@@ -211,7 +211,7 @@ describe("validation errors name the spec path", () => {
     const s = base();
     s.parts[1].kind = "wroker";
     expect(errorsOf(s)).toContain(
-      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, document, event rail, guard, joiner, lock, metric, pipeline, pool, queue, rate limiter, reactive cell, retry, router, schema, session, source, splitter, state machine, store, timeout, trace, transaction, transform, worker'
+      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, guard, idempotency guard, joiner, lock, metric, outbox, pipeline, pool, projection, queue, rate limiter, reactive cell, replay, retry, router, saga, schema, session, snapshot, source, splitter, state machine, store, timeout, trace, transaction, transform, upcaster, worker'
     );
   });
 
@@ -223,7 +223,7 @@ describe("validation errors name the spec path", () => {
     );
     s.story[0].steps[1].verb = "decide";
     expect(errorsOf(s)).toContain(
-      'story[0].steps[1].verb: worker "w" does not react to verb "decide"; its verbs: cancel, fail, finish, stage; "decide" is a verb of: guard, router, schema, state machine'
+      'story[0].steps[1].verb: worker "w" does not react to verb "decide"; its verbs: cancel, fail, finish, stage; "decide" is a verb of: decider, guard, router, schema, state machine'
     );
   });
 
@@ -476,7 +476,7 @@ describe("registries: extend without changing the compiler", () => {
     const plain = createFlowRegistry();
     plain.attachments.register(registry.attachments.get("metric snapshot")!);
     expect(errorsOf(s, plain)).toEqual([
-      'parts[1].kind: unknown part kind "test lamp"; registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, document, event rail, guard, joiner, lock, metric, pipeline, pool, queue, rate limiter, reactive cell, retry, router, schema, session, source, splitter, state machine, store, timeout, trace, transaction, transform, worker',
+      'parts[1].kind: unknown part kind "test lamp"; registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, guard, idempotency guard, joiner, lock, metric, outbox, pipeline, pool, projection, queue, rate limiter, reactive cell, replay, retry, router, saga, schema, session, snapshot, source, splitter, state machine, store, timeout, trace, transaction, transform, upcaster, worker',
     ]);
     // The generated JSON Schema includes the new kinds.
     const schema = JSON.stringify(flowSpecJsonSchema(registry));
@@ -587,21 +587,30 @@ describe("compiler features", () => {
       "cache",
       "circuit breaker",
       "client",
+      "consumer offset",
+      "decider",
       "document",
       "event rail",
+      "event store",
       "guard",
+      "idempotency guard",
       "joiner",
       "lock",
       "metric",
+      "outbox",
       "pipeline",
       "pool",
+      "projection",
       "queue",
       "rate limiter",
       "reactive cell",
+      "replay",
       "retry",
       "router",
+      "saga",
       "schema",
       "session",
+      "snapshot",
       "source",
       "splitter",
       "state machine",
@@ -610,6 +619,7 @@ describe("compiler features", () => {
       "trace",
       "transaction",
       "transform",
+      "upcaster",
       "worker",
     ]);
   });

@@ -310,7 +310,7 @@ describe("compiled timing and outcomes", () => {
   });
 });
 
-describe("data, state and lifecycle mechanisms", () => {
+describe("data, state, lifecycle and event-sourcing mechanisms", () => {
   const kinds = [
     "store",
     "cache",
@@ -321,13 +321,30 @@ describe("data, state and lifecycle mechanisms", () => {
     "transaction",
     "lock",
     "session",
+    "event store",
+    "decider",
+    "projection",
+    "snapshot",
+    "replay",
+    "upcaster",
+    "saga",
+    "outbox",
+    "consumer offset",
+    "idempotency guard",
   ] as const;
   const registry = createFlowRegistry();
 
   it.each(kinds)("%s draws every verb across its story without NaN", (kind) => {
     for (const [verb, def] of Object.entries(registry.parts.get(kind)!.verbs)) {
       // A verb takes particular tokens (control, signal, data…): try each card.
-      const tokens = ["request", "data", "result", "control", "signal"];
+      const tokens = [
+        "request",
+        "data",
+        "result",
+        "control",
+        "signal",
+        "event",
+      ];
       const part = tokens
         .map((token) =>
           compileFlow({

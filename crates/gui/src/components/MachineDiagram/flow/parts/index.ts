@@ -36,6 +36,16 @@ import { tracePart } from "./trace";
 import { transactionPart } from "./transaction";
 import { transformPart } from "./transform";
 import { workerPart } from "./worker";
+import { eventStorePart } from "./eventStore";
+import { deciderPart } from "./decider";
+import { projectionPart } from "./projection";
+import { snapshotPart } from "./snapshot";
+import { replayPart } from "./replay";
+import { upcasterPart } from "./upcaster";
+import { sagaPart } from "./saga";
+import { outboxPart } from "./outbox";
+import { consumerOffsetPart } from "./consumerOffset";
+import { idempotencyGuardPart } from "./idempotencyGuard";
 
 export const STARTER_PARTS: readonly AnyPartKind[] = [
   sourcePart,
@@ -69,6 +79,16 @@ export const STARTER_PARTS: readonly AnyPartKind[] = [
   metricPart,
   tracePart,
   alertPart,
+  eventStorePart,
+  deciderPart,
+  projectionPart,
+  snapshotPart,
+  replayPart,
+  upcasterPart,
+  sagaPart,
+  outboxPart,
+  consumerOffsetPart,
+  idempotencyGuardPart,
 ];
 
 export function registerStarterParts(r: PartRegistry): void {
@@ -112,4 +132,14 @@ export {
   transactionPart,
   transformPart,
   workerPart,
+  eventStorePart,
+  deciderPart,
+  projectionPart,
+  snapshotPart,
+  replayPart,
+  upcasterPart,
+  sagaPart,
+  outboxPart,
+  consumerOffsetPart,
+  idempotencyGuardPart,
 };

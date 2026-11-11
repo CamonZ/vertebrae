@@ -80,7 +80,20 @@ const STORY_VERBS: Record<string, readonly string[]> = {
   // The catalogue lists connect, stage, cancel, close and resume; `finish`
   // (the reply leaves) predates the drawing and the inline-discussions flow uses it.
   session: ["cancel", "close", "connect", "finish", "resume", "stage"],
+  "event store": ["append", "fail", "read"],
+  decider: ["decide", "fail"],
+  projection: ["fail", "fold", "record", "replay"],
+  snapshot: ["fail", "read", "replay", "snapshot"],
+  replay: ["fail", "fold", "replay"],
+  upcaster: ["fail", "upcast"],
+  saga: ["compensate", "fail", "stage", "wait"],
+  outbox: ["commit", "fail", "publish", "record", "retry"],
+  "consumer offset": ["commit", "fail", "process", "read"],
+  "idempotency guard": ["dedupe", "expire", "record", "wait"],
 };
+
+/** Parts with no ports are all frame: their mechanism is inside it. */
+const NO_PORTS = new Set(["trace", "snapshot", "replay", "consumer offset"]);
 
 function Cell({
   def,
@@ -206,7 +219,7 @@ describe.each(PARTS)("%s", (name, def) => {
     const rails = container.querySelectorAll(".md-rail").length;
     expect(frames + rails).toBeGreaterThan(0);
     if (name !== "event rail") expect(frames).toBeGreaterThan(0);
-    if (name !== "trace") expect(rails).toBeGreaterThan(0);
+    if (!NO_PORTS.has(name)) expect(rails).toBeGreaterThan(0);
   });
 
   it("is registered in the flow-spec registry with the catalogue geometry and verbs", () => {

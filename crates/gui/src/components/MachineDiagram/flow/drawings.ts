@@ -1,7 +1,11 @@
 /** Flow-to-catalogue adapters. No gallery scenario or status prose is consulted. */
 import type { ReactNode } from "react";
 import { MACHINE_PARTS } from "../parts";
-import type { CardRole } from "../palette";
+import type { LampStep } from "../geometry";
+import type { CardRole, StateRole } from "../palette";
+import { TL, type TileSpec } from "../parts/eventTiles";
+import type { StatusNote } from "../timeline";
+import { upcastPlan } from "./parts/upcaster";
 import type { CompiledPart, CompiledPartStep } from "./registry";
 
 type Drawing = (t: number, compiled: CompiledPart) => ReactNode;
@@ -579,6 +583,403 @@ export const FLOW_DRAWINGS = {
       crash: null,
       bars: bars.slice(0, 8),
       failedAt: lost ? lost[0] : null,
+    });
+  },
+  "event store": (t, p) => {
+    const X = (i: number) => 162 + 44 * i;
+    let n = Math.min(7, Number(p.props.events ?? 4));
+    const tl = Array.from({ length: n }, (_, i) =>
+      TL(X(i), 170, String(i + 1))
+    );
+    const head: [number, number][] = [[0, Math.max(0, n - 1)]];
+    for (const s of p.steps) {
+      if (s.t > t) break;
+      if (s.verb === "append") {
+        const i = Math.min(n++, 7);
+        tl.push(
+          TL(X(i), 170, String(i + 1), s.t + 0.8, [
+            [s.t + 0.8, "ink"],
+            [s.t + 1.6, "edge"],
+          ])
+        );
+        head.push([s.t + 0.8, i]);
+      } else if (s.verb === "fail" && tl.length > 0) {
+        tl[tl.length - 1].col.push([s.t + 0.75, "red"], [s.t + 1.4, "edge"]);
+      } else if (s.verb === "read") {
+        const from = Math.max(1, Number(s.args.from ?? 1));
+        for (let k = 0; from - 1 + k < n; k++) {
+          const a = s.t + 0.3 + 0.55 * k;
+          tl[Math.min(from - 1 + k, tl.length - 1)]?.col.push(
+            [a - 0.1, "amber"],
+            [a + 0.5, "edge"]
+          );
+        }
+      }
+    }
+    return MACHINE_PARTS["event store"].draw(t, { tl, head });
+  },
+  decider: (t, p) => {
+    const st: StatusNote[] = [
+      [0, String(p.props.state ?? "balance 50"), "ink"],
+    ];
+    const decisions = p.steps.filter(
+      (s) => s.verb === "decide" || s.verb === "fail"
+    );
+    for (const s of decisions)
+      if (s.verb === "decide" && s.args.state !== undefined)
+        st.push([s.t + 1.9, String(s.args.state), "ink"]);
+    const cur = latest(decisions, t);
+    const cl: [number, number] = cur
+      ? [cur.t + 0.65, cur.t + 2.0]
+      : [1e3, 1e3 + 1];
+    const lights = cur
+      ? Array.from({ length: 6 }, (_, k) => cur.t + 0.75 + 0.25 * k)
+      : [];
+    const noop =
+      cur?.verb === "decide" && Number(cur.args.events ?? 1) === 0
+        ? cur.t + 2.0
+        : null;
+    return MACHINE_PARTS.decider.draw(t, { st, cl, lights, noop });
+  },
+  projection: (t, p) => {
+    const WIDTHS = [110, 150, 95, 80] as const;
+    let applied = Number(p.props.applied ?? 3);
+    const rings: [number, number, StateRole][] = [];
+    const rows: [number, number][][] = [
+      [[0, 120]],
+      [[0, 80]],
+      [[0, 150]],
+      [[0, 60]],
+    ];
+    const hl: [number, number][] = [];
+    const ck: StatusNote[] = [[0, `#${applied}`, "ink"]];
+    const fold = (r: number, hold: number, n: number) => {
+      const row = n % 4;
+      rows[row].push([r + hold, WIDTHS[row]]);
+      hl.push([row, r + hold]);
+      ck.push([r + hold, `#${n}`, "ink"]);
+    };
+    for (const s of p.steps) {
+      if (s.t > t) break;
+      if (s.verb === "fold") {
+        rings.push([s.t + 0.6, s.t + 1.05, "green"]);
+        fold(s.t + 0.6, 0.45, ++applied);
+      } else if (s.verb === "fail") {
+        rings.push([s.t + 0.6, s.t + 1.05, "red"]);
+      } else if (s.verb === "replay") {
+        const n = Number(s.args.events ?? 6);
+        rows.forEach((l) => l.push([s.t + 0.5, 0]));
+        ck.push([s.t + 0.5, "#0", "amber"]);
+        for (let k = 0; k < n; k++) {
+          const r = s.t + 1.0 + 0.38 * k + 0.45;
+          rings.push([r, r + 0.2, "green"]);
+          fold(r, 0.2, k + 1);
+        }
+        applied = n;
+      }
+    }
+    return MACHINE_PARTS.projection.draw(t, { rings, rows, hl, ck });
+  },
+  snapshot: (t, p) => {
+    const X = (i: number) => 146 + 44 * i;
+    const events = Math.min(8, Number(p.props.events ?? 8));
+    let snap = Math.min(events, Number(p.props.snapshot ?? 6));
+    const tl = Array.from({ length: 8 }, (_, i) =>
+      TL(X(i), 135, String(i + 1))
+    );
+    const rings: [number, number, StateRole][] = [];
+    const br: {
+      n: number;
+      at: number;
+      col: [number, StateRole][];
+      gone?: number;
+    }[] = snap > 0 ? [{ n: snap, at: -1, col: [[-1e9, "ink"]] }] : [];
+    const st: StatusNote[] = [[0, "state · empty", "dim"]];
+    const fold = (i: number, a: number) =>
+      tl[i].col.push([a - 0.05, "amber"], [a + 0.4, "edge"]);
+    for (const s of p.steps) {
+      if (s.t > t) break;
+      if (s.verb === "read" && snap > 0) {
+        const tail = events - snap;
+        const end = s.t + 0.9 + 0.5 * tail;
+        rings.push([s.t + 0.3, end, "green"]);
+        st.push([s.t + 0.65, `state · v${snap}`, "ink"]);
+        for (let k = 0; k < tail; k++) {
+          fold(snap + k, s.t + 0.8 + 0.5 * k);
+          st.push([s.t + 1.3 + 0.5 * k, `state · v${snap + k + 1}`, "ink"]);
+        }
+      } else if (s.verb === "replay") {
+        const end = s.t + 0.3 + 0.3 * events + 0.5;
+        rings.push([s.t + 0.3, end, "green"]);
+        for (let i = 0; i < events; i++) {
+          fold(i, s.t + 0.3 + 0.3 * i);
+          st.push([s.t + 0.75 + 0.3 * i, `state · v${i + 1}`, "ink"]);
+        }
+      } else if (s.verb === "snapshot") {
+        if (br.length) br[br.length - 1].gone = s.t + 1.2;
+        br.push({
+          n: events,
+          at: s.t + 1.05,
+          col: [
+            [-1e9, "green"],
+            [s.t + 1.8, "ink"],
+          ],
+        });
+        snap = events;
+      } else if (s.verb === "fail" && br.length) {
+        const last = br[br.length - 1];
+        last.col.push([s.t + 0.5, "red"]);
+        last.gone = s.t + 1.6;
+        rings.push([s.t + 0.2, s.t + 0.65, "red"]);
+        snap = 0;
+      }
+    }
+    return MACHINE_PARTS.snapshot.draw(t, { tl, rings, br, st });
+  },
+  replay: (t, p) => {
+    const X = (i: number) => 150 + 85 * i;
+    const LAB = ["+50", "-30", "+50", "+10", "-20"];
+    const tl = LAB.map((l, i) => TL(X(i), 160, l, -1, [], { w: 56 }));
+    const ph: [number, number][] = [[0, -0.6]];
+    const val: [number, number][] = [[0, 0]];
+    const vn: StatusNote[] = [[0, "0", "dim"]];
+    const barC: [number, StateRole][] = [[0, "ink"]];
+    let diverges = false;
+    let pos = 0;
+    let v = 0;
+    const step = (k: number, a: number, amount: number, bad: boolean) => {
+      v += amount;
+      ph.push([a, k]);
+      val.push([a + 0.2, v]);
+      vn.push([a + 0.2, String(v), "ink"]);
+      tl[k].col.push([a, "amber"], [a + 0.45, bad ? "red" : "ink"]);
+    };
+    const AMT = [50, -30, 50, 10, -20];
+    for (const s of p.steps) {
+      if (s.t > t) break;
+      if (s.verb === "replay") {
+        const n = Number(s.args.upTo ?? 5);
+        v = 0;
+        for (let k = 0; k < n; k++)
+          step(k, s.t + 0.9 + 0.55 * k, AMT[k], false);
+        for (let k = n; k < LAB.length; k++) tl[k].dimAt = s.t + 0.6;
+        pos = n;
+      } else if (s.verb === "fold" && pos < AMT.length) {
+        step(pos, s.t + 0.1, AMT[pos], false);
+        pos++;
+      } else if (s.verb === "fail") {
+        diverges = true;
+        v = 0;
+        const amt = [50, -30, 45, 10, -20];
+        for (let k = 0; k < 5; k++)
+          step(k, s.t + 0.9 + 0.55 * k, amt[k], k === 2);
+        barC.push([s.t + 2.4, "red"]);
+        pos = 5;
+      }
+    }
+    vn.push([p.timeline.period - 0.45, "0", "dim"]);
+    return MACHINE_PARTS.replay.draw(t, {
+      tl,
+      ph,
+      val,
+      vn,
+      barC,
+      stored: diverges,
+    });
+  },
+  upcaster: (t, p) => {
+    const rings: [number, number, number, StateRole][] = [];
+    for (const s of p.steps.filter((x) => x.verb === "upcast"))
+      for (const stop of upcastPlan(Number(s.args.from ?? 2), s.t).stops)
+        rings.push([stop.x, stop.from, stop.to, "green"]);
+    return MACHINE_PARTS.upcaster.draw(t, { rings });
+  },
+  saga: (t, p) => {
+    const XS = [170, 320, 470] as const;
+    const rings: [number, number, number, number, StateRole][] = [];
+    const lamps: LampStep[][] = [[], [], []];
+    let at = 0;
+    let waitFrom: number | null = null;
+    for (const s of p.steps) {
+      if (s.t > t) break;
+      if (s.verb === "stage" && at < XS.length) {
+        const a = waitFrom ?? s.t + 0.55;
+        waitFrom = null;
+        rings.push([XS[at], 165, a, a + 0.45, "green"]);
+        lamps[at].push([a + 0.45, "green"]);
+        at++;
+      } else if (s.verb === "wait") {
+        waitFrom = s.t;
+      } else if (s.verb === "fail") {
+        const i = Math.min(at, XS.length - 1);
+        rings.push([XS[i], 165, waitFrom ?? s.t + 0.5, s.t + 0.95, "red"]);
+        lamps[i].push([s.t + 0.95, "red"]);
+        waitFrom = null;
+      } else if (s.verb === "compensate") {
+        let when = s.t + 0.75;
+        for (let k = at - 1; k >= 0; k--) {
+          if (k <= 1) rings.push([XS[k], 255, when - 0.3, when, "green"]);
+          lamps[k].push([when, "off"]);
+          when += 0.95;
+        }
+        at = 0;
+      }
+    }
+    return MACHINE_PARTS.saga.draw(t, { rings, lamps });
+  },
+  outbox: (t, p) => {
+    const rings: [number, number, StateRole][] = [];
+    const pub: [number, "ink" | "amber"][] = [];
+    const tl: TileSpec[] = [];
+    const pending: TileSpec[] = [];
+    let crash: number | null = null;
+    let commit = 1e3;
+    let down = false;
+    let next = 1;
+    for (const s of p.steps) {
+      if (s.t > t) break;
+      if (s.verb === "commit") {
+        commit = s.t;
+        const m = TL(
+          262,
+          225,
+          `m${next++}`,
+          s.t + 0.3,
+          [[s.t + 0.3, "amber"]],
+          { w: 44 }
+        );
+        tl.push(m);
+        pending.push(m);
+      } else if (s.verb === "publish" || s.verb === "retry") {
+        down = false;
+        const a = s.t + (s.verb === "retry" ? 1.1 : 0.5);
+        const m = pending[0];
+        if (!m) continue;
+        rings.push([a + 0.6, a + 1.0, "green"]);
+        pub.push([a + 1.55, s.verb === "retry" ? "amber" : "ink"]);
+        if (s.verb === "publish" && s.args.marked === false) {
+          crash = a + 1.75;
+        } else {
+          pending.shift();
+          m.col.push([a + 1.6, "green"]);
+          m.gone = a + 2.0;
+        }
+      } else if (s.verb === "fail") {
+        down = true;
+        const a = s.t + 0.5;
+        rings.push([a + 0.6, a + 1.0, "red"]);
+      }
+    }
+    return MACHINE_PARTS.outbox.draw(t, {
+      tl,
+      rings,
+      pub,
+      commit,
+      down,
+      crash,
+    });
+  },
+  "consumer offset": (t, p) => {
+    const X = (i: number) => 130 + 48 * i;
+    const committed0 = Number(p.props.committed ?? 3);
+    const tl = Array.from({ length: 8 }, (_, i) =>
+      TL(X(i), 140, String(i + 1), -1, i < committed0 ? [[-1e8, "green"]] : [])
+    );
+    const rings: [number, number, StateRole][] = [];
+    const ptr: [number, number][] = [[0, committed0]];
+    const cm: StatusNote[] = [[0, `#${committed0}`, "ink"]];
+    let read = committed0;
+    let processed = committed0;
+    let committed = committed0;
+    let crash: number | null = null;
+    for (const s of p.steps) {
+      if (s.t > t) break;
+      if (s.verb === "read" && read < 8) {
+        ptr.push([s.t, read + 1]);
+        tl[read].col.push([s.t - 0.05, "amber"]);
+        read++;
+      } else if (s.verb === "process" && processed < read) {
+        rings.push([s.t, s.t + 0.25, "green"]);
+        for (let i = processed; i < read; i++)
+          tl[i].col.push([s.t + 0.25, "ink"]);
+        processed = read;
+      } else if (s.verb === "commit") {
+        const n = Math.min(8, Number(s.args.upTo ?? Math.max(read, 1)));
+        for (let i = committed; i < n; i++)
+          tl[i].col.push([s.t + 0.05 * (i - committed), "green"]);
+        cm.push([s.t, `#${n}`, "green"]);
+        committed = Math.max(committed, n);
+        read = Math.max(read, n);
+      } else if (s.verb === "fail") {
+        crash = s.t;
+        for (let i = processed; i < committed; i++)
+          tl[i].col.push([s.t + 0.1, "red"]);
+        for (let i = committed; i < read; i++)
+          tl[i].col.push([s.t + 0.1, "edge"]);
+        ptr.push([s.t + 0.2, committed]);
+        read = committed;
+        processed = committed;
+      }
+    }
+    return MACHINE_PARTS["consumer offset"].draw(t, {
+      tl,
+      rings,
+      ptr,
+      cm,
+      crash,
+    });
+  },
+  "idempotency guard": (t, p) => {
+    const POS = (i: number) => 300 + 50 * i;
+    const seen = (p.props.seen as readonly string[] | undefined) ?? [
+      "k3",
+      "k5",
+    ];
+    const tl = seen.map((k, i) => TL(POS(i), 160, k, -1, [], { w: 44 }));
+    const rings: [number, number, StateRole][] = [];
+    const erings: [number, number, StateRole][] = [];
+    const fx: [number, "ink" | "red"][] = [];
+    const applied = new Set<string>(seen);
+    const live = new Map<string, TileSpec>(seen.map((k, i) => [k, tl[i]]));
+    const flight = new Map<string, number>();
+    for (const s of p.steps) {
+      if (s.t > t) break;
+      const key = String(s.args.key ?? s.card?.label ?? "");
+      if (s.verb === "dedupe") {
+        if (live.has(key) && !flight.has(key)) {
+          rings.push([s.t + 0.55, s.t + 0.85, "green"]);
+        } else {
+          const again = applied.has(key);
+          const col: [number, CardRole][] = [[s.t + 0.9, "amber"]];
+          if (again) col.push([s.t + 1.8, "red"]);
+          const m = TL(POS(live.size), 160, key, s.t + 0.9, col, { w: 44 });
+          tl.push(m);
+          live.set(key, m);
+          flight.set(key, s.t + 1.1);
+          rings.push([s.t + 0.6, s.t + 0.9, "green"]);
+          fx.push([s.t + 1.5, again ? "red" : "ink"]);
+          applied.add(key);
+        }
+      } else if (s.verb === "wait") {
+        rings.push([s.t + 0.5, s.t + 0.8, "amber"]);
+      } else if (s.verb === "record") {
+        const k = String(s.args.key ?? [...flight.keys()][0] ?? "");
+        const from = flight.get(k);
+        if (from !== undefined) erings.push([from, s.t, "green"]);
+        flight.delete(k);
+        live.get(k)?.col.push([s.t + 0.3, "green"]);
+      } else if (s.verb === "expire") {
+        const k = String(s.args.key ?? [...live.keys()].at(-1) ?? "");
+        const m = live.get(k);
+        if (m) m.gone = s.t;
+        live.delete(k);
+      }
+    }
+    return MACHINE_PARTS["idempotency guard"].draw(t, {
+      tl,
+      rings,
+      erings,
+      fx,
     });
   },
 } satisfies Record<keyof typeof MACHINE_PARTS, Drawing>;
