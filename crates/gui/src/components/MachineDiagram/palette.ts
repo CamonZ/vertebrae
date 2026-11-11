@@ -20,6 +20,12 @@ export type SurfaceRole =
   | "ghost";
 export type Role = StateRole | SurfaceRole;
 export type WashRole = "amber" | "green" | "red";
+/**
+ * Roles a card, ring or lamp can take: the state roles plus the edge grey
+ * the gallery uses for work that was discarded or cancelled (still no
+ * colour beyond state, VL-03).
+ */
+export type CardRole = StateRole | "edge";
 
 export const STATE_ROLES: readonly StateRole[] = [
   "dim",

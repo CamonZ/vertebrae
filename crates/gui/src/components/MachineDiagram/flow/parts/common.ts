@@ -22,3 +22,10 @@ export function sideGates(
 
 /** Seconds a card takes to cross `px` inside a part (thrown spring travel). */
 export const crossing = (px: number) => 0.25 + Math.min(0.4, px / 600);
+
+/** A leg along `pts` from `t` taking `d` seconds (timeline LegInput). */
+export const leg = (
+  pts: readonly (readonly [number, number])[],
+  t: number,
+  d: number
+) => [pts, t, d] as const;

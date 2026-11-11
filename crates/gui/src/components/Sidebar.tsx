@@ -12,6 +12,7 @@ import { Icon } from "./atoms/Icon";
 import { useGuiUpdateStore } from "../stores/guiUpdateStore";
 import { useShellStore } from "../stores/shellStore";
 import { useChatStore } from "../stores/chatStore";
+import { DEV_MACHINE_PARTS_PATH } from "../devRoutes";
 
 interface NavItemProps {
   to: string;
@@ -416,6 +417,21 @@ const SETTINGS_NAV_ITEM = {
   ),
 } as const;
 
+/** Dev builds only: the machine-parts review gallery (no shortcut). */
+const DEV_GALLERY_NAV_ITEM = {
+  id: "dev-machine-parts",
+  to: DEV_MACHINE_PARTS_PATH,
+  label: "Machine parts (dev)",
+  icon: (
+    <Icon size="sm" strokeWidth={2}>
+      <rect x="3" y="3" width="7" height="7" rx="1" />
+      <rect x="14" y="3" width="7" height="7" rx="1" />
+      <rect x="3" y="14" width="7" height="7" rx="1" />
+      <rect x="14" y="14" width="7" height="7" rx="1" />
+    </Icon>
+  ),
+} as const;
+
 const RAIL_PAGE_SHORTCUT_ROUTES = [
   ...RAIL_NAV_ITEMS.map((item) => item.to),
   SETTINGS_NAV_ITEM.to,
@@ -661,6 +677,7 @@ export function Sidebar() {
         className="flex flex-col items-center gap-1 pb-1"
         data-testid="sidebar-settings-utility"
       >
+        {import.meta.env.DEV && <NavItem {...DEV_GALLERY_NAV_ITEM} />}
         <NavItem
           {...SETTINGS_NAV_ITEM}
           shortcutIndex={RAIL_NAV_ITEMS.length + 1}

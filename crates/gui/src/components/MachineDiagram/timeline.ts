@@ -18,7 +18,7 @@ import {
   valueAt,
   windowed,
 } from "./motion";
-import type { StateRole } from "./palette";
+import type { CardRole, StateRole } from "./palette";
 import { pointAt, route, type Point, type Route } from "./route";
 
 export interface CardTag {
@@ -62,7 +62,7 @@ export interface CardSpec {
   readonly hollow: boolean;
   readonly badge: boolean;
   /** Colour over time, `[from, role]`, first entry at -∞. */
-  readonly colors: readonly (readonly [number, StateRole])[];
+  readonly colors: readonly (readonly [number, CardRole])[];
   readonly legs: readonly CardLeg[];
   readonly born: number;
   readonly dies: number;
@@ -144,7 +144,7 @@ export interface CardOptions {
   hollow?: boolean;
   badge?: boolean;
   /** Colour changes after the initial role: `[[t, role], ...]`. */
-  col?: readonly (readonly [number, StateRole])[];
+  col?: readonly (readonly [number, CardRole])[];
   tags?: readonly TagInput[];
   lean?: readonly number[];
 }
@@ -153,7 +153,7 @@ const isRoute = (p: readonly Point[] | Route): p is Route => "cumulative" in p;
 
 export function card(
   w: number,
-  role: StateRole,
+  role: CardRole,
   legs: readonly LegInput[],
   born: number,
   dies: number,
@@ -196,7 +196,7 @@ export function dot(
   pts: readonly Point[],
   at: number,
   d: number,
-  role: StateRole = "ink",
+  role: CardRole = "ink",
   o: CardOptions & { dies?: number } = {}
 ): CardSpec {
   return card(14, role, [[pts, at, d]], at, o.dies ?? at + d + 0.05, {
@@ -265,7 +265,7 @@ export function cardPosition(c: CardSpec, t: number): Point {
   return pointAt(leg.route, thrown(t - leg.t, leg.d));
 }
 
-export function cardRole(c: CardSpec, t: number): StateRole {
+export function cardRole(c: CardSpec, t: number): CardRole {
   return valueAt(c.colors, t);
 }
 
@@ -387,7 +387,7 @@ export interface TagFrame {
   readonly x: number;
   readonly y: number;
   readonly alpha: number;
-  readonly role: StateRole;
+  readonly role: CardRole;
 }
 
 export interface CardFrame {
@@ -402,7 +402,7 @@ export interface CardFrame {
   readonly dot: boolean;
   readonly hollow: boolean;
   readonly badge: boolean;
-  readonly role: StateRole;
+  readonly role: CardRole;
   readonly alpha: number;
   /** Lean in degrees. */
   readonly angle: number;

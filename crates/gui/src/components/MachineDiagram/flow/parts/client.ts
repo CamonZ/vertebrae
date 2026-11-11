@@ -1,21 +1,22 @@
 /**
  * client · asks, then renders (catalogue "client"). Frame 240×170,
- * footprint M; request out E upper, result in E lower. Control cards
+ * footprint M; request out E upper, result in E lower (the gallery's
+ * geometry, so the part drawing in ../../parts/client.tsx lines up). Control cards
  * (cancel) leave by the request port. Durations from the gallery "rendered"
  * story: send 0.6 → waiting 1.35; render pops bars in over 0.5 s.
  */
 import type { PartKindDef } from "../registry";
-import { centred, sideGates } from "./common";
+import { sideGates } from "./common";
 
 const ports = {
   request: {
     side: "E",
-    x: 440,
-    y: 170,
+    x: 390,
+    y: 160,
     direction: "out",
     tokens: ["request", "control", "payload"],
   },
-  result: { side: "E", x: 440, y: 230, direction: "in", tokens: ["result"] },
+  result: { side: "E", x: 390, y: 240, direction: "in", tokens: ["result"] },
 } as const satisfies PartKindDef["ports"];
 
 interface ClientState {
@@ -27,8 +28,8 @@ export const clientPart: PartKindDef<Record<string, unknown>, ClientState> = {
   job: "asks, then renders",
   family: "actors",
   footprint: "M",
-  bb: centred(240, 170),
-  status: { x: 320, y: 318 },
+  bb: [150, 110, 240, 170],
+  status: { x: 270, y: 310 },
   ports,
   gates: () => sideGates(ports),
   init: () => ({ waiting: 0 }),
@@ -42,8 +43,8 @@ export const clientPart: PartKindDef<Record<string, unknown>, ClientState> = {
           [
             [
               [
-                [320, 170],
-                [440, 170],
+                [330, 160],
+                [390, 160],
               ],
               t,
               0.4,
@@ -82,8 +83,8 @@ export const clientPart: PartKindDef<Record<string, unknown>, ClientState> = {
           [
             [
               [
-                [440, 230],
-                [320, 230],
+                [390, 240],
+                [300, 240],
               ],
               t,
               0.35,
@@ -114,8 +115,8 @@ export const clientPart: PartKindDef<Record<string, unknown>, ClientState> = {
           [
             [
               [
-                [320, 170],
-                [440, 170],
+                [330, 160],
+                [390, 160],
               ],
               t,
               0.35,
