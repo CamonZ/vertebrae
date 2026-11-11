@@ -9,3 +9,5 @@ export * from "./validate";
 export * from "./compile";
 export * from "./jsonSchema";
 export * from "./parse";
+export * from "./registryContext";
+export * from "./useFlowClock";

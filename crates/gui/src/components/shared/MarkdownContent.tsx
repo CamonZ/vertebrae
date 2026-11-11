@@ -21,6 +21,7 @@ import { requestMermaidSvg } from "../../mermaid/requestMermaidSvg";
 import { loadGraphviz } from "../../utils/graphviz";
 import { useNearViewport } from "../../hooks/useNearViewport";
 import { StatechartDiagramBlock } from "./StatechartDiagramBlock";
+import { FlowBlock } from "./FlowBlock";
 import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
 import { parseLocalFileReference } from "./localFileReference";
 import { VtbEntityMarkdownLink } from "./VtbEntityLink";
@@ -263,6 +264,11 @@ const diagramRenderers: Record<string, DiagramRenderer> = {
     kind: "component",
     label: "Statechart",
     component: StatechartDiagramBlock,
+  },
+  flow: {
+    kind: "component",
+    label: "Flow",
+    component: FlowBlock,
   },
   mermaid: {
     kind: "svg",

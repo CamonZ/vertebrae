@@ -1,53 +1,8 @@
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
-import { MachineDiagram } from "../MachineDiagram";
-import { MachinePart } from "../MachinePart";
-import { RailCards } from "../RailCards";
-import { Wire } from "../Rail";
-import {
-  arrangement,
-  compileFlowOrThrow,
-  parseFlowSpec,
-  type DiagramTimeline,
-} from "./index";
-
-function Diagram({ d, t }: { d: DiagramTimeline; t: number }) {
-  return (
-    <MachineDiagram label="flow" width={d.width} height={d.height}>
-      {d.rails
-        .filter((r) => r.presence !== "absent")
-        .map((r) => (
-          <Wire
-            key={r.id}
-            points={r.points}
-            change={r.change === "unchanged" ? "" : r.change}
-          />
-        ))}
-      {d.parts
-        .filter((p) => p.presence !== "absent")
-        .map((p) => (
-          <MachinePart
-            key={p.id}
-            id={p.id}
-            part={p.identity}
-            bb={p.bb}
-            timeline={p.timeline}
-            t={t}
-            view={{ kind: "scenario", name: d.arrangement }}
-            change={p.change}
-            changeNote={p.changeNote}
-            status={p.status}
-            x={p.position.x}
-            y={p.position.y}
-            scale={p.scale}
-            reducedMotion={false}
-          />
-        ))}
-      <RailCards timeline={d.travel} t={t} reducedMotion={false} />
-    </MachineDiagram>
-  );
-}
+import { FlowDiagram } from "./FlowDiagram";
+import { arrangement, compileFlowOrThrow, parseFlowSpec } from "./index";
 
 describe("rendering a compiled flow with the motion core", () => {
   const parsed = parseFlowSpec(inlineDiscussions);
@@ -57,7 +12,9 @@ describe("rendering a compiled flow with the motion core", () => {
   it("draws each part with its spec id and a card on a rail with its card id", () => {
     const q1 = after.travel.cards.find((c) => c.id === "q1")!;
     const mid = (q1.born + q1.dies) / 2;
-    const { container } = render(<Diagram d={after} t={mid} />);
+    const { container } = render(
+      <FlowDiagram diagram={after} t={mid} reducedMotion={false} />
+    );
     const ids = [...container.querySelectorAll("[data-part-id]")].map((e) =>
       e.getAttribute("data-part-id")
     );
@@ -70,7 +27,9 @@ describe("rendering a compiled flow with the motion core", () => {
     const arrival = after.markers.find(
       (m) => m.kind === "arrival" && m.card === "q1"
     )!;
-    const { container } = render(<Diagram d={after} t={arrival.t + 0.3} />);
+    const { container } = render(
+      <FlowDiagram diagram={after} t={arrival.t + 0.3} reducedMotion={false} />
+    );
     expect(
       container.querySelector(".md-rail-cards [data-card-id='q1']")
     ).toBeNull();
