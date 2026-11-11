@@ -35,6 +35,14 @@ vi.mock("../../utils/graphviz", () => ({
 
 vi.mock("@tauri-apps/plugin-opener", () => openerMock);
 
+vi.mock("../../bindings", () => ({
+  commands: {
+    listArtifactPresentations: vi
+      .fn()
+      .mockResolvedValue({ status: "ok", data: [] }),
+  },
+}));
+
 // Pierre renders into a shadow root; CodeSnippet.test.tsx covers it. Here the
 // snippet exposes its source and language so block structure stays testable.
 vi.mock("./CodeSnippet", () => ({
