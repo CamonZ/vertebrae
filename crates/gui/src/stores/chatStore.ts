@@ -159,6 +159,7 @@ export type ChatMessage =
   | { kind: "task_notification"; message: string; timestamp: string }
   | {
       kind: "session_end";
+      successful?: boolean;
       durationMs: number;
       costUsd: number;
       numTurns: number;

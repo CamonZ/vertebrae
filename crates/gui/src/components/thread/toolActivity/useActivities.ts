@@ -203,3 +203,15 @@ export function useActivities(
           (typeof Worker === "undefined" ? fallbackAnalysis : loadingAnalysis)
       );
 }
+
+/** Syntax-only access for association evidence; shares the bounded worker. */
+export async function associationSyntax(
+  call: ActivityInput
+): Promise<ActivityAnalysis> {
+  owners++;
+  try {
+    return await request(call);
+  } finally {
+    if (--owners === 0) stopWorker();
+  }
+}

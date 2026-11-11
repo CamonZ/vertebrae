@@ -10,6 +10,10 @@ import {
   useChatAssociationDriver,
 } from "./useChatAssociation";
 
+const syntax = vi.hoisted(() => vi.fn());
+vi.mock("../components/thread/toolActivity/useActivities", () => ({
+  associationSyntax: syntax,
+}));
 vi.mock("../bindings", () => ({
   commands: {
     resolveChatAssociation: vi.fn(),
@@ -779,5 +783,287 @@ describe("useChatAssociation", () => {
     });
 
     expect(result.current.record.ticketId).toBeNull();
+  });
+});
+
+describe("created ticket association", () => {
+  const end = (successful = true): ChatMessage => ({
+    kind: "session_end",
+    successful,
+    durationMs: 1,
+    costUsd: 0,
+    numTurns: 1,
+    timestamp: at(9),
+  });
+
+  const creation = (): ChatMessage => ({
+    kind: "tool_call",
+    toolId: "create",
+    toolName: "Bash",
+    input: JSON.stringify({ command: 'vtb --json add "Retry" -l ticket' }),
+    timestamp: at(2),
+  });
+
+  const output = (extra = {}): ChatMessage => ({
+    kind: "tool_result",
+    toolId: "create",
+    result: JSON.stringify({
+      command: "add",
+      status: "created",
+      task_id: TICKET.id,
+    }),
+    isError: false,
+    timestamp: at(3),
+    ...extra,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resolve.mockReset();
+    vi.mocked(getProjectScopeGeneration).mockReturnValue(0);
+    vi.mocked(commands.resolveChatAssociationEntity).mockResolvedValue({
+      status: "ok",
+      data: TICKET,
+    });
+    syntax.mockResolvedValue({
+      operations: [
+        {
+          source: "vtb",
+          activities: [],
+          relationships: [],
+          literalCommand: {
+            name: "vtb",
+            args: ["--json", "add", "Retry", "-l", "ticket"],
+          },
+        },
+      ],
+    });
+  });
+
+  it("waits for correlated completion in an already-associated chat, persists and is idempotent", async () => {
+    const request = user("Create a new ticket", 1);
+    const initialAssociation = bound({
+      ticketId: UNCACHED.id,
+      ticketTitle: "Previous association",
+    });
+    seed([request], initialAssociation);
+    reply({ create_ticket: true });
+
+    const hook = renderHook(() => useDriven("s1"));
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeTruthy()
+    );
+
+    push(creation());
+    push(output({ result: "{" }));
+
+    await waitFor(() =>
+      expect(hook.result.current.record.processedAtCount).toBe(1)
+    );
+    expect(commands.resolveChatAssociationEntity).not.toHaveBeenCalled();
+    push(output());
+    push(end());
+
+    await waitFor(() =>
+      expect(commands.resolveChatAssociationEntity).toHaveBeenCalledWith(
+        "/p",
+        TICKET.id
+      )
+    );
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeNull()
+    );
+
+    expect(hook.result.current.record.ticketId).toBe(TICKET.id);
+
+    const serialized = JSON.stringify(hook.result.current.record);
+    const persisted = JSON.parse(serialized);
+    hook.unmount();
+
+    const restored = readRecord(persisted);
+    expect(restored.ticketId).toBe(TICKET.id);
+
+    renderHook(() => useDriven("s1"));
+    expect(commands.resolveChatAssociationEntity).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["failed command", output({ isError: true }), true],
+    ["wrong call", output({ toolId: "other" }), true],
+    ["child result", output({ parentToolUseId: "child" }), true],
+    ["cancelled turn", output(), false],
+  ])("keeps the association for %s", async (_, result, successful) => {
+    const request = user("Create a new ticket", 1);
+    const initialAssociation = bound({ ticketId: UNCACHED.id });
+    seed([request], initialAssociation);
+    reply({ create_ticket: true });
+
+    const hook = renderHook(() => useDriven("s1"));
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeTruthy()
+    );
+
+    push(creation());
+    push(result);
+    push(end(successful));
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeNull()
+    );
+
+    expect(hook.result.current.record.ticketId).toBe(UNCACHED.id);
+    expect(hook.result.current.diagnostic).toBeTruthy();
+    expect(commands.resolveChatAssociationEntity).not.toHaveBeenCalled();
+  });
+
+  it("retires pending creation after manual correction", async () => {
+    const request = user("Create a new ticket", 1);
+    const initialAssociation = bound();
+    seed([request], initialAssociation);
+    reply({ create_ticket: true });
+
+    const hook = renderHook(() => useDriven("s1"));
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeTruthy()
+    );
+
+    await act(() => hook.result.current.correct(""));
+    reply({});
+    reply({});
+
+    push(creation());
+    push(output());
+    push(end());
+
+    await waitFor(() =>
+      expect(hook.result.current.record.lastProcessedAt).toBe(at(9))
+    );
+
+    expect(hook.result.current.record.ticketId).toBeNull();
+    expect(commands.resolveChatAssociationEntity).not.toHaveBeenCalled();
+  });
+
+  it.each(["task", "foreign"])("rejects a %s lookup", async (kind) => {
+    const request = user("Create a new ticket", 1);
+    const initialAssociation = bound({ ticketId: UNCACHED.id });
+    seed([request], initialAssociation);
+    reply({ create_ticket: true });
+    vi.mocked(commands.resolveChatAssociationEntity).mockResolvedValue(
+      kind === "task"
+        ? { status: "ok", data: { ...TICKET, level: "task" } }
+        : {
+            status: "error",
+            error: { message: "No eligible entity in this project" },
+          }
+    );
+
+    const hook = renderHook(() => useDriven("s1"));
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeTruthy()
+    );
+
+    push(creation());
+    push(output());
+    push(end());
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeNull()
+    );
+
+    expect(hook.result.current.record.ticketId).toBe(UNCACHED.id);
+    expect(hook.result.current.diagnostic).toBeTruthy();
+  });
+
+  it("drops a lookup after manual correction while it is in flight", async () => {
+    const request = user("Create a new ticket", 1);
+    const initialAssociation = bound();
+    seed([request], initialAssociation);
+    reply({ create_ticket: true });
+    let finish!: (
+      value: Awaited<ReturnType<typeof commands.resolveChatAssociationEntity>>
+    ) => void;
+    vi.mocked(commands.resolveChatAssociationEntity).mockReturnValueOnce(
+      new Promise((r) => {
+        finish = r;
+      })
+    );
+
+    const hook = renderHook(() => useDriven("s1"));
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeTruthy()
+    );
+
+    push(creation());
+    push(output());
+    push(end());
+
+    await waitFor(() =>
+      expect(commands.resolveChatAssociationEntity).toHaveBeenCalledTimes(1)
+    );
+
+    await act(() => hook.result.current.correct(""));
+    await act(async () => finish({ status: "ok", data: TICKET }));
+
+    expect(hook.result.current.record.ticketId).toBeNull();
+    expect(hook.result.current.record.awaitingTicket).toBeNull();
+  });
+
+  it("retires intent when the project generation changes", async () => {
+    const request = user("Create a new ticket", 1);
+    const initialAssociation = bound();
+    seed([request], initialAssociation);
+    reply({ create_ticket: true });
+
+    const hook = renderHook(() => useDriven("s1"));
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeTruthy()
+    );
+    vi.mocked(getProjectScopeGeneration).mockReturnValue(1);
+
+    push(creation());
+    push(output());
+    push(end());
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeNull()
+    );
+    expect(commands.resolveChatAssociationEntity).not.toHaveBeenCalled();
+    expect(hook.result.current.diagnostic).toContain("project changed");
+  });
+
+  it("a newer user message retires intent even at the same timestamp", async () => {
+    const request = user("Create a new ticket", 1);
+    const initialAssociation = bound();
+    seed([request], initialAssociation);
+    reply({ create_ticket: true });
+
+    const hook = renderHook(() => useDriven("s1"));
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeTruthy()
+    );
+    reply({});
+    const cancellation = user("Never mind", 1);
+    push(cancellation);
+
+    await waitFor(() =>
+      expect(hook.result.current.record.awaitingTicket).toBeNull()
+    );
+
+    push(creation());
+    push(output());
+    push(end());
+
+    await waitFor(() =>
+      expect(hook.result.current.record.lastProcessedAt).toBe(at(9))
+    );
+    expect(commands.resolveChatAssociationEntity).not.toHaveBeenCalled();
   });
 });

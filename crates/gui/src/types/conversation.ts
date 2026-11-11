@@ -74,6 +74,7 @@ export interface SessionStartEvent extends BaseEvent {
 
 /** Session end event emitted by the normalized harness stream. */
 export interface SessionEndEvent extends BaseEvent {
+  successful?: boolean;
   kind: "session_end";
   durationMs: number;
   numTurns: number;
@@ -715,6 +716,7 @@ function parseHarnessEvent(
         kind: "session_end",
         timestamp,
         ...harnessOutcomeMetrics(data),
+        successful: readString(data.status)?.toLowerCase() === "completed",
       });
       break;
     }

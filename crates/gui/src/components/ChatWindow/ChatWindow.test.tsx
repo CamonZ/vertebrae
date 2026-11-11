@@ -2499,6 +2499,7 @@ describe("ChatWindow", () => {
     expect(screen.getByTestId("local-chat-stop-generation")).toBeDisabled();
     expect(useChatStore.getState().sessions["test-session"].messages).toEqual([
       expect.objectContaining({ kind: "user", text: "Respond only if needed" }),
+      expect.objectContaining({ kind: "session_end", successful: true }),
     ]);
   });
 

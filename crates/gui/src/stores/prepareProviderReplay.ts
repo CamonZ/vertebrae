@@ -146,6 +146,9 @@ function conversationEventToChatMessage(
     case "session_end":
       return {
         kind: "session_end",
+        ...(event.successful !== undefined
+          ? { successful: event.successful }
+          : {}),
         durationMs: event.durationMs,
         costUsd: event.costUsd,
         numTurns: event.numTurns,

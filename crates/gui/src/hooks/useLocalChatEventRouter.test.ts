@@ -253,7 +253,7 @@ describe("useLocalChatEventRouter route functions", () => {
     const hidden = useChatStore.getState().sessions.hidden;
     expect(hidden.lifecycle).toBe("idle");
     expect(hidden.streamingAssistant).toBeNull();
-    expect(hidden.messages).toEqual([
+    expect(hidden.messages.filter((m) => m.kind !== "session_end")).toEqual([
       expect.objectContaining({
         kind: "assistant",
         text: "Final answer",
@@ -297,7 +297,7 @@ describe("useLocalChatEventRouter route functions", () => {
     const codex = useChatStore.getState().sessions.codex;
     expect(codex.lifecycle).toBe("idle");
     expect(codex.streamingAssistant).toBeNull();
-    expect(codex.messages).toEqual([
+    expect(codex.messages.filter((m) => m.kind !== "session_end")).toEqual([
       expect.objectContaining({
         kind: "assistant",
         text: "Codex answer",
@@ -1207,7 +1207,7 @@ describe("useLocalChatEventRouter route functions", () => {
     expect(routed).toEqual([true, true, true, true, true, true]);
     const bridge = useChatStore.getState().sessions.bridge;
     expect(bridge.lifecycle).toBe("idle");
-    expect(bridge.messages).toEqual([
+    expect(bridge.messages.filter((m) => m.kind !== "session_end")).toEqual([
       expect.objectContaining({
         kind: "assistant",
         text: "root answer",
@@ -1273,8 +1273,11 @@ describe("useLocalChatEventRouter route functions", () => {
 
     const local = useChatStore.getState().sessions.local;
     expect(local.lifecycle).toBe("idle");
-    expect(local.messages).toEqual([
+    expect(local.messages.filter((m) => m.kind !== "session_end")).toEqual([
       expect.objectContaining({ kind: "assistant", text: "late final" }),
+    ]);
+    expect(local.messages.filter((m) => m.kind === "session_end")).toEqual([
+      expect.objectContaining({ successful: true }),
     ]);
   });
 
@@ -1695,7 +1698,7 @@ describe("useLocalChatEventRouter route functions", () => {
     const local = useChatStore.getState().sessions.local;
     expect(local.lifecycle).toBe("idle");
     expect(local.activeTurn).toBeNull();
-    expect(local.messages).toEqual([
+    expect(local.messages.filter((m) => m.kind !== "session_end")).toEqual([
       expect.objectContaining({
         kind: "assistant",
         text: "second turn answer",
@@ -1753,7 +1756,7 @@ describe("useLocalChatEventRouter route functions", () => {
 
     const local = useChatStore.getState().sessions.local;
     expect(local.lifecycle).toBe("idle");
-    expect(local.messages).toEqual([
+    expect(local.messages.filter((m) => m.kind !== "session_end")).toEqual([
       expect.objectContaining({ kind: "assistant", text: "unbegun answer" }),
     ]);
   });
