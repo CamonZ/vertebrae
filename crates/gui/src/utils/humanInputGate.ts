@@ -1,5 +1,5 @@
 import type { GateField, StepExecution, TaskRun } from "../bindings";
-import { safeMs } from "../components/Traces/timeUtils";
+import { safeMs } from "./timeUtils";
 import { executionHumanInput } from "./stepConfig";
 
 const WAIT_CHILDREN_STEP_TYPE = "wait_children";

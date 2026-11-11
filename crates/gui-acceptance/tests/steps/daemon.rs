@@ -64,14 +64,60 @@ async fn update_step_prompt(world: &mut GuiWorld, envelope: &str) {
     );
 }
 
-#[when("I navigate to the traces page for the created task")]
-pub async fn navigate_to_traces_for_task(world: &mut GuiWorld) {
-    // Direct /traces/:taskId navigation. Skips the pipeline → tasks tab → click
-    // chain so this scenario doesn't depend on the (currently broken) realtime
-    // pipeline-count badge.
+#[when("I open the created task's run in the chat")]
+pub async fn open_task_run_in_chat(world: &mut GuiWorld) {
+    // Navigating to /tasks directly skips the pipeline → tasks tab → click
+    // chain. The navigation reloads the frontend.
+    crate::steps::navigation::navigate_to(world, "/tasks", "nav-run-chat-task").await;
+    follow_run_chat_link(world).await;
+}
+
+#[when("I reopen the created task's run in the chat without reloading")]
+pub async fn reopen_task_run_in_chat(world: &mut GuiWorld) {
+    {
+        let wd = world
+            .webdriver
+            .as_ref()
+            .expect("WebDriver session not initialized")
+            .clone();
+        let client = wd.lock().await;
+        // A closing panel keeps its run pane mounted while it animates out.
+        gui_acceptance::wait_for_js(
+            &client,
+            "no run pane",
+            r#"return !document.querySelector('[data-testid="run-pane"]');"#,
+            vec![],
+            Duration::from_secs(5),
+        )
+        .await;
+    }
+    follow_run_chat_link(world).await;
+}
+
+/// Follow the `#task=<id>` deep link on the current page: it opens the task's
+/// active or newest run in the maximized chat from any page.
+async fn follow_run_chat_link(world: &mut GuiWorld) {
     let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
-    let path = format!("/traces/{task_id}");
-    crate::steps::navigation::navigate_to(world, &path, "nav-traces-task").await;
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    // The run may not exist yet when the step starts; the app clears the hash
+    // after handling it, so re-arm it until a run pane renders.
+    gui_acceptance::wait_for_js(
+        &client,
+        "run pane for the created task",
+        r#"const [hash] = arguments;
+        if (document.querySelector('[data-testid="run-pane"]')) return true;
+        if (!location.hash) location.hash = hash;
+        return false;"#,
+        vec![format!("task={task_id}").into()],
+        Duration::from_secs(30),
+    )
+    .await;
+    world.screenshot(&client, "run-chat-task").await;
 }
 
 #[when(expr = "I wait up to {int} seconds for the task to have a completed execution")]

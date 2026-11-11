@@ -75,7 +75,6 @@ import { commands } from "./bindings";
 // Import page components
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { TasksPage } from "./pages/TasksPage";
-import { TracesPage } from "./pages/TracesPage";
 import { DaemonsPage } from "./pages/DaemonsPage";
 import { hasAllRequiredBinaries } from "./utils/installation";
 import { appRoutes } from "./router";
@@ -97,14 +96,6 @@ function createTestRouter(initialEntries: string[]) {
       {
         path: "/tasks",
         element: <TasksPage />,
-      },
-      {
-        path: "/traces/:taskId",
-        element: <TracesPage />,
-      },
-      {
-        path: "/traces",
-        element: <TracesPage />,
       },
       {
         path: "/daemons",
@@ -545,89 +536,6 @@ describe("Router Acceptance Tests", () => {
         expect(screen.getByTestId("daemon-fleet-empty")).toBeInTheDocument();
       });
       expect(screen.getByTestId("daemons-page")).toBeInTheDocument();
-    });
-  });
-
-  describe("Traces route ('/traces/:taskId')", () => {
-    it("renders TracesPage at /traces/:taskId when project is selected", async () => {
-      const router = createTestRouter(["/traces/task-123"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(screen.getByTestId("traces-page")).toBeInTheDocument();
-      });
-      expect(screen.getByTestId("traces-header")).toBeInTheDocument();
-    });
-
-    it("renders the picker rail at bare /traces with no taskId", async () => {
-      const router = createTestRouter(["/traces"]);
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={router} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(screen.getByTestId("traces-picker-rail")).toBeInTheDocument();
-        expect(screen.getByTestId("traces-no-task-hint")).toBeInTheDocument();
-      });
-    });
-
-    it("ProjectGuard redirects to /setup when no project is selected", async () => {
-      // Wrap the route element with a ProjectGuard-like guard to verify the
-      // redirect behavior, since the production router applies ProjectGuard.
-      (
-        commands.hasProjectSelected as ReturnType<typeof vi.fn>
-      ).mockResolvedValue({
-        status: "ok",
-        data: false,
-      });
-
-      // Build a small router that mirrors the production guard contract.
-      function Guard({ children }: { children: React.ReactNode }) {
-        const [hasProject, setHasProject] = React.useState<boolean | null>(
-          null
-        );
-        React.useEffect(() => {
-          commands.hasProjectSelected().then((r) => {
-            setHasProject(r.status === "ok" && r.data === true);
-          });
-        }, []);
-        if (hasProject === null) return <div>Loading...</div>;
-        if (!hasProject) return <div data-testid="redirected-setup">setup</div>;
-        return <>{children}</>;
-      }
-
-      const guardedRouter = createMemoryRouter(
-        [
-          {
-            path: "/traces/:taskId",
-            element: (
-              <Guard>
-                <TracesPage />
-              </Guard>
-            ),
-          },
-        ],
-        { initialEntries: ["/traces/task-123"] }
-      );
-
-      render(
-        <TestWrapper>
-          <RouterProvider router={guardedRouter} />
-        </TestWrapper>
-      );
-
-      await waitFor(() => {
-        expect(screen.getByTestId("redirected-setup")).toBeInTheDocument();
-      });
-      expect(screen.queryByTestId("traces-page")).not.toBeInTheDocument();
     });
   });
 

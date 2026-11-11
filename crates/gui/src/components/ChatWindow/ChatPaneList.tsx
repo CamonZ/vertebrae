@@ -7,8 +7,9 @@ import {
   useState,
   useId,
 } from "react";
-import { useChatStore } from "../../stores/chatStore";
-import type { ChatPane } from "../../stores/chatStore";
+import { isRunPane, useChatStore } from "../../stores/chatStore";
+import type { ChatPane, LocalChatPane } from "../../stores/chatStore";
+import { RunPaneWindow } from "./run/RunChatPane";
 import { ChatWindow } from "./ChatWindow";
 import {
   allocatePaneWidths,
@@ -22,8 +23,14 @@ export type RegisterChangesToggle = (
   toggle: (() => void) | null
 ) => void;
 
+export type RegisterPaneFind = (
+  paneId: string,
+  openFind: (() => boolean) | null
+) => void;
+
 interface ChatPaneListProps {
   registerChangesToggle?: RegisterChangesToggle;
+  registerPaneFind?: RegisterPaneFind;
   visiblePanes: ChatPane[];
   activePaneId: string | null;
   isMaximized: boolean;
@@ -47,6 +54,7 @@ interface ChatPaneListProps {
  */
 export const ChatPaneList = memo(function ChatPaneList({
   registerChangesToggle,
+  registerPaneFind,
   visiblePanes,
   activePaneId,
   isMaximized,
@@ -143,26 +151,46 @@ export const ChatPaneList = memo(function ChatPaneList({
               data-pane-id={pane.id}
               style={paneStyle}
             >
-              <ChatPaneWindow
-                pane={pane}
-                paneIsActive={paneIsActive}
-                paneCount={paneCount}
-                sessionId={pane.sessionId}
-                index={index}
-                focusPane={focusPane}
-                closePane={closePane}
-                closeChatPanel={closeChatPanel}
-                toggleHistorySelector={toggleHistorySelector}
-                toggleMaximized={toggleMaximized}
-                startFreshActiveSession={startFreshActiveSession}
-                splitWithFreshSession={splitWithFreshSession}
-                isMaximized={isMaximized}
-                canAddSplitPane={canAddSplitPane}
-                unsplitPanes={unsplitPanes}
-                projectLabelBySessionId={projectLabelBySessionId}
-                renderObserver={renderObserver}
-                registerChangesToggle={registerChangesToggle}
-              />
+              {isRunPane(pane) ? (
+                <RunPaneWindow
+                  pane={pane}
+                  paneIsActive={paneIsActive}
+                  paneCount={paneCount}
+                  index={index}
+                  isMaximized={isMaximized}
+                  canAddSplitPane={canAddSplitPane}
+                  focusPane={focusPane}
+                  closePane={closePane}
+                  unsplitPanes={unsplitPanes}
+                  closeChatPanel={closeChatPanel}
+                  toggleHistorySelector={toggleHistorySelector}
+                  toggleMaximized={toggleMaximized}
+                  splitWithFreshSession={splitWithFreshSession}
+                  registerFind={registerPaneFind}
+                />
+              ) : (
+                <ChatPaneWindow
+                  pane={pane}
+                  paneIsActive={paneIsActive}
+                  paneCount={paneCount}
+                  sessionId={pane.sessionId}
+                  index={index}
+                  focusPane={focusPane}
+                  closePane={closePane}
+                  closeChatPanel={closeChatPanel}
+                  toggleHistorySelector={toggleHistorySelector}
+                  toggleMaximized={toggleMaximized}
+                  startFreshActiveSession={startFreshActiveSession}
+                  splitWithFreshSession={splitWithFreshSession}
+                  isMaximized={isMaximized}
+                  canAddSplitPane={canAddSplitPane}
+                  unsplitPanes={unsplitPanes}
+                  projectLabelBySessionId={projectLabelBySessionId}
+                  renderObserver={renderObserver}
+                  registerChangesToggle={registerChangesToggle}
+                  registerPaneFind={registerPaneFind}
+                />
+              )}
             </div>
           </Fragment>
         );
@@ -173,7 +201,8 @@ export const ChatPaneList = memo(function ChatPaneList({
 
 interface ChatPaneWindowProps {
   registerChangesToggle?: RegisterChangesToggle;
-  pane: ChatPane;
+  registerPaneFind?: RegisterPaneFind;
+  pane: LocalChatPane;
   paneIsActive: boolean;
   paneCount: number;
   index: number;
@@ -194,6 +223,7 @@ interface ChatPaneWindowProps {
 
 const ChatPaneWindow = memo(function ChatPaneWindow({
   registerChangesToggle,
+  registerPaneFind,
   pane,
   paneIsActive,
   paneCount,
@@ -239,6 +269,10 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
     (toggle: (() => void) | null) => registerChangesToggle?.(pane.id, toggle),
     [pane.id, registerChangesToggle]
   );
+  const registerFind = useCallback(
+    (openFind: (() => boolean) | null) => registerPaneFind?.(pane.id, openFind),
+    [pane.id, registerPaneFind]
+  );
 
   if (label === undefined) return null;
   return (
@@ -275,6 +309,7 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
         key={sessionId}
         sessionId={sessionId}
         registerChangesToggle={registerToggle}
+        registerFind={registerFind}
         onClosePanel={closeChatPanel}
         onStartFresh={onStartFresh}
         onToggleHistory={toggleHistorySelector}

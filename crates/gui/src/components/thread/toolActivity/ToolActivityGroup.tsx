@@ -1,5 +1,6 @@
 import { ChatSessionContext } from "../toolChange/ChatSessionContext";
 import { Fragment, useContext, useId, useState, type ReactNode } from "react";
+import { messageMatches, useThreadFindQuery } from "../find";
 import type { ToolMessage } from "../types";
 import { activityNames } from "./classification";
 import { activitySummary } from "./grouping";
@@ -83,7 +84,9 @@ function CallDisclosure({
   rawOpen: boolean;
   onToggleRaw: () => void;
 }) {
-  const open = call.onToggle ? call.collapsed === false : rawOpen;
+  const findMatch = messageMatches(call, useThreadFindQuery());
+  const open =
+    (call.onToggle ? call.collapsed === false : rawOpen) || findMatch;
   const rawId = useId();
   const state = callState(call);
   const operations = analysis.operations;
@@ -111,6 +114,7 @@ function CallDisclosure({
     <li
       className={`tool-activity-call${selected ? " sel" : ""}`}
       data-evt={call.evt}
+      data-find-match={findMatch ? "" : undefined}
     >
       <button
         type="button"
@@ -211,9 +215,12 @@ function ActivityGroup({
   onSelect?: (evt: string) => void;
   renderChanges?: (call: ToolMessage) => ReactNode;
 }) {
-  const [open, setOpen] = useState(() =>
+  const [userOpen, setOpen] = useState(() =>
     calls.some((call) => call.onToggle && call.collapsed === false)
   );
+  const findQuery = useThreadFindQuery();
+  const open =
+    userOpen || calls.some((call) => messageMatches(call, findQuery));
   const [rawExpanded, setRawExpanded] = useState<ReadonlySet<string>>(
     () => new Set()
   );

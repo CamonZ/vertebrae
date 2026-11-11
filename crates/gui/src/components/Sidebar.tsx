@@ -393,16 +393,6 @@ const RAIL_NAV_ITEMS = [
       </Icon>
     ),
   },
-  {
-    id: "traces",
-    to: "/traces",
-    label: "Traces",
-    icon: (
-      <Icon size="sm" strokeWidth={2}>
-        <path d="M3 12h4l3-9 4 18 3-9h4" />
-      </Icon>
-    ),
-  },
 ] as const;
 
 const SETTINGS_NAV_ITEM = {

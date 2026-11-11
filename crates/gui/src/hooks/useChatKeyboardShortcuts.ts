@@ -12,6 +12,8 @@ export type ShortcutDispatchState = {
   focusPaneByOffset: (offset: number) => boolean;
   historyNavigationEnabled: boolean;
   focusHistorySearch: () => boolean;
+  /** Open the focused pane's in-transcript find bar. */
+  openPaneFind: () => boolean;
   selectHistoryProjectByOffset: (offset: number) => boolean;
   selectHistorySessionByOffset: (offset: number) => Promise<boolean>;
   closeActivePane: () => boolean;
@@ -133,10 +135,16 @@ export function useChatKeyboardShortcuts({
         return;
       }
 
-      if (key === "f" && !event.altKey && !event.ctrlKey && !event.shiftKey) {
-        if (current.focusHistorySearch()) {
-          event.preventDefault();
-        }
+      if (
+        isLetterShortcutKey(event, "KeyF", "f") &&
+        !event.altKey &&
+        !event.ctrlKey
+      ) {
+        // ⌘F finds within the focused pane; ⌘⇧F searches chat sessions.
+        const handled = event.shiftKey
+          ? current.focusHistorySearch()
+          : current.openPaneFind();
+        if (handled) event.preventDefault();
         return;
       }
 

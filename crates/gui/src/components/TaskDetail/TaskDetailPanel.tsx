@@ -20,7 +20,7 @@ import { AcceptanceCriteria } from "./AcceptanceCriteria";
 import { DependenciesSummary } from "./DependenciesSummary";
 import { CodeRefsSummary } from "./CodeRefsSummary";
 import { SpecSection } from "./SpecSection";
-import { TracesExplorerButton } from "./TracesExplorerButton";
+import { RunsInChatButton } from "./RunsInChatButton";
 import {
   deriveRunControlsState,
   deriveHearthStateBreakdown,
@@ -32,7 +32,7 @@ import {
 import { formatStepName } from "../../utils/formatStepName";
 import { getPriorityIndicator } from "../../utils/taskPriority";
 import { resolveHumanInputGate } from "../../utils/humanInputGate";
-import { HumanInputGate } from "../Traces/HumanInputGate";
+import { HumanInputGate } from "../ChatWindow/run/HumanInputGate";
 import { IdentityBadge } from "../shared/EntityId";
 import { Text } from "../atoms/Text";
 import {
@@ -1299,7 +1299,7 @@ export function TaskDetailPanel({
             </div>
           </SectionGroup>
 
-          <TracesExplorerButton taskId={taskData.id} />
+          <RunsInChatButton taskId={taskData.id} />
         </div>
       )}
     </div>

@@ -28,6 +28,7 @@ import {
   ToolChangeBlock,
 } from "./toolChange/ToolChangeBlock";
 import { useWorktreeDelta } from "./toolChange/useWorktreeDelta";
+import { messageMatches, useThreadFindQuery } from "./find";
 
 import type {
   ActivityMessage,
@@ -258,7 +259,10 @@ function ToolCallRow({
   const hasBody =
     !pending &&
     ((props.body != null && props.body !== "") || !!props.payloadDiffs);
-  const collapsed = controlled ? !!props.collapsed : localCollapsed;
+  // Find opens a collapsed body whose recorded content matches.
+  const findMatch = messageMatches(props as ToolMessage, useThreadFindQuery());
+  const collapsed =
+    (controlled ? !!props.collapsed : localCollapsed) && !findMatch;
   const toggle = controlled
     ? props.onToggle
     : () => setLocalCollapsed((c) => !c);

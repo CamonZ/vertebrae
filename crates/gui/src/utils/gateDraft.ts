@@ -1,6 +1,6 @@
 import type { GateDraft, GateField, JsonValue } from "../bindings";
 import type { ChatMessage } from "../stores/chatStore";
-import { safeMs } from "../components/Traces/timeUtils";
+import { safeMs } from "./timeUtils";
 import { isHiddenTurn } from "./gateChat";
 
 /**

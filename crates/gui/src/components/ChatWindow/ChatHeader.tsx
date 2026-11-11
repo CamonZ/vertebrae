@@ -30,7 +30,7 @@ interface ChatHeaderProps {
   showProjectContext?: boolean;
 }
 
-interface HeaderAction {
+export interface HeaderAction {
   key: string;
   title: string;
   ariaLabel: string;
@@ -43,7 +43,7 @@ interface HeaderAction {
   icon: React.ReactNode;
 }
 
-function SvgIcon({
+export function SvgIcon({
   size,
   className,
   children,
@@ -61,6 +61,161 @@ function SvgIcon({
     >
       {children}
     </svg>
+  );
+}
+
+interface PaneControlProps {
+  onClosePanel?: () => void;
+  onToggleWide?: () => void;
+  isWide?: boolean;
+  onSplitPane?: () => void;
+  canSplitPane?: boolean;
+  onUnsplitPanes?: () => void;
+  onClosePane?: () => void;
+}
+
+/** Window controls shared by local chat and run pane headers; closePanel last. */
+function buildPaneActions({
+  onClosePanel,
+  onToggleWide,
+  isWide = false,
+  onSplitPane,
+  canSplitPane = true,
+  onUnsplitPanes,
+  onClosePane,
+}: PaneControlProps): HeaderAction[] {
+  return [
+    {
+      key: "wide",
+      title: isWide ? "Collapse chat panel" : "Widen chat panel",
+      ariaLabel: isWide ? "Collapse chat panel" : "Widen chat panel",
+      onClick: onToggleWide!,
+      show: !!onToggleWide,
+      icon: isWide ? (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 9H4V4m0 5 5-5m6 5h5V4m0 5-5-5M9 15H4v5m0-5 5 5m6-5h5v5m0-5-5 5"
+          />
+        </SvgIcon>
+      ) : (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 9V4h5M4 4l6 6m10-1V4h-5m5 0-6 6M4 15v5h5m-5 0 6-6m10 1v5h-5m5 0-6-6"
+          />
+        </SvgIcon>
+      ),
+    },
+    {
+      key: "split",
+      title: canSplitPane ? "Split chat pane" : "No more chat panes fit",
+      ariaLabel: "Split chat pane",
+      onClick: onSplitPane!,
+      show: !!onSplitPane,
+      disabled: !canSplitPane,
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 5h7v14H4zM13 5h7v14h-7z"
+          />
+        </SvgIcon>
+      ),
+    },
+    {
+      key: "unsplit",
+      title: "Keep only this pane",
+      ariaLabel: "Keep only this pane",
+      onClick: onUnsplitPanes!,
+      show: !!onUnsplitPanes,
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M5 5h14v14H5zM9 9l3 3m0 0 3-3m-3 3v6"
+          />
+        </SvgIcon>
+      ),
+    },
+    {
+      key: "closePane",
+      title: "Close this pane",
+      ariaLabel: "Close this pane",
+      onClick: onClosePane!,
+      show: !!onClosePane,
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M6 18L18 6M6 6l12 12"
+          />
+        </SvgIcon>
+      ),
+    },
+    {
+      key: "closePanel",
+      title: "Close chat panel",
+      ariaLabel: "Close chat panel",
+      onClick: onClosePanel!,
+      show: !!onClosePanel,
+      icon: (
+        <SvgIcon size="h-4 w-4">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M6 18L18 6M6 6l12 12"
+          />
+        </SvgIcon>
+      ),
+    },
+  ];
+}
+
+export function HeaderActionButtons({ actions }: { actions: HeaderAction[] }) {
+  return (
+    <div className="hc-ctrls">
+      {actions
+        .filter((action) => action.show)
+        .map((action) => (
+          <button
+            key={action.key}
+            className={`hc-ctrl${action.className ? ` ${action.className}` : ""}`}
+            onClick={action.onClick}
+            disabled={action.disabled}
+            title={action.title}
+            aria-label={action.ariaLabel}
+            data-testid={action.testId}
+            aria-pressed={action.pressed}
+            aria-expanded={
+              action.key === "changes" ? action.pressed : undefined
+            }
+          >
+            {action.icon}
+          </button>
+        ))}
+    </div>
+  );
+}
+
+/** Window controls (widen, split, close pane, close panel) for non-chat panes. */
+export function PaneControls({
+  leading = [],
+  ...props
+}: PaneControlProps & { leading?: HeaderAction[] }) {
+  return (
+    <HeaderActionButtons actions={[...leading, ...buildPaneActions(props)]} />
   );
 }
 
@@ -168,6 +323,16 @@ export function ChatHeader({
     [cancelTitleEdit, saveTitle]
   );
 
+  const paneActions = buildPaneActions({
+    onClosePanel,
+    onToggleWide,
+    isWide,
+    onSplitPane,
+    canSplitPane,
+    onUnsplitPanes,
+    onClosePane,
+  });
+
   const actions: HeaderAction[] = [
     {
       key: "changes",
@@ -220,84 +385,7 @@ export function ChatHeader({
         </SvgIcon>
       ),
     },
-    {
-      key: "wide",
-      title: isWide ? "Collapse chat panel" : "Widen chat panel",
-      ariaLabel: isWide ? "Collapse chat panel" : "Widen chat panel",
-      onClick: onToggleWide!,
-      show: !!onToggleWide,
-      icon: isWide ? (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 9H4V4m0 5 5-5m6 5h5V4m0 5-5-5M9 15H4v5m0-5 5 5m6-5h5v5m0-5-5 5"
-          />
-        </SvgIcon>
-      ) : (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M4 9V4h5M4 4l6 6m10-1V4h-5m5 0-6 6M4 15v5h5m-5 0 6-6m10 1v5h-5m5 0-6-6"
-          />
-        </SvgIcon>
-      ),
-    },
-    {
-      key: "split",
-      title: canSplitPane ? "Split chat pane" : "No more chat panes fit",
-      ariaLabel: "Split chat pane",
-      onClick: onSplitPane!,
-      show: !!onSplitPane,
-      disabled: !canSplitPane,
-      icon: (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M4 5h7v14H4zM13 5h7v14h-7z"
-          />
-        </SvgIcon>
-      ),
-    },
-    {
-      key: "unsplit",
-      title: "Keep only this pane",
-      ariaLabel: "Keep only this pane",
-      onClick: onUnsplitPanes!,
-      show: !!onUnsplitPanes,
-      icon: (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M5 5h14v14H5zM9 9l3 3m0 0 3-3m-3 3v6"
-          />
-        </SvgIcon>
-      ),
-    },
-    {
-      key: "closePane",
-      title: "Close this pane",
-      ariaLabel: "Close this pane",
-      onClick: onClosePane!,
-      show: !!onClosePane,
-      icon: (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M6 18L18 6M6 6l12 12"
-          />
-        </SvgIcon>
-      ),
-    },
+    ...paneActions.slice(0, -1),
     {
       key: "clear",
       title: "Clear messages",
@@ -327,23 +415,7 @@ export function ChatHeader({
       testId: "local-chat-stop-generation",
       icon: <StopIcon />,
     },
-    {
-      key: "closePanel",
-      title: "Close chat panel",
-      ariaLabel: "Close chat panel",
-      onClick: onClosePanel!,
-      show: !!onClosePanel,
-      icon: (
-        <SvgIcon size="h-4 w-4">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M6 18L18 6M6 6l12 12"
-          />
-        </SvgIcon>
-      ),
-    },
+    ...paneActions.slice(-1),
   ];
 
   return (
@@ -468,27 +540,7 @@ export function ChatHeader({
             {titleEditError || titleError}
           </span>
         )}
-        <div className="hc-ctrls">
-          {actions
-            .filter((action) => action.show)
-            .map((action) => (
-              <button
-                key={action.key}
-                className={`hc-ctrl${action.className ? ` ${action.className}` : ""}`}
-                onClick={action.onClick}
-                disabled={action.disabled}
-                title={action.title}
-                aria-label={action.ariaLabel}
-                data-testid={action.testId}
-                aria-pressed={action.pressed}
-                aria-expanded={
-                  action.key === "changes" ? action.pressed : undefined
-                }
-              >
-                {action.icon}
-              </button>
-            ))}
-        </div>
+        <HeaderActionButtons actions={actions} />
       </div>
     </div>
   );

@@ -458,11 +458,86 @@ export interface GateSteeringState {
   resetAt: number | null;
 }
 
-export interface ChatPane {
-  /** Stable pane identifier for maximized split-chat layout */
-  id: string;
+/** A local harness chat session rendered in a pane. */
+export interface LocalChatPaneTarget {
+  kind?: "local";
   /** Store session rendered in this pane */
   sessionId: string;
+}
+
+/** Request to scroll a run pane to a thread; `nonce` makes repeats distinct. */
+export interface RunPaneScrollRequest {
+  threadId: string;
+  nonce: number;
+}
+
+/**
+ * A durable TaskRun rendered read-only in a pane. Run panes own no
+ * ChatSession, start no harness process and are never persisted.
+ */
+export interface RunPaneTarget {
+  kind: "run";
+  taskId: string;
+  runId: string;
+  /** Render only this subagent thread of the run instead of the whole run. */
+  focusThreadId?: string | null;
+  scrollRequest?: RunPaneScrollRequest | null;
+  sessionId?: never;
+}
+
+export type ChatPaneTarget = LocalChatPaneTarget | RunPaneTarget;
+
+export type LocalChatPane = { id: string } & LocalChatPaneTarget;
+export type RunChatPane = { id: string } & RunPaneTarget;
+/** Stable pane identifier plus what the pane renders. */
+export type ChatPane = LocalChatPane | RunChatPane;
+
+/** Local sessions shown in panes; run panes own no session. */
+export function paneSessionIds(panes: readonly ChatPane[]): string[] {
+  return panes.flatMap((pane) => (isRunPane(pane) ? [] : [pane.sessionId]));
+}
+
+export function isRunPane(
+  pane: ChatPane | null | undefined
+): pane is RunChatPane {
+  return pane?.kind === "run";
+}
+
+/** Same run and the same (optional) focused subagent thread. */
+function sameRunTarget(
+  pane: ChatPane,
+  target: Pick<RunPaneTarget, "runId" | "focusThreadId">
+): boolean {
+  return (
+    isRunPane(pane) &&
+    pane.runId === target.runId &&
+    (pane.focusThreadId ?? null) === (target.focusThreadId ?? null)
+  );
+}
+
+function retargetPane(pane: ChatPane, target: ChatPaneTarget): ChatPane {
+  return { id: pane.id, ...target } as ChatPane;
+}
+
+function paneTarget(pane: ChatPane): ChatPaneTarget {
+  return isRunPane(pane)
+    ? {
+        kind: "run",
+        taskId: pane.taskId,
+        runId: pane.runId,
+        focusThreadId: pane.focusThreadId ?? null,
+        scrollRequest: pane.scrollRequest ?? null,
+      }
+    : { sessionId: pane.sessionId };
+}
+
+export interface OpenRunPaneOptions {
+  /** Add a split pane instead of replacing the active pane. */
+  split?: boolean;
+  /** Pane to replace; defaults to the active pane. */
+  preferredPaneId?: string;
+  /** Scroll the run pane to this thread once rendered. */
+  scrollToThreadId?: string | null;
 }
 
 export interface ChatPaneLayout {
@@ -517,6 +592,19 @@ interface ChatStoreActions {
   closePane: (paneId: string) => void;
   /** Collapse split panes back to a single visible pane */
   unsplitPanes: (paneId?: string) => void;
+  /**
+   * Show a TaskRun read-only in a pane (focusing it if already visible) and
+   * open the panel. Returns the pane id.
+   */
+  openRunPane: (
+    target: Omit<RunPaneTarget, "kind" | "scrollRequest" | "sessionId">,
+    options?: OpenRunPaneOptions
+  ) => string;
+  /**
+   * Keep `anchorPaneId` showing its run and show `sessionId` beside it,
+   * undoing a replacement of the anchor by a session focus.
+   */
+  showSessionBesideRunPane: (sessionId: string, anchor: RunChatPane) => void;
   /**
    * Focus the chat bound to `gate`'s run and step, rebinding it to the
    * currently waiting execution, or create one. `created` marks a new chat;
@@ -1115,13 +1203,18 @@ function latestSessionId(sessions: Record<string, ChatSession>): string | null {
 }
 
 function activeSessionIdFromPaneLayout(
-  paneLayout: ChatPaneLayout
+  paneLayout: ChatPaneLayout,
+  fallback: string | null = null
 ): string | null {
+  const active = paneLayout.panes.find(
+    (pane) => pane.id === paneLayout.activePaneId
+  );
+  if (active && !isRunPane(active)) return active.sessionId;
+  // A focused run pane keeps the last local session as the active session.
   return (
-    paneLayout.panes.find((pane) => pane.id === paneLayout.activePaneId)
-      ?.sessionId ??
-    paneLayout.panes[0]?.sessionId ??
-    null
+    (active ? fallback : null) ??
+    paneLayout.panes.find((pane) => !isRunPane(pane))?.sessionId ??
+    fallback
   );
 }
 
@@ -1130,6 +1223,7 @@ export function normalizePaneLayout(
   sessions: Record<string, ChatSession>
 ): ChatPaneLayout {
   const panes = (paneLayout?.panes ?? []).filter((pane) => {
+    if (isRunPane(pane)) return true;
     const session = sessions[pane.sessionId];
     if (!session || session.status !== "open") {
       return false;
@@ -1175,9 +1269,9 @@ function focusSessionInPaneLayout(
       paneLayout: {
         panes: paneLayout.panes.map((pane) =>
           pane.id === preferredPane.id
-            ? { ...pane, sessionId }
+            ? retargetPane(pane, { sessionId })
             : pane.sessionId === sessionId
-              ? { ...pane, sessionId: preferredPane.sessionId }
+              ? retargetPane(pane, paneTarget(preferredPane))
               : pane
         ),
         activePaneId: preferredPane.id,
@@ -1202,14 +1296,14 @@ function focusSessionInPaneLayout(
       activeSessionId: sessionId,
       paneLayout: {
         panes: paneLayout.panes.map((pane) =>
-          pane.id === activePaneId ? { ...pane, sessionId } : pane
+          pane.id === activePaneId ? retargetPane(pane, { sessionId }) : pane
         ),
         activePaneId,
       },
     };
   }
 
-  const pane = { id: generatePaneId(), sessionId };
+  const pane: ChatPane = { id: generatePaneId(), sessionId };
   return {
     activeSessionId: sessionId,
     paneLayout: {
@@ -1249,7 +1343,7 @@ function addSessionPane(
     return focusSessionInPaneLayout(state, sessionId);
   }
 
-  const pane = { id: generatePaneId(), sessionId };
+  const pane: ChatPane = { id: generatePaneId(), sessionId };
   return {
     activeSessionId: sessionId,
     paneLayout: {
@@ -1266,7 +1360,10 @@ function removePaneFromLayout(
   const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
   if (paneLayout.panes.length <= 1) {
     return {
-      activeSessionId: activeSessionIdFromPaneLayout(paneLayout),
+      activeSessionId: activeSessionIdFromPaneLayout(
+        paneLayout,
+        state.activeSessionId
+      ),
       paneLayout,
     };
   }
@@ -1274,7 +1371,10 @@ function removePaneFromLayout(
   const panes = paneLayout.panes.filter((pane) => pane.id !== paneId);
   if (panes.length === paneLayout.panes.length) {
     return {
-      activeSessionId: activeSessionIdFromPaneLayout(paneLayout),
+      activeSessionId: activeSessionIdFromPaneLayout(
+        paneLayout,
+        state.activeSessionId
+      ),
       paneLayout,
     };
   }
@@ -1285,7 +1385,10 @@ function removePaneFromLayout(
       : paneLayout.activePaneId;
   const nextLayout = { panes, activePaneId };
   return {
-    activeSessionId: activeSessionIdFromPaneLayout(nextLayout),
+    activeSessionId: activeSessionIdFromPaneLayout(
+      nextLayout,
+      state.activeSessionId
+    ),
     paneLayout: nextLayout,
   };
 }
@@ -1306,6 +1409,7 @@ function removeSessionFromRuntimeState(
   const activeSessionStillOpen =
     state.activeSessionId !== null && !!remaining[state.activeSessionId];
   const sessionIds = Object.keys(remaining);
+  const hasRunPanes = normalizedPaneLayout.panes.some(isRunPane);
 
   return {
     sessions: remaining,
@@ -1313,7 +1417,7 @@ function removeSessionFromRuntimeState(
       ? state.activeSessionId
       : (activePaneSessionId ?? latestSessionId(remaining)),
     paneLayout: normalizedPaneLayout,
-    panelOpen: sessionIds.length > 0 ? state.panelOpen : false,
+    panelOpen: sessionIds.length > 0 || hasRunPanes ? state.panelOpen : false,
   };
 }
 
@@ -1337,13 +1441,77 @@ function collapsePaneLayout(
   }
 
   return {
-    activeSessionId: keepPane.sessionId,
+    activeSessionId: isRunPane(keepPane)
+      ? state.activeSessionId
+      : keepPane.sessionId,
     paneLayout: {
       panes: [keepPane],
       activePaneId: keepPane.id,
     },
   };
 }
+
+function openRunPaneInLayout(
+  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
+  target: RunPaneTarget,
+  paneId: string,
+  options: OpenRunPaneOptions
+): { paneId: string; paneLayout: ChatPaneLayout } {
+  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
+  const existing = paneLayout.panes.find((pane) => sameRunTarget(pane, target));
+  if (existing) {
+    return {
+      paneId: existing.id,
+      paneLayout: {
+        panes: paneLayout.panes.map((pane) =>
+          pane.id === existing.id
+            ? { ...existing, scrollRequest: target.scrollRequest ?? null }
+            : pane
+        ),
+        activePaneId: existing.id,
+      },
+    };
+  }
+
+  // Compact chat keeps no layout; preserve the shown session as a pane.
+  const panes: ChatPane[] =
+    paneLayout.panes.length === 0 &&
+    state.activeSessionId &&
+    state.sessions[state.activeSessionId]?.status === "open"
+      ? [{ id: generatePaneId(), sessionId: state.activeSessionId }]
+      : paneLayout.panes;
+
+  const replaceId = options.split
+    ? null
+    : (options.preferredPaneId ?? paneLayout.activePaneId ?? panes[0]?.id);
+  const replace = replaceId
+    ? panes.find((pane) => pane.id === replaceId)
+    : undefined;
+
+  if (replace || (options.split && panes.length >= MAX_CHAT_PANES)) {
+    const into =
+      replace ??
+      panes.find((p) => p.id === paneLayout.activePaneId) ??
+      panes[0];
+    return {
+      paneId: into.id,
+      paneLayout: {
+        panes: panes.map((pane) =>
+          pane.id === into.id ? retargetPane(pane, target) : pane
+        ),
+        activePaneId: into.id,
+      },
+    };
+  }
+
+  const pane: ChatPane = { id: paneId, ...target };
+  return {
+    paneId,
+    paneLayout: { panes: [...panes, pane], activePaneId: paneId },
+  };
+}
+
+let runPaneScrollNonce = 0;
 
 export const useChatStore = create<ChatStore>((set, get) => {
   const removeLocalSessionTree = (sessionId: string): ChatSession[] => {
@@ -2069,7 +2237,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         const pane = paneLayout.panes.find((item) => item.id === paneId);
         if (!pane) return { paneLayout };
         return {
-          activeSessionId: pane.sessionId,
+          activeSessionId: isRunPane(pane)
+            ? state.activeSessionId
+            : pane.sessionId,
           paneLayout: {
             panes: paneLayout.panes,
             activePaneId: pane.id,
@@ -2112,7 +2282,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           activeSessionId: sessionId,
           paneLayout: {
             panes: paneLayout.panes.map((pane) =>
-              pane.id === paneId ? { ...pane, sessionId } : pane
+              pane.id === paneId ? retargetPane(pane, { sessionId }) : pane
             ),
             activePaneId: paneId,
           },
@@ -2145,6 +2315,80 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     unsplitPanes: (paneId) => {
       set((state) => collapsePaneLayout(state, paneId));
+    },
+
+    openRunPane: (target, options = {}) => {
+      const runTarget: RunPaneTarget = {
+        kind: "run",
+        taskId: target.taskId,
+        runId: target.runId,
+        focusThreadId: target.focusThreadId ?? null,
+        scrollRequest: options.scrollToThreadId
+          ? { threadId: options.scrollToThreadId, nonce: ++runPaneScrollNonce }
+          : null,
+      };
+      let openedPaneId = generatePaneId();
+      set((state) => {
+        const next = openRunPaneInLayout(
+          state,
+          runTarget,
+          openedPaneId,
+          options
+        );
+        openedPaneId = next.paneId;
+        return {
+          paneLayout: next.paneLayout,
+          activeSessionId: activeSessionIdFromPaneLayout(
+            next.paneLayout,
+            state.activeSessionId
+          ),
+          panelOpen: true,
+        };
+      });
+      return openedPaneId;
+    },
+
+    showSessionBesideRunPane: (sessionId, anchor) => {
+      set((state) => {
+        const paneLayout = normalizePaneLayout(
+          state.paneLayout,
+          state.sessions
+        );
+        if (!state.sessions[sessionId]) return { paneLayout };
+        const anchorTarget = paneTarget(anchor);
+        let panes = paneLayout.panes;
+        const anchorPane = panes.find((pane) => pane.id === anchor.id);
+        // A session focus may have replaced the run pane; restore it.
+        if (anchorPane && anchorPane.sessionId === sessionId) {
+          if (panes.length >= MAX_CHAT_PANES) return { paneLayout };
+          panes = panes.map((pane) =>
+            pane.id === anchor.id ? retargetPane(pane, anchorTarget) : pane
+          );
+        } else if (!anchorPane) {
+          return { paneLayout };
+        }
+        const sessionPane = panes.find((pane) => pane.sessionId === sessionId);
+        if (sessionPane) {
+          return {
+            activeSessionId: sessionId,
+            paneLayout: { panes, activePaneId: sessionPane.id },
+          };
+        }
+        if (panes.length >= MAX_CHAT_PANES) return { paneLayout };
+        const index = panes.findIndex((pane) => pane.id === anchor.id);
+        const pane: ChatPane = { id: generatePaneId(), sessionId };
+        return {
+          activeSessionId: sessionId,
+          paneLayout: {
+            panes: [
+              ...panes.slice(0, index + 1),
+              pane,
+              ...panes.slice(index + 1),
+            ],
+            activePaneId: pane.id,
+          },
+        };
+      });
     },
 
     listLocalSessions: (projectPath) =>

@@ -1,5 +1,5 @@
 import { useCallback, useMemo } from "react";
-import { MAX_CHAT_PANES, useChatStore } from "../stores/chatStore";
+import { MAX_CHAT_PANES, isRunPane, useChatStore } from "../stores/chatStore";
 import type { ChatPane, ChatPaneLayout } from "../stores/chatStore";
 
 /** Pane split requires a minimum width per pane plus the history column. */
@@ -57,15 +57,21 @@ export function useChatPaneManagement({
   // leaving the pane layout unchanged.
   const normalizedPaneLayout = paneLayout;
   const normalizedPanes = normalizedPaneLayout.panes;
+  // Compact chat shows the active pane: a focused run, else the active session.
+  const activeRunPane = normalizedPanes.find(
+    (pane) => pane.id === paneLayout.activePaneId && isRunPane(pane)
+  );
   const fallbackPane = useMemo<ChatPane | null>(
     () =>
-      activeSessionId
-        ? {
-            id: paneLayout.activePaneId ?? `single-${activeSessionId}`,
-            sessionId: activeSessionId,
-          }
-        : null,
-    [activeSessionId, paneLayout.activePaneId]
+      activeRunPane
+        ? activeRunPane
+        : activeSessionId
+          ? {
+              id: paneLayout.activePaneId ?? `single-${activeSessionId}`,
+              sessionId: activeSessionId,
+            }
+          : null,
+    [activeRunPane, activeSessionId, paneLayout.activePaneId]
   );
   const visiblePanes = useMemo<ChatPane[]>(() => {
     if (isMaximized && normalizedPanes.length > 0) return normalizedPanes;

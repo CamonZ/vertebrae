@@ -109,7 +109,7 @@ describe("useChatPaneManagement", () => {
     ) {
       const sessions: Record<string, ChatSession> = {};
       for (const pane of panes) {
-        if (!sessions[pane.sessionId]) {
+        if (pane.sessionId && !sessions[pane.sessionId]) {
           sessions[pane.sessionId] = makeSession({ id: pane.sessionId });
         }
       }

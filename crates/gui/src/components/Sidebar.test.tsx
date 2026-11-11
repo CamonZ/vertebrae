@@ -67,10 +67,9 @@ describe("Sidebar Traces nav", () => {
       "sidebar-nav-artifacts",
       "sidebar-nav-daemons",
       "sidebar-nav-design",
-      "sidebar-nav-traces",
     ]);
 
-    for (const label of ["tasks", "design", "traces"]) {
+    for (const label of ["tasks", "design"]) {
       const svg = screen
         .getByTestId(`sidebar-nav-${label}`)
         .querySelector("svg");
@@ -86,17 +85,6 @@ describe("Sidebar Traces nav", () => {
     expect(settingsLink.querySelector("svg")).not.toBeNull();
   });
 
-  it("renders a Traces nav link pointing at /traces", () => {
-    render(
-      <MemoryRouter initialEntries={["/tasks"]}>
-        <Sidebar />
-      </MemoryRouter>
-    );
-    const link = screen.getByTestId("sidebar-nav-traces");
-    expect(link).toBeInTheDocument();
-    expect(link.getAttribute("href")).toBe("/traces");
-  });
-
   it("renders a Daemons nav link pointing at the account-scoped fleet route", () => {
     render(
       <MemoryRouter initialEntries={["/tasks"]}>
@@ -107,22 +95,6 @@ describe("Sidebar Traces nav", () => {
     const link = screen.getByTestId("sidebar-nav-daemons");
     expect(link).toHaveAttribute("href", "/daemons");
     expect(link).toHaveAttribute("aria-label", "Daemons");
-  });
-
-  it("clicking the Traces nav navigates to /traces", async () => {
-    const user = userEvent.setup();
-    render(
-      <MemoryRouter initialEntries={["/tasks"]}>
-        <Sidebar />
-        <Routes>
-          <Route path="*" element={<LocationDisplay />} />
-        </Routes>
-      </MemoryRouter>
-    );
-    await user.click(screen.getByTestId("sidebar-nav-traces"));
-    await waitFor(() => {
-      expect(screen.getByTestId("loc")).toHaveTextContent("/traces");
-    });
   });
 
   it("shows the Settings badge when a GUI update is available", () => {
@@ -417,7 +389,9 @@ describe("Sidebar rail chrome", () => {
 
   it("omits the rail connection label and dot", () => {
     renderSidebar();
-    expect(screen.queryByTestId("rail-connection-status")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("rail-connection-status")
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId("rail-connection-dot")).not.toBeInTheDocument();
   });
 

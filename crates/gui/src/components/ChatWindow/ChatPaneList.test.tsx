@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ChatPaneList } from "./ChatPaneList";
 import { useChatStore } from "../../stores/chatStore";
-import type { ChatPane, ChatSession } from "../../stores/chatStore";
+import type { ChatSession, LocalChatPane } from "../../stores/chatStore";
 
 const windowRenders = vi.hoisted(() => ({ count: 0 }));
 
@@ -43,7 +43,7 @@ function createSession(id: string): ChatSession {
 }
 
 function renderPaneList(count = 1, maximized = false) {
-  const panes: ChatPane[] = Array.from({ length: count }, (_, index) => ({
+  const panes: LocalChatPane[] = Array.from({ length: count }, (_, index) => ({
     id: `pane-${index + 1}`,
     sessionId: `session-${index + 1}`,
   }));
@@ -214,7 +214,7 @@ describe("split pane allocation integration", () => {
 
     const remainingPanes = props.visiblePanes.slice(1);
     const replacementPane = {
-      ...props.visiblePanes[0],
+      id: props.visiblePanes[0].id,
       sessionId: "session-2",
     };
     const replacementPanes = [replacementPane, ...remainingPanes];

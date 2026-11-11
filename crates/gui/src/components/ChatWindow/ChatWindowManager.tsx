@@ -7,7 +7,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { useChatStore } from "../../stores/chatStore";
+import {
+  isRunPane,
+  useChatStore,
+  type RunChatPane,
+} from "../../stores/chatStore";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { usePanelExitTransition } from "../../hooks/usePanelExitTransition";
 import { doCloseSession } from "../../hooks/useLocalChat";
@@ -86,6 +90,7 @@ export function ChatWindowManager({
     (s) => s.startFreshSessionInNewPane
   );
   const focusPane = useChatStore((s) => s.focusPane);
+  const openRunPane = useChatStore((s) => s.openRunPane);
   const closePane = useChatStore((s) => s.closePane);
   const unsplitPanes = useChatStore((s) => s.unsplitPanes);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
@@ -370,6 +375,9 @@ export function ChatWindowManager({
     renderedPanelWidth,
     activeSessionId,
   });
+  const activeRunPane = visiblePanes.find(
+    (pane): pane is RunChatPane => pane.id === activePaneId && isRunPane(pane)
+  );
   const historyMaxWidth = maxHistoryWidthForLayout(
     renderedPanelWidth,
     visiblePanes.length
@@ -704,6 +712,15 @@ export function ChatWindowManager({
     []
   );
 
+  const paneFinds = useRef(new Map<string, () => boolean>());
+  const registerPaneFind = useCallback(
+    (paneId: string, openFind: (() => boolean) | null) => {
+      if (openFind) paneFinds.current.set(paneId, openFind);
+      else paneFinds.current.delete(paneId);
+    },
+    []
+  );
+
   useChatKeyboardShortcuts({
     open,
     dispatch: {
@@ -714,6 +731,11 @@ export function ChatWindowManager({
       focusPaneByOffset,
       historyNavigationEnabled: isMaximized,
       focusHistorySearch,
+      openPaneFind: () => {
+        const paneId = activePaneId ?? visiblePanes[0]?.id;
+        const openFind = paneId ? paneFinds.current.get(paneId) : undefined;
+        return openFind ? openFind() : false;
+      },
       selectHistorySessionByOffset,
       selectHistoryProjectByOffset,
       closeActivePane,
@@ -738,6 +760,8 @@ export function ChatWindowManager({
   // focused. The chat is globally mounted; it's "open" only while showing.
   const shouldHandleChatPanelEscape = useCallback(() => {
     const activeElement = document.activeElement;
+    // Escape in a pane's find bar closes the bar, not the panel.
+    if (activeElement?.closest("[data-pane-find]")) return false;
     if (
       activeElement instanceof HTMLInputElement &&
       activeElement.closest("[data-mini-history-search]") &&
@@ -776,8 +800,13 @@ export function ChatWindowManager({
 
   // Wide state is restored only after the exit surface disappears. Collapsing
   // earlier would shrink the chat and move an adjacent panel during drill-out.
+  // Only the mounted → unmounted transition collapses: opening the closed
+  // panel straight into expanded (a run opened in chat) must stay expanded.
+  const wasMountedRef = useRef(mounted);
   useEffect(() => {
-    if (!mounted) collapseMaximized();
+    const wasMounted = wasMountedRef.current;
+    wasMountedRef.current = mounted;
+    if (wasMounted && !mounted) collapseMaximized();
   }, [collapseMaximized, mounted]);
 
   if (!mounted) {
@@ -808,7 +837,12 @@ export function ChatWindowManager({
           {isMaximized && historyVisible && (
             <LocalChatMiniPanel
               width={effectiveHistoryWidth}
-              activeSessionId={activeSessionId ?? visiblePanes[0].sessionId}
+              activeSessionId={
+                activeRunPane
+                  ? ""
+                  : (activeSessionId ?? visiblePanes[0].sessionId ?? "")
+              }
+              activeRunId={activeRunPane?.runId ?? null}
               activeProviderThreadId={activeProviderThreadId}
               searchQuery={sessionQuery}
               onSearchQueryChange={setSessionQuery}
@@ -827,6 +861,15 @@ export function ChatWindowManager({
               onSelectAgent={(sessionId, agent) => {
                 void selectAgentThreadForActivePane(sessionId, agent);
               }}
+              onSelectRun={(row) => {
+                openRunPane({ taskId: row.taskId, runId: row.id });
+              }}
+              onSelectRunStep={(row, executionId) => {
+                openRunPane(
+                  { taskId: row.taskId, runId: row.id },
+                  { scrollToThreadId: executionId }
+                );
+              }}
               onStartProjectChat={startProjectChat}
               deleteError={deleteError}
               onDelete={(sessionId) => void handleDeleteSession(sessionId)}
@@ -841,6 +884,7 @@ export function ChatWindowManager({
           )}
           <ChatPaneList
             registerChangesToggle={registerChangesToggle}
+            registerPaneFind={registerPaneFind}
             visiblePanes={visiblePanes}
             activePaneId={activePaneId}
             isMaximized={isMaximized}

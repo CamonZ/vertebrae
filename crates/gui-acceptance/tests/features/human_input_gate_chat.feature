@@ -26,7 +26,7 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Chat Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the GUI should show "local-chat-acceptance reply" within 10 seconds
@@ -47,14 +47,15 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Reopen Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the local chat should show 1 completed assistant responses within 10 seconds
     When I click on the element with title "Close chat panel"
+    And I reopen the created task's run in the chat without reloading
     And I click on the element with test id "human-input-gate-resolve"
     Then the local chat should show 1 completed assistant responses within 5 seconds
-    When I reload the traces page for the created task
+    When I reload the GUI and reopen the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the local chat composer should offer to resume its session within 10 seconds
@@ -73,7 +74,7 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate No Artifact Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the GUI should show an element with test id "human-input-gate" within 15 seconds
     And the GUI should show a disabled element with title "Configure an artifact on this step to resolve it in a chat" within 5 seconds
 
@@ -90,7 +91,7 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Codex Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the "codex" harness should have started 1 gate chat asking "Approve Gate Codex Task?" with artifact "approval"
@@ -110,7 +111,7 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Review Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the local chat should show 1 completed assistant responses within 10 seconds
@@ -135,7 +136,7 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Stop Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the GUI should show "Drafting" within 10 seconds
@@ -154,7 +155,7 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Draft Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the "claude" harness should have started 1 draft gate chat asking "Approve Gate Draft Task?"
@@ -181,7 +182,7 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Draft Review Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the local chat should show 1 completed assistant responses within 10 seconds
@@ -205,7 +206,7 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Steering Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the local chat should be ready for a message within 10 seconds
@@ -249,12 +250,12 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Recovery Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the local chat should show 1 completed assistant responses within 10 seconds
     When I set the waiting gate's draft to '{"approved": true}' via the CLI
-    And I reload the traces page for the created task
+    And I reload the GUI and reopen the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     When I click on the element with test id "human-input-gate-resolve"
     Then the "claude" harness should have started 2 draft gate chats asking "Approve Gate Recovery Task?"
@@ -274,7 +275,7 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Direct Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the GUI should show an element with test id "human-input-gate-answer-directly" within 15 seconds
     When I click on the element with test id "human-input-gate-answer-directly"
     And I click on the element with test id "gate-answer-input-approved-yes"
@@ -295,6 +296,6 @@ Feature: Resolve a human_input gate in a local chat
       | workflow | Gate Artifact Workflow |
     And I transition the task to step "approve" via the CLI
     And I start the task workflow via the CLI
-    And I navigate to the traces page for the created task
+    And I open the created task's run in the chat
     Then the human_input gate should offer Resolve within 15 seconds
     And the GUI should not show an element with test id "human-input-gate-answer-directly" within 3 seconds

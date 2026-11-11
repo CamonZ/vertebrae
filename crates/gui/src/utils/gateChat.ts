@@ -4,7 +4,7 @@ import type {
   StepExecution,
   TaskRun,
 } from "../bindings";
-import { safeMs } from "../components/Traces/timeUtils";
+import { safeMs } from "./timeUtils";
 import type { HumanInputGateContext } from "./humanInputGate";
 
 const HIDDEN_TURN_OPEN = "<vertebrae-hidden-turn>";
