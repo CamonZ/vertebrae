@@ -5,6 +5,7 @@ import { MachinePart } from "../MachinePart";
 import { RailCards } from "../RailCards";
 import { SvgText } from "../SvgText";
 import { Wire } from "../Rail";
+import { useFlowRegistry } from "./registryContext";
 import type { DiagramTimeline } from "./compile";
 
 export interface FlowDiagramProps {
@@ -30,6 +31,7 @@ export function FlowDiagram({
   label,
   reducedMotion,
 }: FlowDiagramProps) {
+  const registry = useFlowRegistry();
   return (
     <MachineDiagramViewport width={d.width} height={d.height} fitOnMount>
       <MachineDiagram
@@ -66,9 +68,14 @@ export function FlowDiagram({
               scale={p.scale}
               reducedMotion={reducedMotion}
             >
-              {() => (
-                <PartBox x={p.bb[0]} y={p.bb[1]} w={p.bb[2]} h={p.bb[3]} />
-              )}
+              {(frame) => {
+                const draw = registry.parts.get(p.kind)?.draw;
+                return draw ? (
+                  draw(frame.t, p)
+                ) : (
+                  <PartBox x={p.bb[0]} y={p.bb[1]} w={p.bb[2]} h={p.bb[3]} />
+                );
+              }}
             </MachinePart>
           ))}
         {d.parts

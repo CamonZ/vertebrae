@@ -13,6 +13,7 @@ import type { MachinePartDef, PartScenario } from "./types";
 type SeatRing = readonly [number, number, number, CardRole];
 
 interface PoolExtra {
+  readonly seats?: readonly number[];
   /** `[seatX, from, to, result]` seat rings. */
   readonly rings: readonly SeatRing[];
   /** The waiter's give-up ring outside the pool. */
@@ -186,7 +187,7 @@ export const poolMachine: MachinePartDef<PoolExtra> = {
     poolStory("job fails"),
     poolStory("waiter gives up"),
   ],
-  draw: (t, { rings, wait }) => (
+  draw: (t, { rings, wait, seats = SEATS }) => (
     <>
       <Rail
         points={[
@@ -201,7 +202,7 @@ export const poolMachine: MachinePartDef<PoolExtra> = {
         ]}
       />
       <PartBox x={150} y={112} w={340} h={160} />
-      {SEATS.map((x) => (
+      {seats.map((x) => (
         <Hole key={x} x={x} y={SEAT_Y} />
       ))}
       {rings.map(([x, from, to, result], i) => (

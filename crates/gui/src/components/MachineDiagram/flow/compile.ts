@@ -37,6 +37,7 @@ import {
   TOKEN_SHAPES,
   tokenCard,
   type AnyPartKind,
+  type CompiledPartStep,
   type FlowRegistry,
   type PartWriter,
   type StepCard,
@@ -107,6 +108,8 @@ export interface DiagramPart {
   readonly change: ChangeMark;
   readonly changeNote?: string;
   readonly presence: Presence;
+  readonly state: unknown;
+  readonly steps: readonly CompiledPartStep[];
   readonly props: Readonly<Record<string, unknown>>;
   readonly ports: Readonly<Record<string, DiagramPort>>;
   /** The part's own timeline on the shared clock, in part space. */
@@ -324,6 +327,7 @@ interface PartRun {
   readonly presence: Presence;
   readonly draft: StoryDraft;
   readonly markers: TimelineMarker[];
+  readonly steps: CompiledPartStep[];
 }
 
 interface CardRun {
@@ -383,6 +387,7 @@ function arrange(
       presence: presenceOf(p.change, a),
       draft: story(0),
       markers: [],
+      steps: [],
     });
   }
   const portAt = (pid: string, port: string): DiagramPort => {
@@ -587,6 +592,7 @@ function arrange(
         return;
       }
       const sc = c ? stepCard(c) : undefined;
+      const args = withDefaults(step.args, verb.args ?? {});
       const outcome =
         verb.compile({
           t,
@@ -600,7 +606,7 @@ function arrange(
           state: run.state,
           ...(sc ? { card: sc } : {}),
           ...(rail ? { entry: rail.to.port } : {}),
-          args: withDefaults(step.args, verb.args ?? {}),
+          args,
           out: writer(run, sc),
           port: (name: string) => {
             const pd = run.def.ports[name];
@@ -608,6 +614,15 @@ function arrange(
           },
         }) ?? {};
       const end = t + (outcome.duration ?? verb.duration);
+      run.steps.push({
+        verb: step.verb,
+        t,
+        end,
+        args,
+        outcome,
+        ...(sc ? { card: sc } : {}),
+        ...(rail ? { entry: rail.to.port } : {}),
+      });
       if (c) {
         if (outcome.role) c.role = outcome.role;
         if (outcome.token) c.token = outcome.token;
@@ -685,6 +700,8 @@ function arrange(
       ...(changeNote && a !== "before" ? { changeNote } : {}),
       presence: run.presence,
       props: run.props,
+      state: run.state,
+      steps: [...run.steps].sort((x, y) => x.t - y.t),
       ports: Object.fromEntries(
         Object.keys(run.def.ports).map((n) => [n, portAt(p.id, n)])
       ),

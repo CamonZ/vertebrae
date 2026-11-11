@@ -92,11 +92,10 @@ function splitterStory(f: boolean): Timeline {
 /** The copy puff swells at the split point from here. */
 const SPLIT_AT = 1.25;
 
-function Puff({ t }: { t: number }) {
+function Puff({ t, at }: { t: number; at: number }) {
   const { fade } = usePart();
   const k =
-    smoothstep(SPLIT_AT, SPLIT_AT + 0.1, t) *
-    (1 - smoothstep(SPLIT_AT + 0.3, SPLIT_AT + 0.5, t));
+    smoothstep(at, at + 0.1, t) * (1 - smoothstep(at + 0.3, at + 0.5, t));
   if (k <= 0) return null;
   return (
     <circle
@@ -109,7 +108,9 @@ function Puff({ t }: { t: number }) {
   );
 }
 
-export const splitterMachine: MachinePartDef<null> = {
+export const splitterMachine: MachinePartDef<{
+  readonly splitAt: number;
+} | null> = {
   part: {
     name: "splitter",
     job: "copies to every branch",
@@ -133,7 +134,7 @@ export const splitterMachine: MachinePartDef<null> = {
       extra: null,
     },
   ],
-  draw: (t) => (
+  draw: (t, extra) => (
     <>
       <Rail
         points={[
@@ -166,7 +167,7 @@ export const splitterMachine: MachinePartDef<null> = {
           ],
         ]}
       />
-      <Puff t={t} />
+      <Puff t={t} at={extra?.splitAt ?? SPLIT_AT} />
     </>
   ),
 };

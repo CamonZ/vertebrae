@@ -3,6 +3,7 @@
  * catalogue's parts here as they land (`registry.parts.register(def)`); each
  * kind's name matches its part drawing in ../../parts.
  */
+import { FLOW_DRAWINGS } from "../drawings";
 import type { AnyPartKind, PartRegistry } from "../registry";
 import { aggregatorPart } from "./aggregator";
 import { boundaryPart } from "./boundary";
@@ -37,7 +38,12 @@ export const STARTER_PARTS: readonly AnyPartKind[] = [
 ];
 
 export function registerStarterParts(r: PartRegistry): void {
-  for (const def of STARTER_PARTS) r.register(def);
+  for (const def of STARTER_PARTS) {
+    const draw = Object.prototype.hasOwnProperty.call(FLOW_DRAWINGS, def.kind)
+      ? FLOW_DRAWINGS[def.kind as keyof typeof FLOW_DRAWINGS]
+      : undefined;
+    r.register({ ...def, ...(draw ? { draw } : {}) });
+  }
 }
 
 export {
