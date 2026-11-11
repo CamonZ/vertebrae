@@ -6,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorktreeChanges } from "./WorktreeChanges";
 import { useWorktreeWatch } from "./workspace/useWorktreeWatch";
@@ -36,19 +37,30 @@ vi.mock("../../bindings", () => ({
 }));
 // Pierre stand-ins: the editor captures its contents at mount like the real one.
 vi.mock("./workspace/AllChangesView", () => ({
-  default: ({ files, jumpTarget, onOpen, diffStyle }: AllChangesViewProps) => (
-    <div data-testid="all-diffs" data-layout={diffStyle}>
-      {files.map((file) => (
-        <section key={file.path} aria-label={`Diff for ${file.path}`}>
-          <pre>{file.marker ?? file.patch}</pre>
-          <button type="button" onClick={() => onOpen(file.path)}>
-            Open diff {file.path}
-          </button>
-        </section>
-      ))}
-      <output aria-label="Jump target">{jumpTarget?.path ?? ""}</output>
-    </div>
-  ),
+  default: function AllDiffs({
+    files,
+    jumpTarget,
+    onOpen,
+    diffStyle,
+  }: AllChangesViewProps) {
+    const [folded, setFolded] = useState(false);
+    return (
+      <div data-testid="all-diffs" data-layout={diffStyle}>
+        <button aria-expanded={!folded} onClick={() => setFolded(!folded)}>
+          Test fold
+        </button>
+        {files.map((file) => (
+          <section key={file.path} aria-label={`Diff for ${file.path}`}>
+            <pre>{file.marker ?? file.patch}</pre>
+            <button type="button" onClick={() => onOpen(file.path)}>
+              Open diff {file.path}
+            </button>
+          </section>
+        ))}
+        <output aria-label="Jump target">{jumpTarget?.path ?? ""}</output>
+      </div>
+    );
+  },
 }));
 vi.mock("./workspace/DocumentEditor", () => ({
   default: ({
@@ -214,6 +226,38 @@ function selectComparison(control: HTMLElement, value: string) {
 }
 
 describe("WorktreeChanges", () => {
+  it("retains the diff component on background refresh and resets it for comparison/worktree changes", async () => {
+    load.mockResolvedValue({ status: "ok", data: modified });
+    const view = render(<WorktreeChanges worktreePath="/worktree" />);
+    const fold = await screen.findByRole("button", { name: "Test fold" });
+    fireEvent.click(fold);
+    const calls = vi.mocked(useWorktreeWatch).mock.calls;
+    act(() => calls[calls.length - 1][1]());
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("button", { name: "Test fold" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    selectComparison(
+      screen.getByRole("combobox", { name: "Comparison base" }),
+      "head"
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Test fold" })).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      )
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Test fold" }));
+    view.rerender(<WorktreeChanges worktreePath="/another" />);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Test fold" })).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      )
+    );
+  });
+
   it("defaults to the whole branch on open and refresh and can select Uncommitted", async () => {
     render(<WorktreeChanges worktreePath="/worktree" />);
     expect(screen.getByText("Loading changes…")).toHaveAttribute(

@@ -55,6 +55,8 @@ export interface DiffCommentsApi {
   selectedLinesFor(path: string): SelectedLineRange | null;
   /** Pierre's selection-end notification for one file. */
   onSelectionChange(path: string, range: SelectedLineRange | null): void;
+  /** Retire a file's transient selection/composer when its body is hidden. */
+  clearInteraction(path: string): void;
   keyboardProps: HTMLAttributes<HTMLDivElement>;
   renderAnnotation(annotation: { metadata: ReviewAnnotation }): ReactNode;
 }
@@ -200,6 +202,16 @@ export function useDiffComments(
     [files, home, discussion, draft]
   );
 
+  const clearInteraction = useCallback(
+    (path: string) => {
+      setDraft((current) => (current?.path === path ? null : current));
+      setSelection((current) => (current?.path === path ? null : current));
+      ignoreSelection.current = false;
+      if (sharedSelection?.path === path) discussion?.select(null);
+    },
+    [sharedSelection, discussion]
+  );
+
   const renderAnnotation = useCallback(
     (annotation: { metadata: ReviewAnnotation }): ReactNode => (
       <DiffCommentThread
@@ -328,6 +340,7 @@ export function useDiffComments(
   };
   return {
     keyboardProps,
+    clearInteraction,
     enabled: review !== null,
     annotationsFor,
     openComposer,
