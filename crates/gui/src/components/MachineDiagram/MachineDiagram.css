@@ -1,0 +1,88 @@
+/* Machine diagrams: catalogue colour roles mapped onto the app theme tokens.
+   Light and dark follow the .light class on <html>; the diagram markup only
+   references these --md-* properties, so a theme switch needs no re-render. */
+.md-root {
+  /* state roles (VL-03) */
+  --md-dim: var(--color-fg-mute);
+  --md-ink: var(--color-fg);
+  --md-amber: var(--color-warn);
+  --md-green: var(--color-ok);
+  --md-red: var(--color-err);
+  --md-amber-wash: var(--color-warn-wash);
+  --md-green-wash: var(--color-ok-wash);
+  --md-red-wash: var(--color-err-wash);
+
+  /* surfaces */
+  --md-bg: var(--color-bg);
+  --md-fill: var(--color-bg-1);
+  --md-div: var(--color-line);
+  --md-rail: var(--edge-color);
+  --md-edge: var(--color-fg-faint);
+  --md-plate: var(--color-fg-soft);
+  --md-hole: var(--color-bg);
+  --md-ghost: var(--color-fg-ghost);
+
+  font-family: var(--font-mono);
+}
+
+.md-root text {
+  font-family: var(--font-mono);
+  user-select: text;
+}
+
+/* Rails reuse the shared .gedge path vocabulary at the rail weight (VL-05). */
+.md-rail .gedge {
+  stroke: var(--md-rail);
+  stroke-width: 2.5;
+  stroke-opacity: 1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: none;
+}
+.md-rail .gedge.k-handoff {
+  stroke-dasharray: var(--md-dash, 6 8);
+}
+
+/* Wires between parts: plain, + new (heavy ink), − removed (dashed). */
+.md-wire .gedge {
+  stroke: var(--md-rail);
+  stroke-width: 1.5;
+  stroke-opacity: 1;
+  transition: none;
+}
+.md-wire.added .gedge {
+  stroke: var(--md-ink);
+  stroke-width: 3;
+}
+.md-wire.removed .gedge {
+  stroke: var(--md-edge);
+  stroke-dasharray: 4 5;
+}
+
+.md-viewport {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+}
+.md-viewport[data-dragging="true"] {
+  cursor: grabbing;
+}
+.md-stage {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+}
+.md-stage > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.md-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.md-labels .al-cond {
+  position: absolute;
+  transform: translate(-50%, -50%);
+}
