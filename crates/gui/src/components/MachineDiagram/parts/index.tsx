@@ -52,10 +52,30 @@ import { sagaMachine } from "./saga";
 import { outboxMachine } from "./outbox";
 import { consumerOffsetMachine } from "./consumerOffset";
 import { idempotencyGuardMachine } from "./idempotencyGuard";
+import { replicationMachine } from "./replication";
+import { quorumMachine } from "./quorum";
+import { leaderElectionMachine } from "./leaderElection";
+import { failureDetectorMachine } from "./failureDetector";
+import { gossipMachine } from "./gossip";
+import { shardRingMachine } from "./shardRing";
+import { versionVectorMachine } from "./versionVector";
+import { fencingTokenMachine } from "./fencingToken";
+import { serviceRegistryMachine } from "./serviceRegistry";
+import { twoPhaseCommitMachine } from "./twoPhaseCommit";
 import type { MachinePartDef } from "./types";
 
 export type { MachinePartDef, PartScenario } from "./types";
 export {
+  replicationMachine,
+  quorumMachine,
+  leaderElectionMachine,
+  failureDetectorMachine,
+  gossipMachine,
+  shardRingMachine,
+  versionVectorMachine,
+  fencingTokenMachine,
+  serviceRegistryMachine,
+  twoPhaseCommitMachine,
   aggregatorMachine,
   alertMachine,
   approvalMachine,
@@ -142,6 +162,16 @@ export const MACHINE_PARTS = {
   outbox: outboxMachine,
   "consumer offset": consumerOffsetMachine,
   "idempotency guard": idempotencyGuardMachine,
+  replication: replicationMachine,
+  quorum: quorumMachine,
+  "leader election": leaderElectionMachine,
+  "failure detector": failureDetectorMachine,
+  gossip: gossipMachine,
+  "shard ring": shardRingMachine,
+  "version vector": versionVectorMachine,
+  "fencing token": fencingTokenMachine,
+  "two-phase commit": twoPhaseCommitMachine,
+  "service registry": serviceRegistryMachine,
 } as const;
 
 export type MachinePartName = keyof typeof MACHINE_PARTS;

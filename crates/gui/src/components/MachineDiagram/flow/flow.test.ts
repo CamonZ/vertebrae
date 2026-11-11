@@ -211,7 +211,7 @@ describe("validation errors name the spec path", () => {
     const s = base();
     s.parts[1].kind = "wroker";
     expect(errorsOf(s)).toContain(
-      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, guard, idempotency guard, joiner, lock, metric, outbox, pipeline, pool, projection, queue, rate limiter, reactive cell, replay, retry, router, saga, schema, session, snapshot, source, splitter, state machine, store, timeout, trace, transaction, transform, upcaster, worker'
+      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, failure detector, fencing token, gossip, guard, idempotency guard, joiner, leader election, lock, metric, outbox, pipeline, pool, projection, queue, quorum, rate limiter, reactive cell, replay, replication, retry, router, saga, schema, service registry, session, shard ring, snapshot, source, splitter, state machine, store, timeout, trace, transaction, transform, two-phase commit, upcaster, version vector, worker'
     );
   });
 
@@ -223,7 +223,7 @@ describe("validation errors name the spec path", () => {
     );
     s.story[0].steps[1].verb = "decide";
     expect(errorsOf(s)).toContain(
-      'story[0].steps[1].verb: worker "w" does not react to verb "decide"; its verbs: cancel, fail, finish, stage; "decide" is a verb of: decider, guard, router, schema, state machine'
+      'story[0].steps[1].verb: worker "w" does not react to verb "decide"; its verbs: cancel, fail, finish, stage; "decide" is a verb of: decider, guard, quorum, router, schema, state machine'
     );
   });
 
@@ -476,7 +476,7 @@ describe("registries: extend without changing the compiler", () => {
     const plain = createFlowRegistry();
     plain.attachments.register(registry.attachments.get("metric snapshot")!);
     expect(errorsOf(s, plain)).toEqual([
-      'parts[1].kind: unknown part kind "test lamp"; registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, guard, idempotency guard, joiner, lock, metric, outbox, pipeline, pool, projection, queue, rate limiter, reactive cell, replay, retry, router, saga, schema, session, snapshot, source, splitter, state machine, store, timeout, trace, transaction, transform, upcaster, worker',
+      'parts[1].kind: unknown part kind "test lamp"; registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, failure detector, fencing token, gossip, guard, idempotency guard, joiner, leader election, lock, metric, outbox, pipeline, pool, projection, queue, quorum, rate limiter, reactive cell, replay, replication, retry, router, saga, schema, service registry, session, shard ring, snapshot, source, splitter, state machine, store, timeout, trace, transaction, transform, two-phase commit, upcaster, version vector, worker',
     ]);
     // The generated JSON Schema includes the new kinds.
     const schema = JSON.stringify(flowSpecJsonSchema(registry));
@@ -592,9 +592,13 @@ describe("compiler features", () => {
       "document",
       "event rail",
       "event store",
+      "failure detector",
+      "fencing token",
+      "gossip",
       "guard",
       "idempotency guard",
       "joiner",
+      "leader election",
       "lock",
       "metric",
       "outbox",
@@ -602,14 +606,18 @@ describe("compiler features", () => {
       "pool",
       "projection",
       "queue",
+      "quorum",
       "rate limiter",
       "reactive cell",
       "replay",
+      "replication",
       "retry",
       "router",
       "saga",
       "schema",
+      "service registry",
       "session",
+      "shard ring",
       "snapshot",
       "source",
       "splitter",
@@ -619,7 +627,9 @@ describe("compiler features", () => {
       "trace",
       "transaction",
       "transform",
+      "two-phase commit",
       "upcaster",
+      "version vector",
       "worker",
     ]);
   });
