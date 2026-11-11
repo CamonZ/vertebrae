@@ -62,6 +62,14 @@ import { versionVectorMachine } from "./versionVector";
 import { fencingTokenMachine } from "./fencingToken";
 import { serviceRegistryMachine } from "./serviceRegistry";
 import { twoPhaseCommitMachine } from "./twoPhaseCommit";
+import { inferenceStepMachine } from "./inferenceStep";
+import { structuredStepMachine } from "./structuredStep";
+import { executeStepMachine } from "./executeStep";
+import { routeStepMachine } from "./routeStep";
+import { waitChildrenMachine } from "./waitChildren";
+import { humanGateMachine } from "./humanGate";
+import { runEndMachine } from "./runEnd";
+import { taskRunMachine } from "./taskRun";
 import type { MachinePartDef } from "./types";
 
 export type { MachinePartDef, PartScenario } from "./types";
@@ -117,6 +125,14 @@ export {
   outboxMachine,
   consumerOffsetMachine,
   idempotencyGuardMachine,
+  inferenceStepMachine,
+  structuredStepMachine,
+  executeStepMachine,
+  routeStepMachine,
+  waitChildrenMachine,
+  humanGateMachine,
+  runEndMachine,
+  taskRunMachine,
 };
 
 /** Implemented parts, in catalogue order. */
@@ -172,6 +188,14 @@ export const MACHINE_PARTS = {
   "fencing token": fencingTokenMachine,
   "two-phase commit": twoPhaseCommitMachine,
   "service registry": serviceRegistryMachine,
+  "inference step": inferenceStepMachine,
+  "structured step": structuredStepMachine,
+  "execute step": executeStepMachine,
+  "route step": routeStepMachine,
+  "wait children": waitChildrenMachine,
+  "human gate": humanGateMachine,
+  "run end": runEndMachine,
+  "task run": taskRunMachine,
 } as const;
 
 export type MachinePartName = keyof typeof MACHINE_PARTS;

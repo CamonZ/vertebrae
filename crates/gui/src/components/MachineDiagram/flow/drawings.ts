@@ -1043,4 +1043,213 @@ export const FLOW_DRAWINGS = {
       fx,
     });
   },
+  "inference step": (t, p) => {
+    const stage = latest(
+      p.steps.filter((s) => s.verb === "stage"),
+      t
+    );
+    const stop =
+      stage &&
+      p.steps.find(
+        (s) => s.t >= stage.t && ["finish", "fail"].includes(s.verb)
+      );
+    const from = stage ? stage.t + 0.65 : p.timeline.period + 1;
+    const to = stop
+      ? stop.t + (stop.verb === "finish" ? Number(stop.args.work ?? 0) : 0.3)
+      : p.timeline.period;
+    const span = Math.min(to - from, 1.5);
+    return MACHINE_PARTS["inference step"].draw(t, {
+      cl: [from, to],
+      lights: stage
+        ? Array.from({ length: 6 }, (_, i) => from + 0.1 + (span * i) / 6)
+        : [],
+    });
+  },
+  "structured step": (t, p) => {
+    const ask = latest(
+      p.steps.filter((s) => s.verb === "ask"),
+      t
+    );
+    const n = Number(ask?.args.questions ?? 3);
+    const checks = p.steps.filter(
+      (s) => ask && s.verb === "validate" && s.t >= ask.t
+    );
+    const bad = checks.some((s) => s.args.outcome === "invalid");
+    const lamps: LampStep[][] = [0, 1, 2].map((i) =>
+      ask && i < n
+        ? [
+            [0, "off"],
+            [ask.t + 0.85 + 0.35 * i, bad && i === n - 1 ? "amber" : "green"],
+          ]
+        : [[0, "off"]]
+    );
+    return MACHINE_PARTS["structured step"].draw(t, {
+      wait: ask
+        ? [ask.t + 0.6, ask.t + 0.85 + 0.35 * n]
+        : [p.timeline.period + 1, p.timeline.period + 2],
+      chk: checks.map(
+        (s) => [s.t, s.args.outcome === "invalid" ? "red" : "green"] as const
+      ),
+      lamps,
+    });
+  },
+  "execute step": (t, p) => {
+    const run = latest(
+      p.steps.filter((s) => s.verb === "transform" || s.verb === "fail"),
+      t
+    );
+    const st = run ? run.t + 0.7 : p.timeline.period + 1;
+    return MACHINE_PARTS["execute step"].draw(t, {
+      st,
+      crash: run?.verb === "fail" ? st + 0.15 : null,
+    });
+  },
+  "route step": (t, p) => {
+    const turn = latest(
+      p.steps.filter((s) => ["route", "decide", "fail"].includes(s.verb)),
+      t
+    );
+    const at = turn?.t ?? p.timeline.period + 1;
+    const rule =
+      turn && turn.verb !== "fail" ? String(turn.args.rule ?? "r1") : null;
+    const lit = (from: number, to: number, yes: boolean) =>
+      turn
+        ? ([
+            [from, "amber"],
+            [to, yes ? "green" : "edge"],
+          ] as const)
+        : [];
+    return MACHINE_PARTS["route step"].draw(t, {
+      tiles: [
+        { x: 236, label: "r1", col: lit(at + 0.5, at + 0.8, rule === "r1") },
+        {
+          x: 300,
+          label: "r2",
+          col: rule === "r1" ? [] : lit(at + 0.8, at + 1.1, rule === "r2"),
+        },
+        {
+          x: 364,
+          label: rule === null ? "none" : "else",
+          col:
+            rule === "r1" || rule === "r2"
+              ? []
+              : turn
+                ? [
+                    [at + 1.1, "amber"],
+                    [at + 1.4, rule === "else" ? "green" : "red"],
+                  ]
+                : [],
+        },
+      ],
+      arm: [at + 1.15, rule === "r2" ? 1 : rule === "else" ? 2 : 0],
+      labels: strings(p.props.targets),
+    });
+  },
+  "wait children": (t, p) => {
+    const steps = cycle(p.steps, t, ["spawn"], ["validate", "fail"]);
+    const spawn = steps.find((s) => s.verb === "spawn");
+    const from = spawn ? spawn.t + 0.7 : p.timeline.period + 1;
+    const done: (number | null)[] = [null, null, null];
+    for (const s of steps)
+      if (s.verb === "wait" && s.args.outcome !== "running")
+        done[Math.min(3, Math.max(1, Number(s.args.child ?? 1))) - 1] =
+          s.t + 0.5;
+    return MACHINE_PARTS["wait children"].draw(t, {
+      rings: [255, 315, 375].map((x, i) => {
+        const d = done[i];
+        return d != null
+          ? ([x, from, d, "green"] as const)
+          : ([x, from, spawn ? p.timeline.period : from + 1, null] as const);
+      }),
+      chk: steps
+        .filter((s) => s.verb === "validate")
+        .map(
+          (s) => [s.t, s.args.outcome === "rejected" ? "red" : "green"] as const
+        ),
+    });
+  },
+  "human gate": (t, p) => {
+    const steps = cycle(p.steps, t, ["wait"], ["stop"]);
+    const wait = steps.find((s) => s.verb === "wait");
+    const end = steps.find(
+      (s) =>
+        s.verb === "stop" ||
+        (s.verb === "validate" && s.args.outcome !== "invalid")
+    );
+    const from = wait ? wait.t + 0.6 : p.timeline.period + 1;
+    return MACHINE_PARTS["human gate"].draw(t, {
+      wait: [
+        from,
+        end
+          ? end.t + (end.verb === "stop" ? 0.7 : 0.2)
+          : wait
+            ? p.timeline.period
+            : from + 1,
+      ],
+    });
+  },
+  "run end": (t, p) => {
+    const bar: [number, number][] = [[0, 0]];
+    let ring: [number, number] | null = null;
+    let lane = false;
+    let done: number | null = null;
+    for (const s of p.steps) {
+      if (s.verb === "stop" && s.args.by !== "user") bar.push([s.t + 0.3, 1]);
+      else if (s.verb === "stop") {
+        ring = [s.t + 0.6, s.t + 1.5];
+        lane = true;
+      } else if (s.verb === "resume") bar.push([s.t, 0]);
+      else if (s.verb === "finish") done = s.t + 0.9;
+    }
+    return MACHINE_PARTS["run end"].draw(t, {
+      bar,
+      done,
+      ring,
+      ringX: 300,
+      lane: lane ? [330, 96, 140] : null,
+    });
+  },
+  "task run": (t, p) => {
+    const labs = strings(p.props.steps) ?? [];
+    const lab = [0, 1, 2].map((i) => labs[i] ?? `step ${i + 1}`) as [
+      string,
+      string,
+      string,
+    ];
+    const st: [number, number][] = [[0, 0]];
+    const lamps: LampStep[][] = [[[0, "off"]], [[0, "off"]], [[0, "off"]]];
+    let done: number | null = null;
+    let cur = 0;
+    let waiting = false;
+    for (const s of p.steps) {
+      if (s.verb === "start") {
+        st.push([s.t, 0], [s.t + 0.8, 1]);
+        lamps[0].push([s.t + 0.9, "amber"]);
+        cur = 0;
+        waiting = false;
+      } else if (s.verb === "stage" && cur < 2) {
+        lamps[cur].push([s.t, "green"]);
+        if (waiting) st.push([s.t, 1]);
+        cur++;
+        if (!waiting && cur < 2) lamps[cur].push([s.t + 0.8, "amber"]);
+        waiting = false;
+      } else if (s.verb === "wait") {
+        waiting = true;
+        st.push([s.t, 2]);
+        if (cur < 2) lamps[cur].push([s.t, "amber"]);
+      } else if (s.verb === "finish") {
+        st.push([s.t, 3]);
+        done = s.t;
+      } else if (s.verb === "fail") {
+        st.push([s.t, 4]);
+        lamps[Math.min(cur, 1)].push([s.t, "red"]);
+      }
+    }
+    return MACHINE_PARTS["task run"].draw(t, {
+      lab,
+      st: st.sort((a, b) => a[0] - b[0]),
+      lamps,
+      done,
+    });
+  },
 } satisfies Record<keyof typeof MACHINE_PARTS, Drawing>;
