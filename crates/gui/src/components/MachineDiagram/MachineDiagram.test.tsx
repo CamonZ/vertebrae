@@ -389,4 +389,85 @@ describe("viewport", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("retry +1")).toBeInTheDocument();
   });
+
+  function gestureViewport() {
+    render(
+      <MachineDiagramViewport width={640} height={400}>
+        <Part fixture={workerFixture} t={1.9} reducedMotion={false} />
+      </MachineDiagramViewport>
+    );
+    const viewport = screen.getByTestId("machine-diagram-viewport");
+    const canvas = viewport.firstElementChild as HTMLElement;
+    const stage = viewport.querySelector(".md-stage") as HTMLElement;
+    // The stage sits at (100, 200) on screen, shifted by its own translate.
+    vi.spyOn(stage, "getBoundingClientRect").mockImplementation(() => {
+      const [x, y] = stage.style.transform
+        .match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/g)!
+        .map(Number);
+      return { left: 100 + x, top: 200 + y } as DOMRect;
+    });
+    const zoom = () => Number(stage.dataset.zoom);
+    /** The diagram point under screen point (300, 300). */
+    const under = () => {
+      const b = stage.getBoundingClientRect();
+      return [(300 - b.left) / zoom(), (300 - b.top) / zoom()];
+    };
+    return { canvas, zoom, under };
+  }
+
+  function wheel(target: HTMLElement, deltaY: number, ctrlKey: boolean) {
+    const event = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      ctrlKey,
+      deltaY,
+      clientX: 300,
+      clientY: 300,
+    });
+    fireEvent(target, event);
+    return event;
+  }
+
+  it("zooms on Ctrl/⌘-wheel and trackpad pinch around the pointer", () => {
+    const { canvas, zoom, under } = gestureViewport();
+    const before = under();
+    let event!: WheelEvent;
+    act(() => {
+      event = wheel(canvas, -100, true);
+    });
+    expect(event.defaultPrevented).toBe(true);
+    expect(zoom()).toBeCloseTo(Math.exp(0.2));
+    expect(under()[0]).toBeCloseTo(before[0]);
+    expect(under()[1]).toBeCloseTo(before[1]);
+  });
+
+  it("zooms on WebKit gesture events (Safari/WKWebView pinch)", () => {
+    const { canvas, zoom, under } = gestureViewport();
+    const before = under();
+    const gesture = (type: string, scale: number) => {
+      const event = Object.assign(
+        new Event(type, { bubbles: true, cancelable: true }),
+        { scale, clientX: 300, clientY: 300 }
+      );
+      fireEvent(canvas, event);
+    };
+    act(() => {
+      gesture("gesturestart", 1);
+      gesture("gesturechange", 1.5);
+      gesture("gestureend", 2);
+    });
+    expect(zoom()).toBeCloseTo(2);
+    expect(under()[0]).toBeCloseTo(before[0]);
+    expect(under()[1]).toBeCloseTo(before[1]);
+  });
+
+  it("leaves plain wheel scrolling to the page", () => {
+    const { canvas, zoom } = gestureViewport();
+    let event!: WheelEvent;
+    act(() => {
+      event = wheel(canvas, -100, false);
+    });
+    expect(event.defaultPrevented).toBe(false);
+    expect(zoom()).toBe(1);
+  });
 });

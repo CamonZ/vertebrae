@@ -13,12 +13,15 @@ function bounded(zoom: number) {
   return Math.max(0.05, maximumBounded);
 }
 
-/** Canvas-local native listeners must be non-passive to suppress page zoom. */
-export function useStatechartZoom(
+/**
+ * Canvas-local native listeners must be non-passive to suppress page zoom.
+ * `diagramRef` marks the zoomed element whose top-left is the zoom origin.
+ */
+export function useStatechartZoom<T extends Element = SVGSVGElement>(
   canvasRef: RefObject<HTMLSpanElement | null>,
   ready: boolean
 ) {
-  const diagramRef = useRef<SVGSVGElement>(null);
+  const diagramRef = useRef<T>(null);
   const [state, setState] = useState<ZoomState>({ zoom: 1, x: 0, y: 0 });
   const current = useRef(state);
   const rendered = useRef(state);

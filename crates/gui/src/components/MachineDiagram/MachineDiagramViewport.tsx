@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useStatechartViewport } from "../Artifacts/useStatechartViewport";
+import { useStatechartZoom } from "../Artifacts/useStatechartZoom";
 import { EdgeLabel } from "../WorkflowAtlas/EdgeLabel";
 import { ZoomWidget } from "../WorkflowAtlas/ZoomWidget";
 import "../WorkflowAtlas/WorkflowAtlas.css";
@@ -20,26 +21,53 @@ export interface MachineDiagramViewportProps {
   height: number;
   /** Wire labels drawn with the shared EdgeLabel chip over the SVG. */
   labels?: readonly DiagramLabel[];
+  /**
+   * On mount, shrink the diagram to the frame's width (never past 1) and
+   * size the frame to the fitted diagram's height.
+   */
+  fitOnMount?: boolean;
   children: ReactNode;
 }
 
 const MIN_ZOOM = 0.1;
-const MAX_ZOOM = 4;
 const ZOOM_STEP = 1.25;
+/** Leaves room for the zoom control under a very flat fitted diagram. */
+const MIN_FITTED_HEIGHT = 120;
 
 /**
  * Pan/zoom frame for a machine diagram, reusing the statechart viewport's
- * pointer-drag pan and the Workflow Atlas zoom control. Wire labels ride in
- * an HTML layer that shares the SVG's transform, so they stay real DOM text.
+ * pointer-drag pan, its Ctrl/⌘-wheel and trackpad-pinch zoom (anchored at the
+ * pointer), and the Workflow Atlas zoom control. Plain wheel scrolling is left
+ * to the page. Wire labels ride in an HTML layer that shares the SVG's
+ * transform, so they stay real DOM text.
  */
 export function MachineDiagramViewport({
   width,
   height,
   labels = [],
+  fitOnMount = false,
   children,
 }: MachineDiagramViewportProps) {
   const viewport = useStatechartViewport();
-  const [zoom, setZoom] = useState(1);
+  const zoomState = useStatechartZoom<HTMLSpanElement>(
+    viewport.canvasRef,
+    true
+  );
+  const { zoom, setZoom } = zoomState;
+  const initialFit = useRef(fitOnMount);
+  const [fittedHeight, setFittedHeight] = useState<number | null>(null);
+
+  useLayoutEffect(() => {
+    if (!initialFit.current) return;
+    initialFit.current = false;
+    const canvas = viewport.canvasRef.current;
+    if (!canvas || !canvas.clientWidth) return;
+    const fitted = Math.max(MIN_ZOOM, Math.min(1, canvas.clientWidth / width));
+    setZoom(fitted, true);
+    setFittedHeight(Math.max(MIN_FITTED_HEIGHT, Math.ceil(height * fitted)));
+    // Mount-only: later zoom changes come from the user.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function fit() {
     const canvas = viewport.canvasRef.current;
@@ -48,7 +76,7 @@ export function MachineDiagramViewport({
       canvas.clientWidth / width,
       canvas.clientHeight / height
     );
-    setZoom(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, fitted)));
+    setZoom(fitted, true);
     viewport.resetPan();
   }
 
@@ -56,7 +84,7 @@ export function MachineDiagramViewport({
     <span
       className="md-viewport"
       ref={viewport.containerRef}
-      style={{ display: "block", height: viewport.height }}
+      style={{ display: "block", height: fittedHeight ?? viewport.height }}
       data-dragging={viewport.dragging ? "true" : "false"}
       data-testid="machine-diagram-viewport"
     >
@@ -67,11 +95,13 @@ export function MachineDiagramViewport({
       >
         <span
           className="md-stage"
+          ref={zoomState.diagramRef}
+          data-zoom={zoom}
           style={{
             display: "block",
             width,
             height,
-            transform: `translate(${viewport.pan.x}px, ${viewport.pan.y}px) scale(${zoom})`,
+            transform: `translate(${viewport.pan.x + zoomState.x}px, ${viewport.pan.y + zoomState.y}px) scale(${zoom})`,
           }}
         >
           {children}
@@ -83,8 +113,8 @@ export function MachineDiagramViewport({
         </span>
       </span>
       <ZoomWidget
-        onZoomIn={() => setZoom((z) => Math.min(MAX_ZOOM, z * ZOOM_STEP))}
-        onZoomOut={() => setZoom((z) => Math.max(MIN_ZOOM, z / ZOOM_STEP))}
+        onZoomIn={() => setZoom((z) => z * ZOOM_STEP)}
+        onZoomOut={() => setZoom((z) => z / ZOOM_STEP)}
         onFit={fit}
       />
     </span>
