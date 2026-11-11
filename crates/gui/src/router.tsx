@@ -16,11 +16,13 @@ import {
   ArtifactsPage,
   SettingsPage,
   DaemonsPage,
+  MachinePartsGalleryPage,
 } from "./pages";
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
 import { SplashScreen } from "./components";
 import { hasAllRequiredBinaries } from "./utils/installation";
+import { DEV_MACHINE_PARTS_PATH } from "./devRoutes";
 
 function RootLayout() {
   // Initialize theme management at the app root
@@ -234,6 +236,15 @@ export const appRoutes: RouteObject[] = [
           </InstallationGuard>
         ),
       },
+      // Dev-only review gallery of the machine-diagram catalogue parts.
+      ...(import.meta.env.DEV
+        ? [
+            {
+              path: DEV_MACHINE_PARTS_PATH.slice(1),
+              element: <MachinePartsGalleryPage />,
+            },
+          ]
+        : []),
     ],
   },
 ];

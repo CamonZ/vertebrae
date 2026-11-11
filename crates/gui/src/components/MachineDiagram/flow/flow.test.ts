@@ -211,7 +211,7 @@ describe("validation errors name the spec path", () => {
     const s = base();
     s.parts[1].kind = "wroker";
     expect(errorsOf(s)).toContain(
-      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: client, event rail, guard, session, source, worker'
+      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: aggregator, boundary, client, event rail, guard, joiner, pipeline, pool, router, session, source, splitter, transform, worker'
     );
   });
 
@@ -219,11 +219,11 @@ describe("validation errors name the spec path", () => {
     const s = base();
     s.story[0].steps[1].verb = "drain";
     expect(errorsOf(s)).toContain(
-      'story[0].steps[1].verb: worker "w" does not react to verb "drain"; its verbs: cancel, fail, finish, stage'
+      'story[0].steps[1].verb: worker "w" does not react to verb "drain"; its verbs: cancel, fail, finish, stage; "drain" is a verb of: pool'
     );
     s.story[0].steps[1].verb = "decide";
     expect(errorsOf(s)).toContain(
-      'story[0].steps[1].verb: worker "w" does not react to verb "decide"; its verbs: cancel, fail, finish, stage; "decide" is a verb of: guard'
+      'story[0].steps[1].verb: worker "w" does not react to verb "decide"; its verbs: cancel, fail, finish, stage; "decide" is a verb of: guard, router'
     );
   });
 
@@ -476,7 +476,7 @@ describe("registries: extend without changing the compiler", () => {
     const plain = createFlowRegistry();
     plain.attachments.register(registry.attachments.get("metric snapshot")!);
     expect(errorsOf(s, plain)).toEqual([
-      'parts[1].kind: unknown part kind "test lamp"; registered: client, event rail, guard, session, source, worker',
+      'parts[1].kind: unknown part kind "test lamp"; registered: aggregator, boundary, client, event rail, guard, joiner, pipeline, pool, router, session, source, splitter, transform, worker',
     ]);
     // The generated JSON Schema includes the new kinds.
     const schema = JSON.stringify(flowSpecJsonSchema(registry));
@@ -580,11 +580,19 @@ describe("compiler features", () => {
       $defs: { part: { properties: { kind: { enum: string[] } } } };
     };
     expect(schema.$defs.part.properties.kind.enum).toEqual([
+      "aggregator",
+      "boundary",
       "client",
       "event rail",
       "guard",
+      "joiner",
+      "pipeline",
+      "pool",
+      "router",
       "session",
       "source",
+      "splitter",
+      "transform",
       "worker",
     ]);
   });

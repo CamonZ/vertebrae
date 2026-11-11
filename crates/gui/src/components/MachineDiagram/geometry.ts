@@ -4,7 +4,7 @@
  * what these return.
  */
 import { pop, smoothstep } from "./motion";
-import type { StateRole } from "./palette";
+import type { CardRole } from "./palette";
 
 const TAU = 2 * Math.PI;
 
@@ -29,14 +29,14 @@ export function arcPath(
 const round = (n: number) => Math.round(n * 100) / 100;
 
 /** A lamp timeline entry: `[t, role | "off"]`. */
-export type LampStep = readonly [number, StateRole | "off"];
+export type LampStep = readonly [number, CardRole | "off"];
 
 /** Lamp colour and fill (pop spring, capped at 1.1) at `t`. */
 export function lampAt(
   steps: readonly LampStep[],
   t: number
-): [StateRole | null, number] {
-  let role: StateRole | null = null;
+): [CardRole | null, number] {
+  let role: CardRole | null = null;
   let k = 0;
   for (const [a, c] of steps) {
     if (t < a) continue;
@@ -50,7 +50,7 @@ export interface RingGeometry {
   readonly radius: number;
   readonly a0: number;
   readonly a1: number;
-  readonly role: StateRole;
+  readonly role: CardRole;
 }
 
 /**
@@ -61,7 +61,7 @@ export function ringGeometry(
   t: number,
   from: number,
   to: number,
-  result: StateRole | null,
+  result: CardRole | null,
   r = 24
 ): RingGeometry | null {
   if (t < from || t > to + 0.45) return null;

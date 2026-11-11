@@ -48,6 +48,41 @@ npm run generate:types   # Generate TypeScript types from Rust
 3. Edit Rust backend in `src-tauri/src/` — Tauri rebuilds automatically
 4. Run `npm run generate:types` after changing Rust command signatures
 
+### Machine-parts dev gallery
+
+Dev builds (`npm run tauri:dev`) add a sidebar item, **Machine parts (dev)**,
+that opens `/dev/machine-parts` (`src/pages/MachinePartsGalleryPage.tsx`). The
+route and the sidebar item exist only when `import.meta.env.DEV` is true, so
+production builds don't include them.
+
+The page shows every machine-diagram catalogue part. Each part gets one row
+per change mark (unchanged, added, changed, removed). The columns are the
+part's scenarios, shown at their still frame, followed by the five universal
+states (idle, working, ok, failed, absent). The toolbar can:
+
+- switch the app theme (dark, light or system);
+- hide labels, which shows the silhouette view;
+- filter by part or by change mark;
+- switch between playing the scenario timelines (the default) and showing
+  still frames. With reduced motion on, the page starts on still frames.
+
+Use it to check a part by eye in both themes. The unit tests can't do this,
+because jsdom doesn't apply the theme CSS.
+
+A component ticket that adds a catalogue part should:
+
+1. Add the part's drawing and scenarios as a `MachinePartDef` in
+   `src/components/MachineDiagram/parts/<name>.tsx`, and list it in
+   `MACHINE_PARTS` in `parts/index.tsx`. The gallery page picks up every part
+   in `MACHINE_PARTS` without further changes.
+2. Register the flow-spec kind with the same name in
+   `src/components/MachineDiagram/flow/parts/`, and add it to `STARTER_PARTS`.
+3. Add the part's frames to `__fixtures__/galleryParity.json`. Generate them
+   from the gallery reference, not by hand. `galleryUniversalStates.json`
+   already covers every catalogue part. `parts/parts.test.tsx` checks the part
+   against these frames, and also checks palette-only colours, text size,
+   the labels-off silhouette, and that the registry matches the drawing.
+
 ## Frontend Stack
 
 | Technology | Version | Purpose |

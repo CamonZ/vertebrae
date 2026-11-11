@@ -5,7 +5,7 @@
  */
 import { arcPath, ringGeometry } from "./geometry";
 import { pop, smoothstep } from "./motion";
-import { roleColor, type Role, type StateRole } from "./palette";
+import { roleColor, type CardRole, type Role, type StateRole } from "./palette";
 import { usePart } from "./partContext";
 
 /* ---------- part frame and holes ---------- */
@@ -81,7 +81,7 @@ export interface LampProps {
   x: number;
   y: number;
   r: number;
-  role: StateRole | null;
+  role: CardRole | null;
   /** Fill amount 0..1.1 (pop spring). */
   k: number;
 }
@@ -119,7 +119,7 @@ export interface RingProps {
   t: number;
   from: number;
   to: number;
-  result?: StateRole | null;
+  result?: CardRole | null;
   r?: number;
 }
 
