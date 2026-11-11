@@ -1,5 +1,12 @@
 import type { DiffPreferences } from "../../../utils/codeAppearance";
-import { useContext, useEffect, useMemo, useRef, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   CodeView,
   WorkerPoolContext,
@@ -47,6 +54,9 @@ export default function AllChangesView({
   diffStyle,
 }: AllChangesViewProps): ReactNode {
   const options = usePierreDiffOptions();
+  const [collapsedPaths, setCollapsedPaths] = useState<ReadonlySet<string>>(
+    new Set()
+  );
   const viewRef = useRef<CodeViewHandle<ReviewAnnotation, undefined>>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { items, fallbacks, itemPaths } = useMemo(() => {
@@ -84,20 +94,44 @@ export default function AllChangesView({
     return { items, fallbacks, itemPaths };
   }, [files, parsedPatches]);
 
+  // Retained paths keep their folding through patch/annotation refreshes. Removed
+  // files must start expanded if they appear again later.
+  useEffect(() => {
+    const paths = new Set(files.map((file) => file.path));
+    setCollapsedPaths((current) => {
+      const retained = new Set([...current].filter((path) => paths.has(path)));
+      return retained.size === current.size ? current : retained;
+    });
+    for (const id of itemVersions.current.keys()) {
+      if (!itemPaths.has(id)) itemVersions.current.delete(id);
+    }
+  }, [files, itemPaths]);
+
   // Review comments: parsed patch files for resolving gutter selections, and
   // Pierre annotations per file from the shared pending comments.
   const patchFiles = useMemo(
-    () => parsedPatches.flatMap((result) => result.reviewFiles),
-    [parsedPatches]
+    () =>
+      parsedPatches.flatMap((result, index) =>
+        collapsedPaths.has(files[index]?.path) ? [] : result.reviewFiles
+      ),
+    [parsedPatches, files, collapsedPaths]
   );
   const review = useDiffComments({ kind: "worktree" }, patchFiles);
   const { annotationsFor, openComposer, onSelectionChange, selectedLinesFor } =
     review;
   const itemVersions = useRef(
-    new Map<string, { fileDiff: unknown; signature: string; version: number }>()
+    new Map<
+      string,
+      {
+        fileDiff: unknown;
+        signature: string;
+        collapsed: boolean;
+        version: number;
+      }
+    >()
   );
-  // CodeView keeps an item until its `version` changes, so annotation or
-  // diff changes publish a new version.
+  // CodeView keeps an item until its `version` changes. Publish annotation,
+  // diff and folding changes through that same reconciliation contract.
   const reviewItems = useMemo(
     () =>
       items.map((item): CodeViewDiffItem<ReviewAnnotation> => {
@@ -106,24 +140,27 @@ export default function AllChangesView({
             ? annotationsFor(item.id)
             : undefined;
         const signature = JSON.stringify(annotations ?? []);
+        const collapsed = collapsedPaths.has(itemPaths.get(item.id) ?? item.id);
         const previous = itemVersions.current.get(item.id);
         const changed =
           previous !== undefined &&
           (previous.fileDiff !== item.fileDiff ||
-            previous.signature !== signature);
+            previous.signature !== signature ||
+            previous.collapsed !== collapsed);
         const version = (previous?.version ?? 0) + (changed ? 1 : 0);
         itemVersions.current.set(item.id, {
           fileDiff: item.fileDiff,
           signature,
+          collapsed,
           version,
         });
-        return { ...item, annotations, version };
+        return { ...item, annotations, collapsed, version };
       }),
-    [items, itemPaths, annotationsFor]
+    [items, itemPaths, annotationsFor, collapsedPaths]
   );
   // Controlled selection (null when none) so a composer can clear it.
-  const selectedPath = reviewItems.find((item) =>
-    selectedLinesFor(item.id)
+  const selectedPath = reviewItems.find(
+    (item) => !item.collapsed && selectedLinesFor(item.id)
   )?.id;
   const selectedLines = review.enabled
     ? selectedPath
@@ -169,6 +206,13 @@ export default function AllChangesView({
     );
     const target = matches.find((placement) => placement.home) ?? matches[0];
     if (!target || !itemPaths.has(target.path)) return;
+    if (collapsedPaths.has(target.path)) {
+      setCollapsedPaths(
+        (current) =>
+          new Set([...current].filter((path) => path !== target.path))
+      );
+      return; // Scroll after CodeView has received the expanded item version.
+    }
     handledFocus.current = focus.nonce;
     viewRef.current?.scrollTo(
       target.endLine > 0
@@ -181,14 +225,20 @@ export default function AllChangesView({
           }
         : { type: "item", id: target.path, align: "start" }
     );
-  }, [focus, placements, itemPaths]);
+  }, [focus, placements, itemPaths, collapsedPaths]);
 
   // Jump once per request; background refreshes must not move the viewport.
   const handledJump = useRef<number | null>(null);
   useEffect(() => {
     if (!jumpTarget || handledJump.current === jumpTarget.nonce) return;
-    handledJump.current = jumpTarget.nonce;
     const { path } = jumpTarget;
+    if (collapsedPaths.has(path)) {
+      setCollapsedPaths(
+        (current) => new Set([...current].filter((value) => value !== path))
+      );
+      return;
+    }
+    handledJump.current = jumpTarget.nonce;
     if (itemPaths.has(path)) {
       viewRef.current?.scrollTo({ type: "item", id: path, align: "start" });
       return;
@@ -204,7 +254,7 @@ export default function AllChangesView({
         container.scrollTop;
       container.scrollTo({ top, behavior: "auto" });
     }
-  }, [jumpTarget, itemPaths]);
+  }, [jumpTarget, itemPaths, collapsedPaths]);
 
   return (
     <WorkerPoolContext.Provider value={diffWorkerPool}>
@@ -232,17 +282,60 @@ export default function AllChangesView({
                   review.renderAnnotation(args[0])
               : undefined
           }
-          renderHeaderMetadata={(item) => {
+          renderCustomHeader={(item) => {
             const path = itemPaths.get(item.id) ?? item.id;
+            const collapsed = collapsedPaths.has(path);
+            const fileDiff = item.type === "diff" ? item.fileDiff : undefined;
             return (
-              <button
-                type="button"
-                className="changes-open-button"
-                aria-label={`Open ${path}`}
-                onClick={() => onOpen(path)}
-              >
-                Open
-              </button>
+              <div className="changes-diff-heading">
+                <button
+                  type="button"
+                  className="changes-fold-button"
+                  aria-label={`Toggle diff for ${path}`}
+                  aria-expanded={!collapsed}
+                  onClick={() => {
+                    if (!collapsed) review.clearInteraction(path);
+                    setCollapsedPaths((current) => {
+                      const next = new Set(current);
+                      if (collapsed) next.delete(path);
+                      else next.add(path);
+                      return next;
+                    });
+                  }}
+                >
+                  <span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+                  <span className="changes-diff-name">
+                    {fileDiff?.prevName && <>{fileDiff.prevName} → </>}
+                    {fileDiff?.name ?? path}
+                  </span>
+                </button>
+                {fileDiff && (
+                  <span className="changes-diff-totals">
+                    <span className="changes-diff-deletions">
+                      −
+                      {fileDiff.hunks.reduce(
+                        (sum, hunk) => sum + hunk.deletionLines,
+                        0
+                      )}
+                    </span>
+                    <span className="changes-diff-additions">
+                      +
+                      {fileDiff.hunks.reduce(
+                        (sum, hunk) => sum + hunk.additionLines,
+                        0
+                      )}
+                    </span>
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className="changes-open-button"
+                  aria-label={`Open ${path}`}
+                  onClick={() => onOpen(path)}
+                >
+                  Open
+                </button>
+              </div>
             );
           }}
           renderCodeViewHeader={

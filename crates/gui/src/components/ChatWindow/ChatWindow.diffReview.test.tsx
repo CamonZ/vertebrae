@@ -81,13 +81,13 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
           onGutterUtilityClick?: (range: unknown, context: unknown) => void;
         };
         renderAnnotation?: (...args: unknown[]) => ReactNode;
-        renderHeaderMetadata(item: unknown): ReactNode;
+        renderCustomHeader?(item: unknown): ReactNode;
       },
       ref
     ) {
       useImperativeHandle(ref, () => ({ scrollTo: vi.fn() }));
 
-      const inline = !props.renderHeaderMetadata;
+      const inline = !props.renderCustomHeader;
       const firstItem = props.items[0];
 
       if (inline) {

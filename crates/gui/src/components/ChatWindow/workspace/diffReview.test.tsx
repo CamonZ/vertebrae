@@ -46,6 +46,7 @@ interface Props {
       metadata: unknown;
     }>;
     version?: number;
+    collapsed?: boolean;
   }>;
   lineAnnotations?: Array<{
     side: string;
@@ -56,6 +57,7 @@ interface Props {
 }
 
 const seen = vi.hoisted(() => ({
+  scrollTo: vi.fn(),
   fileDiffs: [] as Array<Record<string, unknown>>,
   codeView: null as Record<string, unknown> | null,
   range: { start: 6, end: 6, side: "additions" } as Record<string, unknown>,
@@ -88,30 +90,41 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       props: {
         items: NonNullable<Props["items"]>;
         options: Props["options"];
-        renderHeaderMetadata(item: unknown): ReactNode;
+        renderCustomHeader(item: unknown): ReactNode;
         renderAnnotation?: (...args: unknown[]) => ReactNode;
       },
       ref
     ) {
-      useImperativeHandle(ref, () => ({ scrollTo: vi.fn() }));
+      useImperativeHandle(ref, () => ({ scrollTo: seen.scrollTo }));
       seen.codeView = props as unknown as Record<string, unknown>;
       return (
         <div data-testid="code-view">
           {props.items.map((item) => (
             <div key={item.id}>
-              <button
-                type="button"
-                onClick={() =>
-                  props.options?.onGutterUtilityClick?.(seen.range, { item })
-                }
-              >
-                gutter code view
-              </button>
-              {item.annotations?.map((annotation) => (
-                <div key={`${annotation.side}${annotation.lineNumber}`}>
-                  {props.renderAnnotation?.(annotation, item.fileDiff, item)}
-                </div>
-              ))}
+              {props.renderCustomHeader(item)}
+              {!item.collapsed && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      props.options?.onGutterUtilityClick?.(seen.range, {
+                        item,
+                      })
+                    }
+                  >
+                    gutter code view
+                  </button>
+                  {item.annotations?.map((annotation) => (
+                    <div key={`${annotation.side}${annotation.lineNumber}`}>
+                      {props.renderAnnotation?.(
+                        annotation,
+                        item.fileDiff,
+                        item
+                      )}
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -142,9 +155,11 @@ let nextId = 0;
 function Harness({
   children,
   initial = [],
+  focus = null,
 }: {
   children: ReactNode;
   initial?: PendingComment[];
+  focus?: DiffReviewValue["focus"];
 }) {
   const [comments, setComments] = useState<PendingComment[]>(initial);
   const chain = useMemo<ToolPatch[]>(
@@ -162,7 +177,7 @@ function Harness({
       placements: computePlacements(comments, chain, worktree),
       chain,
       worktree,
-      focus: null,
+      focus,
       addComment: (input) => {
         const comment = createDiffComment({ ...input, id: `c${nextId++}` });
         if (comment) setComments((current) => [...current, comment]);
@@ -174,7 +189,7 @@ function Harness({
       removeComment: (id) =>
         setComments((current) => current.filter((c) => c.id !== id)),
     };
-  }, [comments, chain, worktree]);
+  }, [comments, chain, worktree, focus]);
   return (
     <DiffReviewContext.Provider value={value}>
       {children}
@@ -200,6 +215,7 @@ function addComment(button: string, body: string) {
 
 describe("diff review across PatchFiles and AllChangesView", () => {
   beforeEach(() => {
+    seen.scrollTo.mockReset();
     seen.fileDiffs.length = 0;
     seen.codeView = null;
     seen.range = { start: 6, end: 6, side: "additions" };
@@ -328,6 +344,61 @@ describe("diff review across PatchFiles and AllChangesView", () => {
     expect(lastFileDiff().lineAnnotations).toEqual([]);
   });
 
+  it("preserves pending comments through folding and expands an explicit comment focus", () => {
+    const view = render(
+      <Harness>
+        <AllChangesView
+          files={worktreeFiles}
+          jumpTarget={null}
+          onOpen={vi.fn()}
+        />
+      </Harness>
+    );
+    addComment("gutter code view", "Keep this pending comment");
+    const toggle = screen.getByRole("button", { name: "Toggle diff for f.ts" });
+    fireEvent.click(toggle);
+    expect(screen.queryByText("Keep this pending comment")).toBeNull();
+    expect(codeViewItem().annotations).toHaveLength(1);
+    seen.scrollTo.mockImplementation(() =>
+      expect(codeViewItem().collapsed).toBe(false)
+    );
+    view.rerender(
+      <Harness focus={{ commentId: "c0", nonce: 1 }}>
+        <AllChangesView
+          files={worktreeFiles}
+          jumpTarget={null}
+          onOpen={vi.fn()}
+        />
+      </Harness>
+    );
+    expect(screen.getByText("Keep this pending comment")).toBeVisible();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(seen.scrollTo).toHaveBeenCalledWith({
+      type: "line",
+      id: "f.ts",
+      lineNumber: 6,
+      side: "additions",
+      align: "center",
+    });
+  });
+
+  it("keeps a file folded when a new annotation arrives from another surface", () => {
+    renderBoth();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle diff for f.ts" })
+    );
+    const version = codeViewItem().version!;
+    addComment("gutter file diff", "Arrived during folding");
+    expect(codeViewItem().collapsed).toBe(true);
+    expect(codeViewItem().version).toBeGreaterThan(version);
+    expect(codeViewItem().annotations).toHaveLength(1);
+    expect(screen.getAllByText("Arrived during folding")).toHaveLength(1);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle diff for f.ts" })
+    );
+    expect(screen.getAllByText("Arrived during folding")).toHaveLength(2);
+  });
+
   it("starts without annotations on either diff", () => {
     renderBoth();
     expect(codeViewItem().annotations).toEqual([]);
@@ -442,6 +513,33 @@ describe("diff review across PatchFiles and AllChangesView", () => {
       fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
 
       expect(codeViewProps().selectedLines).toBeNull();
+    });
+
+    it("clears a hidden file's selection and unsent composer on collapse", () => {
+      renderTwo();
+      const range = { start: 6, end: 7, side: "additions" };
+      act(() => codeViewProps().onSelectedLinesChange?.({ id: "f.ts", range }));
+      fireEvent.click(screen.getByRole("button", { name: "gutter code view" }));
+      expect(
+        screen.getByRole("textbox", { name: "New diff comment" })
+      ).toBeVisible();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Toggle diff for f.ts" })
+      );
+      expect(codeViewProps().selectedLines).toBeNull();
+      expect(codeViewItem().annotations).toEqual([]);
+      fireEvent.keyDown(
+        screen.getAllByRole("group", { name: "Code diff selection" })[1],
+        { key: "ArrowDown" }
+      );
+      expect(codeViewProps().selectedLines).toBeNull();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Toggle diff for f.ts" })
+      );
+      expect(codeViewProps().selectedLines).toBeNull();
+      expect(
+        screen.queryByRole("textbox", { name: "New diff comment" })
+      ).toBeNull();
     });
 
     it("keeps a reversed drag as a range", () => {

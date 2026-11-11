@@ -6,6 +6,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodeViewDiffItem } from "@pierre/diffs/react";
 import AllChangesRenderer, { type AllChangesViewProps } from "./AllChangesView";
@@ -25,7 +26,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       props: {
         items: readonly CodeViewDiffItem[];
         options: { diffStyle?: string };
-        renderHeaderMetadata(item: CodeViewDiffItem): ReactNode;
+        renderCustomHeader(item: CodeViewDiffItem): ReactNode;
         renderCodeViewHeader?(): ReactNode;
         containerRef?: Ref<HTMLDivElement>;
       },
@@ -38,7 +39,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
         <div ref={props.containerRef}>
           {props.renderCodeViewHeader?.()}
           {props.items.map((item) => (
-            <div key={item.id}>{props.renderHeaderMetadata(item)}</div>
+            <div key={item.id}>{props.renderCustomHeader(item)}</div>
           ))}
         </div>
       );
@@ -157,4 +158,89 @@ it("passes a workspace layout change to Pierre while preserving prepared diff it
   rerender(<AllChangesView {...props} diffStyle="split" />);
   expect(renderedDiffStyle).toBe("split");
   expect(renderedItems[0].fileDiff).toBe(diff);
+});
+
+const twoTextFiles = [
+  files[0],
+  { ...files[0], path: "b.ts", patch: patch("b.ts") },
+];
+
+it.each(["unified", "split"] as const)(
+  "folds headings independently in %s layout with keyboard support",
+  async (diffStyle) => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(
+      <AllChangesView
+        files={twoTextFiles}
+        jumpTarget={null}
+        onOpen={onOpen}
+        diffStyle={diffStyle}
+      />
+    );
+    const heading = screen.getByRole("button", {
+      name: "Toggle diff for a.ts",
+    });
+    expect(heading).toHaveAttribute("aria-expanded", "true");
+    const version = renderedItems[0].version!;
+    await user.click(heading);
+    expect(heading).toHaveAttribute("aria-expanded", "false");
+    expect(renderedItems.map((item) => item.collapsed)).toEqual([true, false]);
+    expect(renderedItems[0].version).toBeGreaterThan(version);
+    await user.click(screen.getByRole("button", { name: "Open a.ts" }));
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith("a.ts");
+    expect(heading).toHaveAttribute("aria-expanded", "false");
+    heading.focus();
+    await user.keyboard("{Enter}");
+    expect(heading).toHaveAttribute("aria-expanded", "true");
+    await user.keyboard(" ");
+    expect(heading).toHaveAttribute("aria-expanded", "false");
+  }
+);
+
+it("retains folds on refresh and layout changes, discards removed paths, and expands jumps before scrolling", () => {
+  const props = { files: twoTextFiles, jumpTarget: null, onOpen: vi.fn() };
+  const view = render(<AllChangesView {...props} diffStyle="unified" />);
+  fireEvent.click(screen.getByRole("button", { name: "Toggle diff for a.ts" }));
+  const version = renderedItems[0].version!;
+  view.rerender(
+    <AllChangesView {...props} files={[...twoTextFiles]} diffStyle="split" />
+  );
+  expect(renderedItems[0].collapsed).toBe(true);
+  expect(renderedItems[0].version).toBeGreaterThan(version);
+  scrollTo.mockImplementation(() =>
+    expect(renderedItems[0].collapsed).toBe(false)
+  );
+  view.rerender(
+    <AllChangesView {...props} jumpTarget={{ path: "a.ts", nonce: 1 }} />
+  );
+  expect(scrollTo).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Toggle diff for a.ts" }));
+  // The already-handled jump must not reopen a file during refresh.
+  view.rerender(
+    <AllChangesView
+      {...props}
+      files={[...twoTextFiles]}
+      jumpTarget={{ path: "a.ts", nonce: 1 }}
+    />
+  );
+  expect(renderedItems[0].collapsed).toBe(true);
+  view.rerender(<AllChangesView {...props} files={[twoTextFiles[1]]} />);
+  view.rerender(<AllChangesView {...props} />);
+  expect(renderedItems.map((item) => item.collapsed)).toEqual([false, false]);
+});
+
+it("folds every parsed item belonging to one file together", () => {
+  render(
+    <AllChangesView
+      files={[{ ...files[0], patch: patch("a.ts") + patch("other.ts") }]}
+      jumpTarget={null}
+      onOpen={vi.fn()}
+    />
+  );
+  fireEvent.click(
+    screen.getAllByRole("button", { name: "Toggle diff for a.ts" })[0]
+  );
+  expect(renderedItems).toHaveLength(2);
+  expect(renderedItems.map((item) => item.collapsed)).toEqual([true, true]);
 });

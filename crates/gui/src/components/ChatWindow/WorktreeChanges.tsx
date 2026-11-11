@@ -336,6 +336,7 @@ export function WorktreeChanges({
       <div aria-label="All file diffs" className="changes-viewport">
         <Suspense fallback={<p role="status">Loading diffs…</p>}>
           <AllChangesView
+            key={JSON.stringify([worktreePath, comparisonRequest])}
             files={state.data.files}
             parsedPatches={state.parsed}
             jumpTarget={jumpTarget}
