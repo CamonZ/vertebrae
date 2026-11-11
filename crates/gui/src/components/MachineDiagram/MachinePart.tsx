@@ -1,4 +1,9 @@
-import { useMemo, type ReactNode } from "react";
+import {
+  useMemo,
+  type FocusEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import {
   scenarioLabel,
   stateLabel,
@@ -8,6 +13,7 @@ import {
 import { Card } from "./Card";
 import { ChangeMark, RemovedGhost, type BBox } from "./ChangeMark";
 import { Gate } from "./Gate";
+import { isActivationKey, useDiagramInteraction } from "./interaction";
 import { PartContext, usePart } from "./partContext";
 import { StatusLine } from "./StatusLine";
 import { SvgText, type TextAlign } from "./SvgText";
@@ -122,6 +128,9 @@ export function MachinePart({
     view.kind === "state"
       ? stateLabel(part, view.state, change)
       : scenarioLabel(part, view.name, change);
+  const interaction = useDiagramInteraction();
+  const interactive =
+    id !== undefined && interaction?.onActivatePart !== undefined;
   const transform =
     x || y || scale !== 1
       ? `translate(${x} ${y})${scale !== 1 ? ` scale(${scale})` : ""}`
@@ -131,13 +140,22 @@ export function MachinePart({
     <PartContext.Provider value={ctx}>
       <g
         className="md-part"
-        role="img"
-        aria-label={label}
+        role={interactive ? "button" : "img"}
+        aria-label={
+          interactive ? `${label} Now: ${frame.status.current.text}.` : label
+        }
         data-part={part.name}
         data-part-id={id}
         data-pose={effective}
         transform={transform}
+        {...(interactive && id !== undefined
+          ? partHandlers(id, interaction!)
+          : {})}
+        data-active={
+          interactive && interaction?.activePart === id ? "true" : undefined
+        }
       >
+        {interactive && <PartHit bb={bb} />}
         {children?.(frame)}
         <StatusLine
           status={frame.status}
@@ -184,7 +202,65 @@ export function MachinePart({
           </>
         )}
         <ChangeMark mark={change} bb={bb} tab={tab} />
+        {interactive && <PartRing bb={bb} />}
       </g>
     </PartContext.Provider>
   );
+}
+
+/** Padding of the hover/focus target and ring around a part's frame. */
+const RING_PAD = 14;
+
+/** Transparent target so the whole frame, not just its strokes, takes hover. */
+function PartHit({ bb }: { bb: BBox }) {
+  return (
+    <rect
+      className="md-part-hit"
+      x={bb[0] - RING_PAD}
+      y={bb[1] - RING_PAD}
+      width={bb[2] + RING_PAD * 2}
+      height={bb[3] + RING_PAD * 2}
+      fill="transparent"
+    />
+  );
+}
+
+/** Focus / hover / selected ring, shown by MachineDiagram.css. */
+function PartRing({ bb }: { bb: BBox }) {
+  return (
+    <rect
+      className="md-part-ring"
+      x={bb[0] - RING_PAD}
+      y={bb[1] - RING_PAD}
+      width={bb[2] + RING_PAD * 2}
+      height={bb[3] + RING_PAD * 2}
+      rx={14}
+      fill="none"
+      pointerEvents="none"
+    />
+  );
+}
+
+function partHandlers(
+  id: string,
+  i: NonNullable<ReturnType<typeof useDiagramInteraction>>
+) {
+  return {
+    tabIndex: 0,
+    onClick: () => i.onActivatePart?.(id),
+    onKeyDown: (e: KeyboardEvent<SVGGElement>) => {
+      if (!isActivationKey(e.key) || e.target !== e.currentTarget) return;
+      e.preventDefault();
+      e.stopPropagation();
+      i.onActivatePart?.(id);
+    },
+    onMouseEnter: () => i.onInspectPart?.(id),
+    onMouseLeave: () => i.onInspectPart?.(null),
+    onFocus: (e: FocusEvent<SVGGElement>) => {
+      if (e.target === e.currentTarget) i.onInspectPart?.(id);
+    },
+    onBlur: (e: FocusEvent<SVGGElement>) => {
+      if (e.target === e.currentTarget) i.onInspectPart?.(null);
+    },
+  };
 }

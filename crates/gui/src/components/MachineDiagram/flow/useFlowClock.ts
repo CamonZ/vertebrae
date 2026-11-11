@@ -1,23 +1,44 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { beatIndex, beatOutcomeTime, type Timeline } from "../timeline";
+import { useEffect, useState } from "react";
+import type { Timeline } from "../timeline";
 import { useReducedMotion } from "../useReducedMotion";
+import {
+  clockStep,
+  initialClock,
+  retarget,
+  shownBeat,
+  shownTime,
+  type ClockAction,
+  type ClockState,
+} from "./clockModel";
 
-/** Longest frame step, so a backgrounded tab does not jump whole beats. */
-const MAX_FRAME_DT = 0.1;
+export { beatOutcome } from "./clockModel";
 
 export interface FlowClock {
-  /** The time to draw: an outcome time whenever paused or under reduced motion. */
+  /** The time to draw: a beat outcome under reduced motion and after beat steps and chapter jumps. */
   readonly t: number;
   readonly playing: boolean;
   /** Index of the beat showing at `t` (-1 before the first). */
   readonly beat: number;
   readonly beatCount: number;
   readonly reducedMotion: boolean;
+  /** Timeline seconds per second of playback. */
+  readonly speed: number;
+  /** Loop at the end, or play once and stop on the last beat. */
+  readonly loop: boolean;
   play(): void;
   pause(): void;
   toggle(): void;
   stepForward(): void;
   stepBack(): void;
+  /** One frame forward/back (a beat under reduced motion); pauses. */
+  frameForward(): void;
+  frameBack(): void;
+  /** Jump to beat `i` and pause on its outcome. */
+  seek(i: number): void;
+  /** Play beat `i` (a chapter) from its start, pausing on its outcome; a jump under reduced motion. */
+  playBeat(i: number): void;
+  setSpeed(speed: number): void;
+  setLoop(loop: boolean): void;
 }
 
 export interface FlowClockOptions {
@@ -25,27 +46,14 @@ export interface FlowClockOptions {
   reducedMotion?: boolean;
 }
 
-/** Outcome time of beat `i` on `tl`. */
-export function beatOutcome(tl: Timeline, i: number): number {
-  const beats = tl.beats ?? [];
-  if (beats.length === 0) return 0;
-  const b = Math.max(0, Math.min(beats.length - 1, i));
-  return beatOutcomeTime(tl, beats[b].t);
-}
-
-/** Where a beat-by-beat (reduced motion) run resumes: the start of the beat showing at `t`. */
-function beatStart(tl: Timeline, t: number): number {
-  const beats = tl.beats ?? [];
-  const i = beatIndex(beats, t);
-  return i < 0 ? 0 : beats[i].t;
-}
-
 /**
- * Playback clock for a flow diagram, driven by requestAnimationFrame. Starts
- * paused on the first beat's outcome; play loops at the timeline's period.
- * Steps pause and land exactly on a beat's outcome time, wrapping at the ends.
- * Under reduced motion, play advances beat by beat and only ever shows beat
- * outcomes. When `tl` changes (Before/After), the clock keeps its beat index.
+ * Playback clock for a flow diagram, driven by requestAnimationFrame. The
+ * rules live in the pure model (clockModel.ts): starts paused on the first
+ * beat's outcome; play runs once to the last beat's outcome, or loops at the
+ * timeline's period, at the chosen speed;
+ * beat steps pause on a beat's outcome, wrapping at the ends; a chapter
+ * plays just its beat and pauses on the outcome; frame steps pause one frame away. Under reduced motion only beat
+ * outcomes are shown. When `tl` changes (Before/After) the beat index is kept.
  */
 export function useFlowClock(
   tl: Timeline,
@@ -53,63 +61,53 @@ export function useFlowClock(
 ): FlowClock {
   const prefersReduced = useReducedMotion();
   const reduced = o.reducedMotion ?? prefersReduced;
-  const beats = tl.beats ?? [];
-  const n = beats.length;
-  const [t, setT] = useState(() => beatOutcome(tl, 0));
-  const [playing, setPlaying] = useState(false);
+  const [stored, setStored] = useState<ClockState>(() => initialClock(tl));
   const [seen, setSeen] = useState(tl);
-  let shown = t;
+  let s = stored;
   if (seen !== tl) {
-    const i = beatIndex(seen.beats ?? [], t);
-    shown = i < 0 ? 0 : beatOutcome(tl, i);
+    s = retarget(seen, tl, stored, reduced);
     setSeen(tl);
-    setT(shown);
+    setStored(s);
   }
 
-  const current = useRef(shown);
-  useLayoutEffect(() => {
-    current.current = shown;
-  });
+  const dispatch = (a: ClockAction) =>
+    setStored((cur) => clockStep(tl, cur, a, reduced));
 
+  const playing = s.playing;
   useEffect(() => {
     if (!playing || !(tl.period > 0)) return;
-    let raw = reduced ? beatStart(tl, current.current) : current.current;
     let last: number | null = null;
     let frame = 0;
     const tick = (now: number) => {
       if (last !== null) {
-        const dt = Math.min(MAX_FRAME_DT, Math.max(0, (now - last) / 1000));
-        raw = (raw + dt) % tl.period;
-        setT(reduced && n > 0 ? beatOutcomeTime(tl, raw) : raw);
+        const dt = (now - last) / 1000;
+        setStored((cur) => clockStep(tl, cur, { type: "tick", dt }, reduced));
       }
       last = now;
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, tl, reduced, n]);
-
-  function step(dir: 1 | -1) {
-    if (n === 0) return;
-    setPlaying(false);
-    const i = beatIndex(beats, current.current);
-    const next =
-      dir === 1 ? (i + 1 >= n ? 0 : i + 1) : i - 1 < 0 ? n - 1 : i - 1;
-    const at = beatOutcome(tl, next);
-    current.current = at;
-    setT(at);
-  }
+  }, [playing, tl, reduced]);
 
   return {
-    t: shown,
+    t: shownTime(tl, s, reduced),
     playing,
-    beat: beatIndex(beats, shown),
-    beatCount: n,
+    beat: shownBeat(tl, s, reduced),
+    beatCount: tl.beats?.length ?? 0,
     reducedMotion: reduced,
-    play: () => setPlaying(true),
-    pause: () => setPlaying(false),
-    toggle: () => setPlaying((p) => !p),
-    stepForward: () => step(1),
-    stepBack: () => step(-1),
+    speed: s.speed,
+    loop: s.loop,
+    play: () => dispatch({ type: "play" }),
+    pause: () => dispatch({ type: "pause" }),
+    toggle: () => dispatch({ type: "toggle" }),
+    stepForward: () => dispatch({ type: "step", dir: 1 }),
+    stepBack: () => dispatch({ type: "step", dir: -1 }),
+    frameForward: () => dispatch({ type: "frame", dir: 1 }),
+    frameBack: () => dispatch({ type: "frame", dir: -1 }),
+    seek: (i: number) => dispatch({ type: "seek", beat: i }),
+    playBeat: (i: number) => dispatch({ type: "playBeat", beat: i }),
+    setSpeed: (speed: number) => dispatch({ type: "speed", speed }),
+    setLoop: (loop: boolean) => dispatch({ type: "loop", loop }),
   };
 }

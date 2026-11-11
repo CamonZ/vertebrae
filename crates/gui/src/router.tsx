@@ -17,12 +17,13 @@ import {
   SettingsPage,
   DaemonsPage,
   MachinePartsGalleryPage,
+  FlowPlayerDevPage,
 } from "./pages";
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
 import { SplashScreen } from "./components";
 import { hasAllRequiredBinaries } from "./utils/installation";
-import { DEV_MACHINE_PARTS_PATH } from "./devRoutes";
+import { DEV_FLOWS_PATH, DEV_MACHINE_PARTS_PATH } from "./devRoutes";
 
 function RootLayout() {
   // Initialize theme management at the app root
@@ -236,13 +237,14 @@ export const appRoutes: RouteObject[] = [
           </InstallationGuard>
         ),
       },
-      // Dev-only review gallery of the machine-diagram catalogue parts.
+      // Dev-only review pages: the machine-part gallery and the flow player.
       ...(import.meta.env.DEV
         ? [
             {
               path: DEV_MACHINE_PARTS_PATH.slice(1),
               element: <MachinePartsGalleryPage />,
             },
+            { path: DEV_FLOWS_PATH.slice(1), element: <FlowPlayerDevPage /> },
           ]
         : []),
     ],

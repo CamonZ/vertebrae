@@ -567,6 +567,7 @@ function arrange(
           label: `${c.decl.label ?? c.decl.id} → ${step.part}`,
           part: step.part,
           card: c.decl.id,
+          rail: rail.id,
           ...(c.decl.payload?.eventTime !== undefined
             ? { eventTime: c.decl.payload.eventTime }
             : {}),

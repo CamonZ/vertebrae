@@ -34,8 +34,9 @@ export {
   type MachineDiagramViewportProps,
 } from "./MachineDiagramViewport";
 export { useReducedMotion } from "./useReducedMotion";
-export {
-  FlowDiagram,
-  type FlowDiagramProps,
-} from "./flow/FlowDiagram";
+export { FlowDiagram, type FlowDiagramProps } from "./flow/FlowDiagram";
 export { FlowPlayer, type FlowPlayerProps } from "./flow/FlowPlayer";
+export {
+  DiagramInteractionContext,
+  type DiagramInteraction,
+} from "./interaction";

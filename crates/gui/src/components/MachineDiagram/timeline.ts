@@ -103,6 +103,8 @@ export interface TimelineMarker {
   /** Spec id of the part the marker belongs to. */
   readonly part?: string;
   readonly card?: string;
+  /** Arrival markers: spec id of the rail the card arrived on. */
+  readonly rail?: string;
   /** Arrival markers: 1-based arrival order at the part. */
   readonly order?: number;
   readonly eventTime?: number | string;
