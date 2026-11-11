@@ -149,7 +149,11 @@ export interface PartKindDef<P = Record<string, unknown>, S = unknown> {
   /** Frame bounding box in part space (where change marks sit). */
   readonly bb: BBox;
   /** Status line anchor in part space. */
-  readonly status: { readonly x: number; readonly y: number };
+  readonly status: {
+    readonly x: number;
+    readonly y: number;
+    readonly align?: "left" | "center" | "right";
+  };
   readonly props?: Fields;
   /** Ports by name; may be empty (trace, snapshot, replay). */
   readonly ports: Readonly<Record<string, PortDef>>;

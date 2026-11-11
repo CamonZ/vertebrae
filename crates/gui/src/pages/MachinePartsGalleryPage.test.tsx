@@ -7,8 +7,18 @@ import { useUIStore } from "../stores/uiStore";
 import { appRoutes } from "../router";
 import { DEV_MACHINE_PARTS_PATH } from "../devRoutes";
 
-const MARKS = 4;
-const NAMES = Object.keys(MACHINE_PARTS) as (keyof typeof MACHINE_PARTS)[];
+// Part rendering is covered individually in parts/parts.test.tsx. Keep page
+// interaction tests independent of the size of the production catalogue.
+vi.mock("../components/MachineDiagram/parts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../components/MachineDiagram/parts")>();
+  return {
+    ...actual,
+    MACHINE_PARTS: {
+      source: actual.MACHINE_PARTS.source,
+      pool: actual.MACHINE_PARTS.pool,
+    },
+  };
+});
 
 /** Queued animation frames; tests run them explicitly. */
 let frames: FrameRequestCallback[] = [];
@@ -31,30 +41,6 @@ afterEach(() => {
 const cells = (name: string) => screen.queryAllByTestId(`gallery-cell-${name}`);
 
 describe("MachinePartsGalleryPage", () => {
-  it("shows every part × (scenario + universal state) × change mark", () => {
-    render(<MachinePartsGalleryPage />);
-    for (const name of NAMES) {
-      const def = MACHINE_PARTS[name];
-      const columns = def.scenarios.length + UNIVERSAL_STATES.length;
-      expect(cells(name)).toHaveLength(columns * MARKS);
-      const section = screen.getByTestId(`gallery-part-${name}`);
-      for (const sc of def.scenarios) {
-        expect(
-          within(section).getByRole("group", {
-            name: `${name} · scenario · ${sc.name} · − removed`,
-          })
-        ).toBeInTheDocument();
-      }
-      for (const state of UNIVERSAL_STATES) {
-        expect(
-          within(section).getByRole("group", {
-            name: `${name} · state · ${state} · + added`,
-          })
-        ).toBeInTheDocument();
-      }
-    }
-  });
-
   it("switches the app theme between light and dark", () => {
     render(<MachinePartsGalleryPage />);
     const toolbar = screen.getByRole("toolbar", { name: "Gallery controls" });
@@ -81,7 +67,7 @@ describe("MachinePartsGalleryPage", () => {
     fireEvent.click(
       within(screen.getByRole("toolbar", { name: "Parts" })).getByText("pool")
     );
-    expect(cells("worker")).toHaveLength(0);
+    expect(cells("source")).toHaveLength(0);
     fireEvent.click(
       screen.getByText("~ changed", { selector: "button *, button" })
     );

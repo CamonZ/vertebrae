@@ -28,7 +28,11 @@ export interface MachinePartDef<E = unknown> {
   /** Frame bounding box in part space (where change marks and the ghost sit). */
   readonly bb: BBox;
   /** Status line anchor in part space. */
-  readonly status: { readonly x: number; readonly y: number };
+  readonly status: {
+    readonly x: number;
+    readonly y: number;
+    readonly align?: "left" | "center" | "right";
+  };
   readonly scenarios: readonly [
     PartScenario<E>,
     PartScenario<E>,
