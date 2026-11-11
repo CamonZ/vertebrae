@@ -1,3 +1,13 @@
+import { replicationPart } from "./replication";
+import { quorumPart } from "./quorum";
+import { leaderElectionPart } from "./leaderElection";
+import { failureDetectorPart } from "./failureDetector";
+import { gossipPart } from "./gossip";
+import { shardRingPart } from "./shardRing";
+import { versionVectorPart } from "./versionVector";
+import { fencingTokenPart } from "./fencingToken";
+import { twoPhaseCommitPart } from "./twoPhaseCommit";
+import { serviceRegistryPart } from "./serviceRegistry";
 /**
  * Built-in part kinds. Component tickets register the rest of the
  * catalogue's parts here as they land (`registry.parts.register(def)`); each
@@ -89,6 +99,16 @@ export const STARTER_PARTS: readonly AnyPartKind[] = [
   outboxPart,
   consumerOffsetPart,
   idempotencyGuardPart,
+  replicationPart,
+  quorumPart,
+  leaderElectionPart,
+  failureDetectorPart,
+  gossipPart,
+  shardRingPart,
+  versionVectorPart,
+  fencingTokenPart,
+  twoPhaseCommitPart,
+  serviceRegistryPart,
 ];
 
 export function registerStarterParts(r: PartRegistry): void {
@@ -101,6 +121,16 @@ export function registerStarterParts(r: PartRegistry): void {
 }
 
 export {
+  replicationPart,
+  quorumPart,
+  leaderElectionPart,
+  failureDetectorPart,
+  gossipPart,
+  shardRingPart,
+  versionVectorPart,
+  fencingTokenPart,
+  twoPhaseCommitPart,
+  serviceRegistryPart,
   aggregatorPart,
   alertPart,
   approvalPart,

@@ -47,6 +47,16 @@ const GALLERY = new Map(
 
 /** Catalogue v2.1 story verbs per part (catalogue "Story verbs"). */
 const STORY_VERBS: Record<string, readonly string[]> = {
+  replication: ["ack", "commit", "fail", "replicate"],
+  quorum: ["ack", "decide", "fail", "replicate"],
+  "leader election": ["elect", "fail", "heartbeat", "vote"],
+  "failure detector": ["fail", "heartbeat", "suspect", "wait"],
+  gossip: ["fail", "send", "spread"],
+  "shard ring": ["rebalance", "route"],
+  "version vector": ["compare", "merge", "record"],
+  "fencing token": ["fail", "fence", "record"],
+  "two-phase commit": ["commit", "fail", "rollback", "stage", "vote"],
+  "service registry": ["expire", "fail", "register", "resolve"],
   source: ["observe", "send", "spawn", "tick"],
   client: ["cancel", "render", "send", "wait"],
   worker: ["cancel", "fail", "finish", "stage"],
@@ -217,9 +227,15 @@ describe.each(PARTS)("%s", (name, def) => {
     // the trace (no ports) is all frame.
     const frames = container.querySelectorAll(".md-box").length;
     const rails = container.querySelectorAll(".md-rail").length;
-    expect(frames + rails).toBeGreaterThan(0);
-    if (name !== "event rail") expect(frames).toBeGreaterThan(0);
-    if (!NO_PORTS.has(name)) expect(rails).toBeGreaterThan(0);
+    const circles = container.querySelectorAll("circle").length;
+    expect(frames + rails + circles).toBeGreaterThan(0);
+    if (!["event rail", "leader election", "shard ring"].includes(name))
+      expect(frames).toBeGreaterThan(0);
+    if (
+      !NO_PORTS.has(name) &&
+      !["leader election", "gossip", "shard ring"].includes(name)
+    )
+      expect(rails).toBeGreaterThan(0);
   });
 
   it("is registered in the flow-spec registry with the catalogue geometry and verbs", () => {

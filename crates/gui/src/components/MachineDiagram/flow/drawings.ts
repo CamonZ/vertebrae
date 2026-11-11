@@ -1,3 +1,13 @@
+import { replicationPart } from "./parts/replication";
+import { quorumPart } from "./parts/quorum";
+import { leaderElectionPart } from "./parts/leaderElection";
+import { failureDetectorPart } from "./parts/failureDetector";
+import { gossipPart } from "./parts/gossip";
+import { shardRingPart } from "./parts/shardRing";
+import { versionVectorPart } from "./parts/versionVector";
+import { fencingTokenPart } from "./parts/fencingToken";
+import { twoPhaseCommitPart } from "./parts/twoPhaseCommit";
+import { serviceRegistryPart } from "./parts/serviceRegistry";
 /** Flow-to-catalogue adapters. No gallery scenario or status prose is consulted. */
 import type { ReactNode } from "react";
 import { MACHINE_PARTS } from "../parts";
@@ -36,6 +46,57 @@ const resultRole = (s: CompiledPartStep | undefined): CardRole =>
   s?.verb === "fail" || s?.args.outcome === "error" ? "red" : "green";
 
 export const FLOW_DRAWINGS = {
+  replication: (t, p) =>
+    replicationPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof replicationPart.draw>>[1]
+    ),
+  quorum: (t, p) =>
+    quorumPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof quorumPart.draw>>[1]
+    ),
+  "leader election": (t, p) =>
+    leaderElectionPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof leaderElectionPart.draw>>[1]
+    ),
+  "failure detector": (t, p) =>
+    failureDetectorPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof failureDetectorPart.draw>>[1]
+    ),
+  gossip: (t, p) =>
+    gossipPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof gossipPart.draw>>[1]
+    ),
+  "shard ring": (t, p) =>
+    shardRingPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof shardRingPart.draw>>[1]
+    ),
+  "version vector": (t, p) =>
+    versionVectorPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof versionVectorPart.draw>>[1]
+    ),
+  "fencing token": (t, p) =>
+    fencingTokenPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof fencingTokenPart.draw>>[1]
+    ),
+  "two-phase commit": (t, p) =>
+    twoPhaseCommitPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof twoPhaseCommitPart.draw>>[1]
+    ),
+  "service registry": (t, p) =>
+    serviceRegistryPart.draw!(
+      t,
+      p as Parameters<NonNullable<typeof serviceRegistryPart.draw>>[1]
+    ),
+
   source: (t) => MACHINE_PARTS.source.draw(t, null),
   transform: (t, p) => {
     const step = latest(
