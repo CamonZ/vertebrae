@@ -69,6 +69,17 @@ const STORY_VERBS: Record<string, readonly string[]> = {
   metric: ["fail", "measure", "observe"],
   trace: ["finish", "span", "stage"],
   alert: ["acknowledge", "escalate", "notify"],
+  store: ["delete", "read", "record", "snapshot"],
+  cache: ["expire", "miss", "read", "record"],
+  document: ["read", "record", "version"],
+  "state machine": ["cancel", "decide", "fail", "finish", "stage"],
+  "reactive cell": ["notify", "observe", "record"],
+  schema: ["decide", "fail", "validate"],
+  transaction: ["commit", "rollback", "stage"],
+  lock: ["acquire", "expire", "release", "wait"],
+  // The catalogue lists connect, stage, cancel, close and resume; `finish`
+  // (the reply leaves) predates the drawing and the inline-discussions flow uses it.
+  session: ["cancel", "close", "connect", "finish", "resume", "stage"],
 };
 
 function Cell({

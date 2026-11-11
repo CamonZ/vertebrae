@@ -11,7 +11,10 @@
  */
 import { stay } from "../../timeline";
 import { HELD, type PartKindDef, type VerbContext } from "../registry";
-import { Y, centred, sideGates } from "./common";
+import { sideGates } from "./common";
+
+/** The gallery draws the session on a rail at y 170, above the canvas centre. */
+const Y = 170;
 
 const ports = {
   turn: {
@@ -24,7 +27,7 @@ const ports = {
   resume: {
     side: "W",
     x: 220,
-    y: 260,
+    y: 245,
     direction: "in",
     tokens: ["control"],
     dashed: true,
@@ -93,8 +96,8 @@ export const sessionPart: PartKindDef<SessionProps, SessionState> = {
   job: "lives across turns",
   family: "topology and lifecycle",
   footprint: "S",
-  bb: centred(200, 190),
-  status: { x: 320, y: 328 },
+  bb: [220, 100, 200, 190],
+  status: { x: 320, y: 322 },
   props: {
     lifecycle: {
       type: "string",
@@ -222,8 +225,8 @@ export const sessionPart: PartKindDef<SessionProps, SessionState> = {
             [
               [
                 [
-                  [220, 260],
-                  [300, 260],
+                  [220, 245],
+                  [300, 245],
                 ],
                 t,
                 0.3,

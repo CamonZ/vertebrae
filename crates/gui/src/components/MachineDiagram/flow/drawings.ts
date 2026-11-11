@@ -389,4 +389,196 @@ export const FLOW_DRAWINGS = {
       fail: p.steps.some((s) => s.verb === "escalate"),
     });
   },
+  store: (t, p) => {
+    const widths = [150, 110, 170, 90] as const;
+    const resident = Number(p.props.rows ?? 4);
+    const list: [number, number, "edge" | "ink" | "amber"][] = Array.from(
+      { length: resident },
+      (_, i) => [-1, widths[i % 4], i % 4 === 0 || i % 4 === 3 ? "edge" : "ink"]
+    );
+    for (const s of p.steps) {
+      if (s.t > t) break;
+      if (s.verb === "record" && s.args.outcome !== "conflict")
+        list.push([s.t + 0.65, 130, "amber"]);
+      if (s.verb === "delete") list.pop();
+    }
+    const reads = p.steps.filter((s) => s.verb === "read" && s.t <= t);
+    const missing = reads.filter((s) => s.args.outcome === "missing").at(-1);
+    const ok = reads.filter((s) => s.args.outcome !== "missing").at(-1);
+    return MACHINE_PARTS.store.draw(t, {
+      rows: list,
+      sweep: missing ? missing.t : null,
+      read: ok ? ok.t - 0.05 : p.timeline.period + 1,
+    });
+  },
+  cache: (t, p) => {
+    const rows: Parameters<
+      typeof MACHINE_PARTS.cache.draw
+    >[1]["rows"][number][] = [
+      { i: 0, w: 90, c: "ink" },
+      { i: 1, w: 60, c: "edge" },
+      { i: 2, w: 110, c: "ink" },
+    ];
+    const scan: [number, number][] = [];
+    let slot = 3;
+    for (const s of p.steps) {
+      if (s.verb === "read") {
+        const hit = s.outcome.exit === "answer";
+        scan.push(hit ? [s.t + 0.45, s.t + 0.8] : [s.t + 0.5, s.t + 1.0]);
+        if (hit)
+          rows[1] = {
+            ...rows[1],
+            hl: [...(rows[1].hl ?? []), [s.t + 0.8, "green"]],
+          };
+      } else if (s.verb === "miss") {
+        scan.push([s.t + 0.5, s.t + 1.0]);
+        rows[1] = { ...rows[1], hl: [[s.t - 0.2, "amber"]], del: s.t };
+      } else if (s.verb === "expire") {
+        rows[1] = { ...rows[1], drain: [s.t, s.t + 0.5] };
+      } else if (s.verb === "record" && s.args.outcome !== "error") {
+        rows.push({ i: Math.min(slot++, 7), w: 80, c: "ink", add: s.t + 0.6 });
+      }
+    }
+    return MACHINE_PARTS.cache.draw(t, { rows, scan });
+  },
+  document: (t, p) => {
+    const edit = latest(
+      p.steps.filter((s) => s.verb === "record"),
+      t
+    );
+    return MACHINE_PARTS.document.draw(t, {
+      ed: edit ? edit.t + 0.65 : p.timeline.period + 1,
+      fail: edit?.args.outcome === "conflict",
+    });
+  },
+  "state machine": (t) => MACHINE_PARTS["state machine"].draw(t, null),
+  "reactive cell": (t, p) => {
+    const val: [number, string, "ink"][] = [
+      [0, String(p.props.value ?? "3"), "ink"],
+    ];
+    for (const s of p.steps.filter((x) => x.verb === "record"))
+      val.push([s.t + 0.6, String(s.args.value ?? "4"), "ink"]);
+    const lamp = (reader: string) => {
+      const n = latest(
+        p.steps.filter(
+          (s) => s.verb === "notify" && (s.args.reader ?? "out1") === reader
+        ),
+        t
+      );
+      return [
+        n ? n.t + 0.65 : p.timeline.period + 1,
+        n?.args.outcome === "error" ? "red" : "green",
+      ] as const;
+    };
+    return MACHINE_PARTS["reactive cell"].draw(t, {
+      val,
+      hit: [lamp("out1"), lamp("out2")],
+    });
+  },
+  schema: (t, p) => {
+    const fit: [number, CardRole][] = [];
+    for (const s of p.steps.filter((x) => x.verb === "validate")) {
+      if (s.args.outcome === "invalid") fit.push([s.t + 0.6, "red"]);
+      else if (s.args.outcome === "migrated")
+        fit.push([s.t + 0.4, "amber"], [s.t + 1.0, "green"]);
+      else fit.push([s.t + 0.6, "green"]);
+    }
+    const migrated = latest(
+      p.steps.filter(
+        (s) => s.verb === "validate" && s.args.outcome === "migrated"
+      ),
+      t
+    );
+    return MACHINE_PARTS.schema.draw(t, {
+      fit,
+      glow: migrated ? [migrated.t + 0.4, migrated.t + 1.0] : null,
+    });
+  },
+  transaction: (t, p) => {
+    const commits: [number, CardRole][] = [];
+    for (const s of p.steps) {
+      if (s.verb === "commit")
+        commits.push(
+          s.args.outcome === "conflict" ? [s.t, "red"] : [s.t + 0.1, "green"]
+        );
+      else if (s.verb === "rollback") commits.push([s.t + 0.1, "red"]);
+    }
+    const landed = latest(
+      p.steps.filter(
+        (s) => s.verb === "commit" && s.args.outcome !== "conflict"
+      ),
+      t
+    );
+    return MACHINE_PARTS.transaction.draw(t, {
+      commits,
+      landed: landed ? landed.t + 0.1 : null,
+    });
+  },
+  lock: (t, p) => {
+    // Holder cards end seated on the latch; their rings and latch spans follow them.
+    const holders = p.timeline.cards.filter((c) => {
+      const end = c.legs.at(-1)?.route.points.at(-1);
+      return end?.[0] === 320 && end?.[1] === 200;
+    });
+    const cl: number[] = [];
+    const rings: [number, number, number, CardRole | null][] = holders.map(
+      (c) => {
+        const leg = c.legs.at(-1)!;
+        const seated = leg.t + leg.d;
+        const expired = p.steps.some(
+          (s) => s.verb === "expire" && s.t + 0.1 === c.dies
+        );
+        const released = p.steps.some(
+          (s) => s.verb === "release" && s.card?.id === c.id && s.t === c.dies
+        );
+        cl.push(seated + 0.05, c.dies < 1e8 ? c.dies + 0.05 : 1e3);
+        return [
+          320,
+          seated,
+          c.dies < 1e8 ? c.dies : p.timeline.period,
+          released ? "green" : expired ? "edge" : null,
+        ];
+      }
+    );
+    return MACHINE_PARTS.lock.draw(t, {
+      cl,
+      rings,
+      lease: p.steps.some((s) => s.verb === "expire" && s.t <= t),
+      wait: null,
+      pair: null,
+      want: null,
+    });
+  },
+  session: (t, p) => {
+    const marks = (p.timeline.markers ?? [])
+      .filter((m) => ["spawn", "resume", "close"].includes(m.kind))
+      .sort((a, b) => a.t - b.t);
+    const alive: [number, number][] = [];
+    const spawn: number[] = [];
+    for (const m of marks) {
+      if (m.kind === "close") {
+        const open = alive.at(-1);
+        if (open && open[1] > m.t) open[1] = m.t;
+      } else {
+        alive.push([m.t, p.timeline.period + 1]);
+        spawn.push(m.t);
+      }
+    }
+    const lost = p.timeline.notes.find(
+      (n) => n[1] === "resume failed · history lost"
+    );
+    if (lost) spawn.push(lost[0]);
+    const bars: [number, number, "amber" | "ink"][] = [];
+    for (const s of p.steps) {
+      if (s.verb === "stage") bars.push([s.end - 0.1, 110, "amber"]);
+      else if (s.verb === "finish" && s.card) bars.push([s.t, 150, "ink"]);
+    }
+    return MACHINE_PARTS.session.draw(t, {
+      alive,
+      spawn,
+      crash: null,
+      bars: bars.slice(0, 8),
+      failedAt: lost ? lost[0] : null,
+    });
+  },
 } satisfies Record<keyof typeof MACHINE_PARTS, Drawing>;

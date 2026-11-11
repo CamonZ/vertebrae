@@ -24,13 +24,22 @@ import { retryMachine } from "./retry";
 import { timeoutMachine } from "./timeout";
 import { traceMachine } from "./trace";
 import { boundaryMachine } from "./boundary";
+import { cacheMachine } from "./cache";
 import { clientMachine } from "./client";
+import { documentMachine } from "./document";
 import { joinerMachine } from "./joiner";
+import { lockMachine } from "./lock";
 import { pipelineMachine } from "./pipeline";
 import { poolMachine } from "./pool";
+import { reactiveCellMachine } from "./reactiveCell";
 import { routerMachine } from "./router";
+import { schemaMachine } from "./schema";
+import { sessionMachine } from "./session";
 import { sourceMachine } from "./source";
 import { splitterMachine } from "./splitter";
+import { stateMachineMachine } from "./stateMachine";
+import { storeMachine } from "./store";
+import { transactionMachine } from "./transaction";
 import { transformMachine } from "./transform";
 import { workerMachine } from "./worker";
 import type { MachinePartDef } from "./types";
@@ -50,13 +59,22 @@ export {
   timeoutMachine,
   traceMachine,
   boundaryMachine,
+  cacheMachine,
   clientMachine,
+  documentMachine,
   joinerMachine,
+  lockMachine,
   pipelineMachine,
   poolMachine,
+  reactiveCellMachine,
   routerMachine,
+  schemaMachine,
+  sessionMachine,
   sourceMachine,
   splitterMachine,
+  stateMachineMachine,
+  storeMachine,
+  transactionMachine,
   transformMachine,
   workerMachine,
 };
@@ -73,6 +91,14 @@ export const MACHINE_PARTS = {
   aggregator: aggregatorMachine,
   pipeline: pipelineMachine,
   pool: poolMachine,
+  store: storeMachine,
+  cache: cacheMachine,
+  document: documentMachine,
+  "state machine": stateMachineMachine,
+  "reactive cell": reactiveCellMachine,
+  schema: schemaMachine,
+  transaction: transactionMachine,
+  lock: lockMachine,
   queue: queueMachine,
   "event rail": eventRailMachine,
   retry: retryMachine,
@@ -82,6 +108,7 @@ export const MACHINE_PARTS = {
   guard: guardMachine,
   approval: approvalMachine,
   boundary: boundaryMachine,
+  session: sessionMachine,
   metric: metricMachine,
   trace: traceMachine,
   alert: alertMachine,
