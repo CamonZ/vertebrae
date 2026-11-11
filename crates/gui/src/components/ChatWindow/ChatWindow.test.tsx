@@ -204,6 +204,89 @@ describe("ChatWindow", () => {
     });
   });
 
+  it("keeps Changes resizable after a worktree association replaces its container", async () => {
+    const observations: {
+      node?: Element;
+      notify: (width: number) => void;
+      disconnect: () => void;
+    }[] = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        record: (typeof observations)[number];
+        constructor(callback: ResizeObserverCallback) {
+          this.record = {
+            notify: (width) =>
+              callback(
+                [{ contentRect: { width } } as ResizeObserverEntry],
+                this as unknown as ResizeObserver
+              ),
+            disconnect: vi.fn(),
+          };
+          observations.push(this.record);
+        }
+        observe(node: Element) {
+          this.record.node = node;
+        }
+        disconnect() {
+          this.record.disconnect();
+        }
+      }
+    );
+    try {
+      useChatStore.setState({ sessions: { "test-session": createSession() } });
+      const { container } = render(<ChatWindow sessionId="test-session" />);
+      const original = container.querySelector(".chat-with-changes")!;
+      const retired = observations.find((o) => o.node === original)!;
+      act(() => retired.notify(320));
+      act(() =>
+        useChatStore.getState().setSessionAssociation("test-session", {
+          ticketId: null,
+          ticketTitle: null,
+          worktreePath: "/worktree",
+          branch: "feature",
+          lastProcessedAt: null,
+          processedAtCount: 0,
+          awaitingWorktree: null,
+          recentWorktrees: [],
+        })
+      );
+      const replacement = container.querySelector(".chat-with-changes")!;
+      expect(replacement).not.toBe(original);
+      expect(retired.disconnect).toHaveBeenCalledOnce();
+      const current = observations.find((o) => o.node === replacement)!;
+      expect(current).toBeDefined();
+      act(() => current.notify(800));
+      act(() => retired.notify(0));
+      fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+      let handle = await screen.findByRole("separator", {
+        name: "Resize Changes panel",
+      });
+      expect(handle).toHaveAttribute("aria-valuenow", "560");
+      fireEvent.keyDown(handle, { key: "End" });
+      expect(handle).toHaveAttribute("aria-valuenow", "618");
+      fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+      expect(
+        screen.queryByRole("separator", { name: "Resize Changes panel" })
+      ).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+      handle = await screen.findByRole("separator", {
+        name: "Resize Changes panel",
+      });
+      expect(handle).toHaveAttribute("aria-valuenow", "618");
+      act(() => current.notify(480));
+      expect(handle).toHaveAttribute("aria-valuenow", "298");
+      act(() => current.notify(320));
+      expect(handle).toHaveAttribute("aria-valuemax", "180");
+      act(() => current.notify(1200));
+      expect(handle).toHaveAttribute("aria-valuenow", "618");
+      fireEvent.keyDown(handle, { key: "ArrowLeft" });
+      expect(handle).toHaveAttribute("aria-valuenow", "628");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("keeps main requests on their selected model when inline discussions have a dedicated provider", async () => {
     const uiState = useUIStore.getState();
     const dedicatedPreference = {
