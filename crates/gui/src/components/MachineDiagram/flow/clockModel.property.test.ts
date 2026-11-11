@@ -1,0 +1,515 @@
+/**
+ * Model-based tests of the flow player's clock (clockModel.ts). A Hegel state
+ * machine applies random sequences of player actions — play, pause, beat and
+ * frame steps, chapter jumps, speed changes, animation ticks and reduced-motion
+ * switches — to generated timelines and to the compiled reference flows, and
+ * checks every transition against the player's rules.
+ */
+import { test } from "vitest";
+import * as hegel from "@hegeldev/hegel";
+import * as gs from "@hegeldev/hegel/generators";
+import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
+import mechanisms from "./__fixtures__/mechanisms.flow.yaml?raw";
+import { beatIndex, type Timeline } from "../timeline";
+import {
+  FRAME,
+  MAX_FRAME_DT,
+  SPEEDS,
+  beatOutcome,
+  clockStep,
+  initialClock,
+  nextSpeed,
+  playEnd,
+  retarget,
+  shownBeat,
+  shownTime,
+  type ClockState,
+} from "./clockModel";
+import { compileFlowOrThrow, parseFlowSpec } from "./index";
+
+const EPS = 1e-9;
+
+function check(condition: boolean, message: string): void {
+  if (!condition) throw new Error(message);
+}
+
+function compiled(source: string) {
+  const parsed = parseFlowSpec(source);
+  if (!parsed.ok) throw new Error("fixture does not parse");
+  return compileFlowOrThrow(parsed.value);
+}
+
+const FIXTURES: readonly Timeline[] = [
+  ...compiled(inlineDiscussions).arrangements.map((a) => a.travel),
+  ...compiled(mechanisms).arrangements.map((a) => a.travel),
+];
+
+/** A beats-only timeline: distinct beats at least 0.1 s apart, ending before the loop fade. */
+const generatedTimeline = gs.composite<Timeline>((tc) => {
+  const start = tc.draw(gs.floats({ minValue: 0, maxValue: 1.5 }));
+  const gaps = tc.draw(
+    gs.arrays(gs.floats({ minValue: 0.1, maxValue: 3 }), { maxSize: 8 })
+  );
+  const times = [start];
+  for (const g of gaps) times.push(times[times.length - 1] + g);
+  const tail = tc.draw(gs.floats({ minValue: 0.7, maxValue: 3 }));
+  const withBeats = tc.draw(gs.booleans());
+  return {
+    period: times[times.length - 1] + tail,
+    cards: [],
+    gates: [],
+    notes: [[0, "idle", "dim"]],
+    beats: withBeats ? times.map((t, i) => ({ t, caption: `beat ${i}` })) : [],
+  };
+});
+
+const timeline = gs.oneOf(gs.sampledFrom(FIXTURES), generatedTimeline);
+
+const outcomes = (tl: Timeline) =>
+  (tl.beats ?? []).map((_, i) => beatOutcome(tl, i));
+
+/** Forward distance from `a` to `b` around a loop of `period`. */
+const forward = (a: number, b: number, period: number) =>
+  (((b - a) % period) + period) % period;
+
+/** Distance between two points on a loop of `period`, either way round. */
+const loopGap = (a: number, b: number, period: number) => {
+  const d = forward(a, b, period);
+  return Math.min(d, period - d);
+};
+
+interface Machine {
+  tl: Timeline;
+  s: ClockState;
+  reduced: boolean;
+}
+
+const n = (m: Machine) => m.tl.beats?.length ?? 0;
+const shown = (m: Machine) => shownTime(m.tl, m.s, m.reduced);
+const beat = (m: Machine) => shownBeat(m.tl, m.s, m.reduced);
+
+function landedOnBeat(m: Machine, s: ClockState, want: number, what: string) {
+  check(!s.playing, `${what} left the clock playing`);
+  const at = shownTime(m.tl, s, m.reduced);
+  check(
+    at === beatOutcome(m.tl, want),
+    `${what}: expected beat ${want}'s outcome ${beatOutcome(m.tl, want)}, got ${at}`
+  );
+  check(shownBeat(m.tl, s, m.reduced) === want, `${what}: wrong beat index`);
+}
+
+/** The beat a step from `i` should land on (wrapping; -1 counts as "before beat 0"). */
+function stepTarget(i: number, dir: 1 | -1, count: number): number {
+  if (dir === 1) return i + 1 >= count ? 0 : i + 1;
+  return i - 1 < 0 ? count - 1 : i - 1;
+}
+
+const clockMachine: hegel.stateful.StateMachine<Machine> = {
+  rules: {
+    play(_tc, m) {
+      const before = shown(m);
+      const next = clockStep(m.tl, m.s, { type: "play" }, m.reduced);
+      check(next.playing, "play did not start playback");
+      const restart = !m.s.playing && !m.s.loop && before >= playEnd(m.tl);
+      if (restart) {
+        // Playing once from the end starts over from the beginning.
+        const start = shownTime(m.tl, { ...next, raw: 0 }, m.reduced);
+        check(
+          shownTime(m.tl, next, m.reduced) === start,
+          `play from the end shows ${shownTime(m.tl, next, m.reduced)}, not the start ${start}`
+        );
+      } else {
+        check(
+          shownTime(m.tl, next, m.reduced) === before,
+          "starting playback moved the picture"
+        );
+      }
+      m.s = next;
+    },
+    pause(_tc, m) {
+      const before = shown(m);
+      const next = clockStep(m.tl, m.s, { type: "pause" }, m.reduced);
+      check(!next.playing, "pause left the clock playing");
+      check(
+        shownTime(m.tl, next, m.reduced) === before,
+        "pausing moved the picture"
+      );
+      m.s = next;
+    },
+    toggle(_tc, m) {
+      const next = clockStep(m.tl, m.s, { type: "toggle" }, m.reduced);
+      check(next.playing !== m.s.playing, "toggle did not flip playback");
+      m.s = next;
+    },
+    step(tc, m) {
+      tc.assume(n(m) > 0);
+      const dir = tc.draw(gs.sampledFrom([1, -1] as const));
+      const next = clockStep(m.tl, m.s, { type: "step", dir }, m.reduced);
+      landedOnBeat(m, next, stepTarget(beat(m), dir, n(m)), "step");
+      m.s = next;
+    },
+    seek(tc, m) {
+      tc.assume(n(m) > 0);
+      const i = tc.draw(gs.integers({ minValue: -2, maxValue: n(m) + 2 }));
+      const next = clockStep(m.tl, m.s, { type: "seek", beat: i }, m.reduced);
+      landedOnBeat(m, next, Math.max(0, Math.min(n(m) - 1, i)), "seek");
+      m.s = next;
+    },
+    playBeat(tc, m) {
+      tc.assume(n(m) > 0);
+      const i = tc.draw(gs.integers({ minValue: -2, maxValue: n(m) + 2 }));
+      const want = Math.max(0, Math.min(n(m) - 1, i));
+      const next = clockStep(
+        m.tl,
+        m.s,
+        { type: "playBeat", beat: i },
+        m.reduced
+      );
+      const start = m.tl.beats![want].t;
+      const end = beatOutcome(m.tl, want);
+      if (m.reduced || !(end > start)) {
+        // Nothing to animate: a plain jump to the beat's outcome.
+        landedOnBeat(m, next, want, "playing a beat under reduced motion");
+      } else {
+        check(next.playing, "playing a beat did not start playback");
+        check(
+          next.raw === start,
+          `playing beat ${want} started at ${next.raw}, not ${start}`
+        );
+        check(
+          next.until === end,
+          `playing beat ${want} stops at ${next.until}, not ${end}`
+        );
+      }
+      m.s = next;
+    },
+    frame(tc, m) {
+      const dir = tc.draw(gs.sampledFrom([1, -1] as const));
+      const next = clockStep(m.tl, m.s, { type: "frame", dir }, m.reduced);
+      if (m.reduced) {
+        // Reduced motion never shows an in-between frame: a frame is a beat.
+        const asStep = clockStep(m.tl, m.s, { type: "step", dir }, m.reduced);
+        check(
+          shownTime(m.tl, next, true) === shownTime(m.tl, asStep, true),
+          "a reduced-motion frame step differs from a beat step"
+        );
+      } else {
+        check(!next.playing, "frame step left the clock playing");
+        check(
+          loopGap(shown(m) + dir * FRAME, next.raw, m.tl.period) < 1e-6,
+          `frame step from ${shown(m)} landed on ${next.raw}`
+        );
+        const back = clockStep(
+          m.tl,
+          next,
+          { type: "frame", dir: dir === 1 ? -1 : 1 },
+          false
+        );
+        check(
+          loopGap(m.s.raw, back.raw, m.tl.period) < 1e-6,
+          "frame forward then back did not return"
+        );
+      }
+      m.s = next;
+    },
+    tick(tc, m) {
+      const dt = tc.draw(gs.floats({ minValue: 0, maxValue: 0.5 }));
+      const next = clockStep(m.tl, m.s, { type: "tick", dt }, m.reduced);
+      if (!m.s.playing) {
+        check(next === m.s, "a tick moved a paused clock");
+      } else {
+        check(next.speed === m.s.speed, "a tick changed the speed");
+        const want = Math.min(MAX_FRAME_DT, dt) * m.s.speed;
+        const end = playEnd(m.tl);
+        if (m.s.until !== null && m.s.raw + want >= m.s.until) {
+          // Playing one beat: the tick that reaches its outcome stops there.
+          check(
+            next.raw === m.s.until,
+            `beat overran its outcome: ${next.raw}`
+          );
+          check(
+            !next.playing && next.until === null,
+            "kept playing past the beat"
+          );
+        } else if (!m.s.loop && m.s.raw < end && m.s.raw + want >= end) {
+          // Playing once: the tick that reaches the end stops exactly there.
+          check(next.raw === end, `play-once overran the end: ${next.raw}`);
+          check(!next.playing, "play-once kept playing past the end");
+        } else {
+          check(next.playing, "a tick stopped playback before the end");
+          check(
+            loopGap(m.s.raw + want, next.raw, m.tl.period) < 1e-6,
+            `tick from ${m.s.raw} landed on ${next.raw}, expected +${want} (dt ${dt} at ${m.s.speed}×)`
+          );
+        }
+      }
+      m.s = next;
+    },
+    speed(tc, m) {
+      const speed = tc.draw(gs.sampledFrom(SPEEDS));
+      const before = shown(m);
+      const next = clockStep(m.tl, m.s, { type: "speed", speed }, m.reduced);
+      check(next.speed === speed, "speed not applied");
+      check(
+        shownTime(m.tl, next, m.reduced) === before,
+        "changing speed moved the picture"
+      );
+      m.s = next;
+    },
+    loop(tc, m) {
+      const loop = tc.draw(gs.booleans());
+      const next = clockStep(m.tl, m.s, { type: "loop", loop }, m.reduced);
+      check(next.loop === loop, "loop setting not applied");
+      check(
+        next.raw === m.s.raw && next.playing === m.s.playing,
+        "changing loop moved the clock"
+      );
+      m.s = next;
+    },
+    reducedMotion(_tc, m) {
+      m.reduced = !m.reduced;
+    },
+  },
+  invariants: {
+    beatStopOnlyWhilePlaying: {
+      alwaysCheck: true,
+      check: (_tc, m) => {
+        if (m.s.until === null) return;
+        check(m.s.playing, "a beat stop is set on a paused clock");
+        check(
+          m.s.raw <= m.s.until,
+          `raw ${m.s.raw} is past the beat stop ${m.s.until}`
+        );
+      },
+    },
+    rawInLoop: {
+      alwaysCheck: true,
+      check: (_tc, m) =>
+        check(
+          m.s.raw >= 0 && m.s.raw < m.tl.period,
+          `raw ${m.s.raw} outside [0, ${m.tl.period})`
+        ),
+    },
+    reducedShowsOnlyOutcomes: {
+      alwaysCheck: true,
+      check: (_tc, m) => {
+        if (!m.reduced || n(m) === 0) return;
+        check(
+          outcomes(m.tl).includes(shown(m)),
+          `reduced motion shows ${shown(m)}, not a beat outcome`
+        );
+        check(beat(m) >= 0, "reduced motion shows the lead-in");
+      },
+    },
+    beatIndexMatchesTime: {
+      alwaysCheck: true,
+      check: (_tc, m) =>
+        check(
+          beat(m) === beatIndex(m.tl.beats ?? [], shown(m)),
+          "beat index disagrees with the shown time"
+        ),
+    },
+    speedOffered: (_tc, m) =>
+      check(
+        (SPEEDS as readonly number[]).includes(m.s.speed),
+        "speed is not an offered speed"
+      ),
+  },
+};
+
+test("the clock obeys the player's rules under any sequence of actions", () =>
+  hegel.test(
+    (tc) => {
+      const tl = tc.draw(timeline);
+      const reduced = tc.draw(gs.booleans());
+      const s = initialClock(tl);
+      if ((tl.beats?.length ?? 0) > 0)
+        check(
+          shownTime(tl, s, reduced) === beatOutcome(tl, 0),
+          "the clock does not start on the first beat's outcome"
+        );
+      check(!s.playing, "the clock starts playing");
+      hegel.stateful.run(tc, clockMachine, { tl, s, reduced });
+    },
+    { testCases: 300 }
+  ));
+
+test("ticks at 2× cover the same ground as two ticks at 1×", () =>
+  hegel.test((tc) => {
+    const tl = tc.draw(timeline);
+    const raw = tc.draw(
+      gs.floats({ minValue: 0, maxValue: tl.period, excludeMax: true })
+    );
+    const dt = tc.draw(gs.floats({ minValue: 0, maxValue: MAX_FRAME_DT }));
+    const at = (speed: number): ClockState => ({
+      raw,
+      playing: true,
+      speed,
+      loop: true,
+      until: null,
+    });
+    const fast = clockStep(tl, at(2), { type: "tick", dt }, false);
+    const once = clockStep(tl, at(1), { type: "tick", dt }, false);
+    const twice = clockStep(tl, once, { type: "tick", dt }, false);
+    check(
+      loopGap(fast.raw, twice.raw, tl.period) < 1e-9,
+      `2× ${fast.raw} vs 1×·2 ${twice.raw}`
+    );
+  }));
+
+test("switching arrangement keeps the beat index", () =>
+  hegel.test((tc) => {
+    const a = tc.draw(timeline);
+    const b = tc.draw(timeline);
+    const na = a.beats?.length ?? 0;
+    const nb = b.beats?.length ?? 0;
+    tc.assume(na > 0 && nb > 0);
+    const reduced = tc.draw(gs.booleans());
+    const playing = tc.draw(gs.booleans());
+    const i = tc.draw(gs.integers({ minValue: 0, maxValue: na - 1 }));
+    const s = {
+      ...clockStep(a, initialClock(a), { type: "seek", beat: i }, reduced),
+      playing,
+    };
+    const moved = retarget(a, b, s, reduced);
+    const want = Math.min(i, nb - 1);
+    check(
+      shownBeat(b, moved, reduced) === want,
+      `beat ${i} became ${shownBeat(b, moved, reduced)}`
+    );
+    check(moved.playing === playing, "switching changed playback");
+    if (!(reduced && playing))
+      check(
+        shownTime(b, moved, reduced) === beatOutcome(b, want),
+        "switching did not land on the beat's outcome"
+      );
+    check(Math.abs(moved.raw) < b.period + EPS, "raw outside the new loop");
+  }));
+
+test("speed steps stay within the offered speeds and move monotonically", () =>
+  hegel.test((tc) => {
+    const speed = tc.draw(
+      gs.oneOf(
+        gs.sampledFrom(SPEEDS),
+        gs.floats({ minValue: 0.01, maxValue: 8 })
+      )
+    );
+    const up = nextSpeed(speed, 1);
+    const down = nextSpeed(speed, -1);
+    check((SPEEDS as readonly number[]).includes(up), "faster is not offered");
+    check(
+      (SPEEDS as readonly number[]).includes(down),
+      "slower is not offered"
+    );
+    check(down <= up, "slower is faster than faster");
+    if ((SPEEDS as readonly number[]).includes(speed)) {
+      const i = SPEEDS.indexOf(speed as (typeof SPEEDS)[number]);
+      check(up === SPEEDS[Math.min(SPEEDS.length - 1, i + 1)], "faster skips");
+      check(down === SPEEDS[Math.max(0, i - 1)], "slower skips");
+    }
+  }));
+
+test("playing once always ends on the last beat, and plays again from the start", () =>
+  hegel.test((tc) => {
+    const tl = tc.draw(timeline);
+    tc.assume(tl.period > 0);
+    const reduced = tc.draw(gs.booleans());
+    const speed = tc.draw(gs.sampledFrom(SPEEDS));
+    const startAt = tc.draw(gs.integers({ minValue: 0, maxValue: 8 }));
+    let s = clockStep(
+      tl,
+      { ...initialClock(tl), speed },
+      { type: "seek", beat: startAt },
+      reduced
+    );
+    s = clockStep(tl, s, { type: "play" }, reduced);
+    const limit = Math.ceil(tl.period / (MAX_FRAME_DT * speed)) + 2;
+    let ticks = 0;
+    let last = shownTime(tl, s, reduced);
+    while (s.playing && ticks < limit) {
+      s = clockStep(tl, s, { type: "tick", dt: MAX_FRAME_DT }, reduced);
+      const now = shownTime(tl, s, reduced);
+      check(now >= last, `play-once went backwards: ${last} → ${now}`);
+      last = now;
+      ticks++;
+    }
+    check(!s.playing, `still playing after ${ticks} ticks`);
+    check(
+      shownTime(tl, s, reduced) === playEnd(tl),
+      `stopped at ${shownTime(tl, s, reduced)}, not the end ${playEnd(tl)}`
+    );
+    const n = tl.beats?.length ?? 0;
+    if (n > 0)
+      check(
+        shownBeat(tl, s, reduced) === n - 1,
+        "did not stop on the last beat"
+      );
+    // Play again from the end: it starts over instead of stopping at once.
+    const again = clockStep(
+      tl,
+      clockStep(tl, s, { type: "play" }, reduced),
+      { type: "tick", dt: 0.01 },
+      reduced
+    );
+    check(again.playing, "playing again from the end stopped immediately");
+    check(
+      shownTime(tl, again, reduced) <= shownTime(tl, s, reduced),
+      "playing again did not start over"
+    );
+  }));
+
+test("playing a beat animates just that beat and stops on its outcome", () =>
+  hegel.test((tc) => {
+    const tl = tc.draw(timeline);
+    const n = tl.beats?.length ?? 0;
+    tc.assume(n > 0);
+    const reduced = tc.draw(gs.booleans());
+    const i = tc.draw(gs.integers({ minValue: 0, maxValue: n - 1 }));
+    const from: ClockState = {
+      ...initialClock(tl),
+      speed: tc.draw(gs.sampledFrom(SPEEDS)),
+      loop: tc.draw(gs.booleans()),
+      playing: tc.draw(gs.booleans()),
+      raw: tc.draw(
+        gs.floats({ minValue: 0, maxValue: tl.period, excludeMax: true })
+      ),
+    };
+    const start = tl.beats![i].t;
+    const end = beatOutcome(tl, i);
+    let s = clockStep(tl, from, { type: "playBeat", beat: i }, reduced);
+    const drawn = [shownTime(tl, s, reduced)];
+    const limit = Math.ceil(tl.period / (0.02 * from.speed)) + 2;
+    for (let k = 0; s.playing && k < limit; k++) {
+      const dt = tc.draw(gs.floats({ minValue: 0.02, maxValue: MAX_FRAME_DT }));
+      s = clockStep(tl, s, { type: "tick", dt }, reduced);
+      drawn.push(shownTime(tl, s, reduced));
+    }
+    check(!s.playing, "still playing the beat");
+    check(
+      shownTime(tl, s, reduced) === end,
+      `stopped at ${shownTime(tl, s, reduced)}, not ${end}`
+    );
+    check(
+      shownBeat(tl, s, reduced) === shownBeat(tl, { ...s, raw: end }, false),
+      "stopped on another beat"
+    );
+    for (let k = 1; k < drawn.length; k++)
+      check(
+        drawn[k] >= drawn[k - 1],
+        `went backwards: ${drawn[k - 1]} → ${drawn[k]}`
+      );
+    for (const t of drawn)
+      check(
+        t >= start - EPS && t <= end + EPS,
+        `drew ${t}, outside beat ${i} [${start}, ${end}]`
+      );
+    if (reduced) {
+      check(
+        drawn.every((t) => t === end),
+        "reduced motion animated the beat"
+      );
+    } else if (end - start > MAX_FRAME_DT * from.speed) {
+      check(drawn[0] === start, "did not start from the beat's start");
+      check(new Set(drawn).size > 2, "the beat was not animated");
+    }
+  }));
