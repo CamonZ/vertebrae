@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type HTMLAttributes } from "react";
+import { useCallback, useRef, useState, type HTMLAttributes } from "react";
 
 const CHANGES_SPLITTER_WIDTH = 2;
 
@@ -16,22 +16,30 @@ export function clampSidebar(width: number, container: number) {
 export function useSidebarResize(
   options: { initial?: number; side?: "left" | "right"; label?: string } = {}
 ) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const drag = useRef<{ id: number; x: number; width: number } | null>(null);
   const [available, setAvailable] = useState(800);
   const [preferred, setPreferred] = useState(options.initial ?? 240);
 
-  useEffect(() => {
-    const node = containerRef.current;
-    if (!node || typeof ResizeObserver === "undefined") return;
+  // The keyed discussion provider can replace the container without remounting
+  // this hook. Own observation through the DOM ref, rather than a mount effect.
+  const containerRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
 
-    const observer = new ResizeObserver(([entry]) =>
-      setAvailable(entry.contentRect.width)
-    );
+    setAvailable(node.getBoundingClientRect().width);
+    let active = true;
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(([entry]) => {
+            if (active && entry) setAvailable(entry.contentRect.width);
+          });
+    observer?.observe(node);
 
-    observer.observe(node);
-
-    return () => observer.disconnect();
+    return () => {
+      active = false;
+      observer?.disconnect();
+      drag.current = null;
+    };
   }, []);
 
   // Keep only a small usable minimum; the splitter can use the full available width.

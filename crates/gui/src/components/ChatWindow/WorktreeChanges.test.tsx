@@ -810,18 +810,30 @@ describe("WorktreeChanges", () => {
 });
 
 it("resizes with the keyboard and restores the chosen width after collapse", async () => {
-  render(<WorktreeChanges worktreePath="/worktree" />);
-  await screen.findByLabelText("No changes");
-  const handle = screen.getByRole("separator", {
-    name: "Resize files sidebar",
-  });
-  expect(handle).toHaveAttribute("aria-valuenow", "240");
-  fireEvent.keyDown(handle, { key: "ArrowRight" });
-  expect(handle).toHaveAttribute("aria-valuenow", "250");
-  fireEvent.click(screen.getByRole("button", { name: "Hide files" }));
-  expect(screen.queryByRole("separator")).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Show files" }));
-  expect(screen.getByRole("separator")).toHaveAttribute("aria-valuenow", "250");
+  const measure = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockReturnValue({
+      width: 800,
+    } as DOMRect);
+  try {
+    render(<WorktreeChanges worktreePath="/worktree" />);
+    await screen.findByLabelText("No changes");
+    const handle = screen.getByRole("separator", {
+      name: "Resize files sidebar",
+    });
+    expect(handle).toHaveAttribute("aria-valuenow", "240");
+    fireEvent.keyDown(handle, { key: "ArrowRight" });
+    expect(handle).toHaveAttribute("aria-valuenow", "250");
+    fireEvent.click(screen.getByRole("button", { name: "Hide files" }));
+    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show files" }));
+    expect(screen.getByRole("separator")).toHaveAttribute(
+      "aria-valuenow",
+      "250"
+    );
+  } finally {
+    measure.mockRestore();
+  }
 });
 
 it("shows uncapped backend totals and sends independently selected endpoints", async () => {
