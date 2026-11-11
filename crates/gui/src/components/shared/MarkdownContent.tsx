@@ -11,6 +11,7 @@ import {
   useState,
   type ComponentPropsWithoutRef,
   type ReactNode,
+  type ComponentType,
 } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -19,6 +20,7 @@ import remarkGfm from "remark-gfm";
 import { requestMermaidSvg } from "../../mermaid/requestMermaidSvg";
 import { loadGraphviz } from "../../utils/graphviz";
 import { useNearViewport } from "../../hooks/useNearViewport";
+import { StatechartDiagramBlock } from "./StatechartDiagramBlock";
 import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
 import { parseLocalFileReference } from "./localFileReference";
 import { VtbEntityMarkdownLink } from "./VtbEntityLink";
@@ -156,7 +158,9 @@ const remarkPlugins = [remarkGfm, remarkBreaks];
 
 type CodeProps = ComponentPropsWithoutRef<"code"> & {
   inline?: boolean;
-  node?: unknown;
+  node?: {
+    position?: { start: { offset?: number }; end: { offset?: number } };
+  };
 };
 
 const CodeSnippet = lazy(() => import("./CodeSnippet"));
@@ -236,7 +240,8 @@ type RenderedDiagram = {
   frameStyle: React.CSSProperties;
 };
 
-type DiagramRenderer = {
+type SvgDiagramRenderer = {
+  kind: "svg";
   label: string;
   render?: (
     source: string,
@@ -245,27 +250,44 @@ type DiagramRenderer = {
   ) => Promise<RenderedDiagram>;
 };
 
+type DiagramRenderer =
+  | SvgDiagramRenderer
+  | {
+      kind: "component";
+      label: string;
+      component: ComponentType<{ source: string }>;
+    };
+
 const diagramRenderers: Record<string, DiagramRenderer> = {
+  statechart: {
+    kind: "component",
+    label: "Statechart",
+    component: StatechartDiagramBlock,
+  },
   mermaid: {
+    kind: "svg",
     label: "Mermaid",
     render: renderMermaidDiagram,
   },
   mmd: {
+    kind: "svg",
     label: "Mermaid",
     render: renderMermaidDiagram,
   },
   dot: {
+    kind: "svg",
     label: "DOT",
     render: renderDotDiagram,
   },
   graphviz: {
+    kind: "svg",
     label: "DOT",
     render: renderDotDiagram,
   },
-  d2: { label: "D2" },
-  plantuml: { label: "PlantUML" },
-  puml: { label: "PlantUML" },
-  kroki: { label: "Kroki" },
+  d2: { kind: "svg", label: "D2" },
+  plantuml: { kind: "svg", label: "PlantUML" },
+  puml: { kind: "svg", label: "PlantUML" },
+  kroki: { kind: "svg", label: "Kroki" },
 };
 
 const MAX_MERMAID_SVG_LENGTH = 1_000_000;
@@ -457,7 +479,7 @@ function diagramErrorMessage(label: string, error: unknown): string {
 interface DiagramBlockProps {
   language: string;
   source: string;
-  renderer: DiagramRenderer;
+  renderer: SvgDiagramRenderer;
 }
 
 function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
@@ -542,32 +564,35 @@ function normalizeCodeLanguage(className?: string): string {
   return match?.[1]?.toLowerCase() ?? "text";
 }
 
-function completedDiagramBlocks(text: string): Set<string> {
-  const completed = new Set<string>();
-  const openingFence = /(^|\n)(`{3,}|~{3,})([^\n]*)\n/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = openingFence.exec(text)) !== null) {
-    const fence = match[2];
-    const info = match[3].trim();
-    const language = info.split(/\s+/)[0]?.toLowerCase() ?? "";
-    if (!diagramRenderers[language]) continue;
-
-    const fenceChar = fence[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const closingFence = new RegExp(
-      `(^|\\n)${fenceChar}{${fence.length},}[ \\t]*(?=\\n|$)`,
-      "g"
-    );
-    closingFence.lastIndex = openingFence.lastIndex;
-    const close = closingFence.exec(text);
-    if (!close) continue;
-
-    completed.add(text.slice(openingFence.lastIndex, close.index));
-    openingFence.lastIndex = closingFence.lastIndex;
-  }
-
-  return completed;
+// Use parser boundaries so an unfinished duplicate cannot inherit completion.
+function isCompletedDiagramBlock(
+  text: string,
+  node: CodeProps["node"]
+): boolean {
+  const start = node?.position?.start.offset;
+  const end = node?.position?.end.offset;
+  if (start === undefined || end === undefined) return false;
+  const lines = text.slice(start, end).split("\n");
+  if (lines.length < 2) return false;
+  const opening = /^ {0,3}(`{3,}|~{3,})/.exec(lines[0]);
+  if (!opening) return false;
+  const fence = opening[1];
+  const closing =
+    lines
+      .at(-1)
+      ?.replace(/^\s*(?:>\s*)*/, "")
+      .trim() ?? "";
+  return (
+    closing.length >= fence.length &&
+    [...closing].every((char) => char === fence[0])
+  );
 }
+
+const MarkdownRenderContext = createContext<{
+  text: string;
+  projectPath: string | null;
+  projectRoots: readonly string[];
+}>({ text: "", projectPath: null, projectRoots: [] });
 
 function isAbsoluteHttpUrl(href: string | undefined): href is string {
   if (!href || !/^https?:\/\//i.test(href)) return false;
@@ -588,11 +613,7 @@ function markdownUrlTransform(value: string): string {
   return defaultUrlTransform(value);
 }
 
-function createMarkdownComponents(
-  completedDiagramSources: Set<string>,
-  projectPath: string | null,
-  projectRoots: readonly string[]
-) {
+function createMarkdownComponents() {
   return {
     p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
       <p
@@ -753,56 +774,76 @@ function createMarkdownComponents(
         {children}
       </em>
     ),
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    code: ({ inline, className, children, node, ...props }: CodeProps) => {
-      const language = normalizeCodeLanguage(className);
-      let codeString = String(children).replace(/\n$/, "");
-      const isInlineCode = inline ?? !(className || codeString.includes("\n"));
-
-      if (language === "json") {
-        codeString = prettyPrintJsonIfPossible(codeString);
-      }
-
-      if (!inline && (className || codeString.includes("\n"))) {
-        const renderer = diagramRenderers[language];
-        if (renderer && completedDiagramSources.has(codeString)) {
-          return (
-            <DiagramBlock
-              language={language}
-              source={codeString}
-              renderer={renderer}
-            />
-          );
-        }
-
-        return <HighlightedCodeBlock language={language} source={codeString} />;
-      }
-
-      const fileReference =
-        isInlineCode &&
-        parseLocalFileReference(codeString, projectPath, projectRoots);
-      if (fileReference && projectPath) {
-        return (
-          <LocalFileReferenceLink
-            reference={fileReference}
-            projectRoot={projectPath}
-          >
-            {children}
-          </LocalFileReferenceLink>
-        );
-      }
-
-      return (
-        <code
-          className="rounded bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-13 text-[var(--inline-code-fg)]"
-          {...props}
-        >
-          {children}
-        </code>
-      );
-    },
+    code: MarkdownCode,
   };
 }
+
+// Stable identity preserves viewer interaction while later message text streams.
+function MarkdownCode({
+  inline,
+  className,
+  children,
+  node,
+  ...props
+}: CodeProps) {
+  const { text, projectPath, projectRoots } = useContext(MarkdownRenderContext);
+  const language = normalizeCodeLanguage(className);
+  let codeString = String(children).replace(/\n$/, "");
+  const isInlineCode = inline ?? !(className || codeString.includes("\n"));
+
+  if (language === "json") {
+    codeString = prettyPrintJsonIfPossible(codeString);
+  }
+
+  if (!inline && (className || codeString.includes("\n"))) {
+    const renderer = diagramRenderers[language];
+    if (renderer && isCompletedDiagramBlock(text, node)) {
+      if (renderer.kind === "component") {
+        const DiagramComponent = renderer.component;
+        return (
+          <DiagramComponent
+            key={`${language}:${codeString}`}
+            source={codeString}
+          />
+        );
+      }
+      return (
+        <DiagramBlock
+          language={language}
+          source={codeString}
+          renderer={renderer}
+        />
+      );
+    }
+
+    return <HighlightedCodeBlock language={language} source={codeString} />;
+  }
+
+  const fileReference =
+    isInlineCode &&
+    parseLocalFileReference(codeString, projectPath, projectRoots);
+  if (fileReference && projectPath) {
+    return (
+      <LocalFileReferenceLink
+        reference={fileReference}
+        projectRoot={projectPath}
+      >
+        {children}
+      </LocalFileReferenceLink>
+    );
+  }
+
+  return (
+    <code
+      className="rounded bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-13 text-[var(--inline-code-fg)]"
+      {...props}
+    >
+      {children}
+    </code>
+  );
+}
+
+const markdownComponents = createMarkdownComponents();
 
 /**
  * Normalize Elixir map syntax (`%{}` with `=>` or unicode `⇒` separators)
@@ -977,17 +1018,26 @@ const MIN_INLINE_JSON_LENGTH = 10;
 function formatInlineJsonBlocks(text: string): string {
   let result = "";
   let i = 0;
-  let inFence = false;
+  let inFence: string | null = null;
 
   while (i < text.length) {
-    // Fenced code block boundary — consume the fence line and toggle state.
-    if (text.startsWith("```", i)) {
-      const lineEnd = text.indexOf("\n", i + 3);
-      const end = lineEnd === -1 ? text.length : lineEnd + 1;
-      result += text.slice(i, end);
-      i = end;
-      inFence = !inFence;
-      continue;
+    // Preserve all CommonMark fence delimiters while formatting prose JSON.
+    if (i === 0 || text[i - 1] === "\n") {
+      const fenceLine = /^ {0,3}(`{3,}|~{3,})([^\n]*)(?:\n|$)/.exec(
+        text.slice(i)
+      );
+      if (
+        fenceLine &&
+        (!inFence ||
+          (fenceLine[1][0] === inFence[0] &&
+            fenceLine[1].length >= inFence.length &&
+            !fenceLine[2].trim()))
+      ) {
+        result += fenceLine[0];
+        i += fenceLine[0].length;
+        inFence = inFence ? null : fenceLine[1];
+        continue;
+      }
     }
 
     if (inFence) {
@@ -1044,20 +1094,22 @@ function RenderedMarkdownContent({ text, projectPath }: MarkdownContentProps) {
     ? [projectPath]
     : inheritedProjectRoots;
   const prepared = formatInlineJsonBlocks(maybeWrapBareJson(text));
-  const completedDiagrams = completedDiagramBlocks(prepared);
-  const components = createMarkdownComponents(
-    completedDiagrams,
-    effectiveProjectPath,
-    effectiveProjectRoots
-  );
   return (
-    <Markdown
-      remarkPlugins={remarkPlugins}
-      components={components}
-      urlTransform={markdownUrlTransform}
+    <MarkdownRenderContext.Provider
+      value={{
+        text: prepared,
+        projectPath: effectiveProjectPath,
+        projectRoots: effectiveProjectRoots,
+      }}
     >
-      {prepared}
-    </Markdown>
+      <Markdown
+        remarkPlugins={remarkPlugins}
+        components={markdownComponents}
+        urlTransform={markdownUrlTransform}
+      >
+        {prepared}
+      </Markdown>
+    </MarkdownRenderContext.Provider>
   );
 }
 

@@ -20,6 +20,51 @@ pub async fn list_project_artifacts(
         .map_err(Into::into)
 }
 
+/// Promote a chat statechart fence to an artifact attached to its ticket.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_statechart_artifact(
+    state: State<'_, AppState>,
+    body: String,
+    ticket_id: String,
+) -> Result<Artifact, CommandError> {
+    use vertebrae_core::{ArtifactLinkMetadata, CreateArtifactInput, Level};
+
+    // Keep the service and attachment target in one project snapshot. Project
+    // switching takes these locks in the same order.
+    let services = state.services.read().await;
+    let service = services
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+    let client = state.sacrum_client.read().await;
+    let client = client
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+    let ticket = service.tasks().get_task_without_lookups(&ticket_id).await?;
+    if ticket.level != Level::Ticket
+        || ticket
+            .project_id
+            .as_deref()
+            .is_some_and(|id| id != client.project_id())
+    {
+        return Err(CommandError {
+            message: "Statecharts must be saved to a ticket in the active project.".into(),
+        });
+    }
+    let metadata = ArtifactLinkMetadata::new("statechart", "json", "chat", "rendered")
+        .with_extension("statechart_format", json!("xstate-v5"));
+    let input = CreateArtifactInput::new("diagram.statechart.json", body)
+        .with_subject("task", ticket_id)
+        .with_metadata(metadata);
+
+    service
+        .artifacts()
+        .create_artifact(input)
+        .await
+        .map(Into::into)
+        .map_err(Into::into)
+}
+
 /// List artifact files attached to one task.
 #[tauri::command]
 #[specta::specta]
@@ -154,6 +199,85 @@ mod tests {
                 .await
                 .expect("create artifact");
         }
+    }
+
+    #[tokio::test]
+    async fn saving_statechart_requires_a_selected_project() {
+        let app = build_app_without_services();
+        assert_no_project_error(
+            save_statechart_artifact(app.state(), "{}".into(), "ticket-id".into()).await,
+        );
+    }
+
+    #[tokio::test]
+    async fn saving_statechart_preserves_body_and_presentation_attachment() {
+        let app = crate::commands::test_support::build_app_with_services();
+        let project_id = "33333333-3333-4333-8333-333333333333";
+        let config = vertebrae_sacrum_client::SacrumConfig::new(
+            "http://localhost:4000".into(),
+            "test-token".into(),
+            project_id.into(),
+        );
+        let client = vertebrae_sacrum_client::GraphqlClient::new(config);
+        *app.state::<AppState>().sacrum_client.write().await = Some(std::sync::Arc::new(client));
+        let ticket_id = crate::commands::create_task(
+            app.state(),
+            "Chart ticket".into(),
+            None,
+            Some("ticket".into()),
+            None,
+        )
+        .await
+        .expect("create ticket");
+        let body = "{\"id\":\"delivery\",\"initial\":\"Work\",\"states\":{\"Work\":{}}}";
+
+        let artifact = save_statechart_artifact(app.state(), body.into(), ticket_id.clone())
+            .await
+            .expect("save chart");
+
+        let attached = list_task_artifacts(app.state(), ticket_id)
+            .await
+            .expect("ticket artifacts");
+        assert_eq!(attached.len(), 1);
+        assert_eq!(attached[0].id, artifact.id);
+        assert_eq!(artifact.body, body);
+        assert_eq!(artifact.filename, "diagram.statechart.json");
+        let metadata = artifact.metadata.expect("attachment metadata");
+        assert_eq!(metadata.content_kind, "statechart");
+        assert_eq!(metadata.format, "json");
+        assert_eq!(metadata.presentation, "rendered");
+        assert_eq!(metadata.extensions["statechart_format"], "xstate-v5");
+    }
+
+    #[tokio::test]
+    async fn saving_statechart_rejects_missing_or_non_ticket_subjects() {
+        let app = crate::commands::test_support::build_app_with_services();
+        let config = vertebrae_sacrum_client::SacrumConfig::new(
+            "http://localhost:4000".into(),
+            "test-token".into(),
+            "mock-project".into(),
+        );
+        *app.state::<AppState>().sacrum_client.write().await = Some(std::sync::Arc::new(
+            vertebrae_sacrum_client::GraphqlClient::new(config),
+        ));
+        let task_id = crate::commands::create_task(
+            app.state(),
+            "Not a ticket".into(),
+            None,
+            Some("task".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        for id in [task_id, "missing-ticket".into(), "".into()] {
+            assert!(save_statechart_artifact(app.state(), "{}".into(), id)
+                .await
+                .is_err());
+        }
+        assert!(list_project_artifacts(app.state())
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

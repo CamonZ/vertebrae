@@ -730,6 +730,23 @@ unread. Dismissing is local to the session and project: a dismissed durable
 notification stays hidden when history repeats it. The store keeps the newest
 50 of each kind, so a large unread backlog shows its newest 50.
 
+### Live diagrams in Markdown
+
+`MarkdownContent` registers both sandboxed SVG renderers and native React
+component renderers. A completed `statechart` fence mounts `StatechartPreview`
+with the same XState v5 JSON subset and controls as a statechart artifact.
+Unfinished fences remain code, and invalid machines show an inline diagnostic.
+Viewer interaction survives additional text streaming after the closed fence.
+
+In conversations associated with a ticket, **Save as artifact** promotes a valid
+fence to an artifact attached to that ticket with
+rendered statechart metadata, preserves its original body, and replaces the
+fence preview with the saved artifact link and embed. Save failures remain
+visible with a retry action; pending saves cannot populate a later project's
+cache. Conversations without a ticket association, including those associated
+with a task or epic, show the preview without the save button. This action does
+not edit the chat transcript or create a project attachment.
+
 ## Data Flow
 
 ```

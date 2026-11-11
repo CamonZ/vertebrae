@@ -228,6 +228,17 @@ async listProjectArtifacts() : Promise<Result<Artifact[], CommandError>> {
 }
 },
 /**
+ * Promote a chat statechart fence to an artifact attached to its ticket.
+ */
+async saveStatechartArtifact(body: string, ticketId: string) : Promise<Result<Artifact, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_statechart_artifact", { body, ticketId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Read-only presentation projections for artifact entity links. Root artifact
  * reads have no attachment metadata, and Project.artifacts omits task links.
  */
