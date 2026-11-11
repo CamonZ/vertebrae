@@ -374,3 +374,49 @@ describe("data, state, lifecycle and event-sourcing mechanisms", () => {
     }
   });
 });
+
+describe("vertebrae workflow mechanisms", () => {
+  const kinds = [
+    "inference step",
+    "structured step",
+    "execute step",
+    "route step",
+    "wait children",
+    "human gate",
+    "run end",
+    "task run",
+  ] as const;
+  const registry = createFlowRegistry();
+
+  it.each(kinds)("%s draws every verb across its story without NaN", (kind) => {
+    for (const [verb, def] of Object.entries(registry.parts.get(kind)!.verbs)) {
+      const tokens = ["request", "data", "payload", "result", "control"];
+      const part = tokens
+        .map((token) =>
+          compileFlow({
+            version: 1,
+            parts: [{ id: "unit", kind, props: {}, scale: 1 }],
+            cards: [{ id: "a", token }],
+            story: [
+              {
+                caption: "Outcome",
+                steps: [
+                  def.card === "none"
+                    ? { part: "unit", verb }
+                    : { part: "unit", verb, card: "a" },
+                ],
+              },
+            ],
+          } as never)
+        )
+        .find((r) => r.ok)?.flow.arrangements[0].parts[0];
+      expect(part, `${kind}.${verb} compiles with some token`).toBeDefined();
+      if (!part) continue;
+      for (let t = 0; t <= part.timeline.period; t += 0.25) {
+        const html = svg(FLOW_DRAWINGS[kind](t, part));
+        expect(html, `${kind}.${verb} @ ${t}`).not.toContain("NaN");
+        expect(html).not.toContain("undefined");
+      }
+    }
+  });
+});

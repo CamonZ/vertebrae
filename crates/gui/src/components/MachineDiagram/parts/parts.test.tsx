@@ -100,6 +100,14 @@ const STORY_VERBS: Record<string, readonly string[]> = {
   outbox: ["commit", "fail", "publish", "record", "retry"],
   "consumer offset": ["commit", "fail", "process", "read"],
   "idempotency guard": ["dedupe", "expire", "record", "wait"],
+  "inference step": ["call", "fail", "finish", "stage", "validate"],
+  "structured step": ["ask", "fail", "finish", "validate"],
+  "execute step": ["call", "fail", "transform"],
+  "route step": ["decide", "fail", "route"],
+  "wait children": ["fail", "join", "spawn", "validate", "wait"],
+  "human gate": ["answer", "stop", "validate", "wait"],
+  "run end": ["finish", "resume", "stop"],
+  "task run": ["fail", "finish", "stage", "start", "stop", "wait"],
 };
 
 /** Parts with no ports are all frame: their mechanism is inside it. */

@@ -45,6 +45,14 @@ import { timeoutPart } from "./timeout";
 import { tracePart } from "./trace";
 import { transactionPart } from "./transaction";
 import { transformPart } from "./transform";
+import { inferenceStepPart } from "./inferenceStep";
+import { structuredStepPart } from "./structuredStep";
+import { executeStepPart } from "./executeStep";
+import { routeStepPart } from "./routeStep";
+import { waitChildrenPart } from "./waitChildren";
+import { humanGatePart } from "./humanGate";
+import { runEndPart } from "./runEnd";
+import { taskRunPart } from "./taskRun";
 import { workerPart } from "./worker";
 import { eventStorePart } from "./eventStore";
 import { deciderPart } from "./decider";
@@ -109,6 +117,14 @@ export const STARTER_PARTS: readonly AnyPartKind[] = [
   fencingTokenPart,
   twoPhaseCommitPart,
   serviceRegistryPart,
+  inferenceStepPart,
+  structuredStepPart,
+  executeStepPart,
+  routeStepPart,
+  waitChildrenPart,
+  humanGatePart,
+  runEndPart,
+  taskRunPart,
 ];
 
 export function registerStarterParts(r: PartRegistry): void {
@@ -172,4 +188,12 @@ export {
   outboxPart,
   consumerOffsetPart,
   idempotencyGuardPart,
+  inferenceStepPart,
+  structuredStepPart,
+  executeStepPart,
+  routeStepPart,
+  waitChildrenPart,
+  humanGatePart,
+  runEndPart,
+  taskRunPart,
 };
