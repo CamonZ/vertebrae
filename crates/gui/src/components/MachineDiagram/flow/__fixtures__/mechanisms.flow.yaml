@@ -1,0 +1,30 @@
+version: 1
+title: Requests become results
+parts:
+  - { id: source, kind: source, position: { x: 0, y: 0 }, scale: 1 }
+  - { id: worker, kind: worker, position: { x: 640, y: 0 }, scale: 1 }
+  - { id: client, kind: client, position: { x: 0, y: 400 }, scale: 1 }
+  - { id: pipeline, kind: pipeline, position: { x: 640, y: 400 }, scale: 1 }
+rails:
+  - { id: jobs, from: source.out, to: worker.in }
+  - { id: results, from: worker.out, to: client.result }
+cards:
+  - { id: job, token: request }
+  - { id: build, token: payload }
+story:
+  - caption: A source emits a job
+    steps:
+      - { part: source, verb: send, card: job }
+  - caption: The press clamps the job while the build pipeline starts
+    steps:
+      - { part: worker, verb: stage, card: job, via: jobs }
+      - { part: pipeline, verb: stage, card: build, with: true }
+  - caption: A result returns and the client fills its screen
+    steps:
+      - { part: worker, verb: finish, card: job, args: { work: 0.8 } }
+      - { part: client, verb: render, card: job, via: results }
+      - { part: pipeline, verb: stage, card: build, with: true }
+  - caption: The final stage passes
+    steps:
+      - { part: pipeline, verb: stage, card: build }
+      - { part: pipeline, verb: finish, card: build }

@@ -16,6 +16,7 @@ import type { MachinePartDef, PartScenario } from "./types";
 type Step = readonly [number, CardRole];
 
 interface PipelineExtra {
+  readonly stages?: readonly string[];
   /** Per stage: when its lamp lights and in which role. */
   readonly lamps: readonly Step[];
   /** `[x, from, to, result]` slot rings. */
@@ -221,7 +222,7 @@ export const pipelineMachine: MachinePartDef<PipelineExtra> = {
     pipelineStory("fails at test"),
     pipelineStory("cancelled"),
   ],
-  draw: (t, { lamps, rings }) => (
+  draw: (t, { lamps, rings, stages = STAGES }) => (
     <>
       <Rail
         points={[
@@ -249,7 +250,7 @@ export const pipelineMachine: MachinePartDef<PipelineExtra> = {
           ],
         ])}
       />
-      {STAGES.map((name, i) => {
+      {stages.map((name, i) => {
         const x = stageX(i);
         const l = lamps[i];
         return (

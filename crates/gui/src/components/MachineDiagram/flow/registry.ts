@@ -5,6 +5,8 @@
  * timeline fragments; each attachment kind declares its fields. Component
  * tickets register their parts here as they land.
  */
+import type { ReactNode } from "react";
+import type { Timeline } from "../timeline";
 import type { BBox } from "../ChangeMark";
 import type { Footprint } from "../MachinePart";
 import type { StateRole } from "../palette";
@@ -115,7 +117,30 @@ export interface VerbDef<P = Record<string, unknown>, S = unknown> {
   compile(ctx: VerbContext<P, S>): VerbOutcome | void;
 }
 
+/** A verb that actually ran, in part-local geometry and shared-clock time. */
+export interface CompiledPartStep {
+  readonly verb: string;
+  readonly t: number;
+  readonly end: number;
+  readonly args: Readonly<Record<string, unknown>>;
+  readonly card?: StepCard;
+  readonly entry?: string;
+  readonly outcome: VerbOutcome;
+}
+
+export interface CompiledPart<
+  P = Readonly<Record<string, unknown>>,
+  S = unknown,
+> {
+  readonly props: P;
+  readonly state: S;
+  readonly timeline: Timeline;
+  readonly steps: readonly CompiledPartStep[];
+}
+
 export interface PartKindDef<P = Record<string, unknown>, S = unknown> {
+  /** Mechanism only; MachinePart owns cards, gates, status, and change marks. */
+  draw?(t: number, compiled: CompiledPart<P, S>): ReactNode;
   readonly kind: string;
   /** Default job line (name · job). */
   readonly job: string;

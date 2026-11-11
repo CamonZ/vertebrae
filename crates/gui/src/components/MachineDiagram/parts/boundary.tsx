@@ -16,6 +16,7 @@ import { Outline } from "./draw";
 import type { MachinePartDef, PartScenario } from "./types";
 
 interface BoundaryExtra {
+  readonly region?: string;
   /** When the edge is cut (partition). */
   readonly cut: number | null;
 }
@@ -158,7 +159,7 @@ export const boundaryMachine: MachinePartDef<BoundaryExtra> = {
     boundaryStory("refused"),
     boundaryStory("partition"),
   ],
-  draw: (t, { cut }) => (
+  draw: (t, { cut, region = "SACRUM PROCESS" }) => (
     <>
       <Rail
         points={[
@@ -174,12 +175,7 @@ export const boundaryMachine: MachinePartDef<BoundaryExtra> = {
       />
       <Outline x={230} y={80} w={340} h={250} r={18} dash="8 7" />
       <g style={{ letterSpacing: "2.5px" }}>
-        <SvgText
-          x={252}
-          y={108}
-          runs={[["SACRUM PROCESS", 600, "dim"]]}
-          size={18}
-        />
+        <SvgText x={252} y={108} runs={[[region, 600, "dim"]]} size={18} />
       </g>
       <PartBox x={430} y={160} w={110} h={80} r={12} />
       <SvgText

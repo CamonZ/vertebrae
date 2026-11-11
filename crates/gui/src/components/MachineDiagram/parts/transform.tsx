@@ -69,9 +69,9 @@ function transformStory(f: boolean): PartScenario<null> {
   };
 }
 
-function Stamp({ t }: { t: number }) {
+function Stamp({ t, at }: { t: number; at: number }) {
   const { fade } = usePart();
-  const k = held(t, STAMP_AT, STAMP_AT + 0.25);
+  const k = held(t, at, at + 0.25);
   return (
     <>
       <rect
@@ -104,7 +104,9 @@ function Stamp({ t }: { t: number }) {
   );
 }
 
-export const transformMachine: MachinePartDef<null> = {
+export const transformMachine: MachinePartDef<{
+  readonly stampAt: number;
+} | null> = {
   part: {
     name: "transform",
     job: "changes the shape",
@@ -115,7 +117,7 @@ export const transformMachine: MachinePartDef<null> = {
   bb: [200, 120, 240, 160],
   status: { x: 320, y: 312 },
   scenarios: [transformStory(false), transformStory(true)],
-  draw: (t) => (
+  draw: (t, extra) => (
     <>
       <Rail
         points={[
@@ -146,7 +148,7 @@ export const transformMachine: MachinePartDef<null> = {
           ],
         ]}
       />
-      <Stamp t={t} />
+      <Stamp t={t} at={extra?.stampAt ?? STAMP_AT} />
     </>
   ),
 };

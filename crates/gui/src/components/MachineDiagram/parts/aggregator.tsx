@@ -14,6 +14,7 @@ import { PlateLine } from "./draw";
 import type { MachinePartDef, PartScenario } from "./types";
 
 interface AggregatorExtra {
+  readonly squeezeAt?: number;
   /** `[t, role]`: an item bar springs in at `t`. */
   readonly items: readonly (readonly [number, CardRole])[];
 }
@@ -90,13 +91,11 @@ export const aggregatorMachine: MachinePartDef<AggregatorExtra> = {
   bb: [200, 105, 240, 190],
   status: { x: 320, y: 328 },
   scenarios: [aggregatorStory(false), aggregatorStory(true)],
-  draw: (t, { items }) => {
-    const sq = clamp(t - SQUEEZE_AT);
+  draw: (t, { items, squeezeAt = SQUEEZE_AT }) => {
+    const sq = clamp(t - squeezeAt);
     const px =
       420 -
-      (420 - 345) *
-        sq *
-        (1 - smoothstep(SQUEEZE_AT + 0.5, SQUEEZE_AT + 0.9, t));
+      (420 - 345) * sq * (1 - smoothstep(squeezeAt + 0.5, squeezeAt + 0.9, t));
     return (
       <>
         <Rail

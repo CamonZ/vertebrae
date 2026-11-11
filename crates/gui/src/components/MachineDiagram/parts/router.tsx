@@ -18,6 +18,7 @@ import type { MachinePartDef, PartScenario } from "./types";
 type ArmPosition = -1 | 0 | 1 | 2;
 
 interface RouterExtra {
+  readonly routes?: readonly string[];
   /** `[t, position]`: the arm swings to `position` at `t` (clamp spring). */
   readonly arm: readonly (readonly [number, ArmPosition])[];
   /** The card leaves down: a fallback box or a dashed 404 lane. */
@@ -128,7 +129,7 @@ function routerStory(
 }
 
 function angleAt(arm: RouterExtra["arm"], t: number): number {
-  if (t < arm[1][0]) return 0;
+  if (arm.length < 2 || t < arm[1][0]) return 0;
   let a = armAngle(arm[0][1]);
   for (let i = 1; i < arm.length; i++) {
     const [t0, to] = arm[i];
@@ -154,7 +155,7 @@ export const routerMachine: MachinePartDef<RouterExtra> = {
     routerStory("no route · 404"),
     routerStory("fallback"),
   ],
-  draw: (t, { arm, down, fallback }) => {
+  draw: (t, { arm, down, fallback, routes = ROUTES }) => {
     const a = angleAt(arm, t);
     return (
       <>
@@ -211,7 +212,7 @@ export const routerMachine: MachinePartDef<RouterExtra> = {
           w={6}
         />
         <circle cx={270} cy={Y} r={8} fill={roleColor("plate")} />
-        {ROUTES.map((r, i) => (
+        {routes.map((r, i) => (
           <SvgText
             key={r}
             x={596}
