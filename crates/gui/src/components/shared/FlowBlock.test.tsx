@@ -172,6 +172,19 @@ story:
     expect(screen.queryByTestId("flow-player")).toBeNull();
   });
 
+  it("auto-lays out a spec without positions before playing it", async () => {
+    renderFlow(plainSpec.replace(/, position: \{ x: \d+, y: 0 \}/g, ""));
+    expect(screen.getByTestId("flow-laying-out")).toBeVisible();
+    expect(screen.queryByTestId("flow-player")).toBeNull();
+    expect(await screen.findByTestId("flow-player")).toBeVisible();
+    expect(screen.queryByTestId("flow-laying-out")).toBeNull();
+    const parts = [...document.querySelectorAll("[data-part-id]")].map((g) =>
+      g.getAttribute("transform")
+    );
+    expect(parts).toHaveLength(2);
+    expect(new Set(parts).size).toBe(2);
+  });
+
   it("names the spec path for a rail pointing at a missing part in a later rail", () => {
     const body = plainSpec.replace(
       "rails:\n  - { id: jobs, from: src.out, to: w.in }",

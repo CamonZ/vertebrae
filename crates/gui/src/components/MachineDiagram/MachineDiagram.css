@@ -59,6 +59,13 @@
   stroke-dasharray: 4 5;
 }
 
+/* Regions: a dashed frame means a region (VL-01), never a colour. */
+.md-region rect {
+  stroke: var(--md-edge);
+  stroke-width: 2;
+  stroke-dasharray: 8 8;
+}
+
 .md-viewport {
   position: relative;
   overflow: hidden;

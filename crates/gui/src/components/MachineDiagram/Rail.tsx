@@ -43,6 +43,11 @@ export interface WireProps {
   arrow?: boolean;
   /** Optional in-SVG label near the glyph position. */
   label?: string;
+  /**
+   * Centre of the label line where a layout reserved room for it; the change
+   * glyph then leads the label on that line instead of riding the rail.
+   */
+  labelAt?: readonly [number, number];
 }
 
 /**
@@ -50,7 +55,13 @@ export interface WireProps {
  * (VL-08): heavy ink with a + glyph for a new connection, dashed with × for a
  * removed one, plain otherwise.
  */
-export function Wire({ points, change = "", arrow = false, label }: WireProps) {
+export function Wire({
+  points,
+  change = "",
+  arrow = false,
+  label,
+  labelAt,
+}: WireProps) {
   const r = route(points);
   const mid = r.points[Math.floor(r.points.length / 2)];
   const [mx, my] =
@@ -71,21 +82,61 @@ export function Wire({ points, change = "", arrow = false, label }: WireProps) {
         solid
         markerEnd={arrow ? undefined : null}
       />
-      {change === "added" && (
-        <Glyph x={mx} y={my - 20} text="+" size={22} role="ink" />
-      )}
-      {change === "removed" && (
-        <Glyph x={mx} y={my - 20} text="×" size={22} role="dim" />
-      )}
-      {label && (
-        <SvgText
-          x={mx}
-          y={my + 22}
-          runs={[[label, 400, "dim"]]}
-          size={18}
-          align="center"
-        />
+      {labelAt ? (
+        <PlacedLabel at={labelAt} change={change} label={label} />
+      ) : (
+        <>
+          {change === "added" && (
+            <Glyph x={mx} y={my - 20} text="+" size={22} role="ink" />
+          )}
+          {change === "removed" && (
+            <Glyph x={mx} y={my - 20} text="×" size={22} role="dim" />
+          )}
+          {label && (
+            <SvgText
+              x={mx}
+              y={my + 22}
+              runs={[[label, 400, "dim"]]}
+              size={18}
+              align="center"
+            />
+          )}
+        </>
       )}
     </g>
+  );
+}
+
+/** One centred line: change glyph (+ ink, × dim), then the label. */
+function PlacedLabel({
+  at: [x, y],
+  change,
+  label,
+}: {
+  at: readonly [number, number];
+  change: WireChange;
+  label?: string;
+}) {
+  const glyph = change === "added" ? "+" : change === "removed" ? "×" : "";
+  if (!glyph && !label) return null;
+  return (
+    <SvgText
+      x={x}
+      y={y}
+      runs={[
+        ...(glyph
+          ? [
+              [
+                label ? `${glyph} ` : glyph,
+                600,
+                change === "added" ? "ink" : "dim",
+              ] as const,
+            ]
+          : []),
+        ...(label ? [[label, 400, "dim"] as const] : []),
+      ]}
+      size={18}
+      align="center"
+    />
   );
 }

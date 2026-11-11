@@ -10,6 +10,7 @@ import { MachinePart } from "../MachinePart";
 import { RailCards } from "../RailCards";
 import { SvgText } from "../SvgText";
 import { Wire } from "../Rail";
+import { nameLabelLocal, regionLabelAt } from "./extent";
 import { useFlowRegistry } from "./registryContext";
 import type { DiagramTimeline } from "./compile";
 
@@ -25,7 +26,7 @@ export interface FlowDiagramProps {
 }
 
 /**
- * A compiled flow arrangement at time `t`: a wire per rail, a MachinePart per
+ * A compiled flow arrangement at time `t`: regions behind everything, a wire per rail, a MachinePart per
  * part (framed by its bounding box, named above it when drawn below full
  * scale, where MachinePart hides its own title), and the rail layer's
  * travelling cards, inside the pan/zoom viewport. Absent parts and rails are
@@ -51,6 +52,26 @@ export const FlowDiagram = memo(function FlowDiagram({
           width={d.width}
           height={d.height}
         >
+          {d.regions.map((g) => (
+            <g key={g.id} className="md-region" data-region-id={g.id}>
+              <rect
+                x={g.x}
+                y={g.y}
+                width={g.width}
+                height={g.height}
+                rx={18}
+                fill="none"
+              />
+              {g.label && (
+                <SvgText
+                  x={regionLabelAt(g)[0]}
+                  y={regionLabelAt(g)[1]}
+                  runs={[[g.label, 600, "dim"]]}
+                  size={18}
+                />
+              )}
+            </g>
+          ))}
           {d.rails
             .filter((r) => r.presence !== "absent")
             .map((r) => (
@@ -59,6 +80,7 @@ export const FlowDiagram = memo(function FlowDiagram({
                 points={r.points}
                 change={r.change === "unchanged" ? "" : r.change}
                 label={r.label}
+                labelAt={r.labelAt}
               />
             ))}
           {d.parts
@@ -95,8 +117,8 @@ export const FlowDiagram = memo(function FlowDiagram({
             .map((p) => (
               <SvgText
                 key={`name:${p.id}`}
-                x={p.position.x + (p.bb[0] + p.bb[2] / 2) * p.scale}
-                y={p.position.y + p.bb[1] * p.scale - 12}
+                x={p.position.x + nameLabelLocal(p)[0]}
+                y={p.position.y + nameLabelLocal(p)[1]}
                 runs={[[p.identity.name, 600, "ink"]]}
                 size={20}
                 align="center"

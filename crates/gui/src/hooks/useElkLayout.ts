@@ -70,8 +70,8 @@ const defaultOptions: ElkLayoutOptions = {
   algorithm: "layered",
 };
 
-// Create a single ELK instance
-const elk = new ELK();
+/** The app's single ELK instance (also used by flow-diagram auto-layout). */
+export const elk = new ELK();
 
 /**
  * Hook to calculate ELK-based layout for workflow nodes.

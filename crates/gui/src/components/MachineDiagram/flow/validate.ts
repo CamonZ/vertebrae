@@ -23,6 +23,7 @@ const TOP_FIELDS = [
   "title",
   "parts",
   "rails",
+  "regions",
   "cards",
   "story",
   "attachments",
@@ -51,6 +52,7 @@ const RAIL_FIELDS = [
   "change",
   "attachments",
 ];
+const REGION_FIELDS = ["id", "label", "parts"];
 const CARD_FIELDS = [
   "id",
   "token",
@@ -401,6 +403,44 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
         to: to && [to[0], to[1]],
         tokens,
       });
+  });
+
+  /* regions */
+  const regionIds = new Map<string, string>();
+  const regionOf = new Map<string, string>();
+  c.list(input, "regions", root).forEach((raw, i) => {
+    const p = join(join(root, "regions"), i);
+    if (!isRecord(raw)) return c.err(p, "expected a region object");
+    c.unknownFields(raw, REGION_FIELDS, p);
+    const id = c.id(raw, p, regionIds, "region");
+    if (id !== undefined && (partIds.has(id) || railIds.has(id)))
+      c.err(join(p, "id"), `region id "${id}" is also a part or rail id`);
+    c.str(raw, "label", p);
+    const members = c.list(raw, "parts", p, true);
+    if (Array.isArray(raw.parts) && members.length === 0)
+      c.err(join(p, "parts"), "needs at least one part");
+    members.forEach((m, k) => {
+      const mp = join(join(p, "parts"), k);
+      if (typeof m !== "string" || m === "")
+        return c.err(mp, "expected a part id");
+      if (!partIds.has(m))
+        return c.missing(
+          mp,
+          "region names missing part",
+          m,
+          [...partIds.keys()],
+          "parts"
+        );
+      const prev = regionOf.get(m);
+      if (prev !== undefined)
+        return c.err(
+          mp,
+          prev === id
+            ? `part "${m}" is listed twice`
+            : `part "${m}" is already in region "${prev}"; a part belongs to at most one region`
+        );
+      regionOf.set(m, id ?? "");
+    });
   });
 
   /* cards */

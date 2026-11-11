@@ -107,6 +107,19 @@ export interface RailSpec {
   readonly attachments?: readonly AttachmentSpec[];
 }
 
+/**
+ * A boundary drawn around parts (process, network, trust zone, container):
+ * a dashed region named in its corner. Auto-layout keeps its parts together
+ * as one compound node; with hand-given positions it frames them as placed.
+ */
+export interface RegionSpec {
+  readonly id: string;
+  /** Region name drawn in the corner, e.g. SACRUM PROCESS. */
+  readonly label?: string;
+  /** Ids of the parts inside; a part belongs to at most one region. */
+  readonly parts: readonly string[];
+}
+
 export interface CardDecl {
   readonly id: string;
   readonly token: TokenKind;
@@ -153,6 +166,7 @@ export interface FlowSpec {
   readonly title?: string;
   readonly parts: readonly PartSpec[];
   readonly rails?: readonly RailSpec[];
+  readonly regions?: readonly RegionSpec[];
   readonly cards?: readonly CardDecl[];
   readonly story?: readonly BeatSpec[];
   readonly attachments?: readonly AttachmentSpec[];
