@@ -2,7 +2,7 @@ import { render, cleanup } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { MACHINE_PARTS } from "../parts";
-import { compileFlowOrThrow } from "./compile";
+import { compileFlow, compileFlowOrThrow } from "./compile";
 import { FlowDiagram } from "./FlowDiagram";
 import { createFlowRegistry } from "./defaults";
 import { FlowRegistryContext } from "./registryContext";
@@ -307,5 +307,53 @@ describe("compiled timing and outcomes", () => {
     expect(svg(FLOW_DRAWINGS.boundary(3.1, boundary))).toBe(
       svg(MACHINE_PARTS.boundary.draw(3.1, { cut: 2.9 }))
     );
+  });
+});
+
+describe("data, state and lifecycle mechanisms", () => {
+  const kinds = [
+    "store",
+    "cache",
+    "document",
+    "state machine",
+    "reactive cell",
+    "schema",
+    "transaction",
+    "lock",
+    "session",
+  ] as const;
+  const registry = createFlowRegistry();
+
+  it.each(kinds)("%s draws every verb across its story without NaN", (kind) => {
+    for (const [verb, def] of Object.entries(registry.parts.get(kind)!.verbs)) {
+      // A verb takes particular tokens (control, signal, data…): try each card.
+      const tokens = ["request", "data", "result", "control", "signal"];
+      const part = tokens
+        .map((token) =>
+          compileFlow({
+            version: 1,
+            parts: [{ id: "unit", kind, props: {}, scale: 1 }],
+            cards: [{ id: "a", token }],
+            story: [
+              {
+                caption: "Outcome",
+                steps: [
+                  def.card === "none"
+                    ? { part: "unit", verb }
+                    : { part: "unit", verb, card: "a" },
+                ],
+              },
+            ],
+          } as never)
+        )
+        .find((r) => r.ok)?.flow.arrangements[0].parts[0];
+      expect(part, `${kind}.${verb} compiles with some token`).toBeDefined();
+      if (!part) continue;
+      for (let t = 0; t <= part.timeline.period; t += 0.25) {
+        const html = svg(FLOW_DRAWINGS[kind](t, part));
+        expect(html, `${kind}.${verb} @ ${t}`).not.toContain("NaN");
+        expect(html).not.toContain("undefined");
+      }
+    }
   });
 });
