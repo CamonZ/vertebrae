@@ -1,0 +1,216 @@
+# Ticket 8640ee9e (inline code discussions become persistent, tool-capable
+# sessions) as one flow spec. Before and After run the same four questions;
+# only the session's lifecycle and the new read-only tool guard differ, so
+# the process count (4 before, 2 after) comes out of the compile, not the
+# captions. Timing is illustrative; the evidence table is the prototype's.
+version: 1
+title: Inline discussions keep one session per thread
+parts:
+  - id: you
+    kind: client
+    label: you
+    job: select lines, ask
+    position: { x: 0, y: 100 }
+  - id: process
+    kind: session
+    label: discussion session
+    change: changed
+    changeNote: one persistent session per thread
+    before:
+      props: { lifecycle: one-shot, launch: '--tools ""' }
+    after:
+      props: { lifecycle: persistent, launch: "--tools Read,Grep,Glob" }
+    position: { x: 520, y: 150 }
+    attachments:
+      - kind: ref
+        path: crates/harness-claude/src/config.rs
+        line: 33
+        claim: 'Before: discussions launched with --tools "" (no tools)'
+        status: verified
+      - kind: ref
+        path: crates/harness-codex/src/runtime/setup.rs
+        line: 284
+        claim: "Codex: shell_tool true in the read-only sandbox; threads resume"
+        status: verified
+  - id: tools
+    kind: guard
+    label: read_only_decision
+    change: added
+    props: { allow: [Read, Grep, Glob], reason: read only }
+    position: { x: 880, y: 0 }
+    attachments:
+      - kind: note
+        text: >-
+          Claude no longer has Edit in --tools, so the bridge's deny is the
+          second line of defence (READ_ONLY_ORACLE test).
+        status: inferred
+      - kind: ref
+        path: crates/gui/src-tauri/src/local_chat/permissions.rs
+        claim: read-only sessions allow Read, Grep, Glob and deny the rest
+  - id: events
+    kind: event rail
+    label: events
+    scale: 0.75
+    position: { x: 880, y: 200 }
+    attachments:
+      - kind: ref
+        path: crates/gui/src/hooks/useLocalChatEventRouter.ts
+        line: 634
+        claim: reply delivery (deliverLocalChatTurn)
+        status: inferred
+rails:
+  - { id: ask, from: you.request, to: process.turn }
+  - {
+      id: stop,
+      from: you.request,
+      to: process.resume,
+      conditional: true,
+      label: cancel,
+    }
+  - {
+      id: call,
+      from: process.out,
+      to: tools.in,
+      change: added,
+      label: can_use_tool,
+    }
+  - { id: reply, from: process.out, to: events.in }
+  - {
+      id: deliver,
+      from: events.out,
+      to: you.result,
+      label: deliverLocalChatTurn,
+    }
+cards:
+  - {
+      id: q1,
+      token: request,
+      label: Q1,
+      payload: { type: text, value: Please explain what this file does },
+    }
+  - {
+      id: q2,
+      token: request,
+      label: Q2,
+      payload:
+        { type: text, value: what does the function below that line do? },
+    }
+  - {
+      id: q3,
+      token: request,
+      label: Q3,
+      payload: { type: text, value: and the caller? },
+    }
+  - {
+      id: q4,
+      token: request,
+      label: Q4,
+      payload: { type: text, value: one more question },
+    }
+  - { id: a1, token: result, label: A1 }
+  - { id: a2, token: result, label: A2 }
+  - { id: a4, token: result, label: A4 }
+  - { id: cancel3, token: control, label: cancel }
+  - { id: read, token: request, label: Read, origin: process }
+  - { id: grep, token: request, label: Grep, origin: process }
+  - { id: edit, token: request, label: Edit, origin: process }
+story:
+  - id: q1
+    caption:
+      before: "Q1 · every question spawns a new process. The prompt replays the policy, the context and the transcript."
+      after: "Q1 · the first question opens one hidden session for this thread and sends context + question."
+    steps:
+      - { verb: send, part: you, card: q1 }
+      - { verb: stage, part: process, card: q1, via: ask }
+  - id: tools
+    caption:
+      before: 'No tools at all (--tools ""): the agent answers only from the pasted context.'
+      after: "The agent reads more code itself. Read and Grep are allowed by read_only_decision; two calls run side by side."
+    steps:
+      - { verb: decide, part: tools, card: read, via: call }
+      - {
+          verb: decide,
+          part: tools,
+          card: grep,
+          via: call,
+          with: true,
+          delay: 0.25,
+        }
+  - id: a1
+    steps:
+      - { verb: finish, part: process, card: a1 }
+      - {
+          verb: send,
+          part: events,
+          card: a1,
+          via: reply,
+          args: { event: assistant message },
+        }
+      - { verb: render, part: you, card: a1, via: deliver }
+  - id: q2
+    caption:
+      before: "Q2 · a second process. The whole transcript is pasted again as JSON."
+      after: "Q2 · the follow-up goes to the same process. Only the question is sent."
+    steps:
+      - { verb: send, part: you, card: q2 }
+      - { verb: stage, part: process, card: q2, via: ask }
+  - id: edit
+    caption:
+      after: 'An edit attempt is denied: "Selection discussions are read only." The turn keeps going.'
+    steps:
+      - { verb: decide, part: tools, card: edit, via: call }
+  - id: a2
+    steps:
+      - { verb: finish, part: process, card: a2 }
+      - {
+          verb: send,
+          part: events,
+          card: a2,
+          via: reply,
+          args: { event: assistant message },
+        }
+      - { verb: render, part: you, card: a2, via: deliver }
+  - id: q3
+    caption:
+      before: "Q3 · a third process…"
+      after: "Q3 · a third question to the same process…"
+    steps:
+      - { verb: send, part: you, card: q3 }
+      - { verb: stage, part: process, card: q3, via: ask }
+  - id: cancel
+    caption:
+      before: "…cancelled mid-reply. Cancelling closes the process."
+      after: "…cancelled mid-reply. interrupt_local_chat_turn stops the turn; the process stays for the next question."
+    steps:
+      - { verb: cancel, part: you, card: cancel3 }
+      - { verb: cancel, part: process, card: cancel3, via: stop }
+  - id: collapse
+    caption:
+      before: "Collapsing the thread: there is no process between questions, so nothing happens."
+      after: "Collapsing the thread closes its idle process. The resume id stays in chatStore, so nothing is lost."
+    steps:
+      - { verb: close, part: process }
+  - id: q4
+    caption:
+      before: "Q4 · a fourth process, with the longest prompt yet."
+      after: "Q4 · the next ask resumes the session with providerResumeId: process 2, question only."
+    steps:
+      - { verb: send, part: you, card: q4 }
+      - { verb: stage, part: process, card: q4, via: ask }
+      - { verb: finish, part: process, card: a4 }
+      - {
+          verb: send,
+          part: events,
+          card: a4,
+          via: reply,
+          args: { event: assistant message },
+        }
+      - { verb: render, part: you, card: a4, via: deliver }
+  - id: summary
+    caption:
+      before: "4 questions, 4 processes, no tools."
+      after: "4 questions, 2 processes. Read-only tools allowed, everything else denied."
+    attachments:
+      - kind: note
+        text: Same machines in both arrangements. Timing is illustrative, not measured.
+        source: scenario

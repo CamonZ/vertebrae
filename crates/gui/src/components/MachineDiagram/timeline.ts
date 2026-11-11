@@ -37,7 +37,23 @@ export interface CardLeg {
   readonly d: number;
 }
 
+/**
+ * What a card carries, so it can be inspected and followed (token kinds and
+ * tags in the catalogue). `type` is a payload kind such as `symbol`,
+ * `timestamp`, `value`, `version`, `session` or `text`.
+ */
+export interface CardPayload {
+  readonly type: string;
+  readonly value: string | number | boolean | null;
+  /** When the fact happened, as opposed to when the card arrives (shared clock seconds or a label). */
+  readonly eventTime?: number | string;
+  readonly fields?: Readonly<Record<string, string | number | boolean | null>>;
+}
+
 export interface CardSpec {
+  /** Stable identity across parts and rails (one id per authored card). */
+  readonly id?: string;
+  readonly payload?: CardPayload;
   readonly w: number;
   readonly h: number;
   /** Small round signal or event dot instead of a rectangular card. */
@@ -68,12 +84,42 @@ export interface GateSpec {
 
 export type StatusNote = readonly [t: number, text: string, role: StateRole];
 
+/** A diagram-wide beat: one caption explaining what happens from `t` on. */
+export interface Beat {
+  readonly t: number;
+  readonly caption: string;
+  readonly id?: string;
+}
+
+/**
+ * Timeline markers explain behaviour without drawing it: a durable
+ * checkpoint, the arrival order of a card at a part (vs its event time), or
+ * a lifecycle event such as `spawn` / `resume`.
+ */
+export interface TimelineMarker {
+  readonly t: number;
+  readonly kind: string;
+  readonly label: string;
+  /** Spec id of the part the marker belongs to. */
+  readonly part?: string;
+  readonly card?: string;
+  /** Arrival markers: 1-based arrival order at the part. */
+  readonly order?: number;
+  readonly eventTime?: number | string;
+}
+
 export interface Timeline {
   readonly period: number;
   readonly cards: readonly CardSpec[];
   readonly gates: readonly GateSpec[];
   /** Sorted by time; starts with `idle` at 0 and returns to it before the loop ends. */
   readonly notes: readonly StatusNote[];
+  /**
+   * Diagram-wide beats on a shared clock. When present, reduced motion snaps
+   * to the outcome of the current beat instead of the current status note.
+   */
+  readonly beats?: readonly Beat[];
+  readonly markers?: readonly TimelineMarker[];
 }
 
 /* ---------- authoring ---------- */
@@ -91,6 +137,8 @@ export type TagInput = readonly [
 ];
 
 export interface CardOptions {
+  id?: string;
+  payload?: CardPayload;
   h?: number;
   dot?: boolean;
   hollow?: boolean;
@@ -112,6 +160,8 @@ export function card(
   o: CardOptions = {}
 ): CardSpec {
   return {
+    ...(o.id !== undefined ? { id: o.id } : {}),
+    ...(o.payload !== undefined ? { payload: o.payload } : {}),
     w,
     h: o.h ?? w * 0.64,
     dot: o.dot ?? false,
@@ -343,6 +393,8 @@ export interface TagFrame {
 export interface CardFrame {
   /** Index into `timeline.cards` (stable React key). */
   readonly index: number;
+  /** The card's stable id when it has one (follow a card across parts). */
+  readonly id?: string;
   readonly x: number;
   readonly y: number;
   readonly w: number;
@@ -399,13 +451,30 @@ export interface StateAtOptions {
  * before the next note, and never inside the closing fade of the loop.
  */
 export function beatOutcomeTime(tl: Timeline, t: number): number {
-  const notes = tl.notes;
-  const i = noteIndex(notes, t);
-  const start = notes[i][0];
-  const next = i + 1 < notes.length ? notes[i + 1][0] : tl.period;
+  const starts =
+    tl.beats && tl.beats.length > 0
+      ? [0, ...tl.beats.map((b) => b.t).filter((b) => b > 0)]
+      : tl.notes.map((n) => n[0]);
+  let i = 0;
+  while (i + 1 < starts.length && starts[i + 1] <= t) i++;
+  const start = starts[i];
+  const next = i + 1 < starts.length ? starts[i + 1] : tl.period;
   const fadeStart = tl.period - 0.6;
   const end = start <= fadeStart ? Math.min(next, fadeStart) : next;
   return Math.max(start, end - 0.02);
+}
+
+/** Index of the beat showing at `t`, or -1 before the first beat. */
+export function beatIndex(beats: readonly Beat[], t: number): number {
+  let i = -1;
+  while (i + 1 < beats.length && beats[i + 1].t <= t) i++;
+  return i;
+}
+
+/** The caption showing at `t` (null before the first beat). */
+export function captionAt(beats: readonly Beat[], t: number): Beat | null {
+  const i = beatIndex(beats, t);
+  return i < 0 ? null : beats[i];
 }
 
 const POSE_STATUS: Record<Exclude<DiagramPose, "live">, string> = {
@@ -464,6 +533,7 @@ export function stateAt(
     }
     cards.push({
       index,
+      ...(c.id !== undefined ? { id: c.id } : {}),
       x,
       y,
       w: c.w,
