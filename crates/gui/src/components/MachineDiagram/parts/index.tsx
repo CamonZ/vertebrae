@@ -42,6 +42,16 @@ import { storeMachine } from "./store";
 import { transactionMachine } from "./transaction";
 import { transformMachine } from "./transform";
 import { workerMachine } from "./worker";
+import { eventStoreMachine } from "./eventStore";
+import { deciderMachine } from "./decider";
+import { projectionMachine } from "./projection";
+import { snapshotMachine } from "./snapshot";
+import { replayMachine } from "./replay";
+import { upcasterMachine } from "./upcaster";
+import { sagaMachine } from "./saga";
+import { outboxMachine } from "./outbox";
+import { consumerOffsetMachine } from "./consumerOffset";
+import { idempotencyGuardMachine } from "./idempotencyGuard";
 import type { MachinePartDef } from "./types";
 
 export type { MachinePartDef, PartScenario } from "./types";
@@ -77,6 +87,16 @@ export {
   transactionMachine,
   transformMachine,
   workerMachine,
+  eventStoreMachine,
+  deciderMachine,
+  projectionMachine,
+  snapshotMachine,
+  replayMachine,
+  upcasterMachine,
+  sagaMachine,
+  outboxMachine,
+  consumerOffsetMachine,
+  idempotencyGuardMachine,
 };
 
 /** Implemented parts, in catalogue order. */
@@ -112,6 +132,16 @@ export const MACHINE_PARTS = {
   metric: metricMachine,
   trace: traceMachine,
   alert: alertMachine,
+  "event store": eventStoreMachine,
+  decider: deciderMachine,
+  projection: projectionMachine,
+  snapshot: snapshotMachine,
+  replay: replayMachine,
+  upcaster: upcasterMachine,
+  saga: sagaMachine,
+  outbox: outboxMachine,
+  "consumer offset": consumerOffsetMachine,
+  "idempotency guard": idempotencyGuardMachine,
 } as const;
 
 export type MachinePartName = keyof typeof MACHINE_PARTS;
