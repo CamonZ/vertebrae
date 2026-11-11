@@ -1,3 +1,7 @@
+import * as hegel from "@hegeldev/hegel";
+import * as gs from "@hegeldev/hegel/generators";
+import { cleanup } from "@testing-library/react";
+import type { JumpTarget } from "./AllChangesView";
 import { fireEvent, render, screen } from "@testing-library/react";
 import {
   forwardRef,
@@ -15,6 +19,7 @@ import type { WorktreeChange } from "../../../bindings";
 
 const scrollTo = vi.fn();
 let renderedItems: readonly CodeViewDiffItem[] = [];
+let renderedSelection: unknown;
 let renderedDiffStyle: string | undefined;
 
 // CodeView needs real layout; this stand-in records its items and scrolls.
@@ -26,6 +31,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       props: {
         items: readonly CodeViewDiffItem[];
         options: { diffStyle?: string };
+        selectedLines?: unknown;
         renderCustomHeader(item: CodeViewDiffItem): ReactNode;
         renderCodeViewHeader?(): ReactNode;
         containerRef?: Ref<HTMLDivElement>;
@@ -34,6 +40,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
     ) {
       useImperativeHandle(ref, () => ({ scrollTo }));
       renderedItems = props.items;
+      renderedSelection = props.selectedLines;
       renderedDiffStyle = props.options.diffStyle;
       return (
         <div ref={props.containerRef}>
@@ -244,3 +251,128 @@ it("folds every parsed item belonging to one file together", () => {
   expect(renderedItems).toHaveLength(2);
   expect(renderedItems.map((item) => item.collapsed)).toEqual([true, true]);
 });
+
+it("jumps to an evidence line range after unfolding a file", () => {
+  const view = render(
+    <AllChangesView files={files} jumpTarget={null} onOpen={vi.fn()} />
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Toggle diff for a.ts" }));
+  view.rerender(
+    <AllChangesView
+      files={files}
+      jumpTarget={{ path: "a.ts", line: 1, endLine: 2, side: "old", nonce: 4 }}
+      onOpen={vi.fn()}
+    />
+  );
+  expect(renderedItems[0].collapsed).toBe(false);
+  expect(renderedSelection).toEqual({
+    id: "a.ts",
+    range: { start: 1, end: 2, side: "deletions" },
+  });
+  expect(scrollTo).toHaveBeenLastCalledWith({
+    type: "line",
+    id: "a.ts",
+    lineNumber: 1,
+    side: "deletions",
+    align: "center",
+  });
+});
+
+it("matches the navigation model across generated jump, fold, refresh and reopen sequences", () =>
+  hegel.test(
+    (tc) => {
+      const actions = tc.draw(
+        gs.arrays(
+          gs.record({
+            kind: gs.sampledFrom([
+              "jump",
+              "fold",
+              "refresh",
+              "reopen",
+            ] as const),
+            path: gs.sampledFrom(["a.ts", "b.ts"]),
+            side: gs.sampledFrom(["old", "new"] as const),
+            line: gs.integers({ minValue: 1, maxValue: 20 }),
+            length: gs.integers({ minValue: 0, maxValue: 10 }),
+          }),
+          { minSize: 1, maxSize: 25 }
+        )
+      );
+      // Oracle tracks user intent only: folds, current request, and expected scrolls.
+      let target: JumpTarget | null = null;
+      let nonce = 0;
+      const folded = new Set<string>();
+      const expectedScrolls: unknown[] = [];
+      scrollTo.mockReset();
+      const props = () => ({
+        files: [...twoTextFiles],
+        jumpTarget: target,
+        onOpen: vi.fn(),
+      });
+      let view = render(<AllChangesView {...props()} />);
+      const expectJump = (request: JumpTarget) => {
+        folded.delete(request.path);
+        expectedScrolls.push([
+          {
+            type: "line",
+            id: request.path,
+            lineNumber: request.line,
+            side: request.side === "old" ? "deletions" : "additions",
+            align: "center",
+          },
+        ]);
+      };
+      try {
+        for (const action of actions) {
+          switch (action.kind) {
+            case "jump":
+              target = {
+                path: action.path,
+                line: action.line,
+                endLine: action.line + action.length,
+                side: action.side,
+                nonce: ++nonce,
+              };
+              expectJump(target);
+              view.rerender(<AllChangesView {...props()} />);
+              break;
+            case "fold":
+              if (folded.has(action.path)) folded.delete(action.path);
+              else folded.add(action.path);
+              fireEvent.click(
+                screen.getByRole("button", {
+                  name: `Toggle diff for ${action.path}`,
+                })
+              );
+              break;
+            case "refresh":
+              view.rerender(<AllChangesView {...props()} />);
+              break;
+            case "reopen":
+              view.unmount();
+              folded.clear();
+              if (target) expectJump(target);
+              view = render(<AllChangesView {...props()} />);
+              break;
+          }
+          expect(scrollTo.mock.calls, JSON.stringify(actions)).toEqual(
+            expectedScrolls
+          );
+          for (const item of renderedItems)
+            expect(item.collapsed).toBe(folded.has(item.id));
+          if (target)
+            expect(renderedSelection).toEqual({
+              id: target.path,
+              range: {
+                start: target.line,
+                end: target.endLine,
+                side: target.side === "old" ? "deletions" : "additions",
+              },
+            });
+        }
+      } finally {
+        cleanup();
+      }
+    },
+    { testCases: 60 }
+  ));

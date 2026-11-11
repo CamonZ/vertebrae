@@ -11,6 +11,7 @@ import type { DiagramInteraction } from "../interaction";
 import { roleColor } from "../palette";
 import { beatOutcome, nextSpeed, SPEEDS } from "./clockModel";
 import type { CompiledFlow, DiagramTimeline } from "./compile";
+import { AttachmentPanel } from "./AttachmentPanel";
 import { FlowDiagram } from "./FlowDiagram";
 import { leaveToTarget, playerCommand, PLAYER_SHORTCUTS } from "./playerKeys";
 import type { ArrangementName } from "./spec";
@@ -20,7 +21,6 @@ import {
   cardLabel,
   cardsInPart,
   narrateCard,
-  partRefs,
   partStatusAt,
 } from "./whereabouts";
 
@@ -73,7 +73,7 @@ export function FlowPlayer({
   const root = useRef<HTMLDivElement>(null);
 
   const inspected = diagram.parts.find(
-    (p) => p.id === (hovered ?? pinned) && p.presence !== "absent"
+    (p) => p.id === (pinned ?? hovered) && p.presence !== "absent"
   );
 
   const interaction = useMemo<DiagramInteraction>(
@@ -219,6 +219,26 @@ export function FlowPlayer({
               </span>
             </div>
           )}
+          <AttachmentPanel
+            attachments={flow.attachments}
+            label="Flow evidence"
+          />
+          {diagram.rails
+            .filter(
+              (rail) =>
+                rail.presence !== "absent" && rail.attachments.length > 0
+            )
+            .map((rail) => (
+              <details key={rail.id} className={panel}>
+                <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+                  Rail: {rail.label ?? rail.id}
+                </summary>
+                <AttachmentPanel
+                  attachments={rail.attachments}
+                  label={`Rail ${rail.label ?? rail.id} evidence`}
+                />
+              </details>
+            ))}
           {(inspected || followed) && (
             <div className="grid gap-2 sm:grid-cols-2">
               {inspected && (
@@ -248,6 +268,9 @@ export function FlowPlayer({
       </div>
       <div className="sr-only" aria-live="polite" data-testid="flow-announcer">
         {announcement}
+        {inspected
+          ? ` Inspecting ${inspected.identity.name}; ${inspected.attachments.length} evidence items.`
+          : ""}
       </div>
     </div>
   );
@@ -323,6 +346,12 @@ function Chapters({
                   {b.caption}
                 </span>
               </button>
+              {current && (
+                <AttachmentPanel
+                  attachments={b.attachments}
+                  label={`Beat ${i + 1} evidence`}
+                />
+              )}
             </li>
           );
         })}
@@ -552,7 +581,6 @@ function PartInspector({
 }) {
   const part = diagram.parts.find((p) => p.id === partId)!;
   const status = partStatusAt(part, t, reducedMotion);
-  const refs = partRefs(part);
   const inside = cardsInPart(part, t);
   return (
     <section
@@ -604,27 +632,7 @@ function PartInspector({
           ))}
         </div>
       )}
-      {refs.length > 0 && (
-        <ul className="mt-1.5 flex flex-col gap-1" aria-label="Source refs">
-          {refs.map((r, i) => (
-            <li key={i} className="min-w-0" data-ref-path={r.path}>
-              <div className="flex items-baseline gap-1.5">
-                <code className="truncate font-mono text-fg">{r.location}</code>
-                <span
-                  className={
-                    r.status === "verified"
-                      ? "text-[var(--color-ok)]"
-                      : "text-fg-mute"
-                  }
-                >
-                  {r.status}
-                </span>
-              </div>
-              {r.claim && <div className="text-fg-mute">{r.claim}</div>}
-            </li>
-          ))}
-        </ul>
-      )}
+      <AttachmentPanel attachments={part.attachments} />
     </section>
   );
 }
@@ -667,6 +675,7 @@ function CardInspector({
           Stop following
         </Button>
       </div>
+      <AttachmentPanel attachments={card?.attachments ?? []} />
       {payload ? (
         <dl
           className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5"
