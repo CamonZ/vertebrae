@@ -25,6 +25,8 @@ export {
   type BBox,
 } from "./ChangeMark";
 export * from "./MachinePart";
+export { RailCards, type RailCardsProps } from "./RailCards";
+export * from "./flow";
 export { MachineDiagram, type MachineDiagramProps } from "./MachineDiagram";
 export {
   MachineDiagramViewport,

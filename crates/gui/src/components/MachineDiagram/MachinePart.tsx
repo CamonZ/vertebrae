@@ -35,6 +35,8 @@ export type PartView =
 
 export interface MachinePartProps {
   part: PartIdentity;
+  /** Stable id from a flow spec (`data-part-id`), so cards and evidence can find the part. */
+  id?: string;
   /** Frame bounding box in part space (where change marks and the ghost sit). */
   bb: BBox;
   timeline: Timeline;
@@ -77,6 +79,7 @@ export interface MachinePartProps {
  */
 export function MachinePart({
   part,
+  id,
   bb,
   timeline,
   t,
@@ -131,6 +134,7 @@ export function MachinePart({
         role="img"
         aria-label={label}
         data-part={part.name}
+        data-part-id={id}
         data-pose={effective}
         transform={transform}
       >

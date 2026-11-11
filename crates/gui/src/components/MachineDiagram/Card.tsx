@@ -35,7 +35,7 @@ function Shape({
 export function Card({ frame: c }: { frame: CardFrame }) {
   const fill = roleColor(c.role);
   return (
-    <g className="md-card" data-card={c.index}>
+    <g className="md-card" data-card={c.index} data-card-id={c.id}>
       {c.ghosts.map((g, i) => (
         <Shape
           key={i}
