@@ -466,6 +466,19 @@ export function routeLocalChatSessionEndEvent(
     store.interruptStreamingAssistant,
     store.completeAssistantMessage
   );
+  if (!store.sessions[sessionId]?.discussion)
+    store.addMessage(sessionId, {
+      kind: "session_end",
+      timestamp: new Date().toISOString(),
+      durationMs: payload.duration_ms,
+      costUsd: payload.cost_usd,
+      numTurns: payload.num_turns,
+      successful:
+        !wasStopping &&
+        !payload.is_error &&
+        (!payload.completion_status ||
+          payload.completion_status === "completed"),
+    });
   // A stop that interrupted the turn without closing the process ends here;
   // a closing stop settles the lifecycle when the close returns.
   if (wasStopping && !closing) store.setSessionLifecycle(sessionId, "idle");

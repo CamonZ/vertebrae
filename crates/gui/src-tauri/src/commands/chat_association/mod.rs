@@ -76,6 +76,8 @@ pub struct AssociationResult {
     pub worktrees: Vec<AssociationWorktree>,
     /// The user asked to create a worktree; a later tool event will reveal it.
     pub create_worktree: bool,
+    /// Creation intent only; a correlated successful command must confirm the ticket.
+    pub create_ticket: bool,
     /// Set when the decision could not run or an explicit reference did not
     /// resolve; nothing is guessed and the rest of the result still applies.
     pub diagnostic: Option<String>,
@@ -134,6 +136,7 @@ async fn resolve(
         worktree: None,
         worktrees: vec![],
         create_worktree: false,
+        create_ticket: false,
         diagnostic: None,
     };
 
@@ -202,6 +205,7 @@ async fn resolve(
             result.selection = decision.selection;
             result.worktree = decision.worktree;
             result.create_worktree = decision.create_worktree;
+            result.create_ticket = decision.create_ticket;
         }
         Err(error) => result.diagnostic = Some(inference::diagnostic(&error)),
     }

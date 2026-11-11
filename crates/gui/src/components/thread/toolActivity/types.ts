@@ -3,6 +3,8 @@ export interface ActivityInput {
   input: Record<string, unknown>;
 }
 export interface Operation {
+  /** Literal syntax only. Execution/success must be established separately. */
+  literalCommand?: { name: string; args: string[] };
   source: string;
   activities: string[];
   targets?: string[];

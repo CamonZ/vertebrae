@@ -25,9 +25,10 @@ in headers only when more than one chat pane is visible.
 - Without an explicit ID and with no existing entity, descriptive selection
   chooses an eligible cached epic, ticket or task, or "unknown". Choice criteria
   include each entity's level and title. Judgment state includes the current and
-  explicitly named entities' IDs, titles and levels. Assistant text and tool
-  output never select entities.
-- Known associations change only on explicit ID references with selection intent.
+  explicitly named entities' IDs, titles and levels. Assistant text never selects entities. Tool output can select a newly created
+  ticket only through the confirmed creation path described below.
+- Known associations change on explicit ID references with selection intent or
+  a confirmed ticket creation request.
   Manual correction resolves an exact full/short ID in the conversation project
   without a model call; blank clears it. A correction retires older pending
   decisions. Rebinding across levels clears the previous worktree and pending
@@ -57,12 +58,48 @@ in headers only when more than one chat pane is visible.
   fallback model.
 
 
+## Newly created tickets
+
+Every root user message is classified separately for explicit ticket creation
+intent, even when the chat already has an entity and worktree. Questions about
+how to create tickets, quoted examples, negation and hypothetical requests are
+negative cases. A positive intent suppresses existing-entity selection; it only
+stores a pending originating user-event marker and project generation.
+
+At successful root turn completion, the driver inspects at most 128 subsequent
+messages from that turn. It uses literal syntax from the existing parser worker,
+not inferred activity labels. Supported commands are one unconditional `vtb add`
+invocation per call, with `--json` and explicit `-l ticket`, `--level ticket` or
+`--level=ticket`. Direct Bash/exec_command/shell_command calls, literal shell
+`-c` wrappers and single literal `tools.exec_command` calls in functions.exec are
+supported. Compound, deferred, dynamic, piped and redirected invocations are
+unsupported. Command inputs and results are each limited to 32,000 characters.
+
+Root results must match the tool-call ID. Supported output is the complete CLI
+JSON object `{command: "add", status: "created", task_id: "<UUID>"}` or a completed
+exec_command JSON envelope with `exit_code: 0`, no live `session_id`, and that
+object as its `output` string. Human-readable CLI output and other wrapper output
+formats are unsupported and leave the association unchanged with a diagnostic.
+The returned UUID is resolved through the existing project-scoped eligible-entity
+lookup and must identify a ticket. Assistant claims and arbitrary IDs cannot bind.
+
+The turn must confirm exactly one supported creation. Multiple creations,
+failed/cancelled turns or commands, missing/malformed results, child-thread
+results and unsupported evidence leave the association unchanged with a diagnostic.
+Repeated delivery of the same tool identity uses its latest input/result; the
+persisted event cursor makes replay idempotent. Pending intent is retired by a
+newer user message, manual correction or project-generation change. Existing
+saved records without pending intent or terminal success metadata remain valid;
+legacy terminal records cannot confirm a new ticket. Live and provider-replay
+transcripts preserve normalized successful turn completion for this check.
+
+
 ## Limits
 
 Per session the record keeps the entity, worktree, pending-creation snapshot,
 recent worktrees and the last processed event. One request runs at a time; its
 result is dropped if the session changes or a newer user message arrives. Once
-both are known only explicit user references can rebind them.
+both are known, explicit user references and confirmed ticket creations can rebind them.
 
 Existing records retain the legacy `ticketId` and `ticketTitle` keys; these now
 hold the selected entity at any level. New associations also persist

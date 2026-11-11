@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   commands,
   type AssociationResult,
@@ -7,6 +7,8 @@ import {
 import { useChatStore, type ChatMessage } from "../stores/chatStore";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { cachedAssociationCandidates } from "../utils/chatAssociation/candidates";
+
+import { creationEvidence } from "../utils/chatAssociation/creation";
 
 type Worktree = { path: string; branch: string | null };
 
@@ -25,6 +27,7 @@ export type AssociationRecord = {
   lastProcessedAt: string | null;
   processedAtCount: number;
   awaitingWorktree: string[] | null;
+  awaitingTicket?: { timestamp: string; n: number; generation: number } | null;
   recentWorktrees: Worktree[];
 };
 
@@ -72,11 +75,23 @@ export function readRecord(value: unknown): AssociationRecord {
       !["epic", "ticket", "task"].includes(String(v.entityLevel)))
   )
     return EMPTY;
+  if (v.awaitingTicket != null) {
+    const pending = v.awaitingTicket as Record<string, unknown>;
+    if (
+      typeof pending !== "object" ||
+      typeof pending.timestamp !== "string" ||
+      !Number.isSafeInteger(pending.generation) ||
+      !Number.isSafeInteger(pending.n) ||
+      Number(pending.n) < 0
+    )
+      return EMPTY;
+  }
   return v as AssociationRecord;
 }
 
 type Event = {
-  kind: "user" | "tool";
+  kind: "user" | "tool" | "end";
+  messageIndex: number;
   text: string;
   timestamp: string;
   n: number;
@@ -84,9 +99,9 @@ type Event = {
 
 function associationEvents(messages: readonly ChatMessage[]): Event[] {
   const events: Event[] = [];
-  for (const m of messages) {
+  for (const [messageIndex, m] of messages.entries()) {
     if ("parentToolUseId" in m && m.parentToolUseId) continue;
-    // Assistant text never selects entities; tool output only identifies worktrees.
+    // Assistant text never selects entities; tool output requires correlated creation evidence to select a ticket.
     const text =
       m.kind === "user"
         ? m.text
@@ -94,11 +109,15 @@ function associationEvents(messages: readonly ChatMessage[]): Event[] {
           ? m.input
           : m.kind === "tool_result" && !m.isError
             ? m.result
-            : null;
+            : m.kind === "session_end"
+              ? ""
+              : null;
     if (text === null) continue;
     const previous = events[events.length - 1];
     events.push({
-      kind: m.kind === "user" ? "user" : "tool",
+      kind:
+        m.kind === "user" ? "user" : m.kind === "session_end" ? "end" : "tool",
+      messageIndex,
       text: text.slice(0, 12_000),
       timestamp: m.timestamp,
       n: previous?.timestamp === m.timestamp ? previous.n + 1 : 0,
@@ -185,8 +204,8 @@ const setDiagnostic = (sessionId: string, diagnostic: string | null) =>
  * User messages may select an entity (discussing, implementing or tying it by
  * name or ID), tie an existing project worktree, or request a new worktree,
  * which does not exist yet, so later tool events reveal it as a new Git
- * worktree. Once both are known, tool events are skipped and only explicit
- * references in user messages can rebind. A failed or unresolved decision
+ * worktree. Once both are known, tool events are skipped; pending ticket creation is
+ * checked separately at turn completion. A failed or unresolved decision
  * keeps the record with a diagnostic so later events still progress; the next
  * user message is the retry. Mounted once per live or open session by the
  * global driver, so association keeps progressing without a chat window;
@@ -206,8 +225,11 @@ export function useChatAssociationDriver(sessionId: string) {
   const record = readRecord(stored);
   const [tick, setTick] = useState(0);
 
-  const save = (next: AssociationRecord) =>
-    useChatStore.getState().setSessionAssociation(sessionId, next);
+  const save = useCallback(
+    (next: AssociationRecord) =>
+      useChatStore.getState().setSessionAssociation(sessionId, next),
+    [sessionId]
+  );
 
   useEffect(
     () => () => {
@@ -230,10 +252,13 @@ export function useChatAssociationDriver(sessionId: string) {
       next.processedAtCount = last.n + 1;
       save(next);
     };
-    // Once the worktree is known only a user message can still change the
-    // record; skip everything before the next event that can.
+    // A known worktree needs only user decisions or a pending creation at turn
+    // completion; skip everything before the next event that can change it.
     const needed = pending.findIndex(
-      (e) => e.kind === "user" || !record.worktreePath
+      (e) =>
+        e.kind === "user" ||
+        (e.kind === "tool" && !record.worktreePath) ||
+        (e.kind === "end" && !!record.awaitingTicket)
     );
     if (needed !== 0) {
       const last = pending[(needed < 0 ? pending.length : needed) - 1];
@@ -246,7 +271,7 @@ export function useChatAssociationDriver(sessionId: string) {
     const mine = {};
     inflight.set(sessionId, mine);
     const lastUser = (list: readonly ChatMessage[] | undefined) =>
-      list?.filter((m) => m.kind === "user").pop()?.timestamp;
+      list?.filter((m) => m.kind === "user").pop();
     const userAtStart = lastUser(messages);
 
     void (async () => {
@@ -268,28 +293,82 @@ export function useChatAssociationDriver(sessionId: string) {
       const candidates: AssociationEntity[] =
         event.kind === "user" ? cachedAssociationCandidates(generation) : [];
       try {
-        const response = await commands.resolveChatAssociation({
-          attempt_id: attempt,
-          project_root: root,
-          event_kind: event.kind,
-          text: event.text,
-          candidates,
-          candidate_project_root:
-            event.kind === "user" ? await cacheRoot(generation) : null,
-          entity: record.ticketId
-            ? {
-                id: record.ticketId,
-                title: record.ticketTitle ?? "",
-                level: record.entityLevel ?? "ticket",
-              }
-            : null,
-          worktree_path: record.worktreePath,
-        });
+        if (event.kind === "end") {
+          result = {
+            selection: { kind: "keep" },
+            worktree: null,
+            worktrees: [],
+            create_worktree: false,
+            create_ticket: false,
+            diagnostic: null,
+          };
+          const origin = associationEvents(messages).find(
+            (e) =>
+              e.kind === "user" &&
+              e.timestamp === record.awaitingTicket?.timestamp &&
+              e.n === record.awaitingTicket.n
+          );
+          const end = messages[event.messageIndex];
+          if (record.awaitingTicket?.generation !== generation)
+            diagnostic =
+              "Ticket creation detection retired after the project changed.";
+          else if (end.kind !== "session_end" || end.successful !== true)
+            diagnostic =
+              "Ticket creation was not confirmed by a successful turn completion.";
+          else if (
+            origin &&
+            !messages
+              .slice(origin.messageIndex + 1)
+              .some((m) => m.kind === "user")
+          ) {
+            const turnMessages = messages.slice(
+              origin.messageIndex + 1,
+              event.messageIndex
+            );
+            const evidence = await creationEvidence(turnMessages);
 
-        if (response.status === "error") failure = response.error.message;
-        else {
-          result = response.data;
-          diagnostic = result.diagnostic;
+            diagnostic = evidence.diagnostic;
+
+            if (evidence.id) {
+              const entity = await commands.resolveChatAssociationEntity(
+                root,
+                evidence.id
+              );
+
+              if (entity.status === "error") failure = entity.error.message;
+              else if (
+                entity.data.id.toLowerCase() !== evidence.id ||
+                entity.data.level !== "ticket"
+              )
+                diagnostic =
+                  "The created ID is not an eligible ticket in this project.";
+              else result.selection = { kind: "entity", ...entity.data };
+            }
+          }
+        } else {
+          const response = await commands.resolveChatAssociation({
+            attempt_id: attempt,
+            project_root: root,
+            event_kind: event.kind,
+            text: event.text,
+            candidates,
+            candidate_project_root:
+              event.kind === "user" ? await cacheRoot(generation) : null,
+            entity: record.ticketId
+              ? {
+                  id: record.ticketId,
+                  title: record.ticketTitle ?? "",
+                  level: record.entityLevel ?? "ticket",
+                }
+              : null,
+            worktree_path: record.worktreePath,
+          });
+
+          if (response.status === "error") failure = response.error.message;
+          else {
+            result = response.data;
+            diagnostic = result.diagnostic;
+          }
         }
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
@@ -302,6 +381,7 @@ export function useChatAssociationDriver(sessionId: string) {
         inflight.get(sessionId) !== mine ||
         generation !== getProjectScopeGeneration() ||
         live?.projectPath !== root ||
+        live?.association !== stored ||
         lastUser(live?.messages) !== userAtStart
       ) {
         trace("stale_response");
@@ -312,11 +392,19 @@ export function useChatAssociationDriver(sessionId: string) {
       inflight.delete(sessionId);
       setDiagnostic(sessionId, failure ?? diagnostic);
       const next = { ...readRecord(live?.association) };
+      if (event.kind === "end" || event.kind === "user")
+        next.awaitingTicket = null;
       if (failure || !result) {
         // Skipped: a recurring failure must not stall later events.
-      } else if (event.kind === "user") {
+      } else if (event.kind === "user" || event.kind === "end") {
+        if (event.kind === "user" && result.create_ticket)
+          next.awaitingTicket = {
+            timestamp: event.timestamp,
+            n: event.n,
+            generation,
+          };
         const { selection } = result;
-        if (selection.kind === "entity") {
+        if (selection.kind === "entity" && !result.create_ticket) {
           // Replacing an entity never keeps its worktree or pending creation.
           if (next.ticketId && next.ticketId !== selection.id) {
             Object.assign(next, {
@@ -331,8 +419,13 @@ export function useChatAssociationDriver(sessionId: string) {
             entityLevel: selection.level,
           });
 
-          if (!next.worktreePath)
-            attach(next, worktreeFor(selection.id, next.recentWorktrees));
+          if (!next.worktreePath) {
+            const matchingWorktree = worktreeFor(
+              selection.id,
+              next.recentWorktrees
+            );
+            attach(next, matchingWorktree);
+          }
         }
         // An explicitly tied worktree never changes the entity.
         attach(next, result.worktree ?? undefined);
@@ -350,12 +443,13 @@ export function useChatAssociationDriver(sessionId: string) {
         const created = awaiting
           ? touched.filter((w) => !awaiting.includes(w.path))
           : [];
-        attach(
-          next,
+        const candidateWorktrees = awaiting ? created : touched;
+        const matchingWorktree =
           created.length === 1
             ? created[0]
-            : worktreeFor(next.ticketId, awaiting ? created : touched)
-        );
+            : worktreeFor(next.ticketId, candidateWorktrees);
+
+        attach(next, matchingWorktree);
       }
       trace(
         failure
@@ -374,7 +468,7 @@ export function useChatAssociationDriver(sessionId: string) {
       );
       processed(next, event);
     })();
-  }, [messages, root, replayLoading, record, tick, sessionId]);
+  }, [messages, root, replayLoading, record, tick, sessionId, save, stored]);
 
   const worktreePath = record.worktreePath;
   const intendedBranch = record.branch;
@@ -466,6 +560,7 @@ export async function correctChatAssociation(sessionId: string, input: string) {
       worktreePath: null,
       branch: null,
       awaitingWorktree: null,
+      awaitingTicket: null,
     };
 
     // Manual intent supersedes earlier user messages, including any inference
@@ -475,7 +570,9 @@ export async function correctChatAssociation(sessionId: string, input: string) {
       next.processedAtCount = correctedThrough.n + 1;
     }
 
-    attach(next, worktreeFor(next.ticketId, next.recentWorktrees));
+    const matchingWorktree = worktreeFor(next.ticketId, next.recentWorktrees);
+    attach(next, matchingWorktree);
+
     setDiagnostic(sessionId, null);
     useChatStore.getState().setSessionAssociation(sessionId, next);
   } finally {

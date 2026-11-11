@@ -34,6 +34,12 @@ const SELECT_ENTITY: Intent = Intent {
     ),
 };
 
+const CREATE_TICKET: Intent = Intent {
+    instructions: "Does `message` explicitly ask the agent to create a new ticket now?",
+    yes: "The user requests creation of a new ticket, including when this chat already has an entity or worktree.",
+    no: "Discussing or selecting an existing entity, asking how to create tickets, quoted examples, negation, and hypothetical requests are not creation requests.",
+};
+
 const CREATE_WORKTREE: Intent = Intent {
     instructions: "Does `message` ask to create a new worktree?",
     yes: "`message` asks to create a new worktree, for an entity or otherwise.",
@@ -86,6 +92,7 @@ pub(super) struct Decision {
     /// An existing worktree the user explicitly tied to the conversation.
     pub worktree: Option<AssociationWorktree>,
     pub create_worktree: bool,
+    pub create_ticket: bool,
     /// An unresolved or ambiguous explicit reference; nothing was guessed.
     pub diagnostic: Option<String>,
 }
@@ -104,7 +111,7 @@ impl EventSink for DiscardEvents {
 /// message about a worktree. Empty means the message cannot change anything.
 pub(super) fn questions(message: &str, state: State<'_>) -> BTreeMap<&'static str, Intent> {
     let names_entity = !references::entity_tokens(message).is_empty();
-    let mut questions = BTreeMap::new();
+    let mut questions = BTreeMap::from([("create_ticket", CREATE_TICKET)]);
     if state.current_entity.is_none() || names_entity {
         questions.insert("select_entity", SELECT_ENTITY);
     }
@@ -157,6 +164,7 @@ async fn decide_inner(
         selection: AssociationSelection::Keep,
         worktree: None,
         create_worktree: false,
+        create_ticket: false,
         diagnostic: None,
     };
 
@@ -219,6 +227,7 @@ async fn decide_inner(
 
     let asked = |name: &str| intents.get(name) == Some(&true);
     decision.create_worktree = asked("create_worktree");
+    decision.create_ticket = asked("create_ticket");
 
     log::info!(target: "chat_association", "attempt={} phase=intent select_entity={} create_worktree={} select_worktree={} candidates={}",
         attempt, asked("select_entity"), decision.create_worktree, asked("select_worktree"), scope.candidates.len());
@@ -237,7 +246,7 @@ async fn decide_inner(
         }
     }
 
-    if asked("select_entity") || decision.create_worktree {
+    if !decision.create_ticket && (asked("select_entity") || decision.create_worktree) {
         match named {
             Named::One(entity) => {
                 decision.selection = AssociationSelection::Entity {
@@ -491,7 +500,7 @@ mod tests {
         };
 
         let noul = |p: f64| json!({ "type": "noul", "noul": p });
-        let mut answers = serde_json::Map::new();
+        let mut answers = serde_json::Map::from_iter([("create_ticket".into(), noul(0.1))]);
         for (name, p) in intents.as_object().unwrap() {
             answers.insert(name.clone(), noul(p.as_f64().unwrap()));
         }
@@ -564,8 +573,8 @@ mod tests {
 
         let noul = |p| json!({ "type": "noul", "noul": p });
         for (template, candidates, expected) in [
-            (ResponseTemplate::new(200).set_body_json(json!({ "model": "jev-1.14.0", "answers": {"select_entity": noul(0.9), "create_worktree": noul(0.1)}, "usage": {"input_tokens": 1, "output_tokens": 1} })), entities(), "entity"),
-            (ResponseTemplate::new(200).set_body_json(json!({ "model": "jev-1.14.0", "answers": {"select_entity": noul(0.9), "create_worktree": noul(0.1)}, "usage": {"input_tokens": 1, "output_tokens": 1} })), vec![], "keep"),
+            (ResponseTemplate::new(200).set_body_json(json!({ "model": "jev-1.14.0", "answers": {"create_ticket": noul(0.1), "select_entity": noul(0.9), "create_worktree": noul(0.1)}, "usage": {"input_tokens": 1, "output_tokens": 1} })), entities(), "entity"),
+            (ResponseTemplate::new(200).set_body_json(json!({ "model": "jev-1.14.0", "answers": {"create_ticket": noul(0.1), "select_entity": noul(0.9), "create_worktree": noul(0.1)}, "usage": {"input_tokens": 1, "output_tokens": 1} })), vec![], "keep"),
             (ResponseTemplate::new(503).set_body_string("secret-response"), entities(), "error"),
             (ResponseTemplate::new(200).set_body_string("secret-malformed-json"), entities(), "error"),
             (ResponseTemplate::new(200).set_body_json(json!({"model": "jev-1.14.0", "answers": {}, "usage": {"input_tokens": 1, "output_tokens": 1}})), entities(), "error"),
@@ -625,6 +634,52 @@ mod tests {
             diagnostic(&error),
             "The decision provider failed or returned an invalid response."
         );
+    }
+
+    #[tokio::test]
+    async fn creation_intent_never_selects_a_cached_entity_even_when_already_bound() {
+        for state in [
+            State::default(),
+            State {
+                current_entity: Some(&CURRENT),
+                worktree_path: Some("/p"),
+            },
+        ] {
+            let (decision, requests) = run(
+                "Create a new ticket for retry status",
+                state,
+                if state.current_entity.is_some() {
+                    json!({"create_ticket": 0.9})
+                } else {
+                    json!({"create_ticket": 0.9, "select_entity": 0.9, "create_worktree": 0.1})
+                },
+                None,
+            )
+            .await;
+            assert!(decision.create_ticket);
+            assert_eq!(decision.selection, AssociationSelection::Keep);
+            assert_eq!(requests.len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn non_creation_answers_do_not_arm_creation() {
+        for message in [
+            "Discuss the existing ticket",
+            "How do I create a ticket?",
+            "Example: create a ticket",
+            "Do not create a ticket",
+            "If we created a ticket, what would happen?",
+        ] {
+            let (decision, _) = run(
+                message,
+                State::default(),
+                json!({"create_ticket": 0.1, "select_entity": 0.1, "create_worktree": 0.1}),
+                None,
+            )
+            .await;
+            assert!(!decision.create_ticket);
+        }
     }
 
     #[tokio::test]
@@ -706,7 +761,7 @@ mod tests {
 
         assert_eq!(
             asked.keys().collect::<Vec<_>>(),
-            ["create_worktree", "select_worktree"]
+            ["create_ticket", "create_worktree", "select_worktree"]
         );
 
         assert_eq!(requests[0]["state"]["current_entity"], json!(*CURRENT));
@@ -756,7 +811,13 @@ mod tests {
             worktree_path: Some("/p"),
         };
 
-        assert!(questions("what does this function do?", state).is_empty());
+        assert_eq!(
+            questions("what does this function do?", state)
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            ["create_ticket"]
+        );
         let message = format!("Let’s tie this conversation with the following entity {UNCACHED}");
         let (decision, requests) = run(
             &message,

@@ -1613,6 +1613,10 @@ worktrees: AssociationWorktree[];
  */
 create_worktree: boolean;
 /**
+ * Creation intent only; a correlated successful command must confirm the ticket.
+ */
+create_ticket: boolean;
+/**
  * Set when the decision could not run or an explicit reference did not
  * resolve; nothing is guessed and the rest of the result still applies.
  */

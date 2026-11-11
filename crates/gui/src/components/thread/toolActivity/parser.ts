@@ -188,6 +188,7 @@ export function analyzeActivity(
         const rel = relationships(n, inherited);
         const start = operations.length;
         let wrapper = false;
+        let literalCommand: Operation["literalCommand"];
         try {
           let deferred = false;
           for (let p = n.parent; p; p = p.parent) {
@@ -216,6 +217,12 @@ export function analyzeActivity(
             (c) => c.id !== nameNode?.id && c.type !== "variable_assignment"
           );
           const args = nodes.map(shellLiteral);
+          if (
+            args.every((a): a is string => a !== undefined) &&
+            n.parent?.type === "program" &&
+            !children(n).some((c) => c.type === "variable_assignment")
+          )
+            literalCommand = { name, args };
           const words = args.filter((a): a is string => a !== undefined);
           const shellWrapper = ["sh", "bash", "zsh"].includes(
             name.split("/").slice(-1)[0]
@@ -311,6 +318,7 @@ export function analyzeActivity(
                   n.parent?.type === "redirected_statement"
                     ? n.parent.text
                     : n.text,
+                ...(literalCommand ? { literalCommand } : {}),
                 activities: [
                   ...new Set(evidence.flatMap((op) => op.activities)),
                 ],
