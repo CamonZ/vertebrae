@@ -67,7 +67,9 @@ function beatStart(tl: Timeline, i: number): number {
   return beats[Math.max(0, Math.min(beats.length - 1, i))].t;
 }
 
-const wrap = (t: number, period: number) => ((t % period) + period) % period;
+/** `t` folded into [0, period); left exact when already inside, as `%` rounds. */
+const wrap = (t: number, period: number) =>
+  t >= 0 && t < period ? t : ((t % period) + period) % period;
 
 /** Where a single play-through stops: the last beat's (or note's) outcome. */
 export function playEnd(tl: Timeline): number {

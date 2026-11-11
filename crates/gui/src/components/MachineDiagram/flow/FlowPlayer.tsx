@@ -286,7 +286,6 @@ function Chapters({
   clock: FlowClock;
 }) {
   const beats = diagram.beats;
-  const period = diagram.travel.period;
   const list = useRef<HTMLOListElement>(null);
 
   // Keep the current beat in view inside the list, without scrolling the page.
@@ -310,11 +309,14 @@ function Chapters({
         data-testid="flow-chapters"
       >
         {beats.map((b, i) => {
-          const end = i + 1 < beats.length ? beats[i + 1].t : period;
-          const span = Math.max(0.1, end - b.t);
+          // Progress runs from the beat's start to its outcome, so a beat
+          // resting on its outcome (always, under reduced motion) reads full.
+          const span = beatOutcome(diagram.travel, i) - b.t;
           const current = i === clock.beat;
           const progress = current
-            ? Math.max(0, Math.min(1, (clock.t - b.t) / span))
+            ? span > 0
+              ? Math.max(0, Math.min(1, (clock.t - b.t) / span))
+              : 1
             : i < clock.beat
               ? 1
               : 0;
@@ -337,6 +339,7 @@ function Chapters({
                 <span
                   className="absolute inset-y-0 left-0 w-0.5 origin-top bg-[var(--color-accent)]"
                   style={{ transform: `scaleY(${progress})` }}
+                  data-testid="flow-beat-progress"
                   aria-hidden
                 />
                 <span className="w-4 shrink-0 text-right font-mono text-fg-mute">

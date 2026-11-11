@@ -78,6 +78,9 @@ const loopGap = (a: number, b: number, period: number) => {
   return Math.min(d, period - d);
 };
 
+/** Runs of `playThrough` that reached a beat's stop / the play-once end. */
+const stopsReached = { beat: 0, end: 0 };
+
 interface Machine {
   tl: Timeline;
   s: ClockState;
@@ -245,6 +248,45 @@ const clockMachine: hegel.stateful.StateMachine<Machine> = {
       }
       m.s = next;
     },
+    playThrough(tc, m) {
+      // Single ticks rarely carry a beat to its stop; tick until playback
+      // stops on its own (a beat's outcome, or the end when playing once).
+      tc.assume(m.s.playing && (m.s.until !== null || !m.s.loop));
+      const beatStop = m.s.until;
+      const target = beatStop ?? playEnd(m.tl);
+      const dt = tc.draw(gs.floats({ minValue: 0.01, maxValue: MAX_FRAME_DT }));
+      const limit = Math.ceil(m.tl.period / (dt * m.s.speed)) + 2;
+      let s = m.s;
+      let ticks = 0;
+      while (s.playing && ticks < limit) {
+        const next = clockStep(m.tl, s, { type: "tick", dt }, m.reduced);
+        if (beatStop !== null) {
+          check(
+            next.raw >= s.raw && next.raw <= beatStop,
+            `playing a beat moved ${s.raw} → ${next.raw}, stop ${beatStop}`
+          );
+          check(
+            shownBeat(m.tl, next, m.reduced) ===
+              shownBeat(m.tl, m.s, m.reduced),
+            "playing a beat drew another beat"
+          );
+        }
+        s = next;
+        ticks++;
+      }
+      check(!s.playing, `still playing after ${ticks} ticks`);
+      check(
+        s.raw === target && s.until === null,
+        `stopped at ${s.raw} (until ${s.until}), not ${target}`
+      );
+      check(
+        shownTime(m.tl, s, m.reduced) === target,
+        `drew ${shownTime(m.tl, s, m.reduced)} at the stop, not ${target}`
+      );
+      if (beatStop !== null) stopsReached.beat++;
+      else stopsReached.end++;
+      m.s = s;
+    },
     speed(tc, m) {
       const speed = tc.draw(gs.sampledFrom(SPEEDS));
       const before = shown(m);
@@ -317,8 +359,10 @@ const clockMachine: hegel.stateful.StateMachine<Machine> = {
   },
 };
 
-test("the clock obeys the player's rules under any sequence of actions", () =>
-  hegel.test(
+test("the clock obeys the player's rules under any sequence of actions", async () => {
+  stopsReached.beat = 0;
+  stopsReached.end = 0;
+  await hegel.test(
     (tc) => {
       const tl = tc.draw(timeline);
       const reduced = tc.draw(gs.booleans());
@@ -332,7 +376,11 @@ test("the clock obeys the player's rules under any sequence of actions", () =>
       hegel.stateful.run(tc, clockMachine, { tl, s, reduced });
     },
     { testCases: 300 }
-  ));
+  );
+  // The runs carried playback all the way to both kinds of stop.
+  check(stopsReached.beat > 0, "no run played a beat through to its stop");
+  check(stopsReached.end > 0, "no run played once through to the end");
+});
 
 test("ticks at 2× cover the same ground as two ticks at 1×", () =>
   hegel.test((tc) => {
