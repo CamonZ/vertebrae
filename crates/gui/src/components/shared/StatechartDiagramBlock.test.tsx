@@ -240,3 +240,47 @@ it("resets a saved link when the conversation ticket changes", async () => {
     "a001bc77-964a-4106-9ced-3ee95b5b77f7"
   );
 });
+
+it("supports canvas zoom gestures through the chat renderer", async () => {
+  const source = fence();
+
+  render(<MarkdownContent text={source} />);
+
+  const diagram = await screen.findByTestId("native-statechart-svg");
+  const canvas = screen.getByLabelText("Scrollable statechart canvas");
+  const widthAttribute = diagram.getAttribute("width");
+  const width = Number(widthAttribute);
+
+  fireEvent.wheel(canvas, {
+    ctrlKey: true,
+    deltaY: -100,
+    clientX: 100,
+    clientY: 100,
+  });
+
+  const zoomedWidthAttribute = diagram.getAttribute("width");
+  const zoomedWidth = Number(zoomedWidthAttribute);
+
+  expect(zoomedWidth).toBeGreaterThan(width);
+
+  const zoomPercentage = screen.getByText("122%");
+
+  expect(zoomPercentage).toBeInTheDocument();
+
+  const zoomed = diagram.getAttribute("width");
+
+  fireEvent.wheel(canvas, { deltaY: 100 });
+
+  const widthAfterScroll = diagram.getAttribute("width");
+
+  expect(widthAfterScroll).toBe(zoomed);
+
+  const resetButton = screen.getByRole("button", { name: "Reset zoom" });
+
+  fireEvent.click(resetButton);
+
+  const resetWidthAttribute = diagram.getAttribute("width");
+  const resetWidth = Number(resetWidthAttribute);
+
+  expect(resetWidth).toBe(width);
+});

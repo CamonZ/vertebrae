@@ -126,3 +126,53 @@ it("keeps event colors and matching arrowheads when selecting states, with an op
   expect(distinctSingleColors.size).toBe(1);
   expect(screen.queryByLabelText("Transition color legend")).toBeNull();
 });
+
+it("fits a gesture-zoomed chart and retains keyboard resizing", async () => {
+  render(<StatechartPreview body={body} />);
+
+  const diagram = await screen.findByTestId("native-statechart-svg");
+  const canvas = screen.getByLabelText("Scrollable statechart canvas");
+  Object.defineProperties(canvas, {
+    clientWidth: { value: 800 },
+    clientHeight: { value: 500 },
+  });
+
+  fireEvent.wheel(canvas, {
+    ctrlKey: true,
+    deltaY: -100,
+    clientX: 300,
+    clientY: 200,
+  });
+
+  expect(diagram.style.transform).not.toBe("translate(0px, 0px)");
+
+  const fitButton = screen.getByRole("button", { name: "Fit statechart" });
+
+  fireEvent.click(fitButton);
+
+  expect(diagram.style.transform).toBe("translate(0px, 0px)");
+
+  const fittedWidthAttribute = diagram.getAttribute("width");
+  const fittedWidth = Number(fittedWidthAttribute);
+
+  expect(fittedWidth).toBeLessThanOrEqual(784);
+
+  const fittedHeightAttribute = diagram.getAttribute("height");
+  const fittedHeight = Number(fittedHeightAttribute);
+
+  expect(fittedHeight).toBeLessThanOrEqual(484);
+
+  const viewer = screen.getByTestId("statechart-viewer");
+  // jsdom supplies no layout; the resize handler uses the element's bounds.
+  Object.defineProperty(viewer, "getBoundingClientRect", {
+    value: () => ({ height: 640 }),
+  });
+
+  const resizeHandle = screen.getByRole("separator", {
+    name: "Resize statechart",
+  });
+
+  fireEvent.keyDown(resizeHandle, { key: "ArrowDown" });
+
+  expect(viewer).toHaveStyle({ height: "664px" });
+});

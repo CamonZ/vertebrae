@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { InlineResizeHandle } from "../shared/InlineResizeHandle";
 import type { Statechart } from "./statechart";
+import { useStatechartZoom } from "./useStatechartZoom";
 import { useStatechartViewport } from "./useStatechartViewport";
 import {
   layoutStatechart,
@@ -28,9 +29,11 @@ const ARROW_COLORS = [...EVENT_COLORS, "var(--color-fg-mute)"];
 
 export function StatechartViewer({ machine }: { machine: Statechart }) {
   const [result, setResult] = useState<LayoutState>({ status: "loading" });
-  const [zoom, setZoom] = useState(1);
   const viewport = useStatechartViewport();
   const { canvasRef } = viewport;
+  const layoutReady = result.status === "ready";
+  const zoomState = useStatechartZoom(canvasRef, layoutReady);
+  const { zoom, setZoom } = zoomState;
   const [colorMode, setColorMode] = useState("event");
   const eventColors = useMemo(() => {
     const names = machine.transitions.map((transition) => transition.eventType);
@@ -90,9 +93,10 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
 
     const horizontal = (canvas.clientWidth - 16) / layout.width;
     const vertical = (canvas.clientHeight - 16) / layout.height;
-    const fitted = Math.max(0.05, Math.min(1, horizontal, vertical));
+    const availableZoom = Math.min(1, horizontal, vertical);
+    const fitted = Math.max(0.05, availableZoom);
 
-    setZoom(fitted);
+    setZoom(fitted, true);
     viewport.resetPan();
     canvas.scrollLeft = 0;
     canvas.scrollTop = 0;
@@ -113,6 +117,9 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
       <span className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
         <span className="mr-auto font-mono text-xs text-fg-mute">
           XState · read-only statechart
+        </span>
+        <span className="text-xs text-fg-mute">
+          Ctrl + scroll or pinch to zoom
         </span>
         <select
           aria-label="Transition colors"
@@ -150,7 +157,7 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
         </button>
         <button
           type="button"
-          onClick={() => setZoom(1)}
+          onClick={() => setZoom(1, true)}
           className="rounded border border-border px-2 text-xs"
         >
           Reset zoom
@@ -186,6 +193,7 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
         {...viewport.panHandlers}
       >
         <svg
+          ref={zoomState.diagramRef}
           role="group"
           data-testid="native-statechart-svg"
           aria-label={`${machine.name} statechart`}
@@ -195,7 +203,7 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
           className="block max-w-none"
           style={{
             color: "var(--color-fg)",
-            transform: `translate(${viewport.pan.x}px, ${viewport.pan.y}px)`,
+            transform: `translate(${viewport.pan.x + zoomState.x}px, ${viewport.pan.y + zoomState.y}px)`,
           }}
         >
           <defs>
