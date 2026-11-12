@@ -257,6 +257,38 @@ describe("validation errors name the spec path", () => {
     );
   });
 
+  it("regions name existing parts, each part in at most one", () => {
+    const s = {
+      ...base(),
+      regions: [
+        { id: "proc", label: "PROCESS", parts: ["src", "ghost"] },
+        { id: "w", parts: ["src", "w"] },
+        { id: "empty", parts: [] },
+        { id: "odd", parts: ["w"], colour: "red" },
+      ],
+    };
+    const errs = errorsOf(s);
+    expect(errs).toContain(
+      'regions[0].parts[1]: region names missing part "ghost"; parts: src, w'
+    );
+    expect(errs).toContain(
+      'regions[1].id: region id "w" is also a part or rail id'
+    );
+    expect(errs).toContain(
+      'regions[1].parts[0]: part "src" is already in region "proc"; a part belongs to at most one region'
+    );
+    expect(errs).toContain("regions[2].parts: needs at least one part");
+    expect(
+      errs.some((e) => e.startsWith("regions[3].colour: unknown field"))
+    ).toBe(true);
+    const ok = compileFlowOrThrow({
+      ...base(),
+      regions: [{ id: "ok", label: "HOST", parts: ["src", "w"] }],
+    }).arrangements[0];
+    expect(ok.regions).toHaveLength(1);
+    expect(ok.regions[0]).toMatchObject({ id: "ok", label: "HOST" });
+  });
+
   it("version, unknown fields, props and args", () => {
     const s = { ...base(), version: 2, extra: true };
     const errs = errorsOf(s);
@@ -504,7 +536,7 @@ describe("compiler features", () => {
     expect(d.parts[1].positioned).toBe("layout");
     expect(d.parts[1].position.x).toBeGreaterThan(320);
     const custom = compileFlowOrThrow(s, {
-      layout: () => ({ w: { x: 7, y: 9 } }),
+      layout: () => ({ positions: { w: { x: 7, y: 9 } } }),
     }).arrangements[0];
     expect(custom.parts[1].position).toEqual({ x: 7, y: 9 });
     expect(custom.parts[1].ports.in).toMatchObject({

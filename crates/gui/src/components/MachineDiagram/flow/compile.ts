@@ -55,6 +55,15 @@ import type {
   WireChangeMark,
 } from "./spec";
 import { resolvedProps, validateFlowSpec } from "./validate";
+import {
+  partExtent,
+  railLabels,
+  regionLabels,
+  REGION_HEAD,
+  REGION_PAD,
+  pad,
+  union,
+} from "./extent";
 
 /** The first beat starts 0.6 s in, as every gallery story does. */
 export const STORY_LEAD = 0.6;
@@ -103,7 +112,7 @@ export interface DiagramPart {
   readonly position: Position;
   readonly positioned: "given" | "layout";
   readonly bb: BBox;
-  readonly status: { readonly x: number; readonly y: number };
+  readonly status: AnyPartKind["status"];
   /** Mark drawn in this arrangement (Before draws everything unchanged). */
   readonly change: ChangeMark;
   readonly changeNote?: string;
@@ -125,10 +134,24 @@ export interface DiagramRail {
   /** Orthogonal polyline in diagram space (pass to `route` / `Wire`). */
   readonly points: readonly Point[];
   readonly label?: string;
+  /** Centre of the label (and change glyph) when auto-layout placed it. */
+  readonly labelAt?: Point;
   readonly conditional: boolean;
   readonly change: WireChangeMark;
   readonly presence: Presence;
   readonly attachments: readonly AttachmentSpec[];
+}
+
+/** A boundary around parts, drawn as a dashed region (spec `regions`). */
+export interface DiagramRegion {
+  readonly id: string;
+  readonly label?: string;
+  readonly parts: readonly string[];
+  /** Top-left and size in diagram space; the same in every arrangement. */
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
 }
 
 export interface CompiledCard {
@@ -150,6 +173,7 @@ export interface DiagramTimeline {
   readonly height: number;
   readonly parts: readonly DiagramPart[];
   readonly rails: readonly DiagramRail[];
+  readonly regions: readonly DiagramRegion[];
   /** Cards on rails between parts, in diagram space; beats as captions. */
   readonly travel: Timeline;
   readonly beats: readonly CompiledBeat[];
@@ -188,11 +212,29 @@ export interface LayoutRail {
   readonly to: string;
 }
 
-/** Fills in positions for parts without one (auto-layout, ticket 5985798a, plugs in here). */
+/** A rail routed by a layout: points from port to port, and its label centre. */
+export interface RailRoute {
+  readonly points: readonly Point[];
+  readonly labelAt?: Point;
+}
+
+/** One diagram level's layout: positions for unplaced parts, optional rail routes. */
+export interface LevelLayout {
+  readonly positions: Readonly<Record<string, Position>>;
+  /** Rails without a route are drawn with `railBetween` their ports. */
+  readonly routes?: Readonly<Record<string, RailRoute>>;
+}
+
+/**
+ * Fills in positions for parts without one. Called once per diagram level;
+ * `path` names the parts drilled into to reach it (`[]` at the top). The
+ * same result places every arrangement, so Before and After share it.
+ */
 export type LayoutFn = (
   parts: readonly LayoutPart[],
-  rails: readonly LayoutRail[]
-) => Readonly<Record<string, Position>>;
+  rails: readonly LayoutRail[],
+  path: readonly string[]
+) => LevelLayout;
 
 /** Fallback layout: unplaced parts in one row after the placed ones, rail-centred. */
 export const rowLayout: LayoutFn = (parts) => {
@@ -206,7 +248,7 @@ export const rowLayout: LayoutFn = (parts) => {
     out[p.id] = { x, y: (rowH - p.height) / 2 };
     x += p.width + LAYOUT_GAP;
   }
-  return out;
+  return { positions: out };
 };
 
 export interface CompileOptions {
@@ -224,7 +266,7 @@ export function compileFlow(
   if (errors.length) return { ok: false, errors };
   const spec = input as FlowSpec;
   const runtime: FlowSpecError[] = [];
-  const flow = build(spec, registry, o.layout ?? rowLayout, runtime, "");
+  const flow = build(spec, registry, o.layout ?? rowLayout, runtime, "", []);
   return runtime.length ? { ok: false, errors: runtime } : { ok: true, flow };
 }
 
@@ -251,7 +293,8 @@ function build(
   registry: FlowRegistry,
   layout: LayoutFn,
   errors: FlowSpecError[],
-  root: string
+  root: string,
+  path: readonly string[]
 ): CompiledFlow {
   const defs = new Map(
     spec.parts.map((p) => [p.id, registry.parts.get(p.kind)!])
@@ -272,11 +315,16 @@ function build(
       id: r.id,
       from: r.from.slice(0, r.from.lastIndexOf(".")),
       to: r.to.slice(0, r.to.lastIndexOf(".")),
-    }))
+    })),
+    path
   );
   const positions = new Map(
-    spec.parts.map((p) => [p.id, p.position ?? placed[p.id] ?? { x: 0, y: 0 }])
+    spec.parts.map((p) => [
+      p.id,
+      p.position ?? placed.positions[p.id] ?? { x: 0, y: 0 },
+    ])
   );
+  const routes = placed.routes ?? {};
   const drills = new Map<string, DrillTarget>();
   spec.parts.forEach((p, i) => {
     if (!p.drill) return;
@@ -291,7 +339,8 @@ function build(
               registry,
               layout,
               errors,
-              `${root}parts[${i}].drill.spec.`
+              `${root}parts[${i}].drill.spec.`,
+              [...path, p.id]
             ),
           }
     );
@@ -308,12 +357,13 @@ function build(
       },
     ])
   );
+  const arranged = arrangementsOf(spec).map((a) =>
+    arrange(spec, a, defs, positions, routes, scaleOf, drills, errors, root)
+  );
   return {
     version: spec.version,
     ...(spec.title ? { title: spec.title } : {}),
-    arrangements: arrangementsOf(spec).map((a) =>
-      arrange(spec, a, defs, positions, scaleOf, drills, errors, root)
-    ),
+    arrangements: withRegions(arranged, spec),
     cards,
     attachments: spec.attachments ?? [],
   };
@@ -360,6 +410,7 @@ function arrange(
   a: ArrangementName,
   defs: Map<string, AnyPartKind>,
   positions: Map<string, Position>,
+  routes: Readonly<Record<string, RailRoute>>,
   scaleOf: (p: PartSpec) => number,
   drills: Map<string, DrillTarget>,
   errors: FlowSpecError[],
@@ -426,14 +477,21 @@ function arrange(
     const ends = [runs.get(from.part)!.presence, runs.get(to.part)!.presence];
     const presence: Presence =
       own !== "live" ? own : (ends.find((e) => e !== "live") ?? "live");
-    const pf = portAt(from.part, from.port);
-    const pt = portAt(to.part, to.port);
+    const routed = routes[r.id];
     rails.set(r.id, {
       id: r.id,
       from,
       to,
-      points: railBetween(pf, pt),
+      points: routed
+        ? // A laid-out route ends exactly on the ports as placed here.
+          [
+            [portAt(from.part, from.port).x, portAt(from.part, from.port).y],
+            ...routed.points.slice(1, -1),
+            [portAt(to.part, to.port).x, portAt(to.part, to.port).y],
+          ]
+        : railBetween(portAt(from.part, from.port), portAt(to.part, to.port)),
       ...(r.label ? { label: r.label } : {}),
+      ...(routed?.labelAt ? { labelAt: routed.labelAt } : {}),
       conditional: r.conditional ?? false,
       change: a === "before" ? "unchanged" : (r.change ?? "unchanged"),
       presence,
@@ -738,6 +796,7 @@ function arrange(
     height,
     parts,
     rails: [...rails.values()],
+    regions: [],
     travel: {
       ...finishDraft(travel),
       beats: plainBeats,
@@ -747,6 +806,57 @@ function arrange(
     markers,
     counts,
   };
+}
+
+/**
+ * Frame each region around its parts' extents in every arrangement at once,
+ * so a region does not move when the toggle changes a status line, and grow
+ * the canvas to hold regions, rail routes and their labels.
+ */
+function withRegions(
+  arranged: readonly DiagramTimeline[],
+  spec: FlowSpec
+): DiagramTimeline[] {
+  const regions: DiagramRegion[] = (spec.regions ?? []).map((g) => {
+    const box = pad(
+      union(
+        arranged.flatMap((d) =>
+          d.parts.filter((p) => g.parts.includes(p.id)).map(partExtent)
+        )
+      ),
+      REGION_PAD,
+      REGION_HEAD
+    );
+    return {
+      id: g.id,
+      ...(g.label ? { label: g.label } : {}),
+      parts: g.parts,
+      x: box.x0,
+      y: box.y0,
+      width: box.x1 - box.x0,
+      height: box.y1 - box.y0,
+    };
+  });
+  // One canvas for every arrangement, so Before and After line up.
+  const all = union([
+    ...arranged.flatMap((d) => [
+      { x0: 0, y0: 0, x1: d.width, y1: d.height },
+      ...d.rails.flatMap((r) => [
+        ...r.points.map(([x, y]) => ({ x0: x, y0: y, x1: x, y1: y })),
+        ...railLabels(r),
+      ]),
+    ]),
+    ...regions.flatMap((g) => [
+      { x0: g.x, y0: g.y, x1: g.x + g.width, y1: g.y + g.height },
+      ...regionLabels(g),
+    ]),
+  ]);
+  return arranged.map((d) => ({
+    ...d,
+    regions,
+    width: all.x1,
+    height: all.y1,
+  }));
 }
 
 /** The diagram timeline for one arrangement. */

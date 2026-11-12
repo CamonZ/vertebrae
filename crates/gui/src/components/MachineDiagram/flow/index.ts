@@ -7,10 +7,13 @@ export * from "./parts";
 export * from "./defaults";
 export * from "./validate";
 export * from "./compile";
+export * from "./extent";
+export * from "./layout";
 export * from "./jsonSchema";
 export * from "./parse";
 export * from "./registryContext";
 export * from "./useFlowClock";
+export * from "./useLaidOutFlow";
 export {
   FRAME,
   MAX_FRAME_DT,

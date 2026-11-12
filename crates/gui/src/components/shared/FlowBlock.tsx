@@ -1,29 +1,20 @@
 import { useMemo } from "react";
 import { FlowPlayer } from "../MachineDiagram/flow/FlowPlayer";
 import {
-  compileFlow,
   formatFlowError,
   parseFlowSpec,
   useFlowRegistry,
-  type CompiledFlow,
+  useLaidOutFlow,
   type FlowSpecError,
 } from "../MachineDiagram/flow";
 
-type FlowBlockState =
-  | { ok: true; flow: CompiledFlow }
+type Parsed =
+  | { ok: true; value: unknown }
   | { ok: false; errors: readonly FlowSpecError[] };
 
-function compileSource(
-  source: string,
-  registry: ReturnType<typeof useFlowRegistry>
-): FlowBlockState {
+function parseSource(source: string): Parsed {
   try {
-    const parsed = parseFlowSpec(source);
-    if (!parsed.ok) return { ok: false, errors: parsed.errors };
-    const compiled = compileFlow(parsed.value, { registry });
-    return compiled.ok
-      ? { ok: true, flow: compiled.flow }
-      : { ok: false, errors: compiled.errors };
+    return parseFlowSpec(source);
   } catch (e) {
     return {
       ok: false,
@@ -32,33 +23,49 @@ function compileSource(
   }
 }
 
-/** A ```flow block: parse and compile the spec, then play it or list its errors. */
+/**
+ * A ```flow block: parse and compile the spec (auto-laying out parts without
+ * a position), then play it or list its errors.
+ */
 export function FlowBlock({ source }: { source: string }) {
   const registry = useFlowRegistry();
-  const state = useMemo(
-    () => compileSource(source, registry),
-    [source, registry]
-  );
+  const parsed = useMemo(() => parseSource(source), [source]);
+  const compiled = useLaidOutFlow(parsed.ok ? parsed.value : undefined, {
+    registry,
+  });
+  const errors = !parsed.ok
+    ? parsed.errors
+    : compiled.status === "done" && !compiled.result.ok
+      ? compiled.result.errors
+      : undefined;
   return (
     <div
       className="mb-2 max-w-full overflow-hidden rounded-md border border-border/50 bg-bg p-3 whitespace-normal"
       data-testid="flow-block"
     >
-      {state.ok ? (
-        <FlowPlayer flow={state.flow} />
-      ) : (
+      {errors ? (
         <div role="alert" data-testid="flow-errors">
           <div className="mb-1 text-sm font-medium text-err">
-            Flow spec has {state.errors.length}{" "}
-            {state.errors.length === 1 ? "error" : "errors"}
+            Flow spec has {errors.length}{" "}
+            {errors.length === 1 ? "error" : "errors"}
           </div>
           <ul className="list-disc pl-5 font-mono text-xs text-fg">
-            {state.errors.map((e, i) => (
+            {errors.map((e, i) => (
               <li key={i} data-path={e.path}>
                 {formatFlowError(e)}
               </li>
             ))}
           </ul>
+        </div>
+      ) : compiled.status === "done" && compiled.result.ok ? (
+        <FlowPlayer flow={compiled.result.flow} />
+      ) : (
+        <div
+          aria-busy="true"
+          className="font-mono text-xs text-[var(--color-fg-mute)]"
+          data-testid="flow-laying-out"
+        >
+          Laying out the diagram…
         </div>
       )}
     </div>

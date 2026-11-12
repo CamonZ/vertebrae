@@ -45,6 +45,7 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
       title: { type: "string" },
       parts: { type: "array", minItems: 1, items: ref("part") },
       rails: { type: "array", items: ref("rail") },
+      regions: { type: "array", items: ref("region") },
       cards: { type: "array", items: ref("card") },
       story: { type: "array", items: ref("beat") },
       attachments: ref("attachments"),
@@ -144,6 +145,21 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           conditional: { type: "boolean" },
           change: { enum: WIRE_CHANGE_MARKS },
           attachments: ref("attachments"),
+        },
+      },
+      region: {
+        type: "object",
+        required: ["id", "parts"],
+        additionalProperties: false,
+        properties: {
+          id,
+          label: { type: "string" },
+          parts: {
+            type: "array",
+            minItems: 1,
+            uniqueItems: true,
+            items: { type: "string" },
+          },
         },
       },
       card: {
