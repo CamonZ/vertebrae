@@ -28,6 +28,8 @@ sub-index. Links are relative to the file that contains them.
   Load when: "where is the result", `persistence_options`, `vtb artifact`, attaching output to a ticket.
 - [Statechart artifacts](statecharts.md): authoring a machine definition, saving and attaching it, and rendering its artifact link in chat.
   Load when: explaining a development workflow as a statechart, authoring a statechart artifact, or embedding one in chat.
+- [Machine diagrams](machine-diagrams.md): authoring playable flow specs, choosing parts and verbs, evidence, Before/After, drill-down, and saving flow artifacts.
+  Load when: explaining a system flow or PR with a machine diagram, writing a `flow` fence, or authoring a flow artifact.
 - [Running](running/index.md): TaskRuns, concurrency, retries and recovery.
   Load when: starting or stopping a run, `max_concurrency`, run status, `retry_exhausted`, resuming a stuck task.
 - [Debugging](debugging/index.md): failure strings mapped to causes and fixes, logs and outcomes.
