@@ -782,6 +782,16 @@ cache. Conversations without a ticket association, including those associated
 with a task or epic, show the preview without the save button. This action does
 not edit the chat transcript or create a project attachment.
 
+A completed `flow` fence plays its JSON or YAML flow spec with `FlowPlayer`, or
+lists the compiler errors with their spec paths. `useFlowSpec` and
+`FlowSpecView` (`components/shared/`) hold the shared parse, compile and
+render-or-errors body, which forwards `onActivatePart` for drill-down.
+`ChatDiagramBlock` carries the ticket-scoped **Save as artifact** rules above
+for both fence kinds; a saved flow is a `flow`/`json` or `flow`/`yaml`
+artifact (detected the same way as the parser: a body starting with `{` is
+JSON) with rendered presentation. Flow artifacts play in the artifact preview
+and inline wherever a chat message links them with `vtb://artifact`.
+
 ## Data Flow
 
 ```

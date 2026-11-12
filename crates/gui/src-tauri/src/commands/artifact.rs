@@ -20,6 +20,47 @@ pub async fn list_project_artifacts(
         .map_err(Into::into)
 }
 
+/// A diagram kind a chat fence can be promoted to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatDiagram {
+    Statechart,
+    Flow,
+}
+
+impl ChatDiagram {
+    fn noun(self) -> &'static str {
+        match self {
+            Self::Statechart => "Statecharts",
+            Self::Flow => "Flows",
+        }
+    }
+
+    /// Filename and presentation metadata for `body`. A flow spec is JSON when
+    /// it starts with `{` (the same rule the GUI parser uses), YAML otherwise.
+    fn presentation(self, body: &str) -> (&'static str, vertebrae_core::ArtifactLinkMetadata) {
+        use vertebrae_core::ArtifactLinkMetadata;
+        match self {
+            Self::Statechart => (
+                "diagram.statechart.json",
+                ArtifactLinkMetadata::new("statechart", "json", "chat", "rendered")
+                    .with_extension("statechart_format", json!("xstate-v5")),
+            ),
+            Self::Flow => {
+                let (filename, format) = if body.trim_start().starts_with('{') {
+                    ("diagram.flow.json", "json")
+                } else {
+                    ("diagram.flow.yaml", "yaml")
+                };
+                (
+                    filename,
+                    ArtifactLinkMetadata::new("flow", format, "chat", "rendered")
+                        .with_extension("flow_format", json!("flow-v1")),
+                )
+            }
+        }
+    }
+}
+
 /// Promote a chat statechart fence to an artifact attached to its ticket.
 #[tauri::command]
 #[specta::specta]
@@ -28,7 +69,28 @@ pub async fn save_statechart_artifact(
     body: String,
     ticket_id: String,
 ) -> Result<Artifact, CommandError> {
-    use vertebrae_core::{ArtifactLinkMetadata, CreateArtifactInput, Level};
+    save_chat_diagram(state, ChatDiagram::Statechart, body, ticket_id).await
+}
+
+/// Promote a chat flow fence (JSON or YAML spec) to an artifact attached to
+/// its ticket.
+#[tauri::command]
+#[specta::specta]
+pub async fn save_flow_artifact(
+    state: State<'_, AppState>,
+    body: String,
+    ticket_id: String,
+) -> Result<Artifact, CommandError> {
+    save_chat_diagram(state, ChatDiagram::Flow, body, ticket_id).await
+}
+
+async fn save_chat_diagram(
+    state: State<'_, AppState>,
+    kind: ChatDiagram,
+    body: String,
+    ticket_id: String,
+) -> Result<Artifact, CommandError> {
+    use vertebrae_core::{CreateArtifactInput, Level};
 
     // Keep the service and attachment target in one project snapshot. Project
     // switching takes these locks in the same order.
@@ -48,12 +110,14 @@ pub async fn save_statechart_artifact(
             .is_some_and(|id| id != client.project_id())
     {
         return Err(CommandError {
-            message: "Statecharts must be saved to a ticket in the active project.".into(),
+            message: format!(
+                "{} must be saved to a ticket in the active project.",
+                kind.noun()
+            ),
         });
     }
-    let metadata = ArtifactLinkMetadata::new("statechart", "json", "chat", "rendered")
-        .with_extension("statechart_format", json!("xstate-v5"));
-    let input = CreateArtifactInput::new("diagram.statechart.json", body)
+    let (filename, metadata) = kind.presentation(&body);
+    let input = CreateArtifactInput::new(filename, body)
         .with_subject("task", ticket_id)
         .with_metadata(metadata);
 
@@ -271,6 +335,88 @@ mod tests {
         .unwrap();
         for id in [task_id, "missing-ticket".into(), "".into()] {
             assert!(save_statechart_artifact(app.state(), "{}".into(), id)
+                .await
+                .is_err());
+        }
+        assert!(list_project_artifacts(app.state())
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    async fn app_with_ticket(project_id: &str) -> (tauri::App<tauri::test::MockRuntime>, String) {
+        let app = crate::commands::test_support::build_app_with_services();
+        let config = vertebrae_sacrum_client::SacrumConfig::new(
+            "http://localhost:4000".into(),
+            "test-token".into(),
+            project_id.into(),
+        );
+        *app.state::<AppState>().sacrum_client.write().await = Some(std::sync::Arc::new(
+            vertebrae_sacrum_client::GraphqlClient::new(config),
+        ));
+        let ticket_id = crate::commands::create_task(
+            app.state(),
+            "Flow ticket".into(),
+            None,
+            Some("ticket".into()),
+            None,
+        )
+        .await
+        .expect("create ticket");
+        (app, ticket_id)
+    }
+
+    #[tokio::test]
+    async fn saving_flow_requires_a_selected_project() {
+        let app = build_app_without_services();
+        assert_no_project_error(
+            save_flow_artifact(app.state(), "version: 1".into(), "ticket-id".into()).await,
+        );
+    }
+
+    #[tokio::test]
+    async fn saving_flow_attaches_the_spec_with_its_detected_format() {
+        let (app, ticket_id) = app_with_ticket("33333333-3333-4333-8333-333333333333").await;
+        let cases = [
+            ("version: 1\nparts: []\n", "diagram.flow.yaml", "yaml"),
+            (
+                "  {\"version\":1,\"parts\":[]}",
+                "diagram.flow.json",
+                "json",
+            ),
+        ];
+        for (body, filename, format) in cases {
+            let artifact = save_flow_artifact(app.state(), body.into(), ticket_id.clone())
+                .await
+                .expect("save flow");
+            assert_eq!(artifact.body, body);
+            assert_eq!(artifact.filename, filename);
+            let metadata = artifact.metadata.expect("attachment metadata");
+            assert_eq!(metadata.content_kind, "flow");
+            assert_eq!(metadata.format, format);
+            assert_eq!(metadata.presentation, "rendered");
+            assert_eq!(metadata.extensions["flow_format"], "flow-v1");
+        }
+        let attached = list_task_artifacts(app.state(), ticket_id)
+            .await
+            .expect("ticket artifacts");
+        assert_eq!(attached.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn saving_flow_rejects_non_ticket_subjects() {
+        let (app, _) = app_with_ticket("mock-project").await;
+        let task_id = crate::commands::create_task(
+            app.state(),
+            "Not a ticket".into(),
+            None,
+            Some("task".into()),
+            None,
+        )
+        .await
+        .unwrap();
+        for id in [task_id, "missing-ticket".into()] {
+            assert!(save_flow_artifact(app.state(), "version: 1".into(), id)
                 .await
                 .is_err());
         }
