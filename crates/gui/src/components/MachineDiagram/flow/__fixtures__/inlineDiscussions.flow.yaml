@@ -214,3 +214,18 @@ story:
       - kind: note
         text: Same machines in both arrangements. Timing is illustrative, not measured.
         source: scenario
+# What each situation does between questions, lit during its beats; the meter
+# counts process starts (spawns and resumes) from the compile.
+band:
+  heading: BETWEEN QUESTIONS
+  rows:
+    - { name: cancel, note: mid-reply, beats: [cancel], chips: {
+          before: [stop the turn, process closed, next ask spawns],
+          after: [interrupt_local_chat_turn, turn ends, process kept] } }
+    - { name: collapse, note: thread hidden, beats: [collapse], chips: {
+          before: [no process between asks, nothing to keep],
+          after: [idle process closed, providerResumeId kept, next ask resumes] } }
+    - { name: tool call, note: { before: none, after: read-only }, beats: [tools, edit], chips: {
+          before: ['--tools ""', answers from pasted context],
+          after: [read_only_decision, Read · Grep · Glob, "anything else: deny"] } }
+  meter: { label: processes started, marker: [spawn, resume] }

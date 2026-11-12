@@ -55,6 +55,7 @@ import type {
   WireChangeMark,
 } from "./spec";
 import { resolvedProps, validateFlowSpec } from "./validate";
+import { layoutBand, type DiagramBand } from "./band";
 import {
   partExtent,
   railLabels,
@@ -181,6 +182,14 @@ export interface DiagramTimeline {
   readonly markers: readonly TimelineMarker[];
   /** Marker counts by kind, e.g. `{ spawn: 4, close: 4 }`. */
   readonly counts: Readonly<Record<string, number>>;
+  /**
+   * `[start, end)` of each story beat with an id, in seconds: from its start
+   * to the next captioned beat's (the period after the last). A beat that
+   * does not happen in this arrangement has none.
+   */
+  readonly beatWindows: Readonly<Record<string, readonly [number, number]>>;
+  /** The strip under the diagram (spec `band`), below everything else. */
+  readonly band?: DiagramBand;
 }
 
 export interface CompiledFlow {
@@ -524,6 +533,8 @@ function arrange(
   const travel = story(0);
   const arrivals: Omit<TimelineMarker, "order">[] = [];
   const beats: CompiledBeat[] = [];
+  /** Story beats that happen in this arrangement, in order. */
+  const happened: { id?: string; start: number; captioned: boolean }[] = [];
 
   const writer = (run: PartRun, card: StepCard | undefined): PartWriter => ({
     card: (c: CardSpec) => {
@@ -712,6 +723,11 @@ function arrange(
         attachments: beat.attachments ?? [],
       });
     if (ran === 0 && caption === undefined) return;
+    happened.push({
+      ...(beat.id ? { id: beat.id } : {}),
+      start: beatStart,
+      captioned: caption !== undefined,
+    });
     clock = groupEnd + (beat.hold ?? (ran ? BEAT_GAP : CAPTION_HOLD));
   });
 
@@ -726,6 +742,13 @@ function arrange(
     });
 
   const period = clock + END_HOLD;
+  // A beat's window runs until the next caption replaces the one showing.
+  const beatWindows: Record<string, readonly [number, number]> = {};
+  happened.forEach((h, i) => {
+    if (!h.id) return;
+    const next = happened.slice(i + 1).find((n) => n.captioned);
+    beatWindows[h.id] = [h.start, next ? next.start : period];
+  });
   const finishDraft = (d: StoryDraft): Timeline => {
     d.period = period;
     d.cards = d.cards.map((c) => (c.dies >= HELD ? { ...c, dies: period } : c));
@@ -805,13 +828,15 @@ function arrange(
     beats,
     markers,
     counts,
+    beatWindows,
   };
 }
 
 /**
  * Frame each region around its parts' extents in every arrangement at once,
- * so a region does not move when the toggle changes a status line, and grow
- * the canvas to hold regions, rail routes and their labels.
+ * so a region does not move when the toggle changes a status line, grow the
+ * canvas to hold regions, rail routes and their labels, and lay the band
+ * out below all of it.
  */
 function withRegions(
   arranged: readonly DiagramTimeline[],
@@ -851,11 +876,35 @@ function withRegions(
       ...regionLabels(g),
     ]),
   ]);
-  return arranged.map((d) => ({
+  if (!spec.band)
+    return arranged.map((d) => ({
+      ...d,
+      regions,
+      width: all.x1,
+      height: all.y1,
+    }));
+  // The band's left edge lines up with the leftmost drawn element.
+  const left = union([
+    ...arranged.flatMap((d) =>
+      d.parts.filter((p) => p.presence !== "absent").map(partExtent)
+    ),
+    ...regions.map((g) => ({ x0: g.x, y0: g.y, x1: g.x, y1: g.y })),
+  ]).x0;
+  const bands = layoutBand(
+    spec.band,
+    arranged.map((d) => ({
+      arrangement: d.arrangement,
+      markers: d.markers,
+      windows: new Map(Object.entries(d.beatWindows)),
+    })),
+    { ...all, x0: left }
+  );
+  return arranged.map((d, i) => ({
     ...d,
     regions,
-    width: all.x1,
-    height: all.y1,
+    band: bands[i],
+    width: bands[i].x1,
+    height: bands[i].y1,
   }));
 }
 

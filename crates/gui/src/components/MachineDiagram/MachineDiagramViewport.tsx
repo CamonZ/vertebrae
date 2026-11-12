@@ -33,6 +33,12 @@ const MIN_ZOOM = 0.1;
 const ZOOM_STEP = 1.25;
 /** Leaves room for the zoom control under a very flat fitted diagram. */
 const MIN_FITTED_HEIGHT = 120;
+/**
+ * Screen-space column kept clear for the zoom control (16 px inset, 30 px
+ * buttons, 16 px gap), so it never sits over the diagram's left edge — where
+ * a flow band's heading and row names start — at any zoom.
+ */
+export const ZOOM_GUTTER = 62;
 
 /**
  * Pan/zoom frame for a machine diagram, reusing the statechart viewport's
@@ -62,7 +68,8 @@ export function MachineDiagramViewport({
     initialFit.current = false;
     const canvas = viewport.canvasRef.current;
     if (!canvas || !canvas.clientWidth) return;
-    const fitted = Math.max(MIN_ZOOM, Math.min(1, canvas.clientWidth / width));
+    const room = Math.max(1, canvas.clientWidth - ZOOM_GUTTER);
+    const fitted = Math.max(MIN_ZOOM, Math.min(1, room / width));
     setZoom(fitted, true);
     setFittedHeight(Math.max(MIN_FITTED_HEIGHT, Math.ceil(height * fitted)));
     // Mount-only: later zoom changes come from the user.
@@ -73,7 +80,7 @@ export function MachineDiagramViewport({
     const canvas = viewport.canvasRef.current;
     if (!canvas || !canvas.clientWidth || !canvas.clientHeight) return;
     const fitted = Math.min(
-      canvas.clientWidth / width,
+      Math.max(1, canvas.clientWidth - ZOOM_GUTTER) / width,
       canvas.clientHeight / height
     );
     setZoom(fitted, true);
@@ -99,6 +106,7 @@ export function MachineDiagramViewport({
           data-zoom={zoom}
           style={{
             display: "block",
+            left: ZOOM_GUTTER,
             width,
             height,
             transform: `translate(${viewport.pan.x + zoomState.x}px, ${viewport.pan.y + zoomState.y}px) scale(${zoom})`,

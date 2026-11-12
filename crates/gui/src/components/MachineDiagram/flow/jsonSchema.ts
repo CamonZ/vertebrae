@@ -21,6 +21,20 @@ const endpoint = {
   description: "partId.port",
 };
 const ref = (name: string) => ({ $ref: `#/$defs/${name}` });
+const text = { type: "string", minLength: 1 };
+const chips = { type: "array", minItems: 1, items: text };
+/** One value, or `{ before, after }` when the arrangements differ. */
+const perArrangement = (v: JsonSchema): JsonSchema => ({
+  oneOf: [
+    v,
+    {
+      type: "object",
+      required: ["before", "after"],
+      additionalProperties: false,
+      properties: { before: v, after: v },
+    },
+  ],
+});
 
 export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
   const partKinds = registry.parts.kinds();
@@ -48,6 +62,7 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
       regions: { type: "array", items: ref("region") },
       cards: { type: "array", items: ref("card") },
       story: { type: "array", items: ref("beat") },
+      band: ref("band"),
       attachments: ref("attachments"),
     },
     $defs: {
@@ -211,6 +226,55 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           steps: { type: "array", items: ref("step") },
           hold: { type: "number", minimum: 0 },
           attachments: ref("attachments"),
+        },
+      },
+      band: {
+        type: "object",
+        required: ["rows"],
+        additionalProperties: false,
+        description:
+          "A strip under the diagram: one row per situation, lit during its story beats, and an optional marker counter.",
+        properties: {
+          heading: text,
+          rows: { type: "array", minItems: 1, items: ref("bandRow") },
+          meter: {
+            type: "object",
+            required: ["label", "marker"],
+            additionalProperties: false,
+            properties: {
+              label: text,
+              marker: {
+                description:
+                  "Marker kind(s) to count per arrangement, e.g. spawn, close, checkpoint, arrival",
+                oneOf: [
+                  text,
+                  {
+                    type: "array",
+                    minItems: 1,
+                    uniqueItems: true,
+                    items: text,
+                  },
+                ],
+              },
+              footnote: text,
+            },
+          },
+        },
+      },
+      bandRow: {
+        type: "object",
+        required: ["name", "chips", "beats"],
+        additionalProperties: false,
+        properties: {
+          name: text,
+          note: perArrangement(text),
+          chips: perArrangement(chips),
+          beats: {
+            type: "array",
+            minItems: 1,
+            uniqueItems: true,
+            items: { ...id, description: "story beat id" },
+          },
         },
       },
       step: {

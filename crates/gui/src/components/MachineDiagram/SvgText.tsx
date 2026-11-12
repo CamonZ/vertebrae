@@ -15,6 +15,8 @@ export interface SvgTextProps {
   size?: number;
   align?: TextAlign;
   opacity?: number;
+  /** Extra px between characters (headings). */
+  letterSpacing?: number;
 }
 
 /** Real, selectable SVG text in the app's monospace font. Hidden when labels are off. */
@@ -25,6 +27,7 @@ export function SvgText({
   size = 20,
   align = "left",
   opacity = 1,
+  letterSpacing,
 }: SvgTextProps) {
   const { labels } = usePart();
   if (!labels || opacity <= 0) return null;
@@ -36,6 +39,7 @@ export function SvgText({
       dominantBaseline="middle"
       textAnchor={ANCHOR[align]}
       opacity={opacity < 1 ? opacity : undefined}
+      letterSpacing={letterSpacing}
       xmlSpace="preserve"
     >
       {runs.map(([text, weight = 400, role = "ink"], i) => (

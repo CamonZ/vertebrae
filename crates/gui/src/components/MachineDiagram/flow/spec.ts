@@ -161,6 +161,50 @@ export interface BeatSpec {
   readonly attachments?: readonly AttachmentSpec[];
 }
 
+/** A value that reads the same in both arrangements, or one per arrangement. */
+export type PerArrangement<T> = T | { readonly before: T; readonly after: T };
+
+/**
+ * One situation in a band: a name, a note, and a chain of chips saying what
+ * the machine does in it. The row lights while the story is inside one of
+ * its beats.
+ */
+export interface BandRowSpec {
+  readonly name: string;
+  readonly note?: PerArrangement<string>;
+  /** At least one chip; one list per arrangement when the two sides differ. */
+  readonly chips: PerArrangement<readonly string[]>;
+  /** Ids of the story beats during which the row is lit. */
+  readonly beats: readonly string[];
+}
+
+/**
+ * A counter beside the rows: one ring per marker of `marker` kind the
+ * compile produced in the arrangement (e.g. `spawn` for processes started),
+ * filling as each happens.
+ */
+export interface BandMeterSpec {
+  readonly label: string;
+  /**
+   * Marker kind(s) to count, e.g. `spawn`, `close`, `checkpoint`, `arrival`;
+   * `[spawn, resume]` counts every process start.
+   */
+  readonly marker: string | readonly string[];
+  /** Dim line under the rings; defaults to "before: n · after: m" for a change. */
+  readonly footnote?: string;
+}
+
+/**
+ * A strip under the diagram, below a divider, summarising what the machine
+ * does between story beats. Its geometry is the same in every arrangement.
+ */
+export interface BandSpec {
+  /** Letter-spaced heading under the divider, e.g. BETWEEN QUESTIONS. */
+  readonly heading?: string;
+  readonly rows: readonly BandRowSpec[];
+  readonly meter?: BandMeterSpec;
+}
+
 export interface FlowSpec {
   readonly version: number;
   readonly title?: string;
@@ -169,5 +213,6 @@ export interface FlowSpec {
   readonly regions?: readonly RegionSpec[];
   readonly cards?: readonly CardDecl[];
   readonly story?: readonly BeatSpec[];
+  readonly band?: BandSpec;
   readonly attachments?: readonly AttachmentSpec[];
 }
