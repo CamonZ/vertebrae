@@ -9,6 +9,7 @@ export type PlayerCommand =
   | { readonly kind: "speed"; readonly dir: 1 | -1 }
   | { readonly kind: "loop" }
   | { readonly kind: "arrangement" }
+  | { readonly kind: "beats" }
   | { readonly kind: "clear" }
   | { readonly kind: "help" };
 
@@ -31,6 +32,7 @@ export const PLAYER_SHORTCUTS: readonly (readonly [
   ["− / +", "slower / faster"],
   ["L", "loop, or play once and stop at the end"],
   ["B", "Before / After"],
+  ["C", "show or hide the beats"],
   ["Tab, Enter", "focus and open a part or follow a card"],
   ["Esc", "stop following, unpin"],
   ["?", "show or hide these keys"],
@@ -72,6 +74,9 @@ export function playerCommand(
     case "b":
     case "B":
       return { kind: "arrangement" };
+    case "c":
+    case "C":
+      return { kind: "beats" };
     case "l":
     case "L":
       return { kind: "loop" };

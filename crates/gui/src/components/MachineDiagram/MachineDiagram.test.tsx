@@ -471,3 +471,139 @@ describe("viewport", () => {
     expect(zoom()).toBe(1);
   });
 });
+
+describe("resizable viewport", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  /** A resizable viewport fitted into a 662px-wide frame (600px after the gutter). */
+  function resizable() {
+    vi.stubGlobal(
+      "PointerEvent",
+      class extends MouseEvent {
+        pointerId: number;
+        isPrimary: boolean;
+        constructor(type: string, options: PointerEventInit = {}) {
+          super(type, options);
+          this.pointerId = options.pointerId ?? 1;
+          this.isPrimary = options.isPrimary ?? true;
+        }
+      }
+    );
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(
+      600 + 62
+    );
+    render(
+      <MachineDiagramViewport
+        width={1200}
+        height={400}
+        fitOnMount
+        resizeLabel="Resize diagram"
+        minHeight={160}
+      >
+        <Part fixture={workerFixture} t={1.9} reducedMotion={false} />
+      </MachineDiagramViewport>
+    );
+    const frame = screen.getByTestId("machine-diagram-viewport");
+    const grip = screen.getByRole("separator", { name: "Resize diagram" });
+    // jsdom has no pointer capture.
+    Object.assign(grip, {
+      setPointerCapture: () => {},
+      hasPointerCapture: () => false,
+      releasePointerCapture: () => {},
+    });
+    const stage = frame.querySelector(".md-stage") as HTMLElement;
+    // jsdom has no layout: the frame reports its styled height.
+    vi.spyOn(frame, "getBoundingClientRect").mockImplementation(
+      () => ({ height: parseFloat(frame.style.height) }) as DOMRect
+    );
+    return { frame, grip, stage, height: () => frame.style.height };
+  }
+
+  it("starts at the fitted height; the first drag on the grip replaces it", () => {
+    const { frame, grip, stage, height } = resizable();
+    // Fitted at 600/1200 = 0.5 → 200px (above the 160px minimum).
+    expect(height()).toBe("200px");
+    expect(grip).toHaveAttribute("aria-valuemin", "160");
+    expect(grip).toHaveAttribute("aria-valuenow", "200");
+    const transform = stage.style.transform;
+    fireEvent.pointerDown(grip, { button: 0, clientX: 10, clientY: 300 });
+    fireEvent.pointerMove(grip, { clientX: 10, clientY: 380 });
+    fireEvent.pointerUp(grip, { clientX: 10, clientY: 380 });
+    expect(height()).toBe("280px");
+    expect(grip).toHaveAttribute("aria-valuenow", "280");
+    // Zoom and pan stay anchored at the frame's top-left.
+    expect(stage.style.transform).toBe(transform);
+    expect(frame).toHaveAttribute("data-dragging", "false");
+  });
+
+  it("Up/Down on the focused grip resize within the bounds", () => {
+    const { grip, stage, height } = resizable();
+    const transform = stage.style.transform;
+    act(() => grip.focus());
+    fireEvent.keyDown(grip, { key: "ArrowDown" });
+    expect(height()).toBe("224px");
+    fireEvent.keyDown(grip, { key: "ArrowUp", shiftKey: true });
+    expect(height()).toBe("176px");
+    for (let i = 0; i < 10; i++) fireEvent.keyDown(grip, { key: "ArrowUp" });
+    expect(height()).toBe(`${grip.getAttribute("aria-valuemin")}px`);
+    for (let i = 0; i < 40; i++)
+      fireEvent.keyDown(grip, { key: "ArrowDown", shiftKey: true });
+    expect(height()).toBe(`${grip.getAttribute("aria-valuemax")}px`);
+    expect(stage.style.transform).toBe(transform);
+  });
+
+  it("never fits below the minimum height", () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(
+      600 + 62
+    );
+    render(
+      <MachineDiagramViewport
+        width={1200}
+        height={400}
+        fitOnMount
+        minHeight={320}
+      >
+        <Part fixture={workerFixture} t={1.9} reducedMotion={false} />
+      </MachineDiagramViewport>
+    );
+    expect(screen.getByTestId("machine-diagram-viewport").style.height).toBe(
+      "320px"
+    );
+  });
+
+  it("fits clear of floating panels and gives them a layer in the frame", () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(
+      600 + 62 + 300
+    );
+    let layer: HTMLElement | null = null;
+    render(
+      <MachineDiagramViewport
+        width={1200}
+        height={400}
+        fitOnMount
+        overlayRef={(el) => (layer = el)}
+        fitInsets={() => ({ right: 300, bottom: 50 })}
+      >
+        <Part fixture={workerFixture} t={1.9} reducedMotion={false} />
+      </MachineDiagramViewport>
+    );
+    const frame = screen.getByTestId("machine-diagram-viewport");
+    const stage = frame.querySelector(".md-stage") as HTMLElement;
+    expect(stage.dataset.zoom).toBe("0.5");
+    expect(frame.style.height).toBe(`${200 + 50}px`);
+    expect(layer).not.toBeNull();
+    expect(frame).toContainElement(layer);
+  });
+
+  it("has no grip unless asked for one", () => {
+    render(
+      <MachineDiagramViewport width={640} height={400}>
+        <Part fixture={workerFixture} t={1.9} reducedMotion={false} />
+      </MachineDiagramViewport>
+    );
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
+});

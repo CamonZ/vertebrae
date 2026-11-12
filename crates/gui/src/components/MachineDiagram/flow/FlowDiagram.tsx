@@ -6,7 +6,10 @@ import {
   type DiagramInteraction,
 } from "../interaction";
 import { MachineDiagram } from "../MachineDiagram";
-import { MachineDiagramViewport } from "../MachineDiagramViewport";
+import {
+  MachineDiagramViewport,
+  type FitInsets,
+} from "../MachineDiagramViewport";
 import { MachinePart } from "../MachinePart";
 import { RailCards } from "../RailCards";
 import { SvgText } from "../SvgText";
@@ -24,6 +27,12 @@ import {
   type DiagramMorph,
 } from "./morph";
 import type { FlowRegistry } from "./registry";
+
+/**
+ * Smallest flow frame: room for the floating beats list and controls (the
+ * statechart viewer's minimum).
+ */
+export const MIN_FLOW_HEIGHT = 320;
 
 /** Accessible note on a part with a drill-down. */
 export const DRILL_HINT = "Opens a deeper diagram.";
@@ -44,6 +53,10 @@ export interface FlowDiagramProps {
    * and take no input.
    */
   morph?: DiagramMorph;
+  /** See MachineDiagramViewport: a layer for floating panels. Keep stable. */
+  overlayRef?: (layer: HTMLElement | null) => void;
+  /** See MachineDiagramViewport: room kept clear of floating panels. */
+  fitInsets?: (width: number) => FitInsets;
 }
 
 /**
@@ -66,6 +79,8 @@ export const FlowDiagram = memo(function FlowDiagram({
   reducedMotion,
   interaction,
   morph,
+  overlayRef,
+  fitInsets,
 }: FlowDiagramProps) {
   const registry = useFlowRegistry();
   const e = morph ? morphEase(morph.progress) : undefined;
@@ -78,7 +93,15 @@ export const FlowDiagram = memo(function FlowDiagram({
   }));
   return (
     <DiagramInteractionContext.Provider value={interaction ?? null}>
-      <MachineDiagramViewport width={d.width} height={d.height} fitOnMount>
+      <MachineDiagramViewport
+        width={d.width}
+        height={d.height}
+        fitOnMount
+        resizeLabel="Resize diagram"
+        minHeight={MIN_FLOW_HEIGHT}
+        overlayRef={overlayRef}
+        fitInsets={fitInsets}
+      >
         <MachineDiagram
           label={label ?? `flow · ${d.arrangement}`}
           width={d.width}

@@ -543,3 +543,128 @@ describe("play once or loop", () => {
     expect(player()).toHaveAttribute("data-loop", "false");
   });
 });
+
+describe("hiding the beats and resizing the diagram", () => {
+  const beatsToggle = () =>
+    screen.getByRole("button", { name: /^(Hide|Show) beats$/ });
+  const chaptersPanel = () => screen.getByTestId("flow-chapters-panel");
+  /** Everything playback-related the reader would lose on a reset. */
+  const playback = () => ({
+    beat: player().getAttribute("data-beat"),
+    t: player().getAttribute("data-t"),
+    playing: player().getAttribute("data-playing"),
+    arrangement: player().getAttribute("data-arrangement"),
+    following: player().getAttribute("data-following"),
+    pinned: screen.queryByTestId("flow-part-inspector")?.textContent ?? null,
+  });
+  /** Following q1, the tools part pinned, at beat 3. */
+  function placeInStory() {
+    fireEvent.click(
+      player().querySelector(".md-card[data-card-id='q1']") as SVGGElement
+    );
+    fireEvent.click(part("tools"));
+    act(() => player().focus());
+    key("3");
+    const state = playback();
+    expect(state.beat).toBe("2");
+    expect(state.following).toBe("q1");
+    expect(state.pinned).toMatch(/pinned/);
+    return state;
+  }
+
+  it("the toggle hides and shows the beats list by pointer and by C", () => {
+    renderPlayer();
+    const toggle = beatsToggle();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveAttribute("aria-controls", chaptersPanel().id);
+    expect(chaptersPanel()).toBeVisible();
+
+    fireEvent.click(toggle);
+    expect(chaptersPanel()).not.toBeVisible();
+    expect(beatsToggle()).toHaveAttribute("aria-expanded", "false");
+    expect(beatsToggle()).toHaveAccessibleName("Show beats");
+
+    act(() => player().focus());
+    key("c");
+    expect(chaptersPanel()).toBeVisible();
+    key("C");
+    expect(chaptersPanel()).not.toBeVisible();
+  });
+
+  it("the beats and the controls float over the diagram, which fills the frame", () => {
+    renderPlayer();
+    const frame = screen.getByTestId("machine-diagram-viewport");
+    const bottom = screen.getByTestId("flow-bottom-panel");
+    expect(frame).toContainElement(chaptersPanel());
+    expect(frame).toContainElement(bottom);
+    expect(bottom).toContainElement(
+      screen.getByRole("button", { name: "Next beat" })
+    );
+    // The grip is the frame's foot, below the floating controls.
+    const grip = screen.getByRole("separator", { name: "Resize diagram" });
+    expect(frame.nextElementSibling).toBe(grip);
+    // With the beats hidden the controls take the full width.
+    expect(bottom.className).toMatch(/right-\[calc/);
+    key("c");
+    expect(bottom.className).toMatch(/\bright-4\b/);
+  });
+
+  it("lists the beats shortcut in the help", () => {
+    renderPlayer();
+    key("?");
+    expect(screen.getByTestId("flow-shortcuts")).toHaveTextContent(
+      "show or hide the beats"
+    );
+  });
+
+  it("does not reset playback, the pinned part or the followed card", () => {
+    renderPlayer();
+    const state = placeInStory();
+    key("c");
+    expect(playback()).toEqual(state);
+    fireEvent.click(beatsToggle());
+    expect(playback()).toEqual(state);
+  });
+
+  it("shown again, the list brings the current beat into view", () => {
+    renderPlayer();
+    const list = screen.getByTestId("flow-chapters");
+    Object.defineProperty(list, "clientHeight", { value: 100 });
+    [...list.children].forEach((li, i) => {
+      Object.defineProperty(li, "offsetTop", { value: i * 50 });
+      Object.defineProperty(li, "offsetHeight", { value: 50 });
+    });
+    key("c");
+    list.scrollTop = 0;
+    key("End");
+    key("c");
+    expect(list.scrollTop).toBe(after.beats.length * 50 - 100);
+  });
+
+  it("resizing the diagram with its grip does not reset playback", () => {
+    renderPlayer();
+    const state = placeInStory();
+    const grip = screen.getByRole("separator", { name: "Resize diagram" });
+    const frame = screen.getByTestId("machine-diagram-viewport");
+    vi.spyOn(frame, "getBoundingClientRect").mockImplementation(
+      () => ({ height: parseFloat(frame.style.height) }) as DOMRect
+    );
+    const before = frame.style.height;
+    expect(grip).toHaveAttribute("aria-valuemin", "320");
+    act(() => grip.focus());
+    fireEvent.keyDown(grip, { key: "ArrowDown" });
+    expect(frame.style.height).not.toBe(before);
+    expect(playback()).toEqual(state);
+  });
+
+  it("has no beats toggle when the flow has no beats", () => {
+    const noBeats = {
+      ...flow,
+      arrangements: flow.arrangements.map((a) => ({ ...a, beats: [] })),
+    };
+    render(<FlowPlayer flow={noBeats} reducedMotion={false} />);
+    expect(
+      screen.queryByRole("button", { name: /beats$/ })
+    ).not.toBeInTheDocument();
+  });
+});
