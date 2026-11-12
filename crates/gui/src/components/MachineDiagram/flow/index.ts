@@ -8,6 +8,7 @@ export * from "./defaults";
 export * from "./validate";
 export * from "./compile";
 export * from "./extent";
+export * from "./band";
 export * from "./layout";
 export * from "./jsonSchema";
 export * from "./parse";

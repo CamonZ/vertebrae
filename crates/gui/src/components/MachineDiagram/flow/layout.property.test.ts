@@ -7,12 +7,15 @@
  * label; part extents never overlap; Before and After share one geometry;
  * rails start and end on their ports and run orthogonally; return rails run
  * below everything; regions frame exactly their members; hand-given
- * positions win; and the same spec always lays out the same way.
+ * positions win; and the same spec always lays out the same way. Some specs
+ * carry a band, whose labels and chips take part in every collision check
+ * and which must sit below everything, in one geometry for Before and After.
  */
 import { expect, test } from "vitest";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
 import {
+  bandLabels,
   compileFlow,
   compileFlowLaidOut,
   compileFlowOrThrow,
@@ -21,10 +24,15 @@ import {
   overlaps,
   partExtent,
   partFrame,
+  partLabels,
+  railLabels,
+  regionLabels,
   returnRails,
   type Box,
   type CompiledFlow,
   type DiagramTimeline,
+  type BandSpec,
+  type BeatSpec,
   type FlowSpec,
   type PartSpec,
   type RailSpec,
@@ -72,14 +80,72 @@ const PART_CHANGES = [
 ] as const;
 const RAIL_CHANGES = ["unchanged", "unchanged", "added", "removed"] as const;
 
+const ROW_NAMES = ["cancel", "collapse", "tool call", "retry"] as const;
+const NOTES = ["mid-reply", "thread hidden", "none", "read-only"] as const;
+const CHIPS = [
+  "stop the turn",
+  "process kept",
+  "interrupt_local_chat_turn",
+  "next ask spawns",
+  "Read · Grep · Glob",
+  "ok",
+] as const;
+const METER_MARKERS = ["arrival", "spawn", ["spawn", "resume"]] as const;
+
 interface Generated {
   readonly spec: FlowSpec;
   /** Ids of the parts that carry a hand-given position. */
   readonly placed: ReadonlySet<string>;
 }
 
+/**
+ * Caption-only beats and a band whose rows name them: random rows, notes,
+ * chips (per arrangement or shared) and an optional meter.
+ */
+const banded = gs.composite<{ story: BeatSpec[]; band: BandSpec }>((tc) => {
+  const beats = tc.draw(gs.integers({ minValue: 1, maxValue: 4 }));
+  const story: BeatSpec[] = Array.from({ length: beats }, (_, i) => ({
+    id: `b${i}`,
+    caption: `beat ${i}`,
+  }));
+  const chips = () =>
+    tc.draw(gs.arrays(gs.sampledFrom(CHIPS), { minSize: 1, maxSize: 4 }));
+  const note = () => tc.draw(gs.sampledFrom(NOTES));
+  const rows = Array.from(
+    { length: tc.draw(gs.integers({ minValue: 1, maxValue: 4 })) },
+    () => {
+      const ids = story.map((b) => b.id!).filter(() => tc.draw(gs.booleans()));
+      return {
+        name: tc.draw(gs.sampledFrom(ROW_NAMES)),
+        ...(tc.draw(gs.booleans())
+          ? {
+              note: tc.draw(gs.booleans())
+                ? note()
+                : { before: note(), after: note() },
+            }
+          : {}),
+        chips: tc.draw(gs.booleans())
+          ? chips()
+          : { before: chips(), after: chips() },
+        beats: ids.length > 0 ? ids : ["b0"],
+      };
+    }
+  );
+  const marker = tc.draw(gs.sampledFrom(METER_MARKERS));
+  return {
+    story,
+    band: {
+      ...(tc.draw(gs.booleans()) ? { heading: "BETWEEN QUESTIONS" } : {}),
+      rows,
+      ...(tc.draw(gs.booleans())
+        ? { meter: { label: "processes started", marker } }
+        : {}),
+    },
+  };
+});
+
 /** A flow spec over the starter parts; `placing` lets some parts carry a position. */
-const flowSpec = (placing: boolean) =>
+const flowSpec = (placing: boolean, band: boolean | "maybe" = "maybe") =>
   gs.composite<Generated>((tc) => {
     const n = tc.draw(gs.integers({ minValue: 2, maxValue: 6 }));
     const kinds = Array.from({ length: n }, () =>
@@ -145,11 +211,13 @@ const flowSpec = (placing: boolean) =>
           parts: members,
         });
     }
+    const withBand = band === "maybe" ? tc.draw(gs.booleans()) : band;
     const spec: FlowSpec = {
       version: 1,
       parts,
       rails,
       ...(regions.length > 0 ? { regions } : {}),
+      ...(withBand ? tc.draw(banded) : {}),
     };
     // Change marks have their own rules (a rail on an added part must be
     // added, …); keep only the specs the compiler accepts.
@@ -415,6 +483,126 @@ test(
             );
           });
         }
+      },
+      { testCases: 50 }
+    ),
+  TIMEOUT
+);
+
+/** Everything a picture draws above its band, as boxes. */
+function drawnAbove(d: DiagramTimeline): [string, Box][] {
+  const drawn = d.parts.filter((p) => p.presence !== "absent");
+  return [
+    ...drawn.map((p) => [`part ${p.id}`, partExtent(p)] as [string, Box]),
+    ...drawn.flatMap((p) =>
+      partLabels(p).map((l) => [`label ${l.text}`, l] as [string, Box])
+    ),
+    ...d.rails.flatMap((r) => [
+      ...r.points.map(
+        ([x, y]) =>
+          [`rail ${r.id}`, { x0: x, y0: y, x1: x, y1: y }] as [string, Box]
+      ),
+      ...railLabels(r).map((l) => [`rail label ${l.text}`, l] as [string, Box]),
+    ]),
+    ...d.regions.flatMap((g) => [
+      [`region ${g.id}`, regionBox(g)] as [string, Box],
+      ...regionLabels(g).map((l) => [`region label`, l] as [string, Box]),
+    ]),
+  ];
+}
+
+/** The band's geometry: what must not change between arrangements. */
+const bandGeometry = (d: DiagramTimeline) => {
+  const b = d.band!;
+  return {
+    divider: [b.x0, b.x1, b.y],
+    heading: [b.heading, b.headingY],
+    chipX: b.chipX,
+    rows: b.rows.map((r) => [r.y, r.chips[0]?.x]),
+    meter: b.meter && [
+      b.meter.x,
+      b.meter.labelY,
+      b.meter.ringsY,
+      b.meter.footnoteY,
+      b.meter.footnote,
+    ],
+    bottom: b.y1,
+    canvas: [d.width, d.height],
+  };
+};
+
+test(
+  "the band sits below every part, rail, lane, region and label, inside the canvas",
+  () =>
+    hegel.testAsync(async (tc) => {
+      const { spec } = tc.draw(flowSpec(tc.draw(gs.booleans()), true));
+      for (const flow of [
+        await laidOut(spec),
+        compileFlowOrThrow(spec, { registry }),
+      ])
+        for (const d of flow.arrangements) {
+          const b = d.band;
+          check(b !== undefined, `${d.arrangement}: no band`);
+          if (!b) return;
+          for (const [what, box] of drawnAbove(d))
+            check(
+              box.y1 < b.y,
+              `${d.arrangement}: ${what} reaches ${box.y1}, below the divider at ${b.y}`
+            );
+          for (const l of bandLabels(b))
+            check(
+              l.y0 > b.y && l.x0 >= 0 && l.x1 <= d.width && l.y1 <= d.height,
+              `${d.arrangement}: band ${l.kind} "${l.text}" leaves the band or canvas`
+            );
+          check(
+            b.x1 <= d.width && b.y1 === d.height,
+            `${d.arrangement}: canvas ${d.width}×${d.height} does not end with the band`
+          );
+          // Random hand-given positions may collide among themselves; the
+          // band must still collide with nothing.
+          const hit = labelCollisions(d).filter((h) => h.includes("band:"));
+          check(hit.length === 0, `${d.arrangement}: ${hit.join("; ")}`);
+        }
+    }, SETTINGS),
+  TIMEOUT
+);
+
+test(
+  "Before and After share the band's divider, rows, meter and canvas",
+  () =>
+    hegel.testAsync(async (tc) => {
+      const { spec } = tc.draw(flowSpec(tc.draw(gs.booleans()), true));
+      const [first, ...rest] = (await laidOut(spec)).arrangements;
+      for (const d of rest)
+        expect(bandGeometry(d)).toEqual(bandGeometry(first));
+    }, SETTINGS),
+  TIMEOUT
+);
+
+test(
+  "a band only adds itself: everything above it lays out as without one",
+  () =>
+    hegel.testAsync(
+      async (tc) => {
+        const { spec } = tc.draw(flowSpec(tc.draw(gs.booleans()), true));
+        const bare: FlowSpec = { ...spec, band: undefined };
+        delete (bare as { band?: unknown }).band;
+        const [a, b] = [await laidOut(spec), await laidOut(bare)];
+        a.arrangements.forEach((d, i) => {
+          const e = b.arrangements[i];
+          expect(d.parts.map((p) => [p.id, p.position])).toEqual(
+            e.parts.map((p) => [p.id, p.position])
+          );
+          expect(d.rails.map((r) => r.points)).toEqual(
+            e.rails.map((r) => r.points)
+          );
+          expect(d.regions).toEqual(e.regions);
+          check(e.band === undefined, "a spec without a band drew one");
+          check(
+            d.width >= e.width && d.height > e.height,
+            "the band did not grow the canvas"
+          );
+        });
       },
       { testCases: 50 }
     ),

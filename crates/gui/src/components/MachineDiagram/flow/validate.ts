@@ -26,6 +26,7 @@ const TOP_FIELDS = [
   "regions",
   "cards",
   "story",
+  "band",
   "attachments",
 ];
 const PART_FIELDS = [
@@ -72,6 +73,10 @@ const STEP_FIELDS = [
   "args",
   "checkpoint",
 ];
+const BAND_FIELDS = ["heading", "rows", "meter"];
+const BAND_ROW_FIELDS = ["name", "note", "chips", "beats"];
+const BAND_METER_FIELDS = ["label", "marker", "footnote"];
+const SIDES = ["before", "after"];
 const PAYLOAD_FIELDS = ["type", "value", "eventTime", "fields"];
 /** Drill-down nesting and total sub-spec limits (YAML aliases can repeat or loop a spec). */
 export const MAX_DRILL_DEPTH = 8;
@@ -508,6 +513,102 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
       checkStep(c, s, join(join(p, "steps"), k), parts, partIds, rails, cards)
     );
   });
+
+  if (input.band !== undefined)
+    checkBand(c, input.band, join(root, "band"), beatIds);
+}
+
+/** A band: heading, rows naming story beats by id, and an optional meter. */
+function checkBand(
+  c: Checker,
+  raw: unknown,
+  p: string,
+  beatIds: Map<string, string>
+) {
+  if (!isRecord(raw)) return c.err(p, "expected a band object with rows");
+  c.unknownFields(raw, BAND_FIELDS, p);
+  c.str(raw, "heading", p);
+  const rows = c.list(raw, "rows", p, true);
+  if (Array.isArray(raw.rows) && rows.length === 0)
+    c.err(join(p, "rows"), "needs at least one row");
+  rows.forEach((row, i) => {
+    const rp = join(join(p, "rows"), i);
+    if (!isRecord(row)) return c.err(rp, "expected a band row object");
+    c.unknownFields(row, BAND_ROW_FIELDS, rp);
+    c.str(row, "name", rp, true);
+    perArrangement(c, row, "note", rp, (v, vp) => {
+      if (typeof v !== "string" || v === "")
+        c.err(vp, "expected a non-empty string");
+    });
+    if (row.chips === undefined) c.err(join(rp, "chips"), "is required");
+    else
+      perArrangement(c, row, "chips", rp, (v, vp) => {
+        if (!Array.isArray(v))
+          return c.err(vp, "expected a list of chip texts");
+        if (v.length === 0) return c.err(vp, "needs at least one chip");
+        v.forEach((chip, k) => {
+          if (typeof chip !== "string" || chip === "")
+            c.err(join(vp, k), "expected a non-empty string");
+        });
+      });
+    const beats = c.list(row, "beats", rp, true);
+    if (Array.isArray(row.beats) && beats.length === 0)
+      c.err(join(rp, "beats"), "needs at least one beat id");
+    const seen = new Set<string>();
+    beats.forEach((b, k) => {
+      const bp = join(join(rp, "beats"), k);
+      if (typeof b !== "string" || b === "")
+        return c.err(bp, "expected a beat id");
+      if (seen.has(b)) return c.err(bp, `beat "${b}" is listed twice`);
+      seen.add(b);
+      if (!beatIds.has(b))
+        c.missing(
+          bp,
+          "band row names missing beat",
+          b,
+          [...beatIds.keys()],
+          "beat ids"
+        );
+    });
+  });
+  const meter = raw.meter;
+  if (meter === undefined) return;
+  const mp = join(p, "meter");
+  if (!isRecord(meter))
+    return c.err(mp, "expected a meter object with label and marker");
+  c.unknownFields(meter, BAND_METER_FIELDS, mp);
+  c.str(meter, "label", mp, true);
+  if (Array.isArray(meter.marker)) {
+    if (meter.marker.length === 0)
+      c.err(join(mp, "marker"), "needs at least one marker kind");
+    meter.marker.forEach((k, i) => {
+      if (typeof k !== "string" || k === "")
+        c.err(join(join(mp, "marker"), i), "expected a marker kind");
+    });
+  } else c.str(meter, "marker", mp, true);
+  c.str(meter, "footnote", mp);
+}
+
+/**
+ * A field that is either one value or `{ before, after }`, each checked by
+ * `each`. The per-arrangement form needs both sides.
+ */
+function perArrangement(
+  c: Checker,
+  obj: Record<string, unknown>,
+  key: string,
+  path: string,
+  each: (v: unknown, p: string) => void
+) {
+  const v = obj[key];
+  if (v === undefined) return;
+  const p = join(path, key);
+  if (!isRecord(v)) return each(v, p);
+  c.unknownFields(v, SIDES, p);
+  for (const side of SIDES)
+    if (v[side] === undefined)
+      c.err(join(p, side), "is required (give both before and after)");
+    else each(v[side], join(p, side));
 }
 
 function checkPayload(c: Checker, v: unknown, p: string) {

@@ -6,7 +6,6 @@
  * with the same boxes. Monospace text is estimated at 0.6 em per character
  * and 1.2 em per line.
  */
-import type { TextAlign } from "../SvgText";
 import type {
   DiagramPart,
   DiagramRail,
@@ -14,13 +13,20 @@ import type {
   DiagramTimeline,
 } from "./compile";
 import type { Point } from "../route";
-
-export interface Box {
-  readonly x0: number;
-  readonly y0: number;
-  readonly x1: number;
-  readonly y1: number;
-}
+import { LINE_EM, textBox, type Box } from "./measure";
+import {
+  BAND_CHIP_HEIGHT,
+  BAND_FOOTNOTE_SIZE,
+  BAND_HEADING_SIZE,
+  BAND_METER_RING,
+  BAND_NAME_SIZE,
+  headingWidth,
+  meterCountText,
+  meterCountX,
+  ringX,
+  rowLine,
+  type DiagramBand,
+} from "./band";
 
 export type LabelKind =
   | "title"
@@ -31,7 +37,12 @@ export type LabelKind =
   | "name"
   | "rail"
   | "mark"
-  | "region";
+  | "region"
+  | "band"
+  | "chip"
+  | "meter";
+
+export { CHAR_EM, LINE_EM, textBox, textWidth, type Box } from "./measure";
 
 export interface LabelBox extends Box {
   readonly kind: LabelKind;
@@ -40,10 +51,6 @@ export interface LabelBox extends Box {
   readonly text: string;
 }
 
-/** Monospace advance per px of font size (JetBrains Mono / IBM Plex Mono ≈ 0.6 em). */
-export const CHAR_EM = 0.6;
-/** Line box per px of font size. */
-export const LINE_EM = 1.2;
 /** Hover/focus ring padding around a frame (MachinePart RING_PAD). */
 export const RING_PAD = 14;
 /** Rail label size and its offset under the rail (Wire). */
@@ -59,23 +66,6 @@ export const REGION_LABEL_SIZE = 18;
 /** Pill gate half-extents when fully open (Gate, `offset` up to 24). */
 const GATE_HALF_LONG = 34;
 const GATE_HALF_SHORT = 4.5;
-
-export const textWidth = (text: string, size: number) =>
-  text.length * size * CHAR_EM;
-
-/** A single line centred on `y` (SvgText uses dominant-baseline middle). */
-export function textBox(
-  x: number,
-  y: number,
-  text: string,
-  size: number,
-  align: TextAlign = "left"
-): Box {
-  const w = textWidth(text, size);
-  const h = size * LINE_EM;
-  const x0 = align === "left" ? x : align === "center" ? x - w / 2 : x - w;
-  return { x0, y0: y - h / 2, x1: x0 + w, y1: y + h / 2 };
-}
 
 export function union(boxes: readonly Box[]): Box {
   return {
@@ -317,19 +307,84 @@ export function regionLabels(g: DiagramRegion): LabelBox[] {
 }
 
 /**
+ * Every label the band draws, in diagram space: the heading, each row's
+ * name and note, each chip's pill, and the meter's label, rings, count and
+ * footnote. Each has its own owner, so no two may overlap.
+ */
+export function bandLabels(b: DiagramBand): LabelBox[] {
+  const out: LabelBox[] = [];
+  const add = (kind: LabelKind, owner: string, text: string, box: Box) =>
+    out.push({ ...box, kind, owner: `band:${owner}`, text });
+  if (b.heading) {
+    const h = BAND_HEADING_SIZE * LINE_EM;
+    add("band", "heading", b.heading, {
+      x0: b.x0,
+      y0: b.headingY - h / 2,
+      x1: b.x0 + headingWidth(b.heading),
+      y1: b.headingY + h / 2,
+    });
+  }
+  b.rows.forEach((r, i) => {
+    const line = rowLine(r.name, r.note);
+    add("band", `row${i}`, line, textBox(b.x0, r.y, line, BAND_NAME_SIZE));
+    r.chips.forEach((c, k) =>
+      add("chip", `row${i}.chip${k}`, c.text, {
+        x0: c.x,
+        y0: r.y - BAND_CHIP_HEIGHT / 2,
+        x1: c.x + c.width,
+        y1: r.y + BAND_CHIP_HEIGHT / 2,
+      })
+    );
+  });
+  const m = b.meter;
+  if (m) {
+    const n = m.times.length;
+    add(
+      "meter",
+      "meter",
+      m.label,
+      textBox(m.x, m.labelY, m.label, BAND_NAME_SIZE)
+    );
+    if (n > 0)
+      add("meter", "meter.rings", `${n} rings`, {
+        x0: ringX(m, 0) - BAND_METER_RING,
+        y0: m.ringsY - BAND_METER_RING,
+        x1: ringX(m, n - 1) + BAND_METER_RING,
+        y1: m.ringsY + BAND_METER_RING,
+      });
+    const count = meterCountText(n, n);
+    add(
+      "meter",
+      "meter.count",
+      count,
+      textBox(meterCountX(m, n), m.ringsY, count, BAND_NAME_SIZE)
+    );
+    if (m.footnote)
+      add(
+        "meter",
+        "meter.footnote",
+        m.footnote,
+        textBox(m.x, m.footnoteY, m.footnote, BAND_FOOTNOTE_SIZE)
+      );
+  }
+  return out;
+}
+
+/**
  * Every label in a picture that collides with a part's frame, a gate or
  * another owner's label, as readable descriptions (empty when clear). A
  * part's change tab hangs on its own frame by design, so that pair is
  * allowed.
  */
 export function labelCollisions(
-  d: Pick<DiagramTimeline, "parts" | "rails" | "regions">
+  d: Pick<DiagramTimeline, "parts" | "rails" | "regions" | "band">
 ): string[] {
   const drawn = d.parts.filter((p) => p.presence !== "absent");
   const labels: LabelBox[] = [
     ...drawn.flatMap(partLabels),
     ...d.rails.filter((r) => r.presence !== "absent").flatMap(railLabels),
     ...d.regions.flatMap(regionLabels),
+    ...(d.band ? bandLabels(d.band) : []),
   ];
   const solids: { owner: string; what: string; box: Box }[] = [
     ...drawn.map((p) => ({

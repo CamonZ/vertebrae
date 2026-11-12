@@ -11,6 +11,7 @@ import { RailCards } from "../RailCards";
 import { SvgText } from "../SvgText";
 import { Wire } from "../Rail";
 import { nameLabelLocal, regionLabelAt } from "./extent";
+import { FlowBand } from "./FlowBand";
 import { useFlowRegistry } from "./registryContext";
 import type { DiagramTimeline } from "./compile";
 
@@ -29,7 +30,8 @@ export interface FlowDiagramProps {
  * A compiled flow arrangement at time `t`: regions behind everything, a wire per rail, a MachinePart per
  * part (framed by its bounding box, named above it when drawn below full
  * scale, where MachinePart hides its own title), and the rail layer's
- * travelling cards, inside the pan/zoom viewport. Absent parts and rails are
+ * travelling cards, inside the pan/zoom viewport, with the band (if any)
+ * under it all. Absent parts and rails are
  * not drawn. Works
  * for any registered part kind: everything comes from the compiled timeline.
  * With `interaction`, parts take hover, focus and activation and cards can
@@ -124,6 +126,9 @@ export const FlowDiagram = memo(function FlowDiagram({
                 align="center"
               />
             ))}
+          {d.band && (
+            <FlowBand band={d.band} t={t} reducedMotion={reducedMotion} />
+          )}
           <RailCards timeline={d.travel} t={t} reducedMotion={reducedMotion} />
         </MachineDiagram>
       </MachineDiagramViewport>
