@@ -20,7 +20,6 @@ import {
   loadLastUsedLocalChatModelId,
 } from "../utils/localChatPersistence";
 import {
-  hasStaleModelDefault,
   hasStaleReasoningEffort,
   hasStaleSpeedTier,
   providerHarnessInfo,
@@ -243,6 +242,11 @@ export function useChatSession(sessionId: string) {
     !harnessCatalog || selectedHarnessInfo?.available === true;
   const canUseComposer =
     !hasPendingUserQuestion &&
+    (lockedHarness ||
+      hasResume ||
+      !!session?.messages.length ||
+      !selectedModelId ||
+      supportedModelIds.has(selectedModelId)) &&
     selectedHarnessAvailable &&
     (!isBusy || canQueueMessage);
   const canSendMessage = (isActive || canQueueMessage) && canUseComposer;
@@ -260,11 +264,11 @@ export function useChatSession(sessionId: string) {
     if (messageCount > 0) return;
 
     // A saved setting is only an initial value. A user choice already made in
-    // this empty session must win over a later settings-page update.
+    // this empty session must win over a later settings-page update. Stale
+    // defaults stay visible until the user chooses a model or resets them.
     if (
       selectedModelId === undefined &&
-      savedHarnessDefaults?.modelId &&
-      !hasStaleModelDefault(visibleHarness, savedHarnessDefaults.modelId)
+      savedHarnessDefaults?.modelId
     ) {
       setSessionSelectedModel(sessionId, savedHarnessDefaults.modelId);
     }
@@ -354,17 +358,18 @@ export function useChatSession(sessionId: string) {
     if (hasConversation || messageCount > 0) return;
 
     // Prefer the explicit per-harness setting over the legacy last-used model
-    // preference. Invalid stored settings intentionally fall through so the
-    // existing behavior remains safe and unchanged.
-    if (
-      savedHarnessDefaults?.modelId &&
-      !hasStaleModelDefault(visibleHarness, savedHarnessDefaults.modelId)
-    ) {
+    // preference. A stale saved model requires an explicit reset.
+    if (savedHarnessDefaults?.modelId) {
       return;
     }
 
     const lastUsed = loadLastUsedLocalChatModelId();
-    if (lastUsed && supportedModelIds.has(lastUsed)) {
+    if (!lastUsed) return;
+    const legacyBuiltinChoice =
+      (selectedProviderId === "anthropic" &&
+        /^(claude-|sonnet$|opus$|haiku$|fable$)/i.test(lastUsed)) ||
+      (selectedProviderId === "openai" && /^gpt-/i.test(lastUsed));
+    if (supportedModelIds.has(lastUsed) || legacyBuiltinChoice) {
       setSessionSelectedModel(sessionId, lastUsed);
     }
   }, [
@@ -374,6 +379,7 @@ export function useChatSession(sessionId: string) {
     messageCount,
     savedHarnessDefaults,
     selectedModelId,
+    selectedProviderId,
     sessionId,
     setSessionSelectedModel,
     supportedModelIds,
@@ -399,7 +405,7 @@ export function useChatSession(sessionId: string) {
   useEffect(() => {
     if (!hasSession || !visibleHarness) return;
     if (lockedHarness || hasConversation) return;
-    if (!selectedModelId) return;
+    if (!selectedModelId || savedHarnessDefaults?.modelId) return;
     if (visibleHarness.models.length > 0) return;
     setSessionSelectedModel(sessionId, null);
   }, [
@@ -407,6 +413,7 @@ export function useChatSession(sessionId: string) {
     hasSession,
     lockedHarness,
     selectedModelId,
+    savedHarnessDefaults?.modelId,
     sessionId,
     setSessionSelectedModel,
     visibleHarness,

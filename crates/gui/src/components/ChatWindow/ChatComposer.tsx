@@ -642,7 +642,11 @@ export function ChatComposer({
                   <select
                     aria-label={`${visibleHarness.label} model`}
                     data-testid="local-chat-model-picker"
-                    value={session.selectedModelId ?? ""}
+                    value={
+                      selectedProviderId === "openai" && session.selectedModelId === "default"
+                        ? ""
+                        : session.selectedModelId ?? ""
+                    }
                     onChange={onModelChange}
                     disabled={picker.modelPickerDisabled}
                   >
@@ -652,16 +656,29 @@ export function ChatComposer({
                         Unsupported: {session.selectedModelId}
                       </option>
                     )}
-                    {(visibleHarness.models ?? []).map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}
-                        {model.id === visibleHarness.default_model_id
-                          ? " (default)"
-                          : ""}
-                      </option>
-                    ))}
+                    {(visibleHarness.models ?? [])
+                      .filter(
+                        (model) =>
+                          !(
+                            selectedProviderId === "openai" &&
+                            model.id === "default"
+                          )
+                      )
+                      .map((model) => (
+                        <option key={model.id} value={model.id}>
+                          {model.label}
+                          {model.id === visibleHarness.default_model_id
+                            ? " (default)"
+                            : ""}
+                        </option>
+                      ))}
                   </select>
                 </label>
+                {picker.selectedModelUnsupported && !picker.hasConversation && (
+                  <span role="alert">
+                    Choose an available model or reset to Default model to start this chat.
+                  </span>
+                )}
                 {availableReasoningEfforts.length > 0 && (
                   <label className="hc-effort-picker">
                     <select

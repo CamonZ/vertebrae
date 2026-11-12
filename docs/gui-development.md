@@ -294,6 +294,40 @@ never on the adapter crates directly.
 | `gate.rs` | `LocalChatGateBinding`, the hidden gate protocol instructions (draft or whole-artifact), and the bound `vtb gate` / `vtb artifact add` command check |
 | `manager.rs` | Session registry and pane/session bookkeeping |
 
+#### Built-in local-chat model menus
+
+`vertebrae_harness::curate_local_chat_models` owns picker selection policy:
+Anthropic Fable, Opus, Sonnet, Haiku; OpenAI Astra, Sol, Terra, Luna. Each
+family contributes its newest numeric version, with family rank taking priority
+over version. Aliases and unranked families are absent from new choices.
+Equal versions prefer an undated ID, then the newest dated snapshot; lexical
+ID and serialized capability metadata break remaining ties deterministically.
+Capabilities stay attached to the selected row and are never merged.
+
+Claude IDs, labels and capabilities come from the shared adapter's
+`DEFAULT_CLAUDE_MODELS` and `builtin_claude_model_capabilities`. Add confirmed
+IDs there, update model-specific capability rules with provider evidence, then
+run the harness and GUI catalog regressions. Do not add another GUI model list.
+Fable 5.2's `claude-fable-5-2` ID, fast-mode capability and 1M context window
+were verified against Claude Code 2.1.322 metadata on 2026-11-12; a live
+first-party response confirmed that exact ID and window. Catalog presence
+still depends on the existing CLI readiness check; account-specific rejection
+is reported by the provider when a request runs.
+
+Codex keeps the raw app-server discovery catalog (all pages, hidden models
+excluded) or bundled fallback, then applies the same menu policy at the
+local-chat projection. IDs and capabilities remain provider-supplied. Codex
+0.167.2's live `model/list` and bundled catalogs both contain `gpt-6-astra`, `gpt-6.1-sol`,
+`gpt-6.1-terra`, and `gpt-6-luna`. The `default` sentinel remains a no-override
+choice; the composer displays it once through its default/current-model row.
+
+Picker filtering never removes legacy execution support or changes active or
+resumable conversation IDs/history. An obsolete saved default for a new chat
+stays visibly unsupported and requires choosing an available model or resetting
+to the default; it cannot silently switch families. Settings and dedicated
+inline discussions likewise show stale choices and request recovery. Custom
+providers bypass built-in curation and retain their configured model IDs/order.
+
 #### Gate chats
 
 The **Resolve** action on a waiting `human_input` gate opens a local chat

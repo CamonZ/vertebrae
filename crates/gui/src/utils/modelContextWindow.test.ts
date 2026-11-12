@@ -6,6 +6,12 @@ import {
 } from "./modelContextWindow";
 
 describe("resolveContextWindow", () => {
+  it.each(["claude-fable-5-2", "FABLE-5.2"])(
+    "uses the confirmed Fable 5.2 context for %s",
+    (model) => {
+      expect(resolveContextWindow(model, 200_000)).toBe(1_000_000);
+    }
+  );
   it("returns 1M for opus 5.5 variants", () => {
     expect(resolveContextWindow("claude-opus-5-5", undefined)).toBe(1_000_000);
     expect(resolveContextWindow("opus-5.5", undefined)).toBe(1_000_000);

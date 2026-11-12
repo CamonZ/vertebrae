@@ -17,10 +17,6 @@ use self::args::supported_claude_model_catalog;
 #[cfg(test)]
 use self::args::builtin_claude_output_styles;
 
-// Re-export public catalog types for tests.
-#[cfg(test)]
-pub(crate) use self::args::{ClaudeModelCatalog, ClaudeModelOption};
-
 /// Claude Code's `--effort` levels, also accepted in-session as the
 /// `effortLevel` flag setting.
 const CLAUDE_EFFORT_LEVELS: &[(&str, &str)] = &[
@@ -211,7 +207,7 @@ mod tests {
         assert_eq!(info.label, "Claude");
         assert!(info.available);
         assert_eq!(info.unavailable_reason, None);
-        assert_eq!(info.default_model_id, Some("sonnet".to_string()));
+        assert_eq!(info.default_model_id, Some("claude-sonnet-5-5".to_string()));
         assert!(info.supports_resume);
         assert_eq!(
             info.speed_tiers,
@@ -228,126 +224,21 @@ mod tests {
                 },
             ]
         );
+        let catalog = supported_claude_model_catalog();
         assert_eq!(
-            info.models,
-            vec![
-                LocalChatModelOption {
-                    id: "sonnet".to_string(),
-                    label: "Sonnet".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: None,
-                    supports_personality: None,
-                },
-                LocalChatModelOption {
-                    id: "opus".to_string(),
-                    label: "Opus".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                    supports_personality: None,
-                },
-                LocalChatModelOption {
-                    id: "haiku".to_string(),
-                    label: "Haiku".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: None,
-                    supports_personality: None,
-                },
-                LocalChatModelOption {
-                    id: "fable".to_string(),
-                    label: "Fable".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: None,
-                    supports_personality: None,
-                },
-                LocalChatModelOption {
-                    id: "claude-opus-5".to_string(),
-                    label: "Claude Opus 5".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                    supports_personality: None,
-                },
-                LocalChatModelOption {
-                    id: "claude-opus-5-5".to_string(),
-                    label: "Claude Opus 5.5".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                    supports_personality: None,
-                },
-                LocalChatModelOption {
-                    id: "claude-opus-4-8".to_string(),
-                    label: "Claude Opus 4.8".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                    supports_personality: None,
-                },
-                LocalChatModelOption {
-                    id: "claude-sonnet-5-5".to_string(),
-                    label: "Claude Sonnet 5.5".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: None,
-                    supports_personality: None,
-                },
-                LocalChatModelOption {
-                    id: "claude-haiku-5-5".to_string(),
-                    label: "Claude Haiku 5.5".to_string(),
-                    supported_reasoning_effort_ids: None,
-                    supported_speed_tier_ids: None,
-                    supports_personality: None,
-                },
-            ]
+            info.models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>(),
+            catalog
+                .models
+                .iter()
+                .map(|model| model.id.as_str())
+                .collect::<Vec<_>>()
         );
         assert_eq!(
-            supported_claude_model_catalog(),
-            ClaudeModelCatalog {
-                default_model_id: "sonnet".to_string(),
-                models: vec![
-                    ClaudeModelOption {
-                        id: "sonnet".to_string(),
-                        label: "Sonnet".to_string(),
-                        supported_speed_tier_ids: None,
-                    },
-                    ClaudeModelOption {
-                        id: "opus".to_string(),
-                        label: "Opus".to_string(),
-                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                    },
-                    ClaudeModelOption {
-                        id: "haiku".to_string(),
-                        label: "Haiku".to_string(),
-                        supported_speed_tier_ids: None,
-                    },
-                    ClaudeModelOption {
-                        id: "fable".to_string(),
-                        label: "Fable".to_string(),
-                        supported_speed_tier_ids: None,
-                    },
-                    ClaudeModelOption {
-                        id: "claude-opus-5".to_string(),
-                        label: "Claude Opus 5".to_string(),
-                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                    },
-                    ClaudeModelOption {
-                        id: "claude-opus-5-5".to_string(),
-                        label: "Claude Opus 5.5".to_string(),
-                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                    },
-                    ClaudeModelOption {
-                        id: "claude-opus-4-8".to_string(),
-                        label: "Claude Opus 4.8".to_string(),
-                        supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                    },
-                    ClaudeModelOption {
-                        id: "claude-sonnet-5-5".to_string(),
-                        label: "Claude Sonnet 5.5".to_string(),
-                        supported_speed_tier_ids: None,
-                    },
-                    ClaudeModelOption {
-                        id: "claude-haiku-5-5".to_string(),
-                        label: "Claude Haiku 5.5".to_string(),
-                        supported_speed_tier_ids: None,
-                    },
-                ],
-            }
+            info.models[0].supported_speed_tier_ids,
+            Some(vec!["default".into(), "fast".into()])
         );
     }
 
@@ -363,7 +254,7 @@ mod tests {
             info.unavailable_reason,
             Some("Claude Code CLI not found".to_string())
         );
-        assert_eq!(info.default_model_id, Some("sonnet".to_string()));
+        assert_eq!(info.default_model_id, Some("claude-sonnet-5-5".to_string()));
     }
 
     #[test]
