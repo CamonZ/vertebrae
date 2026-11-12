@@ -10,11 +10,12 @@ import { SegmentedControl } from "../../molecules";
 import type { DiagramInteraction } from "../interaction";
 import { roleColor } from "../palette";
 import { beatOutcome, nextSpeed, SPEEDS } from "./clockModel";
-import type { CompiledFlow, DiagramTimeline } from "./compile";
+import type { BeatChange, CompiledFlow, DiagramTimeline } from "./compile";
 import { AttachmentPanel } from "./AttachmentPanel";
 import { FlowDiagram } from "./FlowDiagram";
 import { leaveToTarget, playerCommand, PLAYER_SHORTCUTS } from "./playerKeys";
 import type { ArrangementName } from "./spec";
+import { useArrangementMorph } from "./useArrangementMorph";
 import { useFlowClock, type FlowClock } from "./useFlowClock";
 import {
   beatAnnouncement,
@@ -72,6 +73,7 @@ export function FlowPlayer({
     flow.arrangements.find((a) => a.arrangement === selected) ??
     flow.arrangements[0];
   const clock = useFlowClock(diagram.travel, { reducedMotion });
+  const { morph, start: startMorph } = useArrangementMorph(clock.reducedMotion);
   const [hovered, setHovered] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
   const [followed, setFollowed] = useState<string | null>(null);
@@ -120,9 +122,17 @@ export function FlowPlayer({
             : undefined
         );
 
+  // Switching arrangement keeps the beat; with motion the marked parts
+  // morph from the one being left, frozen where it was.
+  const choose = (a: ArrangementName) => {
+    if (a === diagram.arrangement) return;
+    startMorph(diagram, clock.t);
+    setSelected(a);
+  };
+
   const toggleArrangement = () => {
     if (names.length !== 2) return;
-    setSelected(names[0] === diagram.arrangement ? names[1] : names[0]);
+    choose(names[0] === diagram.arrangement ? names[1] : names[0]);
   };
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
@@ -181,6 +191,9 @@ export function FlowPlayer({
       className="@container flex flex-col gap-2 rounded-[var(--radius-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
       data-testid="flow-player"
       data-arrangement={diagram.arrangement}
+      data-morph={
+        morph ? `${morph.from.arrangement}→${diagram.arrangement}` : undefined
+      }
       data-t={clock.t}
       data-beat={clock.beat}
       data-playing={clock.playing ? "true" : "false"}
@@ -201,12 +214,13 @@ export function FlowPlayer({
             }
             reducedMotion={clock.reducedMotion}
             interaction={interaction}
+            morph={morph}
           />
           <Controls
             clock={clock}
             names={names}
             arrangement={diagram.arrangement}
-            onArrangement={setSelected}
+            onArrangement={choose}
             help={help}
             onHelp={() => setHelp((h) => !h)}
           />
@@ -343,7 +357,11 @@ function Chapters({
                       ? "border-[var(--color-line)] bg-[var(--color-bg-1)] text-fg-soft hover:border-[var(--color-line-strong)]"
                       : "border-[var(--color-line)] bg-[var(--color-bg-1)] text-fg-mute hover:border-[var(--color-line-strong)] hover:text-fg-soft"
                 }`}
-                aria-label={`Beat ${i + 1} of ${beats.length}: ${b.caption}`}
+                aria-label={`Beat ${i + 1} of ${beats.length}: ${b.caption}${
+                  b.changes.length
+                    ? `. Changed steps: ${b.changes.map((c) => `${c.change} ${c.label}`).join("; ")}`
+                    : ""
+                }`}
                 aria-current={current ? "step" : undefined}
                 title={current ? undefined : b.caption}
                 onClick={() => clock.playBeat(i)}
@@ -357,9 +375,22 @@ function Chapters({
                 <span className="w-4 shrink-0 text-right font-mono text-fg-mute">
                   {i + 1}
                 </span>
-                <span className={current ? "min-w-0" : "min-w-0 line-clamp-2"}>
-                  {b.caption}
-                </span>
+                {b.changes.length > 0 ? (
+                  <span className="flex min-w-0 flex-col gap-1">
+                    <span
+                      className={current ? "min-w-0" : "min-w-0 line-clamp-2"}
+                    >
+                      {b.caption}
+                    </span>
+                    <StepMarks changes={b.changes} />
+                  </span>
+                ) : (
+                  <span
+                    className={current ? "min-w-0" : "min-w-0 line-clamp-2"}
+                  >
+                    {b.caption}
+                  </span>
+                )}
               </button>
               {current && (
                 <AttachmentPanel
@@ -372,6 +403,34 @@ function Chapters({
         })}
       </ol>
     </div>
+  );
+}
+
+const STEP_GLYPH = { added: "+", changed: "~", removed: "−" } as const;
+
+/**
+ * Marked story steps of a beat, as tags that read without colour: + solid,
+ * ~ outlined, − dashed and struck through (it does not run in After).
+ */
+function StepMarks({ changes }: { changes: readonly BeatChange[] }) {
+  return (
+    <span className="flex flex-wrap gap-1" data-testid="flow-step-marks">
+      {changes.map((c, k) => (
+        <span
+          key={k}
+          data-mark={c.change}
+          className={`rounded-[var(--radius-sm,4px)] border px-1 font-mono text-[11px] leading-4 ${
+            c.change === "added"
+              ? "border-fg bg-fg text-bg"
+              : c.change === "changed"
+                ? "border-fg text-fg"
+                : "border-dashed border-fg-mute text-fg-mute line-through"
+          }`}
+        >
+          {STEP_GLYPH[c.change]} {c.label}
+        </span>
+      ))}
+    </span>
   );
 }
 

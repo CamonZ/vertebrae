@@ -84,6 +84,16 @@ export interface PartSpec {
   readonly change?: ChangeMark;
   /** What changed, drawn under the name for `~ changed`. */
   readonly changeNote?: string;
+  /**
+   * Marks on the part's ports, by port name (drawn in the After arrangement):
+   * a connection point added, changed or removed in the change.
+   */
+  readonly portChanges?: Readonly<Record<string, ChangeMark>>;
+  /**
+   * Marks on the part's stages, by stage name, for kinds with stages
+   * (pipeline stages, saga steps, TaskRun stations; drawn in After).
+   */
+  readonly stageChanges?: Readonly<Record<string, ChangeMark>>;
   readonly before?: ArrangementOverride;
   readonly after?: ArrangementOverride;
   /** Hand-given placement of the part's 640×400 cell; auto-layout fills it in when absent. */
@@ -145,6 +155,11 @@ export interface StepSpec {
   readonly args?: Readonly<Record<string, unknown>>;
   /** Mark a durable checkpoint on the timeline when the step ends. */
   readonly checkpoint?: string;
+  /**
+   * The step's change mark: an added step runs only in After, a removed one
+   * only in Before; both and changed steps are listed on their beat in After.
+   */
+  readonly change?: ChangeMark;
 }
 
 /** A caption, or one per arrangement when the two sides read differently. */

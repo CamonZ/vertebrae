@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import inlineDiscussions from "../MachineDiagram/flow/__fixtures__/inlineDiscussions.flow.yaml?raw";
 import { parseFlowSpec } from "../MachineDiagram/flow";
 import { DRILL_HINT } from "../MachineDiagram/flow/FlowDiagram";
+import { MORPH_SECONDS } from "../MachineDiagram/flow/morph";
 import type { Artifact } from "../../bindings";
 import { queryClient } from "../../query/queryClient";
 import { resetProjectScopedStores } from "../../stores/projectScopedStores";
@@ -301,5 +302,68 @@ describe("unusable sub-specs", () => {
     expect(
       within(err).getByRole("button", { name: "Retry" })
     ).toBeInTheDocument();
+  });
+});
+
+describe("drill-down with the Before/After morph", () => {
+  const frames = (ms: number) => act(() => vi.advanceTimersByTime(ms));
+  const leaving = (el: Element) => el.querySelectorAll("[data-morph-from]");
+
+  beforeEach(() => {
+    vi.useFakeTimers({
+      toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"],
+    });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("drilling in mid-morph opens the live part and the parent comes back settled", () => {
+    renderView();
+    const top = playerAt(0);
+    act(() => top.focus());
+    fireEvent.keyDown(top, { key: "b" });
+    frames(MORPH_SECONDS * 400);
+    expect(top.dataset.morph).toBe("after→before");
+    expect(leaving(top).length).toBeGreaterThan(0);
+    // Only the live copy carries the part id, so the click opens it.
+    expect(level(0).querySelectorAll("[data-part-id='process']")).toHaveLength(
+      1
+    );
+    fireEvent.click(partAt(0, "process"));
+
+    const sub = playerAt(1);
+    expect(sub).toBeVisible();
+    expect(sub.dataset.morph).toBeUndefined();
+    frames(MORPH_SECONDS * 1000);
+
+    fireEvent.click(
+      within(breadcrumb()).getByRole("button", { name: /back/i })
+    );
+    expect(top).toHaveAttribute("data-arrangement", "before");
+    expect(top.dataset.morph).toBeUndefined();
+    expect(leaving(top)).toHaveLength(0);
+  });
+
+  it("a sub-spec morphs its own Before/After; the parent stays still", () => {
+    renderView();
+    fireEvent.click(partAt(0, "process"));
+    const top = playerAt(0);
+    const sub = playerAt(1);
+    const parent = level(0).innerHTML;
+    fireEvent.keyDown(sub, { key: "b" });
+    frames(MORPH_SECONDS * 500);
+    expect(sub.dataset.morph).toBe("after→before");
+    // The added worker fades out of the sub-diagram.
+    const fading = [...leaving(sub)].map(
+      (g) => g.querySelector(".md-part")?.getAttribute("data-part") ?? null
+    );
+    expect(fading).toContain("worker");
+    expect(top.dataset.morph).toBeUndefined();
+    expect(level(0).innerHTML).toBe(parent);
+    frames(MORPH_SECONDS * 1000);
+    expect(sub.dataset.morph).toBeUndefined();
+    expect(leaving(sub)).toHaveLength(0);
+    expect(sub.querySelector("[data-part-id='w']")).toBeNull();
   });
 });

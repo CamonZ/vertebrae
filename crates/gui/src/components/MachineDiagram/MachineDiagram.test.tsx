@@ -238,7 +238,7 @@ describe("accessibility and change marks", () => {
     );
     expect(container.querySelector('[data-mark="removed"]')).not.toBeNull();
     expect(
-      container.querySelector(".md-ghost rect[fill^='url(#']")
+      container.querySelector(".md-ghost .md-hatch[clip-path^='url(#']")
     ).not.toBeNull();
     expect(container.querySelectorAll(".md-card")).toHaveLength(0);
     expect(
