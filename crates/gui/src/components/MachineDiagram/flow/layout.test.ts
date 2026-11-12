@@ -280,6 +280,80 @@ describe("auto-layout", () => {
     }
   });
 
+  it.each([
+    {
+      name: "stacked parts beside the return legs",
+      parts: [
+        { id: "p0", kind: "two-phase commit" },
+        { id: "p1", kind: "aggregator" },
+        { id: "p2", kind: "aggregator" },
+        { id: "p3", kind: "aggregator" },
+        { id: "p4", kind: "alert" },
+      ],
+      forward: { id: "r3", from: "p0.p2", to: "p4.in" },
+    },
+    {
+      name: "an approval beside the return legs",
+      parts: [
+        { id: "p0", kind: "two-phase commit" },
+        { id: "p1", kind: "approval" },
+      ],
+      forward: { id: "r3", from: "p0.p1", to: "p1.person" },
+    },
+  ])(
+    "keeps disjoint self-loops apart with $name",
+    async ({ parts, forward }) => {
+      // Shrunk Hegel counterexamples: r0 and r2 have distinct ports, while
+      // the intervening r1 joins the two ports used by those self-loops.
+      const d = (
+        await laidOut({
+          version: 1,
+          parts,
+          rails: [
+            { id: "r0", from: "p0.p1", to: "p0.p1" },
+            { id: "r1", from: "p0.p1", to: "p0.p2" },
+            { id: "r2", from: "p0.p2", to: "p0.p2" },
+            forward,
+          ],
+        })
+      ).arrangements[0];
+      const [a, b] = [d.rails[0], d.rails[2]];
+      for (const r of [a, b]) {
+        expect(Math.max(...r.points.map(([, y]) => y))).toBeGreaterThan(
+          Math.max(...d.parts.map((p) => partExtent(p).y1))
+        );
+      }
+      for (let i = 1; i < a.points.length; i++)
+        for (let j = 1; j < b.points.length; j++) {
+          const [p, q, r, s] = [
+            a.points[i - 1],
+            a.points[i],
+            b.points[j - 1],
+            b.points[j],
+          ];
+          for (const k of [0, 1] as const) {
+            const o = 1 - k;
+            if (
+              [
+                Math.abs(p[o] - q[o]),
+                Math.abs(r[o] - s[o]),
+                Math.abs(p[o] - r[o]),
+              ].some((distance) => distance >= 0.5)
+            )
+              continue;
+            const overlap =
+              Math.min(Math.max(p[k], q[k]), Math.max(r[k], s[k])) -
+              Math.max(Math.min(p[k], q[k]), Math.min(r[k], s[k]));
+            expect(
+              overlap,
+              JSON.stringify([a.points, b.points])
+            ).toBeLessThanOrEqual(1);
+          }
+        }
+      expect(labelCollisions(d)).toEqual([]);
+    }
+  );
+
   it("finds return rails by model order", () => {
     const parts = ["a", "b", "c"].map((id) => ({ id }));
     expect(

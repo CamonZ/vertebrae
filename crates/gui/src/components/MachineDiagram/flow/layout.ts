@@ -370,6 +370,7 @@ async function layoutLevel(
   const verticals = Object.values(routes).flatMap((q) =>
     verticalRuns(q.points)
   );
+  const routedReturns: DiagramRail[] = [];
   for (const r of rails) {
     if (!back.has(r.id) || touchesGiven(r)) continue;
     const fromSide = nodes.get(r.from.part)!.part.ports[r.from.port].side;
@@ -387,14 +388,35 @@ async function layoutLevel(
     // Each leg finds its own way between the parts from its stub down to
     // the lane, keeping clear of rails already drawn — including this rail's
     // first leg, so a self-loop comes back up beside itself.
-    const out = legToLane(exit, fromSide, lane, extents, verticals) ?? [
+    // A shared port may keep its fork/join stub. Otherwise reserve every
+    // horizontal run too: separate bottom lanes alone do not keep the
+    // intermediate steps of their legs from merging.
+    const ends = [r.from, r.to];
+    const horizontals = routedReturns
+      .filter(
+        (q) =>
+          ![q.from, q.to].some((e) =>
+            ends.some((end) => end.part === e.part && end.port === e.port)
+          )
+      )
+      .flatMap((q) => segments(routes[q.id].points))
+      .filter(([a, b]) => Math.abs(a[1] - b[1]) < SNAP);
+    const out = legToLane(
       exit,
-      [exit[0], lane],
-    ];
-    const home = legToLane(entry, toSide, lane, extents, [
-      ...verticals,
-      ...verticalRuns(out),
-    ]) ?? [entry, [entry[0], lane]];
+      fromSide,
+      lane,
+      extents,
+      verticals,
+      horizontals
+    ) ?? [exit, [exit[0], lane]];
+    const home = legToLane(
+      entry,
+      toSide,
+      lane,
+      extents,
+      [...verticals, ...verticalRuns(out)],
+      horizontals
+    ) ?? [entry, [entry[0], lane]];
     const [downAt, upAt] = [out[out.length - 1][0], home[home.length - 1][0]];
     routes[r.id] = {
       points: dedupe([
@@ -412,6 +434,7 @@ async function layoutLevel(
         : {}),
     };
     verticals.push(...verticalRuns(routes[r.id].points));
+    routedReturns.push(r);
     lane += LANE_STEP;
   }
   return keptOnCanvas(positions, routes, extents, labelOf);
@@ -635,17 +658,17 @@ const BEND_COST = 120;
 
 /**
  * An orthogonal path from a stub down to the return lane that crosses no
- * part and runs no vertical within a rail gap of another rail's vertical.
- * Dijkstra over the grid of lines a stub away from every part edge and a
- * rail gap beside every vertical, with a cost per bend; undefined when the
- * stub is boxed in.
+ * part, keeps a rail gap beside existing verticals, and shares no reserved
+ * horizontal stretch. Dijkstra over lines around part edges and reserved
+ * runs, with a cost per bend; undefined when the stub is boxed in.
  */
 function legToLane(
   stub: Point,
   side: PortSide,
   lane: number,
   extents: readonly Box[],
-  verticals: readonly VerticalRun[]
+  verticals: readonly VerticalRun[],
+  horizontals: readonly Segment[]
 ): Point[] | undefined {
   // Running along a part's edge counts as touching it.
   const parts = extents.map((e) => pad(e, 1));
@@ -658,11 +681,16 @@ function legToLane(
     ...extents.flatMap((e) => [e.x0 - LANE_STUB, e.x1 + LANE_STUB]),
     ...verticals.flatMap((v) => [v.x - RAIL_GAP, v.x + RAIL_GAP]),
   ]);
+  // A stub can sit between an existing vertical and a part. Let the leg
+  // climb around the vertical's end before descending, rather than treating
+  // the stub's row as the top of the search and falling back through rails.
   const ys = uniq([
     stub[1],
     lane,
+    ...verticals.flatMap((v) => [v.y0 - RAIL_GAP, v.y1 + RAIL_GAP]),
+    ...horizontals.flatMap(([a]) => [a[1] - RAIL_GAP, a[1] + RAIL_GAP]),
     ...extents.flatMap((e) => [e.y0 - LANE_STUB, e.y1 + LANE_STUB]),
-  ]).filter((y) => y >= stub[1] - SNAP && y <= lane + SNAP);
+  ]).filter((y) => y <= lane + SNAP);
   const sx = xs.findIndex((x) => Math.abs(x - stub[0]) < 0.01);
   const sy = ys.findIndex((y) => Math.abs(y - stub[1]) < 0.01);
   const goal = ys.length - 1;
@@ -672,7 +700,7 @@ function legToLane(
   const free = (a: Point, b: Point) => {
     const box = segmentBox([a, b]);
     if (parts.some((e) => crosses(box, e))) return false;
-    if (a[1] === b[1]) return true; // horizontal steps may cross rails
+    if (a[1] === b[1]) return !horizontals.some((s) => collinear([a, b], s));
     return !verticals.some(
       (v) =>
         Math.abs(v.x - a[0]) < RAIL_GAP - SNAP &&
