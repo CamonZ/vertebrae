@@ -64,6 +64,13 @@ export const sagaPart: PartKindDef<Record<string, unknown>, SagaState> = {
   status: { x: 320, y: 332 },
   ports,
   gates: () => sideGates({ in: ports.in, out: ports.out }),
+  // Around each step station (lamp, slot and name); the tag sits left of the lamp.
+  stages: () =>
+    STEPS.map((name, i) => ({
+      name,
+      bb: [XS[i] - 70, 108, 140, 112],
+      tag: [XS[i] - 46, 130],
+    })),
   init: () => ({ at: 0, id: null, waitFrom: null }),
   verbs: {
     stage: {

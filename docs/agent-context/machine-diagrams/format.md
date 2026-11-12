@@ -8,12 +8,12 @@ and unregistered names are errors.
 
 | Object | Fields and meaning |
 | --- | --- |
-| Part | Required `id`, `kind`; optional `label` (defaults to kind), `job`, `props`, `change`, `changeNote`, `before`, `after`, `position`, `scale`, `attachments`, `drill` |
+| Part | Required `id`, `kind`; optional `label` (defaults to kind), `job`, `props`, `change`, `changeNote`, `portChanges`, `stageChanges`, `before`, `after`, `position`, `scale`, `attachments`, `drill` |
 | Rail | Required `id`, `from`, `to` as `partId.port`; optional `label`, `conditional` (dashed conditional lane), `change`, `attachments` |
 | Region | Required `id`, nonempty `parts` (part IDs); optional `label`. A part belongs to at most one region; use for a process, trust zone or container |
 | Card | Required `id`, `token`; optional `label` (defaults to ID), `payload`, `origin` (part ID), `attachments` |
 | Beat | Optional `id`, `caption`, `steps`, `hold`, `attachments`. Give IDs to beats referenced by band rows |
-| Step | Required `verb`, `part`; optional `card`, `via`, `with`, `delay`, `args`, `checkpoint` |
+| Step | Required `verb`, `part`; optional `card`, `via`, `with`, `delay`, `args`, `checkpoint`, `change` |
 
 `position: {x: 0, y: 100}` places a part's 640×400 cell; omit it to
 auto-layout with ELK. `scale` is 0.1–4; defaults follow the part footprint:

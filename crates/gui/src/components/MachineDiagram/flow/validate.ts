@@ -37,6 +37,8 @@ const PART_FIELDS = [
   "props",
   "change",
   "changeNote",
+  "portChanges",
+  "stageChanges",
   "before",
   "after",
   "position",
@@ -72,6 +74,7 @@ const STEP_FIELDS = [
   "delay",
   "args",
   "checkpoint",
+  "change",
 ];
 const BAND_FIELDS = ["heading", "rows", "meter"];
 const BAND_ROW_FIELDS = ["name", "note", "chips", "beats"];
@@ -103,6 +106,17 @@ class Checker {
     label?: string
   ) {
     this.errors.push({ path, ...notFound(what, name, names, label) });
+  }
+
+  changeMark(v: unknown, path: string) {
+    if (v !== undefined && !CHANGE_MARKS.includes(v as never))
+      this.missing(
+        path,
+        "unknown change mark",
+        String(v),
+        CHANGE_MARKS,
+        "allowed"
+      );
   }
 
   unknownFields(
@@ -254,14 +268,7 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
     const id = c.id(raw, p, partIds, "part");
     const kind = c.str(raw, "kind", p, true);
     for (const k of ["label", "job", "changeNote"]) c.str(raw, k, p);
-    if (raw.change !== undefined && !CHANGE_MARKS.includes(raw.change as never))
-      c.missing(
-        join(p, "change"),
-        "unknown change mark",
-        String(raw.change),
-        CHANGE_MARKS,
-        "allowed"
-      );
+    c.changeMark(raw.change, join(p, "change"));
     if (raw.position !== undefined)
       checkFields(
         raw.position,
@@ -310,6 +317,7 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
           `per-arrangement overrides need change: changed (this part is ${String(raw.change ?? "unchanged")})`
         );
     }
+    checkInnerMarks(c, raw, def, p);
     if (id !== undefined) parts.set(id, { def, path: p });
   });
 
@@ -696,6 +704,7 @@ function checkStep(
   const cardId = c.str(raw, "card", p);
   const via = c.str(raw, "via", p);
   c.str(raw, "checkpoint", p);
+  c.changeMark(raw.change, join(p, "change"));
   if (raw.with !== undefined)
     checkField(raw.with, { type: "boolean" }, join(p, "with"), c.errors);
   if (raw.delay !== undefined)
@@ -772,6 +781,53 @@ function checkStep(
   if (need === "none" && cardId !== undefined)
     c.err(join(p, "card"), `${part.def.kind} verb "${verb}" takes no card`);
   checkFields(raw.args, v.args ?? {}, join(p, "args"), c.errors);
+}
+
+/**
+ * `portChanges` keys must be the kind's ports and `stageChanges` keys its
+ * stages as the After arrangement names them (where the marks are drawn).
+ */
+function checkInnerMarks(
+  c: Checker,
+  raw: Record<string, unknown>,
+  def: AnyPartKind,
+  p: string
+) {
+  const marks = (key: string, names: readonly string[], what: string) => {
+    const v = raw[key];
+    if (v === undefined) return;
+    const kp = join(p, key);
+    if (!isRecord(v))
+      return c.err(kp, `expected an object of ${what} names to change marks`);
+    for (const [name, mark] of Object.entries(v)) {
+      if (!names.includes(name))
+        c.missing(
+          join(kp, name),
+          `${def.kind} has no ${what}`,
+          name,
+          names,
+          `its ${what}s`
+        );
+      c.changeMark(mark, join(kp, name));
+    }
+  };
+  marks("portChanges", Object.keys(def.ports), "port");
+  if (raw.stageChanges === undefined) return;
+  if (!def.stages)
+    return c.err(join(p, "stageChanges"), `${def.kind} has no stages to mark`);
+  const after =
+    isRecord(raw.after) && isRecord(raw.after.props)
+      ? raw.after.props
+      : undefined;
+  const base = isRecord(raw.props) ? raw.props : undefined;
+  let names: string[] = [];
+  try {
+    names = def.stages(resolvedProps(def, base, after)).map((s) => s.name);
+  } catch {
+    // Bad props are reported against props; nothing to match stages against.
+    return;
+  }
+  marks("stageChanges", names, "stage");
 }
 
 /** Props with defaults for a part in one arrangement (spec assumed valid). */

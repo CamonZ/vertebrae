@@ -21,25 +21,56 @@ import {
   type DiagramBandMeter,
   type DiagramBandRow,
 } from "./band";
+import { bandRowDiffers } from "./morph";
 
 /** Lit chips take an amber wash at this alpha (the prototype's 0.18). */
 const LIT_FILL = 0.18;
+
+/** The band being left during a Before/After morph, at its frozen time. */
+export interface BandMorph {
+  readonly from: DiagramBand;
+  readonly t: number;
+  /** Eased progress, 0 → 1. */
+  readonly e: number;
+}
 
 /**
  * The band under a flow diagram at shown time `t`: the divider, heading,
  * one row per situation (lit amber while the story is in one of its beats)
  * and the meter. Geometry comes from the compiled band; only `t` changes
- * what is lit and filled.
+ * what is lit and filled. During a Before/After morph the divider and
+ * heading stay put; rows and the meter that read differently cross-fade
+ * from the band being left.
  */
 export function FlowBand({
   band: b,
   t,
   reducedMotion,
+  morph,
 }: {
   band: DiagramBand;
   t: number;
   reducedMotion?: boolean;
+  morph?: BandMorph;
 }) {
+  const fromRow = (i: number) => {
+    const r = morph?.from.rows[i];
+    if (!morph || !r) return undefined;
+    const to = b.rows[i];
+    const differs =
+      !to ||
+      bandRowDiffers(r, to) ||
+      bandRowLit(r, morph.t) !== bandRowLit(to, t);
+    return differs ? r : undefined;
+  };
+  const fm = morph?.from.meter;
+  const meterDiffers =
+    morph !== undefined &&
+    fm !== undefined &&
+    (!b.meter ||
+      meterCount(fm, morph.t) !== meterCount(b.meter, t) ||
+      fm.times.length !== b.meter.times.length ||
+      fm.footnote !== b.meter.footnote);
   return (
     <g className="md-band" data-testid="flow-band">
       <rect
@@ -58,33 +89,65 @@ export function FlowBand({
           letterSpacing={BAND_HEADING_SPACING}
         />
       )}
-      {b.rows.map((r, i) => (
-        <BandRow key={i} index={i} x={b.x0} row={r} lit={bandRowLit(r, t)} />
-      ))}
+      {b.rows.map((r, i) => {
+        const from = fromRow(i);
+        const row = (
+          <BandRow key={i} index={i} x={b.x0} row={r} lit={bandRowLit(r, t)} />
+        );
+        return from ? (
+          <g key={i}>
+            {row}
+            <g opacity={1 - morph!.e} aria-hidden data-morph-from="band-row">
+              <BandRow
+                index={i}
+                x={morph!.from.x0}
+                row={from}
+                lit={bandRowLit(from, morph!.t)}
+                leaving
+              />
+            </g>
+          </g>
+        ) : (
+          row
+        );
+      })}
       {b.meter && (
         <BandMeter meter={b.meter} t={t} reducedMotion={reducedMotion} />
+      )}
+      {meterDiffers && (
+        <g opacity={1 - morph!.e} aria-hidden data-morph-from="band-meter">
+          <BandMeter
+            meter={fm!}
+            t={morph!.t}
+            reducedMotion={reducedMotion}
+            leaving
+          />
+        </g>
       )}
     </g>
   );
 }
 
+/** `leaving`: the morph's outgoing copy, kept out of test and state hooks. */
 function BandRow({
   index,
   x,
   row: r,
   lit,
+  leaving,
 }: {
   index: number;
   x: number;
   row: DiagramBandRow;
   lit: boolean;
+  leaving?: boolean;
 }) {
   const h = BAND_CHIP_HEIGHT;
   return (
     <g
       className="md-band-row"
-      data-band-row={index}
-      data-lit={lit ? "true" : "false"}
+      data-band-row={leaving ? undefined : index}
+      data-lit={leaving ? undefined : lit ? "true" : "false"}
     >
       <SvgText
         x={x}
@@ -138,19 +201,25 @@ function BandMeter({
   meter: m,
   t,
   reducedMotion,
+  leaving,
 }: {
   meter: DiagramBandMeter;
   t: number;
   reducedMotion?: boolean;
+  leaving?: boolean;
 }) {
   const n = meterCount(m, t);
   const total = m.times.length;
   return (
     <g
       className="md-band-meter"
-      data-testid="flow-band-meter"
-      data-count={n}
-      data-total={total}
+      {...(leaving
+        ? {}
+        : {
+            "data-testid": "flow-band-meter",
+            "data-count": n,
+            "data-total": total,
+          })}
     >
       <SvgText
         x={m.x}

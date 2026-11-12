@@ -56,6 +56,8 @@ export interface MachinePartProps {
   changeNote?: string;
   /** Tab position override for the change mark. */
   tab?: readonly [number, number];
+  /** Before/After morph progress while the change mark arrives (see ChangeMark). */
+  markMorph?: number;
   /** Status line anchor in part space. */
   status: { x: number; y: number; align?: TextAlign };
   /** Placement in the enclosing diagram. */
@@ -96,6 +98,7 @@ export function MachinePart({
   change = "unchanged",
   changeNote,
   tab,
+  markMorph,
   status,
   x = 0,
   y = 0,
@@ -206,7 +209,7 @@ export function MachinePart({
             )}
           </>
         )}
-        <ChangeMark mark={change} bb={bb} tab={tab} />
+        <ChangeMark mark={change} bb={bb} tab={tab} morph={markMorph} />
         {interactive && <PartRing bb={bb} />}
       </g>
     </PartContext.Provider>

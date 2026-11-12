@@ -99,6 +99,17 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           props: { type: "object" },
           change: { enum: CHANGE_MARKS },
           changeNote: { type: "string" },
+          portChanges: {
+            type: "object",
+            description: "change marks on the part's ports, by port name",
+            additionalProperties: { enum: CHANGE_MARKS },
+          },
+          stageChanges: {
+            type: "object",
+            description:
+              "change marks on the part's stages, by stage name (kinds with stages)",
+            additionalProperties: { enum: CHANGE_MARKS },
+          },
           before: ref("override"),
           after: ref("override"),
           position: ref("position"),
@@ -133,6 +144,10 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
               description: `${k} · ${def.job}; ports: ${Object.keys(def.ports).join(", ")}; verbs: ${Object.keys(def.verbs).join(", ")}`,
               properties: {
                 props,
+                portChanges: {
+                  propertyNames: { enum: Object.keys(def.ports) },
+                },
+                ...(def.stages ? {} : { stageChanges: false }),
                 before: { properties: { props: update } },
                 after: { properties: { props: update } },
               },
@@ -298,6 +313,11 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           delay: { type: "number", minimum: 0 },
           args: { type: "object" },
           checkpoint: { type: "string" },
+          change: {
+            enum: CHANGE_MARKS,
+            description:
+              "added: runs only in After; removed: runs only in Before; marked on its beat in After",
+          },
         },
       },
     },

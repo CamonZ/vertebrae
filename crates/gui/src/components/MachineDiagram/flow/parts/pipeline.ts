@@ -52,6 +52,13 @@ export const pipelinePart: PartKindDef<PipelineProps, PipelineState> = {
   },
   ports,
   gates: () => sideGates(ports),
+  // One cell per drawn stage (three per frame), inside the dividers.
+  stages: (props) =>
+    props.stages.slice(0, 3).map((name, i) => ({
+      name,
+      bb: [88 + 160 * i, 133, 144, 134],
+      tag: [112 + 160 * i, 156],
+    })),
   init: () => ({ at: -1, card: null }),
   verbs: {
     stage: {

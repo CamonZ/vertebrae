@@ -1,6 +1,5 @@
 import { useId, useMemo, type ReactNode } from "react";
 import { GraphMarkers } from "../WorkflowAtlas/GraphMarkers";
-import { HatchPattern } from "./ChangeMark";
 import { PartContext } from "./partContext";
 import { PART_HEIGHT, PART_WIDTH } from "./MachinePart";
 import "./MachineDiagram.css";
@@ -19,7 +18,7 @@ export interface MachineDiagramProps {
 
 /**
  * SVG root for machine diagrams: theme-mapped colour roles (MachineDiagram.css),
- * shared arrow markers, and the hatch pattern for removed/absent parts.
+ * shared arrow markers, and the id prefix removed/absent ghosts clip their hatch by.
  * Parts and wires share one logical coordinate space, the same one elkjs
  * layouts and WorkflowAtlas edges use.
  */
@@ -46,9 +45,6 @@ export function MachineDiagram({
       aria-label={label}
     >
       <GraphMarkers />
-      <defs>
-        <HatchPattern id={hatchId} />
-      </defs>
       <PartContext.Provider value={ctx}>{children}</PartContext.Provider>
     </svg>
   );

@@ -40,6 +40,7 @@ import {
   type CompiledPartStep,
   type FlowRegistry,
   type PartWriter,
+  type StageDef,
   type StepCard,
 } from "./registry";
 import type {
@@ -117,6 +118,12 @@ export interface DiagramPart {
   /** Mark drawn in this arrangement (Before draws everything unchanged). */
   readonly change: ChangeMark;
   readonly changeNote?: string;
+  /** Marked ports by name (none in Before). */
+  readonly portChanges: Readonly<
+    Record<string, Exclude<ChangeMark, "unchanged">>
+  >;
+  /** Marked stages (none in Before). */
+  readonly stageMarks: readonly DiagramStageMark[];
   readonly presence: Presence;
   readonly state: unknown;
   readonly steps: readonly CompiledPartStep[];
@@ -163,8 +170,24 @@ export interface CompiledCard {
   readonly attachments: readonly AttachmentSpec[];
 }
 
+/** A marked story step, listed on its beat in the After arrangement. */
+export interface BeatChange {
+  readonly part: string;
+  readonly verb: string;
+  readonly change: Exclude<ChangeMark, "unchanged">;
+  /** "<part label> · <verb>", e.g. "worker · retry". */
+  readonly label: string;
+}
+
 export interface CompiledBeat extends Beat {
   readonly attachments: readonly AttachmentSpec[];
+  /** Marked steps of the beat (and of uncaptioned beats it continues); After only. */
+  readonly changes: readonly BeatChange[];
+}
+
+/** A stage's change mark in part space (StageDef plus the mark). */
+export interface DiagramStageMark extends StageDef {
+  readonly change: Exclude<ChangeMark, "unchanged">;
 }
 
 export interface DiagramTimeline {
@@ -289,12 +312,35 @@ export function compileFlowOrThrow(
   return r.flow;
 }
 
+const marked = (m: string | undefined) => m !== undefined && m !== "unchanged";
+const anyMarked = (r: Readonly<Record<string, string>> | undefined) =>
+  Object.values(r ?? {}).some(marked);
+
 export function arrangementsOf(spec: FlowSpec): ArrangementName[] {
   const changed =
     spec.parts.some(
-      (p) => (p.change && p.change !== "unchanged") || p.before || p.after
-    ) || (spec.rails ?? []).some((r) => r.change && r.change !== "unchanged");
+      (p) =>
+        marked(p.change) ||
+        p.before ||
+        p.after ||
+        anyMarked(p.portChanges) ||
+        anyMarked(p.stageChanges)
+    ) ||
+    (spec.rails ?? []).some((r) => marked(r.change)) ||
+    (spec.story ?? []).some((b) =>
+      (b.steps ?? []).some((s) => marked(s.change))
+    );
   return changed ? ["before", "after"] : ["current"];
+}
+
+/** Whether a step marked `change` runs in arrangement `a` (+ only After, − only Before). */
+export function stepRuns(
+  change: string | undefined,
+  a: ArrangementName
+): boolean {
+  if (change === "added") return a !== "before";
+  if (change === "removed") return a === "before";
+  return true;
 }
 
 function build(
@@ -398,6 +444,15 @@ interface CardRun {
   exit: string | null;
   role: StateRole;
   consumed: boolean;
+}
+
+/** The marked entries of a name → mark record. */
+function only(
+  r: Readonly<Record<string, ChangeMark>> | undefined
+): Record<string, ChangeMark> {
+  return Object.fromEntries(
+    Object.entries(r ?? {}).filter(([, m]) => m !== "unchanged")
+  );
 }
 
 function presenceOf(change: string | undefined, a: ArrangementName): Presence {
@@ -585,8 +640,24 @@ function arrange(
     let groupStart = clock;
     let groupEnd = clock;
     let ran = 0;
+    const changes: BeatChange[] =
+      a === "before"
+        ? []
+        : (beat.steps ?? []).flatMap((s) =>
+            s.change && s.change !== "unchanged"
+              ? [
+                  {
+                    part: s.part,
+                    verb: s.verb,
+                    change: s.change,
+                    label: `${runs.get(s.part)!.spec.label ?? runs.get(s.part)!.def.kind} · ${s.verb}`,
+                  },
+                ]
+              : []
+          );
     (beat.steps ?? []).forEach((step: StepSpec, k) => {
       const sp = `${bp}.steps[${k}]`;
+      if (!stepRuns(step.change, a)) return;
       const run = runs.get(step.part)!;
       const rail = step.via ? rails.get(step.via)! : undefined;
       if (run.presence !== "live" || (rail && rail.presence !== "live")) return;
@@ -721,7 +792,15 @@ function arrange(
         caption,
         ...(beat.id ? { id: beat.id } : {}),
         attachments: beat.attachments ?? [],
+        changes,
       });
+    else if (changes.length > 0 && beats.length > 0) {
+      const last = beats[beats.length - 1];
+      beats[beats.length - 1] = {
+        ...last,
+        changes: [...last.changes, ...changes],
+      };
+    }
     if (ran === 0 && caption === undefined) return;
     happened.push({
       ...(beat.id ? { id: beat.id } : {}),
@@ -780,6 +859,19 @@ function arrange(
       status: run.def.status,
       change: a === "before" ? "unchanged" : (p.change ?? "unchanged"),
       ...(changeNote && a !== "before" ? { changeNote } : {}),
+      portChanges:
+        a === "before"
+          ? {}
+          : (only(p.portChanges) as DiagramPart["portChanges"]),
+      stageMarks:
+        a === "before" || !p.stageChanges || !run.def.stages
+          ? []
+          : run.def.stages(run.props).flatMap((st: StageDef) => {
+              const change = p.stageChanges![st.name];
+              return change && change !== "unchanged"
+                ? [{ ...st, change }]
+                : [];
+            }),
       presence: run.presence,
       props: run.props,
       state: run.state,

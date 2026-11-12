@@ -140,6 +140,15 @@ export interface CompiledPart<
   readonly steps: readonly CompiledPartStep[];
 }
 
+/** A stage or station inside a part, in part space. */
+export interface StageDef {
+  readonly name: string;
+  /** Box the stage's change mark outlines. */
+  readonly bb: BBox;
+  /** Centre of the mark's glyph tag. */
+  readonly tag: readonly [number, number];
+}
+
 export interface PartKindDef<P = Record<string, unknown>, S = unknown> {
   /** Mechanism only; MachinePart owns cards, gates, status, and change marks. */
   draw?(t: number, compiled: CompiledPart<P, S>): ReactNode;
@@ -161,6 +170,8 @@ export interface PartKindDef<P = Record<string, unknown>, S = unknown> {
   readonly ports: Readonly<Record<string, PortDef>>;
   /** Pill gates where rails meet the frame (VL-05). */
   gates?(props: P): readonly GateSpec[];
+  /** Named stages or stations inside the frame, in order, for stage change marks. */
+  stages?(props: P): readonly StageDef[];
   /** Fresh simulation state per arrangement. */
   init?(props: P): S;
   readonly verbs: Readonly<Record<string, VerbDef<P, S>>>;

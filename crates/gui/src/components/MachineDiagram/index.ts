@@ -21,9 +21,11 @@ export {
 export {
   ChangeMark,
   RemovedGhost,
-  HatchPattern,
+  PortMark,
+  StageMark,
   type BBox,
 } from "./ChangeMark";
+export { hatchPath } from "./hatch";
 export * from "./MachinePart";
 export { RailCards, type RailCardsProps } from "./RailCards";
 export * from "./flow";

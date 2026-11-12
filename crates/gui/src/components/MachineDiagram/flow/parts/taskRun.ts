@@ -55,6 +55,13 @@ export const taskRunPart: PartKindDef<TaskRunProps, TaskRunState> = {
   },
   ports,
   gates: () => [],
+  // Around each station box; the tag sits left of the station lamp.
+  stages: (props) =>
+    X.map((x, i) => ({
+      name: props.steps[i] ?? `step ${i + 1}`,
+      bb: [x - 56, 104, 112, 82],
+      tag: [x - 30, 126],
+    })),
   init: () => ({ id: null, cur: 0, waiting: false }),
   verbs: {
     start: {
