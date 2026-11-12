@@ -337,6 +337,91 @@ async function layoutLevel(
     if (z) routes[r.id] = z;
   }
 
+  // Keep ELK's geometry unless it merges beyond a port-connected fork/join.
+  // Use the same search and reservations as return legs for a conflicting rail.
+  const accepted: DiagramRail[] = [];
+  for (const r of forward) {
+    const route = routes[r.id];
+    if (!route) continue;
+    const reserved = accepted.flatMap((q) =>
+      reservedRuns(r, q, routes[q.id].points)
+    );
+    if (
+      segments(route.points).some((s) =>
+        reserved.some((t) => collinear(s, t))
+      ) ||
+      accepted.some((q) =>
+        reservedRuns(q, r, route.points).some((s) =>
+          segments(routes[q.id].points).some((t) => collinear(s, t))
+        )
+      )
+    ) {
+      const fromSide = nodes.get(r.from.part)!.part.ports[r.from.port].side;
+      const toSide = nodes.get(r.to.part)!.part.ports[r.to.port].side;
+      const bf = borderAt(r.from.part, r.from.port);
+      const bt = borderAt(r.to.part, r.to.port);
+      const labels = Object.entries(routes).flatMap(([id, q]) => {
+        const text = labelOf(id);
+        return text && q.labelAt ? [labelBox(q.labelAt, text)] : [];
+      });
+      const findPath = (stub: number) =>
+        legToLane(
+          [
+            bf[0] + OUTWARD[fromSide][0] * stub,
+            bf[1] + OUTWARD[fromSide][1] * stub,
+          ],
+          fromSide,
+          union([...extents, ...labels]).y1 + LANE_GAP,
+          [...extents, ...labels],
+          reserved.flatMap((s) => verticalRuns(s)),
+          reserved.filter(([a, b]) => Math.abs(a[1] - b[1]) < SNAP),
+          {
+            point: [
+              bt[0] + OUTWARD[toSide][0] * stub,
+              bt[1] + OUTWARD[toSide][1] * stub,
+            ],
+            side: toSide,
+          }
+        );
+      // ELK can put a bend within one rail gap of the usual stub. Search
+      // from just outside the padded node too, so that bend cannot box us in.
+      const path = findPath(LANE_STUB) ?? findPath(2);
+      if (path) {
+        const points = dedupe([
+          portAt(r.from.part, r.from.port),
+          bf,
+          ...path,
+          bt,
+          portAt(r.to.part, r.to.port),
+        ]);
+        const text = labelOf(r.id);
+        const labelAt = text
+          ? labelOnRoute(points, text, [
+              ...extents,
+              ...Object.entries(routes)
+                .filter(([id]) => id !== r.id)
+                .flatMap(([id, q]) => {
+                  const label = labelOf(id);
+                  return [
+                    ...segments(q.points).map(segmentBox),
+                    ...(label && q.labelAt ? [labelBox(q.labelAt, label)] : []),
+                  ];
+                }),
+            ])
+          : undefined;
+        routes[r.id] = {
+          points,
+          ...(labelAt
+            ? { labelAt }
+            : route.labelAt
+              ? { labelAt: route.labelAt }
+              : {}),
+        };
+      }
+    }
+    accepted.push(r);
+  }
+
   /* return rails along the bottom */
   const below: Box[] = [
     ...extents,
@@ -366,10 +451,6 @@ async function layoutLevel(
     ]),
   ];
   let lane = union(below).y1 + LANE_GAP;
-  /** Vertical runs already drawn, which a return rail's legs keep clear of. */
-  const verticals = Object.values(routes).flatMap((q) =>
-    verticalRuns(q.points)
-  );
   const routedReturns: DiagramRail[] = [];
   for (const r of rails) {
     if (!back.has(r.id) || touchesGiven(r)) continue;
@@ -391,16 +472,13 @@ async function layoutLevel(
     // A shared port may keep its fork/join stub. Otherwise reserve every
     // horizontal run too: separate bottom lanes alone do not keep the
     // intermediate steps of their legs from merging.
-    const ends = [r.from, r.to];
-    const horizontals = routedReturns
-      .filter(
-        (q) =>
-          ![q.from, q.to].some((e) =>
-            ends.some((end) => end.part === e.part && end.port === e.port)
-          )
-      )
-      .flatMap((q) => segments(routes[q.id].points))
-      .filter(([a, b]) => Math.abs(a[1] - b[1]) < SNAP);
+    const reserved = [...accepted, ...routedReturns].flatMap((q) =>
+      reservedRuns(r, q, routes[q.id].points)
+    );
+    const verticals = reserved.flatMap((s) => verticalRuns(s));
+    const horizontals = reserved.filter(
+      ([a, b]) => Math.abs(a[1] - b[1]) < SNAP
+    );
     const out = legToLane(
       exit,
       fromSide,
@@ -414,7 +492,15 @@ async function layoutLevel(
       toSide,
       lane,
       extents,
-      [...verticals, ...verticalRuns(out)],
+      [
+        ...verticals,
+        ...verticalRuns(
+          // A same-port loop can share its first straight run, then fork.
+          r.from.part === r.to.part && r.from.port === r.to.port
+            ? out.slice(Math.max(0, portRunEnd(out) - 1))
+            : out
+        ),
+      ],
       horizontals
     ) ?? [entry, [entry[0], lane]];
     const [downAt, upAt] = [out[out.length - 1][0], home[home.length - 1][0]];
@@ -433,7 +519,6 @@ async function layoutLevel(
           }
         : {}),
     };
-    verticals.push(...verticalRuns(routes[r.id].points));
     routedReturns.push(r);
     lane += LANE_STEP;
   }
@@ -640,6 +725,34 @@ function collectEdges(
   return out;
 }
 
+/** Reserve every run except a straight fork/join connected to a common port. */
+function reservedRuns(
+  r: DiagramRail,
+  q: DiagramRail,
+  points: readonly Point[]
+): Segment[] {
+  const same = (a: DiagramRail["from"], b: DiagramRail["from"]) =>
+    a.part === b.part && a.port === b.port;
+  const shared = [
+    ...(same(q.from, r.from) || same(q.from, r.to) ? [points] : []),
+    ...(same(q.to, r.from) || same(q.to, r.to) ? [[...points].reverse()] : []),
+  ];
+  const allowed = shared.flatMap((path) => {
+    const end = portRunEnd(path);
+    return segments(end < 0 ? path : path.slice(0, end));
+  });
+  return segments(points).filter((s) => !allowed.some((a) => collinear(s, a)));
+}
+
+/** First point beyond the straight run connected to the port, or -1. */
+function portRunEnd(points: readonly Point[]): number {
+  return points.findIndex(
+    (p) =>
+      Math.abs(p[0] - points[0][0]) >= SNAP &&
+      Math.abs(p[1] - points[0][1]) >= SNAP
+  );
+}
+
 interface VerticalRun {
   readonly x: number;
   readonly y0: number;
@@ -657,8 +770,8 @@ const MOVES = [
 const BEND_COST = 120;
 
 /**
- * An orthogonal path from a stub down to the return lane that crosses no
- * part, keeps a rail gap beside existing verticals, and shares no reserved
+ * An orthogonal path from a stub to a return lane (or another port's stub)
+ * that crosses no part, keeps a rail gap beside verticals, and shares no reserved
  * horizontal stretch. Dijkstra over lines around part edges and reserved
  * runs, with a cost per bend; undefined when the stub is boxed in.
  */
@@ -668,7 +781,8 @@ function legToLane(
   lane: number,
   extents: readonly Box[],
   verticals: readonly VerticalRun[],
-  horizontals: readonly Segment[]
+  horizontals: readonly Segment[],
+  target?: { point: Point; side: PortSide }
 ): Point[] | undefined {
   // Running along a part's edge counts as touching it.
   const parts = extents.map((e) => pad(e, 1));
@@ -678,6 +792,8 @@ function legToLane(
     );
   const xs = uniq([
     stub[0],
+    ...(target ? [target.point[0]] : []),
+    ...horizontals.flatMap(([a, b]) => [a[0] - RAIL_GAP, b[0] + RAIL_GAP]),
     ...extents.flatMap((e) => [e.x0 - LANE_STUB, e.x1 + LANE_STUB]),
     ...verticals.flatMap((v) => [v.x - RAIL_GAP, v.x + RAIL_GAP]),
   ]);
@@ -686,6 +802,7 @@ function legToLane(
   // the stub's row as the top of the search and falling back through rails.
   const ys = uniq([
     stub[1],
+    ...(target ? [target.point[1]] : []),
     lane,
     ...verticals.flatMap((v) => [v.y0 - RAIL_GAP, v.y1 + RAIL_GAP]),
     ...horizontals.flatMap(([a]) => [a[1] - RAIL_GAP, a[1] + RAIL_GAP]),
@@ -723,7 +840,15 @@ function legToLane(
     const h = k % 5;
     const cell = (k - h) / 5;
     const [ix, iy] = [cell % xs.length, Math.floor(cell / xs.length)];
-    if (iy === goal) {
+    const arrived = target
+      ? Math.abs(xs[ix] - target.point[0]) < 0.01 &&
+        Math.abs(ys[iy] - target.point[1]) < 0.01 &&
+        h !== 0 &&
+        MOVES[h - 1][0] * OUTWARD[target.side][0] +
+          MOVES[h - 1][1] * OUTWARD[target.side][1] <=
+          0
+      : iy === goal;
+    if (arrived) {
       const path: Point[] = [];
       for (
         let at: number | undefined = k;
@@ -895,6 +1020,38 @@ const labelBox = ([x, y]: Point, text: string): Box => {
     y1: y + LABEL_H / 2,
   };
 };
+
+/** Keep a rerouted rail's label beside a clear run, rather than its old ELK run. */
+function labelOnRoute(
+  points: readonly Point[],
+  text: string,
+  obstacles: readonly Box[]
+): Point | undefined {
+  const runs = segments(points);
+  const width = textWidth(text, RAIL_LABEL_SIZE) + LABEL_PAD_X;
+  for (const [a, b] of [...runs].sort(
+    (s, t) => Math.abs(t[1][0] - t[0][0]) - Math.abs(s[1][0] - s[0][0])
+  )) {
+    const x = (a[0] + b[0]) / 2;
+    const y = (a[1] + b[1]) / 2;
+    const candidates: Point[] =
+      Math.abs(a[1] - b[1]) < SNAP
+        ? [
+            [x, y - LABEL_LIFT],
+            [x, y + LABEL_LIFT],
+          ]
+        : [
+            [x + width / 2 + 5, y],
+            [x - width / 2 - 5, y],
+          ];
+    for (const at of candidates) {
+      const box = labelBox(at, text);
+      if (![...obstacles, ...runs.map(segmentBox)].some((e) => crosses(box, e)))
+        return at;
+    }
+  }
+  return undefined;
+}
 
 /**
  * ELK hangs a rail's label on a dummy node in the middle layer, and the

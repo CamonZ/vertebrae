@@ -1,3 +1,4 @@
+import { sharesBadStretch } from "./layoutTestHelpers";
 /**
  * Property tests of flow auto-layout (layout.ts). Hegel generates valid flow
  * specs from the starter parts — random kinds, rails between compatible
@@ -241,28 +242,6 @@ const regionBox = (g: DiagramTimeline["regions"][number]): Box => ({
 const inside = (a: Box, b: Box) =>
   a.x0 >= b.x0 && a.x1 <= b.x1 && a.y0 >= b.y0 && a.y1 <= b.y1;
 
-/** Whether two routes run along one line for more than a pixel. */
-function sharesStretch(
-  a: readonly (readonly [number, number])[],
-  b: readonly (readonly [number, number])[]
-): boolean {
-  const near = (x: number, y: number) => Math.abs(x - y) < 0.5;
-  for (let i = 1; i < a.length; i++)
-    for (let j = 1; j < b.length; j++) {
-      const [p, q, r, s] = [a[i - 1], a[i], b[j - 1], b[j]];
-      for (const k of [0, 1] as const) {
-        const o = 1 - k;
-        // both segments on the line where coordinate o is constant
-        if (!near(p[o], q[o]) || !near(r[o], s[o]) || !near(p[o], r[o]))
-          continue;
-        const lo = Math.max(Math.min(p[k], q[k]), Math.min(r[k], s[k]));
-        const hi = Math.min(Math.max(p[k], q[k]), Math.max(r[k], s[k]));
-        if (hi - lo > 1) return true;
-      }
-    }
-  return false;
-}
-
 const SETTINGS = { testCases: 100 };
 /** ELK lays out every generated spec; a run takes seconds, not milliseconds. */
 const TIMEOUT = 120_000;
@@ -358,17 +337,10 @@ test(
               );
             }
           }
-          // Return rails are routed here, not by ELK: each keeps its own
-          // lane and verticals.
           for (const q of d.rails) {
-            if (q.id <= r.id || !backs.has(r.id) || !backs.has(q.id)) continue;
-            // Rails meeting at one port share its stub (a fork or a join).
-            const key = (e: { part: string; port: string }) =>
-              `${e.part}.${e.port}`;
-            const mine = new Set([key(r.from), key(r.to)]);
-            if (mine.has(key(q.from)) || mine.has(key(q.to))) continue;
+            if (q.id <= r.id) continue;
             check(
-              !sharesStretch(r.points, q.points),
+              !sharesBadStretch(r, q),
               `${where}: rails ${r.id} and ${q.id} run along each other`
             );
           }
