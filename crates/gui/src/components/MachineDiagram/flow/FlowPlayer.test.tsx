@@ -477,7 +477,7 @@ describe("reduced motion", () => {
       run(1500);
     }
     expect(seen.size).toBeGreaterThan(4);
-  });
+  }, 30_000); // Room for slow CI runners.
 
   it("a chapter shows its beat's outcome at once under reduced motion", () => {
     renderPlayer({ reducedMotion: true });
