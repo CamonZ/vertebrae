@@ -1,62 +1,28 @@
 use super::*;
 
 #[test]
-fn supported_claude_model_catalog_uses_expected_aliases_and_default() {
+fn supported_claude_model_catalog_is_concrete_ranked_and_has_valid_default() {
     let catalog = supported_claude_model_catalog();
-
+    assert_eq!(catalog.default_model_id, "claude-sonnet-5-5");
     assert_eq!(
-        catalog,
-        ClaudeModelCatalog {
-            default_model_id: "sonnet".to_string(),
-            models: vec![
-                ClaudeModelOption {
-                    id: "sonnet".to_string(),
-                    label: "Sonnet".to_string(),
-                    supported_speed_tier_ids: None,
-                },
-                ClaudeModelOption {
-                    id: "opus".to_string(),
-                    label: "Opus".to_string(),
-                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                },
-                ClaudeModelOption {
-                    id: "haiku".to_string(),
-                    label: "Haiku".to_string(),
-                    supported_speed_tier_ids: None,
-                },
-                ClaudeModelOption {
-                    id: "fable".to_string(),
-                    label: "Fable".to_string(),
-                    supported_speed_tier_ids: None,
-                },
-                ClaudeModelOption {
-                    id: "claude-opus-5".to_string(),
-                    label: "Claude Opus 5".to_string(),
-                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                },
-                ClaudeModelOption {
-                    id: "claude-opus-5-5".to_string(),
-                    label: "Claude Opus 5.5".to_string(),
-                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                },
-                ClaudeModelOption {
-                    id: "claude-opus-4-8".to_string(),
-                    label: "Claude Opus 4.8".to_string(),
-                    supported_speed_tier_ids: Some(vec!["default".into(), "fast".into()]),
-                },
-                ClaudeModelOption {
-                    id: "claude-sonnet-5-5".to_string(),
-                    label: "Claude Sonnet 5.5".to_string(),
-                    supported_speed_tier_ids: None,
-                },
-                ClaudeModelOption {
-                    id: "claude-haiku-5-5".to_string(),
-                    label: "Claude Haiku 5.5".to_string(),
-                    supported_speed_tier_ids: None,
-                },
-            ],
-        }
+        catalog
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "claude-fable-5-2",
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5"
+        ]
     );
+    assert_eq!(catalog.models[0].label, "Claude Fable 5.2");
+    assert_eq!(
+        catalog.models[0].supported_speed_tier_ids,
+        Some(vec!["default".into(), "fast".into()])
+    );
+    assert!(catalog.models[2].supported_speed_tier_ids.is_none());
 }
 
 #[test]
@@ -66,6 +32,7 @@ fn resolve_requested_claude_model_accepts_supported_ids() {
         (" Opus ", "opus"),
         ("HAIKU", "haiku"),
         ("fable", "fable"),
+        ("claude-fable-5-2", "claude-fable-5-2"),
         (" CLAUDE-OPUS-5-5 ", "claude-opus-5-5"),
     ] {
         assert_eq!(

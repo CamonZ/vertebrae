@@ -11,8 +11,8 @@ use vertebrae_harness_core::{
 };
 
 use crate::{
-    ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig, DEFAULT_CLAUDE_MODELS,
-    config::claude_model_supports_fast_mode,
+    CLAUDE_REASONING_EFFORTS, ClaudeDecodeContext, ClaudeLaunchMode, ClaudeProviderConfig,
+    DEFAULT_CLAUDE_MODELS, config::claude_model_supports_fast_mode,
 };
 
 mod controls;
@@ -71,6 +71,23 @@ fn claude_model_speed_tiers(model: &str) -> BTreeSet<SpeedTier> {
     }
 }
 
+/// Execution-compatible Claude catalog. Picker consumers curate this list separately.
+pub fn builtin_claude_model_capabilities() -> Vec<ModelCapability> {
+    DEFAULT_CLAUDE_MODELS
+        .iter()
+        .map(|(id, label)| ModelCapability {
+            id: (*id).into(),
+            label: (*label).into(),
+            reasoning_efforts: CLAUDE_REASONING_EFFORTS
+                .iter()
+                .map(|effort| (*effort).into())
+                .collect(),
+            supported_speed_tiers: claude_model_speed_tiers(id),
+            supports_personality: None,
+        })
+        .collect()
+}
+
 enum SessionCommand {
     Send {
         request: SendTurnRequest,
@@ -97,11 +114,6 @@ struct PendingTurn {
 #[async_trait]
 impl HarnessRuntime for ClaudeRuntime {
     async fn capabilities(&self) -> Result<HarnessCapabilities, HarnessError> {
-        let reasoning_efforts: BTreeSet<String> = crate::config::CLAUDE_REASONING_EFFORTS
-            .iter()
-            .map(|effort| (*effort).to_owned())
-            .collect();
-
         match self.config.resolve_executable() {
             Ok(_) => Ok(HarnessCapabilities {
                 provider: "anthropic".into(),
@@ -112,16 +124,7 @@ impl HarnessRuntime for ClaudeRuntime {
                 structured_inference: false,
                 session_resumption: true,
                 default_model: Some("sonnet".into()),
-                models: DEFAULT_CLAUDE_MODELS
-                    .iter()
-                    .map(|(id, label)| ModelCapability {
-                        id: (*id).into(),
-                        label: (*label).into(),
-                        reasoning_efforts: reasoning_efforts.clone(),
-                        supported_speed_tiers: claude_model_speed_tiers(id),
-                        supports_personality: None,
-                    })
-                    .collect(),
+                models: builtin_claude_model_capabilities(),
                 default_permission_mode: Some("default".into()),
                 permission_modes: claude_permission_modes(),
                 approval_categories: BTreeSet::new(),

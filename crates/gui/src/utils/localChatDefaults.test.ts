@@ -131,6 +131,23 @@ describe("local chat defaults", () => {
     });
   });
 
+  it("reloads concrete curated defaults while retaining obsolete IDs for visible reset", async () => {
+    useLocalChatDefaultsStore.getState().setModelDefault("anthropic", "claude-fable-5-2");
+    useLocalChatDefaultsStore.getState().setModelDefault("openai", "gpt-6.1-sol");
+    useLocalChatDefaultsStore.getState().setModelDefault("custom", "fable");
+    vi.resetModules();
+    const fresh = await import("./localChatDefaults");
+    expect(fresh.useLocalChatDefaultsStore.getState().defaults).toEqual({
+      anthropic: { modelId: "claude-fable-5-2" }, openai: { modelId: "gpt-6.1-sol" }, custom: { modelId: "fable" },
+    });
+    fresh.useLocalChatDefaultsStore.getState().setModelDefault("anthropic", "opus");
+    vi.resetModules();
+    const legacy = await import("./localChatDefaults");
+    const stored = legacy.useLocalChatDefaultsStore.getState().defaults.anthropic?.modelId;
+    expect(stored).toBe("opus");
+    expect(legacy.hasStaleModelDefault({models: [{id: "claude-opus-5-5", label: "Opus 5.5"}]}, stored)).toBe(true);
+  });
+
   it("migrates harness-keyed v1 defaults onto the built-in providers", async () => {
     window.localStorage.setItem(
       LEGACY_LOCAL_CHAT_DEFAULTS_STORAGE_KEY,

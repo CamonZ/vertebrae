@@ -110,6 +110,63 @@ describe("ChatComposer", () => {
     body: "Explain which parser.",
   };
 
+  it("renders curated intelligence order with a single Codex default choice", () => {
+    const ids = ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"];
+    const info = {
+      ...CODEX_INFO,
+      available: true,
+      default_model_id: "default",
+      models: [
+        { id: "default", label: "Codex default" },
+        ...ids.map((id) => ({ id, label: id })),
+      ],
+    };
+    render(
+      <ChatComposer
+        {...defaultProps({
+          visibleHarness: info,
+          selectedProviderId: "openai",
+          session: createSession({ harness: "codex" }),
+        })}
+      />
+    );
+    const picker = screen.getByTestId(
+      "local-chat-model-picker"
+    ) as HTMLSelectElement;
+    expect(Array.from(picker.options, (option) => option.value)).toEqual([
+      "",
+      ...ids,
+    ]);
+  });
+
+  it("keeps a custom provider's default-named model and list order", () => {
+    const info = {
+      ...CODEX_INFO,
+      available: true,
+      models: [
+        { id: "default", label: "Custom default" },
+        { id: "sol", label: "Custom sol" },
+      ],
+    };
+    render(
+      <ChatComposer
+        {...defaultProps({
+          visibleHarness: info,
+          selectedProviderId: "custom",
+          session: createSession({ harness: "codex", providerId: "custom" }),
+        })}
+      />
+    );
+    const picker = screen.getByTestId(
+      "local-chat-model-picker"
+    ) as HTMLSelectElement;
+    expect(Array.from(picker.options, (option) => option.value)).toEqual([
+      "",
+      "default",
+      "sol",
+    ]);
+  });
+
   // --- Context bar ---
 
   it("renders the context fill bar with width and color", () => {

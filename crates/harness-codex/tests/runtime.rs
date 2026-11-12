@@ -1583,3 +1583,66 @@ async fn rejected_turn_settings_do_not_become_the_defaults_for_later_turns() {
     session.close().await.unwrap();
     server.abort();
 }
+
+#[tokio::test]
+async fn model_discovery_collects_later_pages_before_excluding_hidden_models() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = accept_async(stream).await.unwrap();
+        while let Some(Ok(Message::Text(text))) = socket.next().await {
+            let request: Value = serde_json::from_str(&text).unwrap();
+            let Some(id) = request.get("id") else {
+                continue;
+            };
+            let result = match request["method"].as_str().unwrap() {
+                "initialize" => json!({"capabilities": {}}),
+                "model/list" => {
+                    let later_page = request["params"]["cursor"] == "second";
+                    let models = if later_page {
+                        vec![
+                            json!({"id":"new-sol", "model":"gpt-6.10-sol", "displayName":"Sol 6.10", "supportsPersonality":false, "supportedReasoningEfforts":[{"reasoningEffort":"high"}], "serviceTiers":[{"id":"priority"}]}),
+                            json!({"id":"hidden", "model":"gpt-99-sol", "displayName":"Hidden", "hidden":true}),
+                        ]
+                    } else {
+                        vec![
+                            json!({"id":"old-sol", "model":"gpt-6.9-sol", "displayName":"Sol 6.9", "isDefault":true}),
+                        ]
+                    };
+                    json!({"data":models, "nextCursor": if later_page { Value::Null } else { json!("second") }})
+                }
+                method => panic!("unexpected discovery request: {method}"),
+            };
+            socket
+                .send(Message::Text(json!({"id":id, "result":result}).to_string()))
+                .await
+                .unwrap();
+        }
+    });
+    let runtime = CodexRuntime::new(CodexProviderConfig {
+        launcher: Some(Arc::new(TestLauncher {
+            url: format!("ws://{address}"),
+        })),
+        ..CodexProviderConfig::default()
+    });
+    let capabilities = runtime.capabilities().await.unwrap();
+    assert!(capabilities.available);
+    assert_eq!(
+        capabilities
+            .models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>(),
+        ["default", "gpt-6.9-sol", "gpt-6.10-sol"]
+    );
+    let later = capabilities.models.last().unwrap();
+    assert_eq!(later.supports_personality, Some(false));
+    assert!(
+        later
+            .supported_speed_tiers
+            .contains(&vertebrae_harness_core::SpeedTier::Fast)
+    );
+    assert!(later.reasoning_efforts.contains("high"));
+    server.await.unwrap();
+}

@@ -5,6 +5,10 @@
 //! launch configuration, and permission translation stay here and in the
 //! provider adapter crates.
 
+mod model_picker;
+pub use model_picker::curate_local_chat_models;
+pub use vertebrae_harness_claude::builtin_claude_model_capabilities;
+
 use std::{
     collections::BTreeMap,
     env,

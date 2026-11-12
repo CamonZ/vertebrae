@@ -1572,6 +1572,7 @@ while IFS= read -r _; do :; done
                 mode: SessionMode::New,
                 config: RequestConfig {
                     developer_instructions: Some("standing rules".into()),
+                    model: Some("claude-fable-5-2".into()),
                     ..RequestConfig::default()
                 },
             },
@@ -1596,6 +1597,7 @@ while IFS= read -r _; do :; done
     );
     assert!(launch.contains("arg=--append-system-prompt\narg=standing rules\n"));
     assert!(!launch.contains("arg=--resume="));
+    assert!(launch.contains("arg=--model\narg=claude-fable-5-2\n"));
     session.close().await.unwrap();
 }
 
@@ -2274,6 +2276,31 @@ async fn capabilities_advertise_haiku_5_5_without_opus_fast_mode() {
     assert_eq!(model.label, "Claude Haiku 5.5");
     assert!(model.supported_speed_tiers.is_empty());
     assert_eq!(capabilities.default_model.as_deref(), Some("sonnet"));
+}
+
+#[tokio::test]
+async fn capabilities_advertise_confirmed_fable_5_2_and_keep_legacy_ids() {
+    let temp = TempDir::new().unwrap();
+    let executable = temp.path().join("claude");
+    fs::write(&executable, "fixture").unwrap();
+    let capabilities = runtime(executable).capabilities().await.unwrap();
+    let model = capabilities
+        .models
+        .iter()
+        .find(|model| model.id == "claude-fable-5-2")
+        .unwrap();
+    assert_eq!(model.label, "Claude Fable 5.2");
+    assert!(
+        model
+            .supported_speed_tiers
+            .contains(&vertebrae_harness_core::SpeedTier::Fast)
+    );
+    assert!(
+        capabilities
+            .models
+            .iter()
+            .any(|model| model.id == "claude-opus-4-8")
+    );
 }
 
 async fn wait_for_payload(

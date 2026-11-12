@@ -19,6 +19,7 @@ pub const DEFAULT_CLAUDE_MODELS: &[(&str, &str)] = &[
     ("opus", "Opus"),
     ("haiku", "Haiku"),
     ("fable", "Fable"),
+    ("claude-fable-5-2", "Claude Fable 5.2"),
     ("claude-opus-5", "Claude Opus 5"),
     ("claude-opus-5-5", "Claude Opus 5.5"),
     ("claude-opus-4-8", "Claude Opus 4.8"),
@@ -39,8 +40,10 @@ pub fn is_claude_read_only_tool(tool_name: &str) -> bool {
 }
 
 pub(crate) fn claude_model_supports_fast_mode(model: &str) -> bool {
-    matches!(model, "opus" | "claude-opus-5" | "claude-opus-4-8")
-        || model.starts_with("claude-opus-5-")
+    matches!(
+        model,
+        "opus" | "claude-opus-5" | "claude-opus-4-8" | "claude-fable-5-2"
+    ) || model.starts_with("claude-opus-5-")
         || model.starts_with("claude-opus-4-8-")
 }
 

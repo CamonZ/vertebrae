@@ -1,5 +1,6 @@
 import { useUIStore } from "../../stores/uiStore";
 import { useProviderSettingsStore } from "../../stores/providerSettingsStore";
+import { useLocalChatDefaultsStore } from "../../utils/localChatDefaults";
 import { withBuiltinProviders } from "../../test/localChatCatalog";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
@@ -195,6 +196,7 @@ describe("ChatWindow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    useLocalChatDefaultsStore.setState({ defaults: {}, defaultProvider: null });
     useUIStore.setState({ inlineDiscussionPreference: { mode: "follow" } });
     useChatStore.setState({
       sessions: {},
@@ -1776,6 +1778,51 @@ describe("ChatWindow", () => {
       useChatStore.getState().sessions["test-session"].selectedModelId
     ).toBeNull();
     expect(localStorage.getItem("local-chat-model:last-used:v1")).toBeNull();
+  });
+
+  it("sends the exact versioned Fable choice to session creation", async () => {
+    const ids = ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({ status: "ok", data: withBuiltinProviders({ default_harness: "claude", harnesses: [{
+      harness: "claude", label: "Claude", available: true, unavailable_reason: null,
+      default_model_id: "claude-sonnet-5-5", default_reasoning_effort: null,
+      reasoning_efforts: [], supports_resume: true, models: ids.map((id) => ({ id, label: id })),
+    }] }) });
+    useChatStore.setState({ sessions: { "test-session": createSession() }, activeSessionId: "test-session", panelOpen: true });
+    const user = userEvent.setup();
+    render(<ChatWindow sessionId="test-session" />);
+    const picker = await screen.findByTestId("local-chat-model-picker");
+    expect(Array.from((picker as HTMLSelectElement).options, (option) => option.value)).toEqual(["", ...ids]);
+    await user.selectOptions(picker, "claude-fable-5-2");
+    await user.type(screen.getByTestId("local-chat-composer"), "Start");
+    await user.click(screen.getByTitle("Start session"));
+    await waitFor(() => expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(expect.objectContaining({ model_id: "claude-fable-5-2" })));
+  });
+
+  it("requires an explicit reset of an obsolete saved model for a new chat", async () => {
+    useLocalChatDefaultsStore
+      .getState()
+      .setModelDefault("anthropic", "claude-opus-4-8");
+    localStorage.setItem("local-chat-model:last-used:v1", "haiku");
+    useChatStore.setState({
+      sessions: { "test-session": createSession() },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    const user = userEvent.setup();
+    render(<ChatWindow sessionId="test-session" />);
+    const picker = await screen.findByTestId("local-chat-model-picker");
+    await waitFor(() => expect(picker).toHaveValue("claude-opus-4-8"));
+    expect(picker).toHaveTextContent("Unsupported: claude-opus-4-8");
+    await user.type(screen.getByTestId("local-chat-composer"), "Start");
+    expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
+    await user.selectOptions(picker, "opus");
+    await user.type(screen.getByTestId("local-chat-composer"), "Start");
+    await user.click(screen.getByTitle("Start session"));
+    await waitFor(() =>
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+        expect.objectContaining({ model_id: "opus" })
+      )
+    );
   });
 
   it("uses the last selected model as the default for a new session", async () => {

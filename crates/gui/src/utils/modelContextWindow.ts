@@ -11,6 +11,9 @@
 // Include both hyphenated model IDs and dot-form aliases because Claude CLI
 // uses both formats in different output contexts.
 const MODEL_CONTEXT_WINDOW: Array<{ pattern: string; max: number }> = [
+  // Claude Code 2.1.322 metadata and live first-party response, 2026-11-12.
+  { pattern: "fable-5-2", max: 1_000_000 },
+  { pattern: "fable-5.2", max: 1_000_000 },
   { pattern: "opus-5-5", max: 1_000_000 },
   { pattern: "opus-5.5", max: 1_000_000 },
   { pattern: "opus-4-8", max: 1_000_000 },

@@ -32,8 +32,12 @@ pub(super) fn requested_reasoning_effort(reasoning_effort: Option<&str>) -> Opti
 }
 
 pub(super) fn local_chat_harness_info_from_capabilities(
-    capabilities: HarnessCapabilities,
+    mut capabilities: HarnessCapabilities,
 ) -> LocalChatHarnessInfo {
+    capabilities.models = vertebrae_harness::curate_local_chat_models(
+        vertebrae_core::BuiltinProvider::Openai,
+        capabilities.models,
+    );
     let has_known_personality_capability = capabilities
         .models
         .iter()
@@ -188,7 +192,7 @@ mod tests {
                     supports_personality: Some(false),
                 },
                 ModelCapability {
-                    id: "server-only-model".into(),
+                    id: "gpt-6-astra".into(),
                     label: "Server only model".into(),
                     reasoning_efforts: BTreeSet::from(["ultra".into()]),
                     supported_speed_tiers: BTreeSet::from([
@@ -220,7 +224,7 @@ mod tests {
                 .iter()
                 .map(|model| model.id.as_str())
                 .collect::<Vec<_>>(),
-            ["default", "server-only-model"]
+            ["default", "gpt-6-astra"]
         );
         assert_eq!(
             info.models[1].supported_reasoning_effort_ids,
@@ -270,9 +274,9 @@ mod tests {
             one_shot_runs: true,
             structured_inference: false,
             session_resumption: true,
-            default_model: Some("luna".into()),
+            default_model: Some("gpt-6-luna".into()),
             models: vec![ModelCapability {
-                id: "luna".into(),
+                id: "gpt-6-luna".into(),
                 label: "Luna".into(),
                 reasoning_efforts: BTreeSet::new(),
                 supported_speed_tiers: BTreeSet::new(),

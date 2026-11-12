@@ -1023,7 +1023,7 @@ async fn dedicated_model(world: &mut GuiWorld) {
     let selections = [
         ("Inline discussion mode", "dedicated"),
         ("Inline discussion provider", "anthropic"),
-        ("Inline discussion model", "opus"),
+        ("Inline discussion model", "claude-opus-5-5"),
         ("Inline discussion reasoning effort", "high"),
         ("Inline discussion speed tier", "fast"),
     ];
@@ -1069,7 +1069,7 @@ async fn dedicated_model(world: &mut GuiWorld) {
 
         const effort = document.querySelector('[aria-label="Inline discussion reasoning effort"]');
         const speed = document.querySelector('[aria-label="Inline discussion speed tier"]');
-        return picker?.value === 'opus' && effort?.value === 'high' && speed?.value === 'fast';
+        return picker?.value === 'claude-opus-5-5' && effort?.value === 'high' && speed?.value === 'fast';
     "#;
 
     gui_acceptance::wait_for_js(
@@ -1105,7 +1105,7 @@ async fn dedicated_requests(world: &mut GuiWorld) {
         let args = launch.as_array().unwrap();
         let uses_dedicated_model = args
             .windows(2)
-            .any(|pair| pair[0] == "--model" && pair[1] == "opus");
+            .any(|pair| pair[0] == "--model" && pair[1] == "claude-opus-5-5");
 
         assert!(uses_dedicated_model, "dedicated launch: {args:?}");
         let uses_effort = args
