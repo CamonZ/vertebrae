@@ -71,6 +71,21 @@
   overflow: hidden;
   touch-action: none;
 }
+/* A resizable frame: the diagram fills it, the grip runs along its foot. */
+.md-resizable {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+}
+/* Floating panels over the diagram; panels opt back into input. */
+.md-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
 .md-viewport[data-dragging="true"] {
   cursor: grabbing;
 }

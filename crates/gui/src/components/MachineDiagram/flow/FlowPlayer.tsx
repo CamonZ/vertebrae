@@ -1,13 +1,16 @@
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { Button, Icon } from "../../atoms";
 import { SegmentedControl } from "../../molecules";
 import type { DiagramInteraction } from "../interaction";
+import { type FitInsets, ZOOM_GUTTER } from "../MachineDiagramViewport";
 import { roleColor } from "../palette";
 import { beatOutcome, nextSpeed, SPEEDS } from "./clockModel";
 import type { BeatChange, CompiledFlow, DiagramTimeline } from "./compile";
@@ -51,9 +54,27 @@ const ARRANGEMENT_LABELS: Record<ArrangementName, string> = {
 const speedLabel = (s: number) => `${s}×`;
 
 /**
- * An interactive flow explorer: beats as a list of chapters beside the
- * diagram (below it in a narrow container; paused by default), beat
- * and frame stepping, optional playback at a chosen speed, a Before/After
+ * Floating panels: a borderless glass card laid on the diagram, sized to
+ * its content, that takes input (the overlay layer itself does not).
+ */
+const floating =
+  "pointer-events-auto rounded-[var(--radius-md)] bg-[color-mix(in_srgb,var(--color-bg-1)_86%,transparent)] shadow-[var(--shadow-2)] backdrop-blur-md";
+
+/** Height kept under a fitted diagram for the floating controls bar. */
+const CONTROLS_ROOM = 56;
+/** Width of the floating beats panel (`w-72 max-w-[45%]`) and its margins. */
+const beatsRoom = (width: number) => Math.min(288, width * 0.45) + 32;
+const insetsBelow = (): FitInsets => ({ right: 0, bottom: CONTROLS_ROOM });
+const insetsBeside = (width: number): FitInsets => ({
+  right: beatsRoom(width),
+  bottom: CONTROLS_ROOM,
+});
+
+/**
+ * An interactive flow explorer. The diagram fills a resizable frame; the
+ * beats (a list of chapters, paused by default) float over its right side
+ * and can be hidden, and the controls, evidence and inspectors float over
+ * its foot. Beat and frame stepping, optional playback at a chosen speed, a Before/After
  * toggle that keeps the beat, hover/focus on a part to inspect its state and
  * source refs, and click a card to follow it with a narrated caption. Every
  * control has a keyboard shortcut; beat captions and the followed card are
@@ -78,6 +99,10 @@ export function FlowPlayer({
   const [pinned, setPinned] = useState<string | null>(null);
   const [followed, setFollowed] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
+  const [beatsShown, setBeatsShown] = useState(true);
+  const chaptersId = useId();
+  const [overlay, setOverlay] = useState<HTMLElement | null>(null);
+  const hasBeats = diagram.beats.length > 0;
   const root = useRef<HTMLDivElement>(null);
   const playingHidden = suspended && clock.playing;
   useEffect(() => {
@@ -165,6 +190,10 @@ export function FlowPlayer({
         if (names.length !== 2) return;
         toggleArrangement();
         break;
+      case "beats":
+        if (!hasBeats) return;
+        setBeatsShown((b) => !b);
+        break;
       case "clear":
         if (!followed && !pinned && !help) return;
         setFollowed(null);
@@ -185,10 +214,10 @@ export function FlowPlayer({
       ref={root}
       role="group"
       aria-label={label}
-      aria-keyshortcuts="Space ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Home End"
+      aria-keyshortcuts="Space ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Home End C"
       tabIndex={0}
       onKeyDown={onKeyDown}
-      className="@container flex flex-col gap-2 rounded-[var(--radius-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
+      className="flex flex-col gap-2 rounded-[var(--radius-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
       data-testid="flow-player"
       data-arrangement={diagram.arrangement}
       data-morph={
@@ -204,94 +233,128 @@ export function FlowPlayer({
       {flow.title && (
         <div className="text-sm font-medium text-fg">{flow.title}</div>
       )}
-      <div className="flex flex-col gap-3 @2xl:flex-row">
-        <div className="flex min-w-0 flex-1 flex-col gap-2">
-          <FlowDiagram
-            diagram={diagram}
-            t={clock.t}
-            label={
-              flow.title ? `${flow.title} · ${diagram.arrangement}` : undefined
-            }
-            reducedMotion={clock.reducedMotion}
-            interaction={interaction}
-            morph={morph}
-          />
-          <Controls
-            clock={clock}
-            names={names}
-            arrangement={diagram.arrangement}
-            onArrangement={choose}
-            help={help}
-            onHelp={() => setHelp((h) => !h)}
-          />
-          {help && <ShortcutHelp />}
-          {followed && (
-            <div
-              className="flex items-center gap-2 text-sm text-fg"
-              data-testid="flow-narration"
-            >
-              <span
-                className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]"
-                aria-hidden
+      <FlowDiagram
+        diagram={diagram}
+        t={clock.t}
+        label={
+          flow.title ? `${flow.title} · ${diagram.arrangement}` : undefined
+        }
+        reducedMotion={clock.reducedMotion}
+        interaction={interaction}
+        morph={morph}
+        overlayRef={setOverlay}
+        fitInsets={hasBeats && beatsShown ? insetsBeside : insetsBelow}
+      />
+      {overlay &&
+        createPortal(
+          <>
+            {hasBeats && (
+              <Chapters
+                id={chaptersId}
+                shown={beatsShown}
+                diagram={diagram}
+                clock={clock}
               />
-              <span>
-                {narrateCard(
-                  flow,
-                  diagram,
-                  followed,
-                  clock.t,
-                  clock.reducedMotion
-                )}
-              </span>
-            </div>
-          )}
-          <AttachmentPanel
-            attachments={flow.attachments}
-            label="Flow evidence"
-          />
-          {diagram.rails
-            .filter(
-              (rail) =>
-                rail.presence !== "absent" && rail.attachments.length > 0
-            )
-            .map((rail) => (
-              <details key={rail.id} className={panel}>
-                <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
-                  Rail: {rail.label ?? rail.id}
-                </summary>
-                <AttachmentPanel
-                  attachments={rail.attachments}
-                  label={`Rail ${rail.label ?? rail.id} evidence`}
-                />
-              </details>
-            ))}
-          {(inspected || followed) && (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {inspected && (
-                <PartInspector
-                  diagram={diagram}
-                  partId={inspected.id}
-                  t={clock.t}
-                  reducedMotion={clock.reducedMotion}
-                  pinned={pinned === inspected.id}
-                  flow={flow}
-                  onFollow={setFollowed}
-                />
-              )}
+            )}
+            <div
+              className={`pointer-events-none absolute bottom-4 flex max-h-[calc(100%-2rem)] flex-col items-start justify-end gap-2 overflow-y-auto ${
+                hasBeats && beatsShown
+                  ? "right-[calc(min(18rem,45%)+2rem)]"
+                  : "right-4"
+              }`}
+              style={{ left: ZOOM_GUTTER }}
+              data-testid="flow-bottom-panel"
+            >
+              {help && <ShortcutHelp />}
               {followed && (
-                <CardInspector
-                  flow={flow}
-                  cardId={followed}
-                  onStop={() => setFollowed(null)}
-                />
+                <div
+                  className={`${floating} flex max-w-xl items-center gap-2 px-3 py-1.5 text-sm text-fg`}
+                  data-testid="flow-narration"
+                >
+                  <span
+                    className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]"
+                    aria-hidden
+                  />
+                  <span>
+                    {narrateCard(
+                      flow,
+                      diagram,
+                      followed,
+                      clock.t,
+                      clock.reducedMotion
+                    )}
+                  </span>
+                </div>
               )}
+              {flow.attachments.length > 0 && (
+                <div className={`${floating} max-w-xl px-3 py-1.5`}>
+                  <AttachmentPanel
+                    attachments={flow.attachments}
+                    label="Flow evidence"
+                  />
+                </div>
+              )}
+              {diagram.rails
+                .filter(
+                  (rail) =>
+                    rail.presence !== "absent" && rail.attachments.length > 0
+                )
+                .map((rail) => (
+                  <details key={rail.id} className={panel}>
+                    <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+                      Rail: {rail.label ?? rail.id}
+                    </summary>
+                    <AttachmentPanel
+                      attachments={rail.attachments}
+                      label={`Rail ${rail.label ?? rail.id} evidence`}
+                    />
+                  </details>
+                ))}
+              {(inspected || followed) && (
+                <div className="grid w-full max-w-3xl gap-2 sm:grid-cols-2">
+                  {inspected && (
+                    <PartInspector
+                      diagram={diagram}
+                      partId={inspected.id}
+                      t={clock.t}
+                      reducedMotion={clock.reducedMotion}
+                      pinned={pinned === inspected.id}
+                      flow={flow}
+                      onFollow={setFollowed}
+                    />
+                  )}
+                  {followed && (
+                    <CardInspector
+                      flow={flow}
+                      cardId={followed}
+                      onStop={() => setFollowed(null)}
+                    />
+                  )}
+                </div>
+              )}
+              <div className={`${floating} max-w-full p-0.5`}>
+                <Controls
+                  clock={clock}
+                  names={names}
+                  arrangement={diagram.arrangement}
+                  onArrangement={choose}
+                  help={help}
+                  onHelp={() => setHelp((h) => !h)}
+                  beats={
+                    hasBeats
+                      ? {
+                          shown: beatsShown,
+                          controls: chaptersId,
+                          onToggle: () => setBeatsShown((b) => !b),
+                        }
+                      : undefined
+                  }
+                />
+              </div>
             </div>
-          )}
-        </div>
-        {diagram.beats.length > 0 && (
-          <Chapters diagram={diagram} clock={clock} />
+          </>,
+          overlay
         )}
-      </div>
       <div className="sr-only" aria-live="polite" data-testid="flow-announcer">
         {announcement}
         {inspected
@@ -304,10 +367,19 @@ export function FlowPlayer({
 
 /* ---------- chapters ---------- */
 
+/**
+ * The beats list. Hidden rather than unmounted when the reader hides it, so
+ * `aria-controls` keeps a target; shown again, it brings the current beat
+ * back into view.
+ */
 function Chapters({
+  id,
+  shown,
   diagram,
   clock,
 }: {
+  id: string;
+  shown: boolean;
   diagram: DiagramTimeline;
   clock: FlowClock;
 }) {
@@ -318,19 +390,24 @@ function Chapters({
   useEffect(() => {
     const ol = list.current;
     const li = ol?.children[clock.beat] as HTMLElement | undefined;
-    if (!ol || !li) return;
+    if (!shown || !ol || !li) return;
     const top = li.offsetTop;
     const bottom = top + li.offsetHeight;
     if (top < ol.scrollTop) ol.scrollTop = top;
     else if (bottom > ol.scrollTop + ol.clientHeight)
       ol.scrollTop = bottom - ol.clientHeight;
-  }, [clock.beat]);
+  }, [clock.beat, shown]);
 
   return (
-    <div className="relative @2xl:min-h-96 @2xl:w-72 @2xl:shrink-0">
+    <div
+      id={id}
+      hidden={!shown}
+      className={`${floating} absolute top-4 right-4 flex max-h-[calc(100%-2rem)] w-72 max-w-[45%] py-1.5`}
+      data-testid="flow-chapters-panel"
+    >
       <ol
         ref={list}
-        className="relative flex max-h-72 flex-col gap-1 overflow-y-auto @2xl:absolute @2xl:inset-0 @2xl:max-h-none"
+        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto"
         aria-label="Beats"
         data-testid="flow-chapters"
       >
@@ -350,12 +427,12 @@ function Chapters({
             <li key={b.id ?? i}>
               <button
                 type="button"
-                className={`relative flex w-full items-start gap-2 overflow-hidden rounded-[var(--radius-sm,4px)] border py-1.5 pr-2 pl-3 text-left text-xs leading-snug transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+                className={`relative flex w-full items-start gap-2.5 py-1.5 pr-3 pl-3 text-left text-xs leading-snug transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
                   current
-                    ? "border-[var(--color-accent)] bg-[var(--color-accent-wash)] text-fg"
+                    ? "text-fg"
                     : i < clock.beat
-                      ? "border-[var(--color-line)] bg-[var(--color-bg-1)] text-fg-soft hover:border-[var(--color-line-strong)]"
-                      : "border-[var(--color-line)] bg-[var(--color-bg-1)] text-fg-mute hover:border-[var(--color-line-strong)] hover:text-fg-soft"
+                      ? "text-fg-soft hover:text-fg"
+                      : "text-fg-mute hover:text-fg-soft"
                 }`}
                 aria-label={`Beat ${i + 1} of ${beats.length}: ${b.caption}${
                   b.changes.length
@@ -372,7 +449,9 @@ function Chapters({
                   data-testid="flow-beat-progress"
                   aria-hidden
                 />
-                <span className="w-4 shrink-0 text-right font-mono text-fg-mute">
+                <span
+                  className={`w-4 shrink-0 text-right tabular-nums ${current ? "text-[var(--color-accent)]" : "text-fg-mute"}`}
+                >
                   {i + 1}
                 </span>
                 {b.changes.length > 0 ? (
@@ -443,7 +522,6 @@ const ICONS = {
       <path d="M18 6l-9 6 9 6z" fill="currentColor" />
     </>
   ),
-  prevFrame: <path d="M15 6l-6 6 6 6" />,
   play: <path d="M8 5l11 7-11 7z" fill="currentColor" />,
   pause: (
     <>
@@ -451,11 +529,20 @@ const ICONS = {
       <path d="M15 5v14" strokeWidth={3} />
     </>
   ),
-  nextFrame: <path d="M9 6l6 6-6 6" />,
   nextBeat: (
     <>
       <path d="M18 5v14" />
       <path d="M6 6l9 6-9 6z" fill="currentColor" />
+    </>
+  ),
+  beats: (
+    <>
+      <path d="M9 6h11" />
+      <path d="M9 12h11" />
+      <path d="M9 18h11" />
+      <path d="M4 6h.01" strokeWidth={3} />
+      <path d="M4 12h.01" strokeWidth={3} />
+      <path d="M4 18h.01" strokeWidth={3} />
     </>
   ),
   loop: (
@@ -476,6 +563,8 @@ function IconButton({
   onClick,
   disabled,
   pressed,
+  expanded,
+  controls,
 }: {
   label: string;
   keys: string;
@@ -484,6 +573,9 @@ function IconButton({
   onClick: () => void;
   disabled?: boolean;
   pressed?: boolean;
+  /** A disclosure toggle: what it shows and whether it is showing. */
+  expanded?: boolean;
+  controls?: string;
 }) {
   return (
     <Button
@@ -499,6 +591,8 @@ function IconButton({
       aria-label={label}
       aria-keyshortcuts={shortcut}
       aria-pressed={pressed}
+      aria-expanded={expanded}
+      aria-controls={controls}
       title={`${label} (${keys})`}
     >
       <Icon size="sm">{ICONS[icon]}</Icon>
@@ -513,6 +607,7 @@ function Controls({
   onArrangement,
   help,
   onHelp,
+  beats,
 }: {
   clock: FlowClock;
   names: readonly ArrangementName[];
@@ -520,11 +615,15 @@ function Controls({
   onArrangement: (a: ArrangementName) => void;
   help: boolean;
   onHelp: () => void;
+  /** The beats list toggle; absent when the flow has no beats. */
+  beats?: { shown: boolean; controls: string; onToggle: () => void };
 }) {
   const noBeats = clock.beatCount === 0;
-  const frameNote = clock.reducedMotion ? " (a beat with reduced motion)" : "";
+  const nextSpeedUp =
+    SPEEDS[(SPEEDS.findIndex((v) => v === clock.speed) + 1) % SPEEDS.length];
+  // Frame stepping stays on the keyboard (, . and ⇧←/⇧→), listed in the help.
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div className="flex flex-wrap items-center gap-0.5">
       <IconButton
         label="Previous beat"
         keys="←"
@@ -534,25 +633,11 @@ function Controls({
         disabled={noBeats}
       />
       <IconButton
-        label={`Previous frame${frameNote}`}
-        keys=", or ⇧←"
-        shortcut="Shift+ArrowLeft"
-        icon="prevFrame"
-        onClick={clock.frameBack}
-      />
-      <IconButton
         label={clock.playing ? "Pause" : "Play"}
         keys="Space"
         shortcut="Space"
         icon={clock.playing ? "pause" : "play"}
         onClick={clock.toggle}
-      />
-      <IconButton
-        label={`Next frame${frameNote}`}
-        keys=". or ⇧→"
-        shortcut="Shift+ArrowRight"
-        icon="nextFrame"
-        onClick={clock.frameForward}
       />
       <IconButton
         label="Next beat"
@@ -562,6 +647,27 @@ function Controls({
         onClick={clock.stepForward}
         disabled={noBeats}
       />
+      {clock.beatCount > 0 && (
+        <span
+          className="px-1.5 text-xs tabular-nums text-fg-soft"
+          data-testid="flow-beat-count"
+        >
+          {Math.max(0, clock.beat) + 1}
+          <span className="text-fg-mute"> / {clock.beatCount}</span>
+        </span>
+      )}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="!px-1.5 text-xs tabular-nums"
+        onClick={() => clock.setSpeed(nextSpeedUp)}
+        aria-label={`Speed ${speedLabel(clock.speed)}`}
+        aria-keyshortcuts="+ -"
+        title={`Speed: click for ${speedLabel(nextSpeedUp)} (− / +)`}
+        data-testid="flow-speed"
+      >
+        {speedLabel(clock.speed)}
+      </Button>
       <IconButton
         label="Loop"
         keys={clock.loop ? "L · on: play loops" : "L · off: play once"}
@@ -570,23 +676,9 @@ function Controls({
         onClick={() => clock.setLoop(!clock.loop)}
         pressed={clock.loop}
       />
-      {clock.beatCount > 0 && (
-        <span className="ml-1 font-mono text-xs text-fg-mute">
-          beat {Math.max(0, clock.beat) + 1}/{clock.beatCount}
-        </span>
-      )}
-      <SegmentedControl
-        className="ml-2"
-        ariaLabel="Speed"
-        options={SPEEDS.map((s) => ({
-          value: String(s),
-          label: speedLabel(s),
-        }))}
-        value={String(clock.speed)}
-        onChange={(v) => clock.setSpeed(Number(v))}
-      />
-      <div className="ml-auto flex items-center gap-2">
-        {names.length === 2 && (
+      {names.length === 2 && (
+        <>
+          <Divider />
           <SegmentedControl
             ariaLabel="Arrangement"
             options={names.map((n) => ({
@@ -596,28 +688,44 @@ function Controls({
             value={arrangement}
             onChange={onArrangement}
           />
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="!px-2 font-mono"
-          onClick={onHelp}
-          aria-label="Keyboard shortcuts"
-          aria-expanded={help}
-          aria-keyshortcuts="?"
-          title="Keyboard shortcuts (?)"
-        >
-          ?
-        </Button>
-      </div>
+        </>
+      )}
+      <Divider />
+      {beats && (
+        <IconButton
+          label={beats.shown ? "Hide beats" : "Show beats"}
+          keys="C"
+          shortcut="C"
+          icon="beats"
+          onClick={beats.onToggle}
+          expanded={beats.shown}
+          controls={beats.controls}
+        />
+      )}
+      <Button
+        size="sm"
+        variant="ghost"
+        className="!px-2"
+        onClick={onHelp}
+        aria-label="Keyboard shortcuts"
+        aria-expanded={help}
+        aria-keyshortcuts="?"
+        title="Keyboard shortcuts (?)"
+      >
+        ?
+      </Button>
     </div>
   );
+}
+
+function Divider() {
+  return <span className="mx-1 h-4 w-px bg-[var(--color-line)]" aria-hidden />;
 }
 
 function ShortcutHelp() {
   return (
     <dl
-      className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-xs"
+      className={`${floating} grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 px-3 py-2 text-xs`}
       aria-label="Keyboard shortcuts"
       data-testid="flow-shortcuts"
     >
@@ -633,8 +741,7 @@ function ShortcutHelp() {
 
 /* ---------- inspectors ---------- */
 
-const panel =
-  "min-w-0 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-xs";
+const panel = `${floating} min-w-0 px-3 py-2 text-xs`;
 
 function PartInspector({
   flow,

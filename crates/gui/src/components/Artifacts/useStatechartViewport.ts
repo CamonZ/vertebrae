@@ -16,21 +16,34 @@ type Gesture = {
   | { kind: "resize"; height: number }
 );
 
+export interface ViewportBounds {
+  /** Smallest frame height the grip allows (default 320). */
+  readonly minHeight?: number;
+  /** Largest frame height the grip allows (default 1600). */
+  readonly maxHeight?: number;
+}
+
 /** Own pointer capture only for an active drag; a click still selects a state. */
-export function useStatechartViewport() {
+export function useStatechartViewport({
+  minHeight = 320,
+  maxHeight = 1600,
+}: ViewportBounds = {}) {
   const containerRef = useRef<HTMLSpanElement>(null);
   const canvasRef = useRef<HTMLSpanElement>(null);
   const gesture = useRef<Gesture | null>(null);
   const suppressClick = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [height, setHeight] = useState(640);
+  /** The grip has set the height (by drag or keys) at least once. */
+  const [resized, setResized] = useState(false);
   const [pan, setPan] = useState({ x: 0, y: 0 });
 
   function resize(nextHeight: number) {
-    const availableHeight = Math.min(1600, nextHeight);
-    const boundedHeight = Math.max(320, availableHeight);
+    const availableHeight = Math.min(maxHeight, nextHeight);
+    const boundedHeight = Math.max(minHeight, availableHeight);
 
     setHeight(boundedHeight);
+    setResized(true);
   }
 
   function startPan(event: PointerEvent<HTMLElement>) {
@@ -137,6 +150,7 @@ export function useStatechartViewport() {
     canvasRef,
     dragging,
     height,
+    resized,
     pan,
     resetPan: () => setPan({ x: 0, y: 0 }),
     panHandlers: {
