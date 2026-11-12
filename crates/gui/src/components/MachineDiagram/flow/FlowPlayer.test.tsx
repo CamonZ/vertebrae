@@ -6,6 +6,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
+import { userEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
 import { FlowPlayer } from "./FlowPlayer";
@@ -31,6 +32,14 @@ const shownT = () => Number(player().getAttribute("data-t"));
 const shownBeat = () => Number(player().getAttribute("data-beat"));
 const key = (k: string, init: KeyboardEventInit = {}) =>
   fireEvent.keyDown(document.activeElement ?? player(), { key: k, ...init });
+const chapterButtons = () =>
+  within(screen.getByTestId("flow-chapters")).getAllByRole("button");
+const progressBars = () =>
+  within(screen.getByTestId("flow-chapters"))
+    .getAllByTestId("flow-beat-progress")
+    .map((bar) =>
+      Number(/scaleY\(([^)]+)\)/.exec(bar.style.transform)?.[1] ?? NaN)
+    );
 const part = (id: string) =>
   player().querySelector(`[data-part-id='${id}']`) as SVGGElement;
 
@@ -170,6 +179,100 @@ describe("chapters and announcements", () => {
     expect(chapters[4]).toHaveAccessibleName(
       `Beat 5 of ${after.beats.length}: ${after.beats[4].caption}`
     );
+  });
+
+  it("Enter or Space on a focused beat plays that beat", async () => {
+    const user = userEvent.setup();
+    renderPlayer();
+    const chapters = chapterButtons();
+    chapters[3].focus();
+    await user.keyboard("{Enter}");
+    expect(player()).toHaveAttribute("data-playing", "true");
+    expect(shownBeat()).toBe(3);
+    expect(shownT()).toBeGreaterThanOrEqual(after.beats[3].t);
+    expect(shownT()).toBeLessThanOrEqual(outcomes[3]);
+
+    chapters[5].focus();
+    await user.keyboard(" ");
+    // Space plays the beat; the player does not also toggle playback.
+    expect(player()).toHaveAttribute("data-playing", "true");
+    expect(shownBeat()).toBe(5);
+    expect(shownT()).toBeGreaterThanOrEqual(after.beats[5].t);
+    expect(shownT()).toBeLessThanOrEqual(outcomes[5]);
+    expect(chapters[5]).toHaveAttribute("aria-current", "step");
+  });
+
+  it("clamps long captions on beats other than the current one", () => {
+    const long = `${"A very long caption that keeps going ".repeat(8)}to the end.`;
+    const withLong = {
+      ...flow,
+      arrangements: flow.arrangements.map((a) => ({
+        ...a,
+        beats: a.beats.map((b, i) => (i === 1 ? { ...b, caption: long } : b)),
+      })),
+    };
+    renderPlayer({ flow: withLong });
+    const caption = () =>
+      chapterButtons()[1].querySelector("span:last-child") as HTMLElement;
+    expect(caption()).toHaveClass("line-clamp-2");
+    // The full caption stays available: as a tooltip and the accessible name.
+    expect(chapterButtons()[1]).toHaveAttribute("title", long);
+    expect(chapterButtons()[1]).toHaveAccessibleName(
+      `Beat 2 of ${after.beats.length}: ${long}`
+    );
+    key("2");
+    expect(caption()).not.toHaveClass("line-clamp-2");
+    expect(caption()).toHaveTextContent(long);
+    expect(chapterButtons()[1]).not.toHaveAttribute("title");
+    expect(chapterButtons()[0].querySelector("span:last-child")).toHaveClass(
+      "line-clamp-2"
+    );
+  });
+
+  it("draws a progress bar per beat: done, current and still to come", () => {
+    renderPlayer();
+    const n = after.beats.length;
+    key("3");
+    // Resting on beat 3's outcome: it and every earlier beat read full.
+    expect(progressBars()).toEqual(
+      Array.from({ length: n }, (_, i) => (i <= 2 ? 1 : 0))
+    );
+    // Part way through the beat, the current bar is part full.
+    for (let f = 0; f < 15; f++) key(",");
+    expect(shownBeat()).toBe(2);
+    const mid = progressBars()[2];
+    expect(mid).toBeGreaterThan(0);
+    expect(mid).toBeLessThan(1);
+    key(",");
+    expect(progressBars()[2]).toBeLessThan(mid);
+    expect(progressBars().slice(0, 2)).toEqual([1, 1]);
+    expect(
+      progressBars()
+        .slice(3)
+        .every((p) => p === 0)
+    ).toBe(true);
+  });
+
+  it("keeps the current beat scrolled into view inside the list", () => {
+    renderPlayer();
+    const list = screen.getByTestId("flow-chapters");
+    // jsdom has no layout: give the list a 100px window over 50px rows.
+    Object.defineProperty(list, "clientHeight", { value: 100 });
+    [...list.children].forEach((li, i) => {
+      Object.defineProperty(li, "offsetTop", { value: i * 50 });
+      Object.defineProperty(li, "offsetHeight", { value: 50 });
+    });
+    const n = after.beats.length;
+    expect(n * 50).toBeGreaterThan(100);
+    key("End");
+    expect(list.scrollTop).toBe(n * 50 - 100);
+    key("Home");
+    expect(list.scrollTop).toBe(0);
+    key("5");
+    expect(list.scrollTop).toBe(5 * 50 - 100);
+    // A beat already in view does not scroll the list.
+    key("4");
+    expect(list.scrollTop).toBe(5 * 50 - 100);
   });
 
   it("announces the beat caption through a live region", () => {
@@ -332,6 +435,48 @@ describe("reduced motion", () => {
     }
     for (const t of seen) expect(outcomes).toContain(t);
     expect(seen.size).toBeGreaterThan(2);
+  });
+
+  it("clicking beats in the list, playing or paused, only draws settled beats", () => {
+    vi.useFakeTimers({
+      toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"],
+    });
+    renderPlayer({ reducedMotion: true });
+    const seen = new Set<number>();
+    const look = () => {
+      seen.add(shownT());
+      expect(outcomes).toContain(shownT());
+      // The current beat is settled, so its bar reads full.
+      expect(progressBars()[shownBeat()]).toBe(1);
+      expect(chapterButtons()[shownBeat()]).toHaveAttribute(
+        "aria-current",
+        "step"
+      );
+    };
+    const run = (ms: number) => {
+      for (let k = 0; k < ms; k += 16) {
+        act(() => vi.advanceTimersByTime(16));
+        look();
+      }
+    };
+    for (const i of [4, 1, 6]) {
+      fireEvent.click(chapterButtons()[i]);
+      expect(player()).toHaveAttribute("data-playing", "false");
+      expect(shownBeat()).toBe(i);
+      look();
+      run(200);
+    }
+    // While playing: a click lands on the beat's outcome and holds there.
+    key(" ");
+    run(400);
+    for (const i of [2, 7, 0]) {
+      fireEvent.click(chapterButtons()[i]);
+      expect(shownBeat()).toBe(i);
+      look();
+      key(" ");
+      run(1500);
+    }
+    expect(seen.size).toBeGreaterThan(4);
   });
 
   it("a chapter shows its beat's outcome at once under reduced motion", () => {
