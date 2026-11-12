@@ -10,10 +10,14 @@ import { MachinePart } from "../MachinePart";
 import { RailCards } from "../RailCards";
 import { SvgText } from "../SvgText";
 import { Wire } from "../Rail";
+import { DrillMark } from "./DrillMark";
 import { nameLabelLocal, regionLabelAt } from "./extent";
 import { FlowBand } from "./FlowBand";
 import { useFlowRegistry } from "./registryContext";
 import type { DiagramTimeline } from "./compile";
+
+/** Accessible note on a part with a drill-down. */
+export const DRILL_HINT = "Opens a deeper diagram.";
 
 export interface FlowDiagramProps {
   diagram: DiagramTimeline;
@@ -103,13 +107,24 @@ export const FlowDiagram = memo(function FlowDiagram({
                 y={p.position.y}
                 scale={p.scale}
                 reducedMotion={reducedMotion}
+                activationHint={p.drill ? DRILL_HINT : undefined}
               >
                 {(frame) => {
                   const draw = registry.parts.get(p.kind)?.draw;
-                  return draw ? (
-                    draw(frame.t, p)
-                  ) : (
-                    <PartBox x={p.bb[0]} y={p.bb[1]} w={p.bb[2]} h={p.bb[3]} />
+                  return (
+                    <>
+                      {draw ? (
+                        draw(frame.t, p)
+                      ) : (
+                        <PartBox
+                          x={p.bb[0]}
+                          y={p.bb[1]}
+                          w={p.bb[2]}
+                          h={p.bb[3]}
+                        />
+                      )}
+                      {p.drill && <DrillMark bb={p.bb} scale={p.scale} />}
+                    </>
                   );
                 }}
               </MachinePart>
