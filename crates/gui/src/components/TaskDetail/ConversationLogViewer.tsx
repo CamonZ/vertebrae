@@ -8,7 +8,7 @@
  * - Tool results (success/error)
  *
  * Rendering primitives are shared with UnifiedChatView via
- * `components/Traces/conversation/EventRenderer`.
+ * `components/TaskDetail/conversation/EventRenderer`.
  */
 
 import { useState, useMemo } from "react";
@@ -18,7 +18,7 @@ import {
   EventRenderer,
   TimeModeContext,
   type TimeMode,
-} from "../Traces/conversation/EventRenderer";
+} from "./conversation/EventRenderer";
 
 interface ConversationLogViewerProps {
   logs: SessionLog[];

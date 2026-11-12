@@ -38,6 +38,7 @@ import type {
   ThreadStatus,
   Turn as TurnModel,
 } from "./types";
+import { messageMatches, threadMatches, useThreadFindQuery } from "./find";
 
 // ===========================================================================
 // Status mark — the subthread summary status dot / spinner.
@@ -99,6 +100,7 @@ function Turn(props: TurnProps): ReactNode {
     onChildRun,
   } = props;
   const msgs = turn.messages ?? [];
+  const findQuery = useThreadFindQuery();
   return (
     <Fragment>
       {showSep ? (
@@ -135,7 +137,7 @@ function Turn(props: TurnProps): ReactNode {
           );
         }
         if (reveal === "shallow" && m.type === "system") return null;
-        return (
+        const row = (
           <EventRow
             key={m.evt || i}
             {...m}
@@ -143,6 +145,13 @@ function Turn(props: TurnProps): ReactNode {
             onClick={onSelect ? () => onSelect(m.evt) : undefined}
             onChildRun={onChildRun}
           />
+        );
+        return findQuery && messageMatches(m, findQuery) ? (
+          <div key={m.evt || i} className="evfind" data-find-match="">
+            {row}
+          </div>
+        ) : (
+          row
         );
       })}
     </Fragment>
@@ -184,7 +193,15 @@ export function Thread(props: ThreadProps): ReactNode {
 
   const nested = depth > 0;
   // root threads open; subthreads start collapsed (prototype behavior).
-  const [open, setOpen] = useState(!nested);
+  const [userOpen, setOpen] = useState(!nested);
+  const findQuery = useThreadFindQuery();
+  // Find opens a collapsed subagent that contains a match.
+  const open = userOpen || (nested && threadMatches(thread, findQuery));
+  const labelMatch =
+    !!findQuery &&
+    [thread.label, thread.spawnLabel, thread.step?.to].some((value) =>
+      value?.toLowerCase().includes(findQuery)
+    );
 
   const kind: StepKind =
     (thread.step && thread.step.kind) || thread.kind || "llm";
@@ -227,6 +244,7 @@ export function Thread(props: ThreadProps): ReactNode {
         >
           <div
             className="sth-sum"
+            data-find-match={labelMatch ? "" : undefined}
             onClick={() => {
               setOpen((o) => !o);
               onSelect?.(thread.id);
@@ -270,7 +288,10 @@ export function Thread(props: ThreadProps): ReactNode {
   return (
     <div className="thread" ref={(el) => registerRef?.(thread.id, el)}>
       {showHead ? (
-        <div className={"thread-head " + mode + sel + " k-" + kind}>
+        <div
+          className={"thread-head " + mode + sel + " k-" + kind}
+          data-find-match={labelMatch ? "" : undefined}
+        >
           {mode === "timed" ? (
             <div className="evwhen">
               {st.at}

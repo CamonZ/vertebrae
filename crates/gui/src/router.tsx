@@ -12,7 +12,6 @@ import {
   ProjectSetupPage,
   WelcomeInstallPage,
   TasksPage,
-  TracesPage,
   ArtifactsPage,
   SettingsPage,
   DaemonsPage,
@@ -24,6 +23,7 @@ import { commands } from "./bindings";
 import { SplashScreen } from "./components";
 import { hasAllRequiredBinaries } from "./utils/installation";
 import { DEV_FLOWS_PATH, DEV_MACHINE_PARTS_PATH } from "./devRoutes";
+import { useRunChatDeepLink } from "./hooks/useRunChatDeepLink";
 
 function RootLayout() {
   // Initialize theme management at the app root
@@ -32,6 +32,8 @@ function RootLayout() {
   useDensity();
   // Apply inline code colors from Appearance settings
   useInlineCodeStyle();
+  // `#task=…&run=…&exec=…` opens a TaskRun in the chat from any page.
+  useRunChatDeepLink();
 
   return (
     <AppShell>
@@ -202,22 +204,6 @@ export const appRoutes: RouteObject[] = [
         element: (
           <GuardedRoute>
             <ArtifactsPage />
-          </GuardedRoute>
-        ),
-      },
-      {
-        path: "traces/:taskId",
-        element: (
-          <GuardedRoute>
-            <TracesPage />
-          </GuardedRoute>
-        ),
-      },
-      {
-        path: "traces",
-        element: (
-          <GuardedRoute>
-            <TracesPage />
           </GuardedRoute>
         ),
       },

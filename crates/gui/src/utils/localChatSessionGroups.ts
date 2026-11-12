@@ -1,4 +1,4 @@
-import type { SavedProject, Task } from "../bindings";
+import type { SavedProject, Task, TaskRun } from "../bindings";
 import type { LocalChatSessionSummary } from "./localChatPersistence";
 import {
   compareLocalChatSessionRecency,
@@ -286,13 +286,69 @@ export function localChatSessionTaskId(
     : null;
 }
 
+/** A durable TaskRun listed in history under its task's group. */
+export interface LocalChatRunRow {
+  /** TaskRun id. */
+  id: string;
+  taskId: string;
+  run: TaskRun;
+  /** Row label; the task title is the group label. */
+  label: string;
+  /** Last activity used to order rows alongside sessions. */
+  updatedAt: string;
+  completed: boolean;
+}
+
 export interface LocalChatTicketGroup {
   id: string;
   ticketId: string | null;
   entityLevel?: "epic" | "task";
   label: string;
   sessions: LocalChatSessionSummary[];
+  runs?: LocalChatRunRow[];
   children?: LocalChatTicketGroup[];
+}
+
+function timestampMs(value: string | null | undefined): number {
+  const parsed = Date.parse(value ?? "");
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function newestGroupActivity(group: LocalChatTicketGroup): number {
+  return Math.max(
+    0,
+    ...group.sessions.map((session) => timestampMs(session.updatedAt)),
+    ...(group.runs ?? []).map((run) => timestampMs(run.updatedAt))
+  );
+}
+
+/** A group's sessions and runs interleaved newest first (sessions win ties). */
+export function localChatGroupRows(
+  group: Pick<LocalChatTicketGroup, "sessions" | "runs">
+): (
+  | { kind: "session"; session: LocalChatSessionSummary }
+  | { kind: "run"; run: LocalChatRunRow }
+)[] {
+  const rows = [
+    ...group.sessions.map((session) => ({
+      kind: "session" as const,
+      session,
+      at: timestampMs(session.updatedAt),
+    })),
+    ...(group.runs ?? []).map((run) => ({
+      kind: "run" as const,
+      run,
+      at: timestampMs(run.updatedAt),
+    })),
+  ];
+  // Stable sort keeps the existing session order among equal timestamps.
+  return rows
+    .sort((a, b) => b.at - a.at)
+    .map((row) =>
+      row.kind === "session"
+        ? { kind: row.kind, session: row.session }
+        : { kind: row.kind, run: row.run }
+    );
 }
 
 /** Preserve recency within groups and collect unassociated chats after tickets. */
@@ -348,11 +404,34 @@ export function groupLocalChatSessionsByTicket(
  */
 export function groupLocalChatSessionsByHierarchy(
   sessions: LocalChatSessionSummary[],
-  tasks: ReadonlyMap<string, Pick<Task, "id" | "title" | "level" | "parent_id">>
+  tasks: ReadonlyMap<
+    string,
+    Pick<Task, "id" | "title" | "level" | "parent_id">
+  >,
+  runs: readonly LocalChatRunRow[] = []
 ): LocalChatTicketGroup[] {
   const groups = new Map<string, LocalChatTicketGroup>();
   const parentById = new Map<string, string>();
-  const direct = groupLocalChatSessionsByTicket(sessions);
+  const direct = groupLocalChatSessionsByTicket(sessions).map((group) => ({
+    ...group,
+  }));
+  const ungroupedIndex = direct.findIndex((group) => !group.ticketId);
+  const ungrouped = ungroupedIndex >= 0 ? direct.splice(ungroupedIndex, 1) : [];
+
+  // Runs join their task's group, creating it when no chat is associated.
+  for (const run of runs) {
+    const id = `ticket:${run.taskId}`;
+    let group = direct.find((candidate) => candidate.id === id);
+    if (!group) {
+      group = { id, ticketId: run.taskId, label: run.taskId, sessions: [] };
+      direct.push(group);
+    }
+    group.runs = [...(group.runs ?? []), run];
+  }
+  // Order groups by their newest session or run, as rows are within a group.
+  if (runs.length)
+    direct.sort((a, b) => newestGroupActivity(b) - newestGroupActivity(a));
+  direct.push(...ungrouped);
 
   for (const group of direct) groups.set(group.id, { ...group, children: [] });
 
@@ -417,6 +496,26 @@ export function groupLocalChatSessionsByHierarchy(
     } else if (group.ticketId) {
       roots.push(group);
     }
+  }
+
+  // Ancestors are created after the groups that reach them; order every
+  // level by its newest descendant so a recent run surfaces its epic.
+  if (runs.length) {
+    const newest = new Map<LocalChatTicketGroup, number>();
+    const activity = (group: LocalChatTicketGroup): number => {
+      const known = newest.get(group);
+      if (known !== undefined) return known;
+      const value = Math.max(
+        newestGroupActivity(group),
+        ...(group.children ?? []).map(activity)
+      );
+      newest.set(group, value);
+      return value;
+    };
+    const byActivity = (a: LocalChatTicketGroup, b: LocalChatTicketGroup) =>
+      activity(b) - activity(a);
+    for (const group of groups.values()) group.children?.sort(byActivity);
+    roots.sort(byActivity);
   }
 
   const other = groups.get("ungrouped");

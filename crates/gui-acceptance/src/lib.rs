@@ -298,7 +298,6 @@ pub async fn wait_for_page(client: &Client, path: &str, project: Option<&str>) {
         "/artifacts" => "[role='tree'][aria-label='Project artifacts']",
         "/welcome" => "[data-testid='welcome-install']",
         "/settings" => "[data-testid='settings-page']",
-        p if p.starts_with("/traces") => "[data-testid='traces-page']",
         _ => "main",
     };
     wait_for_js(

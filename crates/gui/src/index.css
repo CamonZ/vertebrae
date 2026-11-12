@@ -3610,6 +3610,56 @@ html.light ::selection {
   font-size: var(--text-10);
   color: var(--fg-faint);
 }
+.hc-panel .hc-find {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-bg-1);
+}
+.hc-panel .hc-find-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px var(--s-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-size: var(--text-12);
+}
+.hc-panel .hc-find-count {
+  min-width: 3.5em;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--text-10);
+  color: var(--fg-faint);
+}
+.hc-panel [data-find-match] {
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-warn) 10%, transparent);
+}
+.hc-panel [data-find-current] {
+  outline: 2px solid color-mix(in oklch, var(--color-warn) 70%, transparent);
+  outline-offset: 1px;
+}
+.hc-panel .hc-mini-history-run-status {
+  font-family: var(--font-mono);
+  font-size: var(--text-10);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+}
+.hc-panel .hc-mini-history-run-status[data-status="executing"],
+.hc-panel .hc-mini-history-run-status[data-status="queued"] {
+  color: var(--color-ok);
+}
+.hc-panel .hc-mini-history-run-status[data-status="waiting"] {
+  color: var(--color-warn);
+}
+.hc-panel .hc-mini-history-run-status[data-status="failed"] {
+  color: var(--color-err);
+}
 .hc-panel .hc-mini-history-harness {
   display: inline-flex;
   width: 18px;

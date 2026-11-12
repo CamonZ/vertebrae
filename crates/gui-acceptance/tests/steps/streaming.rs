@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use crate::GuiWorld;
 
-/// Pause before the first delta, long enough to open the traces page so the
-/// GUI is subscribed before anything streams.
+/// Pause before the first delta, long enough to open the run in the chat so
+/// the GUI is subscribed before anything streams.
 const PAUSE_BEFORE_FIRST_DELTA_MS: u64 = 10_000;
 /// Pause after the first delta, while the scenario checks the partial text.
 const PAUSE_AFTER_FIRST_DELTA_MS: u64 = 12_000;
@@ -289,7 +289,7 @@ pub async fn conversation_shows_once(world: &mut GuiWorld, expected: String, tim
 
     while Instant::now() < deadline {
         let text = match client
-            .find(Locator::Css("[data-testid=\"unified-chat-view\"]"))
+            .find(Locator::Css("[data-testid=\"run-pane-scroll\"]"))
             .await
         {
             Ok(view) => view.prop("textContent").await.ok().flatten(),
@@ -330,17 +330,18 @@ pub async fn element_reads(world: &mut GuiWorld, test_id: String, expected: Stri
     let mut actual = None;
 
     while Instant::now() < deadline {
-        actual = match client
-            .find(Locator::Css(&format!("[data-testid=\"{test_id}\"]")))
+        // innerText, not WebDriver's element text: WebKitWebDriver reports an
+        // ellipsis-truncating (overflow: hidden) label as empty even when it renders.
+        actual = client
+            .execute(
+                r#"const el = document.querySelector(`[data-testid="${arguments[0]}"]`);
+                return el ? el.innerText : null;"#,
+                vec![test_id.clone().into()],
+            )
             .await
-        {
-            Ok(element) => element
-                .text()
-                .await
-                .ok()
-                .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" ")),
-            Err(_) => None,
-        };
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .map(|text| text.split_whitespace().collect::<Vec<_>>().join(" "));
         if actual.as_deref() == Some(expected.as_str()) {
             return;
         }
@@ -416,9 +417,9 @@ pub async fn sacrum_stores_snapshot_only(world: &mut GuiWorld, expected: String)
     );
 }
 
-#[when("I reload the traces page for the created task")]
-pub async fn reload_traces_page(world: &mut GuiWorld) {
-    // A full navigation restarts the frontend, so the page renders only what
-    // Sacrum returns from storage.
-    crate::steps::daemon::navigate_to_traces_for_task(world).await;
+#[when("I reload the GUI and reopen the created task's run in the chat")]
+pub async fn reload_run_chat(world: &mut GuiWorld) {
+    // A full navigation restarts the frontend, so the run pane renders only
+    // what Sacrum returns from storage.
+    crate::steps::daemon::open_task_run_in_chat(world).await;
 }

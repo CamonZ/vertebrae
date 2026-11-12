@@ -38,93 +38,102 @@ function preferCurrentTaskWhenNewer(fetched: Task, current: Task): Task {
  *
  * TanStack Query owns the server-state cache for task list data.
  */
-export function useTasks(filter?: TaskFilterOptions) {
+export function useTasks(
+  filter?: TaskFilterOptions,
+  options: { enabled?: boolean } = {}
+) {
   const activeFilter = normalizeTaskFilter(filter);
   const projectScopeGeneration = useProjectScopeGeneration();
   const queryKey = queryKeys.tasks.list(projectScopeGeneration, activeFilter);
 
-  const query = useQuery({
-    queryKey,
-    structuralSharing: shareTaskList,
-    // Keep matching rows mounted across filter requests in the same project.
-    // Never carry a previous project's data into a new scope.
-    placeholderData: (previous, previousQuery) => {
-      if (!previous || previousQuery?.queryKey[1] !== projectScopeGeneration)
-        return undefined;
-      const matching = previous.filter((task) =>
-        taskMatchesFilter(task, activeFilter)
-      );
-      return matching.length === previous.length ? previous : matching;
-    },
-    queryFn: async () => {
-      const tasksAtFetchStart = new Map(
-        (queryClient.getQueryData<Task[]>(queryKey) ?? []).map((task) => [
-          task.id,
-          task,
-        ])
-      );
-      const detailTasksAtFetchStart = new Map(
-        queryClient
+  const query = useQuery(
+    {
+      queryKey,
+      enabled: options.enabled ?? true,
+      structuralSharing: shareTaskList,
+      // Keep matching rows mounted across filter requests in the same project.
+      // Never carry a previous project's data into a new scope.
+      placeholderData: (previous, previousQuery) => {
+        if (!previous || previousQuery?.queryKey[1] !== projectScopeGeneration)
+          return undefined;
+        const matching = previous.filter((task) =>
+          taskMatchesFilter(task, activeFilter)
+        );
+        return matching.length === previous.length ? previous : matching;
+      },
+      queryFn: async () => {
+        const tasksAtFetchStart = new Map(
+          (queryClient.getQueryData<Task[]>(queryKey) ?? []).map((task) => [
+            task.id,
+            task,
+          ])
+        );
+        const detailTasksAtFetchStart = new Map(
+          queryClient
+            .getQueriesData<Task>({
+              queryKey: queryKeys.tasks.details(projectScopeGeneration),
+            })
+            .map(([, task]) => task)
+            .filter((task): task is Task => Boolean(task))
+            .map((task) => [task.id, task])
+        );
+        const tasks = await unwrapCommand(commands.listTasks(activeFilter));
+
+        // Preserve only tasks newly inserted while this request was in flight.
+        // Pre-existing query entries can belong to a previously selected
+        // project and must not be re-added after the scoped fetch completes.
+        const currentQueryTasks =
+          queryClient.getQueryData<Task[]>(queryKey) ?? [];
+        const currentDetailTasks = queryClient
           .getQueriesData<Task>({
             queryKey: queryKeys.tasks.details(projectScopeGeneration),
           })
           .map(([, task]) => task)
-          .filter((task): task is Task => Boolean(task))
-          .map((task) => [task.id, task])
-      );
-      const tasks = await unwrapCommand(commands.listTasks(activeFilter));
+          .filter((task): task is Task => Boolean(task));
+        const fetchedIds = new Set(tasks.map((task) => task.id));
+        const currentTasksById = new Map(
+          currentQueryTasks.map((task) => [task.id, task])
+        );
+        const currentDetailTasksById = new Map(
+          currentDetailTasks.map((task) => [task.id, task])
+        );
+        const reconciledFetchedTasks = tasks.map((task) => {
+          const currentTask =
+            currentTasksById.get(task.id) ??
+            currentDetailTasksById.get(task.id);
+          const taskAtFetchStart =
+            tasksAtFetchStart.get(task.id) ??
+            detailTasksAtFetchStart.get(task.id);
+          if (!currentTask || currentTask === taskAtFetchStart) return task;
+          return preferCurrentTaskWhenNewer(task, currentTask);
+        });
+        const upsertedDuringFetch = currentQueryTasks.filter(
+          (task) => !fetchedIds.has(task.id) && !tasksAtFetchStart.has(task.id)
+        );
+        const upsertedDuringFetchIds = new Set(
+          upsertedDuringFetch.map((task) => task.id)
+        );
+        const detailUpsertsDuringFetch = currentDetailTasks.filter(
+          (task) =>
+            !fetchedIds.has(task.id) &&
+            !upsertedDuringFetchIds.has(task.id) &&
+            !tasksAtFetchStart.has(task.id) &&
+            !detailTasksAtFetchStart.has(task.id) &&
+            taskMatchesFilter(task, activeFilter)
+        );
 
-      // Preserve only tasks newly inserted while this request was in flight.
-      // Pre-existing query entries can belong to a previously selected
-      // project and must not be re-added after the scoped fetch completes.
-      const currentQueryTasks =
-        queryClient.getQueryData<Task[]>(queryKey) ?? [];
-      const currentDetailTasks = queryClient
-        .getQueriesData<Task>({
-          queryKey: queryKeys.tasks.details(projectScopeGeneration),
-        })
-        .map(([, task]) => task)
-        .filter((task): task is Task => Boolean(task));
-      const fetchedIds = new Set(tasks.map((task) => task.id));
-      const currentTasksById = new Map(
-        currentQueryTasks.map((task) => [task.id, task])
-      );
-      const currentDetailTasksById = new Map(
-        currentDetailTasks.map((task) => [task.id, task])
-      );
-      const reconciledFetchedTasks = tasks.map((task) => {
-        const currentTask =
-          currentTasksById.get(task.id) ?? currentDetailTasksById.get(task.id);
-        const taskAtFetchStart =
-          tasksAtFetchStart.get(task.id) ??
-          detailTasksAtFetchStart.get(task.id);
-        if (!currentTask || currentTask === taskAtFetchStart) return task;
-        return preferCurrentTaskWhenNewer(task, currentTask);
-      });
-      const upsertedDuringFetch = currentQueryTasks.filter(
-        (task) => !fetchedIds.has(task.id) && !tasksAtFetchStart.has(task.id)
-      );
-      const upsertedDuringFetchIds = new Set(
-        upsertedDuringFetch.map((task) => task.id)
-      );
-      const detailUpsertsDuringFetch = currentDetailTasks.filter(
-        (task) =>
-          !fetchedIds.has(task.id) &&
-          !upsertedDuringFetchIds.has(task.id) &&
-          !tasksAtFetchStart.has(task.id) &&
-          !detailTasksAtFetchStart.has(task.id) &&
-          taskMatchesFilter(task, activeFilter)
-      );
-
-      const reconciledTasks = [
-        ...reconciledFetchedTasks,
-        ...upsertedDuringFetch,
-        ...detailUpsertsDuringFetch,
-      ];
-      hydrateActiveTaskRunsFromTasks(reconciledTasks, projectScopeGeneration);
-      return reconciledTasks;
+        const reconciledTasks = [
+          ...reconciledFetchedTasks,
+          ...upsertedDuringFetch,
+          ...detailUpsertsDuringFetch,
+        ];
+        hydrateActiveTaskRunsFromTasks(reconciledTasks, projectScopeGeneration);
+        return reconciledTasks;
+      },
     },
-  });
+    // Explicit client: also used by surfaces mounted outside the provider.
+    queryClient
+  );
 
   return {
     tasks: query.data ?? NO_TASKS,

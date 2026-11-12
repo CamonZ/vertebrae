@@ -6,6 +6,7 @@ import {
   getLocalChatLifecycle,
   isLocalChatLifecycleBusy,
   useChatStore,
+  paneSessionIds,
   providerThreadSessionId,
 } from "../stores/chatStore";
 import { isLocalChatSessionCleared } from "../utils/localChatPersistence";
@@ -68,7 +69,7 @@ export function useChildChatSessions(
             : `${session.id}:${session.providerChildrenStopped ?? false}:${getLocalChatLifecycle(session)}:${session.providerResumeId}`
         )
         .join("\0") +
-      `:${state.activeSessionId}:${state.paneLayout.panes.map((pane) => pane.sessionId).join(",")}`
+      `:${state.activeSessionId}:${paneSessionIds(state.paneLayout.panes).join(",")}`
   );
 
   useEffect(() => {
@@ -101,7 +102,7 @@ export function useChildChatSessions(
       try {
         const stateAtStart = useChatStore.getState();
         const selected = new Set(
-          stateAtStart.paneLayout.panes.map((pane) => pane.sessionId)
+          paneSessionIds(stateAtStart.paneLayout.panes)
         );
         if (stateAtStart.activeSessionId)
           selected.add(stateAtStart.activeSessionId);
@@ -336,8 +337,8 @@ export function useChildChatSessions(
 
         const state = useChatStore.getState();
 
-        for (const pane of state.paneLayout.panes) {
-          const selected = state.sessions[pane.sessionId];
+        for (const paneSessionId of paneSessionIds(state.paneLayout.panes)) {
+          const selected = state.sessions[paneSessionId];
           if (!selected?.providerResumeId) continue;
 
           // Refresh terminal transitions too: final output may have landed since

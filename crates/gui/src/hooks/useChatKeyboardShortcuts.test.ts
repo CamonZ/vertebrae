@@ -21,6 +21,7 @@ function makeDispatch(
     focusPaneByOffset: vi.fn(() => true),
     historyNavigationEnabled: true,
     focusHistorySearch: vi.fn(() => true),
+    openPaneFind: vi.fn(() => true),
     selectHistoryProjectByOffset: vi.fn(() => true),
     selectHistorySessionByOffset: vi.fn(async () => true),
     closeActivePane: vi.fn(() => true),
@@ -239,21 +240,38 @@ describe("useChatKeyboardShortcuts", () => {
     input.remove();
   });
 
-  it("focuses history search with cmd+f", () => {
+  it("opens the focused pane's find bar with cmd+f", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
 
-    fireKey({ key: "f", code: "KeyF", metaKey: true });
+    const event = fireKey({ key: "f", code: "KeyF", metaKey: true });
 
-    expect(dispatch.focusHistorySearch).toHaveBeenCalledTimes(1);
+    expect(dispatch.openPaneFind).toHaveBeenCalledTimes(1);
+    expect(dispatch.focusHistorySearch).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
   });
 
-  it("does not intercept cmd+f when history search is unavailable", () => {
+  it("focuses history search with cmd+shift+f", () => {
+    const dispatch = makeDispatch();
+    renderShortcutHook(dispatch);
+
+    fireKey({ key: "F", code: "KeyF", metaKey: true, shiftKey: true });
+
+    expect(dispatch.focusHistorySearch).toHaveBeenCalledTimes(1);
+    expect(dispatch.openPaneFind).not.toHaveBeenCalled();
+  });
+
+  it("does not intercept cmd+shift+f when history search is unavailable", () => {
     const dispatch = makeDispatch();
     dispatch.focusHistorySearch = vi.fn(() => false);
     const { unmount } = renderShortcutHook(dispatch);
 
-    const event = fireKey({ key: "f", code: "KeyF", metaKey: true });
+    const event = fireKey({
+      key: "F",
+      code: "KeyF",
+      metaKey: true,
+      shiftKey: true,
+    });
 
     expect(event.defaultPrevented).toBe(false);
     unmount();

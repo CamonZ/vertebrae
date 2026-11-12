@@ -369,6 +369,28 @@ describe("ChatWindowManager", () => {
     expect(panel).toHaveStyle({ width: "384px" });
   });
 
+  it("opens a closed panel straight into the maximized view", () => {
+    const s1 = createSession({ id: "s1", label: "New Chat" });
+    useChatStore.setState({
+      sessions: { s1 },
+      activeSessionId: "s1",
+      panelOpen: false,
+    });
+    render(<ChatWindowManager />);
+
+    // openRunInChat: expand, then open the panel, before the panel mounts.
+    act(() => {
+      useShellStore.getState().setChatPanelPresentation("expanded");
+      useChatStore.setState({ panelOpen: true });
+    });
+
+    expect(screen.getByTestId("chat-window-manager")).toHaveAttribute(
+      "data-maximized",
+      "true"
+    );
+    expect(useShellStore.getState().chatPanelPresentation).toBe("expanded");
+  });
+
   it("toggles the wide project chat view from the header control", async () => {
     const user = userEvent.setup();
     Object.defineProperty(window, "innerWidth", {
@@ -1876,7 +1898,9 @@ describe("ChatWindowManager", () => {
       expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
     });
     const state = useChatStore.getState();
-    const paneSessionIds = state.paneLayout.panes.map((pane) => pane.sessionId);
+    const paneSessionIds = state.paneLayout.panes.map(
+      (pane) => pane.sessionId!
+    );
     expect(paneSessionIds).toHaveLength(2);
     expect(new Set(paneSessionIds).size).toBe(2);
     expect(paneSessionIds[0]).toBe(first);
@@ -3348,7 +3372,12 @@ describe("ChatWindowManager", () => {
     });
 
     render(<ChatWindowManager />);
-    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true });
+    fireEvent.keyDown(window, {
+      key: "F",
+      code: "KeyF",
+      metaKey: true,
+      shiftKey: true,
+    });
     expect(
       screen.queryByTestId("local-chat-session-search")
     ).not.toBeInTheDocument();
@@ -3365,7 +3394,12 @@ describe("ChatWindowManager", () => {
       ).toBeInTheDocument();
     });
 
-    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true });
+    fireEvent.keyDown(window, {
+      key: "F",
+      code: "KeyF",
+      metaKey: true,
+      shiftKey: true,
+    });
     expect(search).toHaveFocus();
 
     fireEvent.keyDown(window, {
@@ -3886,12 +3920,26 @@ describe("ChatWindowManager", () => {
     });
 
     fireEvent.keyDown(window, { key: "b", metaKey: true });
-    fireEvent.keyDown(window, { key: "f", metaKey: true });
+    fireEvent.keyDown(window, { key: "F", metaKey: true, shiftKey: true });
     await waitFor(() =>
       expect(
         screen.getByRole("searchbox", { name: "Search local chats" })
       ).toHaveFocus()
     );
+  });
+
+  it("opens the active pane's find bar with Cmd+F and closes it with Escape", async () => {
+    useChatStore.getState().openSession("Find chat", "/test/project");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "f", code: "KeyF", metaKey: true });
+
+    const input = await screen.findByTestId("pane-find-input");
+    await waitFor(() => expect(input).toHaveFocus());
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(screen.queryByTestId("pane-find-input")).toBeNull();
+    expect(useChatStore.getState().panelOpen).toBe(true);
   });
 
   it("opens the sidebar from compact mode with Cmd+B and reveals hidden history with the history shortcut", async () => {

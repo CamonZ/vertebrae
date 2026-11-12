@@ -16,6 +16,7 @@ import {
   groupLocalChatSessionsByHierarchy,
   flattenLocalChatTicketGroups,
   type LocalChatTicketGroup,
+  type LocalChatRunRow,
   localChatSessionDisplayTitle,
   normalizeLocalChatSessionQuery,
   type LocalChatSessionGroup,
@@ -30,12 +31,16 @@ import { SessionGroupList } from "./SessionGroupList";
 import { SessionDeleteButton } from "./SessionDeleteButton";
 import { ConversationAssociations } from "./ConversationAssociations";
 import { ThinkingIndicator } from "./ThinkingIndicator";
+import { RunHistoryRow } from "./run/RunHistoryRow";
+import { useHistoryRuns } from "../../hooks/useHistoryRuns";
 
 export type LocalChatSessionActivity = "thinking" | "compacting" | "stopping";
 
 interface LocalChatMiniPanelProps {
   width: number;
   activeSessionId: string;
+  /** Run shown in the active pane, highlighted among run rows. */
+  activeRunId?: string | null;
   activeProviderThreadId?: string | null;
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
@@ -58,6 +63,10 @@ interface LocalChatMiniPanelProps {
   ) => void | Promise<void>;
   onStartProjectChat?: (group: LocalChatSessionGroup) => void | Promise<void>;
   onDelete: (sessionId: string) => void | Promise<void>;
+  /** Open a TaskRun row in the active pane; enables run rows. */
+  onSelectRun?: (run: LocalChatRunRow) => void;
+  /** Open a run scrolled to one of its step executions. */
+  onSelectRunStep?: (run: LocalChatRunRow, executionId: string) => void;
 }
 
 /**
@@ -68,6 +77,7 @@ interface LocalChatMiniPanelProps {
 export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   width,
   activeSessionId,
+  activeRunId,
   activeProviderThreadId,
   searchQuery,
   onSearchQueryChange,
@@ -85,6 +95,8 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   onSelectAgent,
   onStartProjectChat,
   onDelete,
+  onSelectRun,
+  onSelectRunStep,
 }: LocalChatMiniPanelProps) {
   const [projectsExpanded, setProjectsExpanded] = useState(true);
   const projectListId = useId();
@@ -133,12 +145,27 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     (session) => showCompleted || !completedSessionIds.has(session.id)
   );
 
+  const historyRuns = useHistoryRuns({
+    enabled: !!onSelectRun && selectedProject?.isCurrentProject === true,
+    showCompleted,
+    searchQuery,
+  });
+
   const hiddenCompletedCount =
-    matchingSessionItems.length - sessionItems.length;
+    matchingSessionItems.length -
+    sessionItems.length +
+    historyRuns.hiddenCompletedCount;
 
   const ticketGroups = useMemo(
-    () => groupLocalChatSessionsByHierarchy(sessionItems, tasks),
-    [sessionItems, tasks]
+    () =>
+      historyRuns.rows.length
+        ? groupLocalChatSessionsByHierarchy(
+            sessionItems,
+            new Map([...historyRuns.tasksById, ...tasks]),
+            historyRuns.rows
+          )
+        : groupLocalChatSessionsByHierarchy(sessionItems, tasks),
+    [sessionItems, tasks, historyRuns.rows, historyRuns.tasksById]
   );
 
   const groupedSessionIds = useMemo(() => {
@@ -232,6 +259,30 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
     setExpandedTickets((current) => new Set([...current, ...pathKeys]));
   }, [revealSession, ticketGroups, ticketKey]);
+
+  // Expand the ticket path to the run shown in the active pane.
+  useEffect(() => {
+    if (!activeRunId) return;
+
+    const pathToRun = (
+      groups: LocalChatTicketGroup[]
+    ): LocalChatTicketGroup[] => {
+      for (const group of groups) {
+        if (group.runs?.some((run) => run.id === activeRunId)) return [group];
+        const children = pathToRun(group.children ?? []);
+        if (children.length) return [group, ...children];
+      }
+      return [];
+    };
+    const keys = pathToRun(ticketGroups).map((group) => ticketKey(group.id));
+    if (!keys.length) return;
+
+    setExpandedTickets((current) =>
+      keys.every((key) => current.has(key))
+        ? current
+        : new Set([...current, ...keys])
+    );
+  }, [activeRunId, ticketGroups, ticketKey]);
 
   useEffect(() => {
     if (!revealSession) return;
@@ -544,7 +595,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
             </div>
           )}
 
-          {sessionItems.length === 0 ? (
+          {sessionItems.length === 0 && historyRuns.rows.length === 0 ? (
             <div
               className="hc-mini-history-empty"
               data-testid={
@@ -604,7 +655,8 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                     group,
                   ]);
                   const conversationCount = descendantGroups.reduce(
-                    (count, child) => count + child.sessions.length,
+                    (count, child) =>
+                      count + child.sessions.length + (child.runs?.length ?? 0),
                     0
                   );
                   const rowsId = `local-chat-ticket-${encodeURIComponent(selectedProjectId ?? "")}-${encodeURIComponent(group.id)}`;
@@ -670,6 +722,20 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                     </section>
                   );
                 }}
+                renderRunRow={
+                  onSelectRun
+                    ? (run) => (
+                        <RunHistoryRow
+                          row={run}
+                          isActive={run.id === activeRunId}
+                          onSelect={onSelectRun}
+                          onSelectStep={(row, executionId) =>
+                            onSelectRunStep?.(row, executionId)
+                          }
+                        />
+                      )
+                    : undefined
+                }
                 renderRow={(session, { isActive }) => {
                   const age = miniThreadAge(session.updatedAt);
                   const title = miniThreadTitle(session.title, session.label);

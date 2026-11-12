@@ -4,6 +4,8 @@ import {
 } from "../shared/EvidenceNavigationContext";
 import type { JumpTarget } from "./workspace/AllChangesView";
 import { commands } from "../../bindings";
+import { ThreadFindContext } from "../thread/find";
+import { usePaneFind } from "./usePaneFind";
 import { useSidebarResize } from "./workspace/useSidebarResize";
 import "./workspaceTabs.css";
 import {
@@ -70,6 +72,8 @@ const NO_COMMENTS: PendingComment[] = [];
 
 interface ChatWindowProps {
   registerChangesToggle?: (toggle: (() => void) | null) => void;
+  /** Registers this pane's find opener for ⌘F. */
+  registerFind?: (openFind: (() => boolean) | null) => void;
   renderObserver?: (part: "transcript" | "composer") => void;
   sessionId: string;
   /** Closes the whole chat panel (the header's ✕). Provided by the manager. */
@@ -101,6 +105,7 @@ interface ChatWindowProps {
  */
 export function ChatWindow({
   registerChangesToggle,
+  registerFind,
   sessionId,
   onClosePanel,
   onStartFresh,
@@ -424,6 +429,14 @@ export function ChatWindow({
     };
   }, [registerChangesToggle, worktreePath, autoFocusComposer, toggleChanges]);
 
+  const conversationRef = useRef<HTMLDivElement>(null);
+  const find = usePaneFind(conversationRef);
+  useEffect(() => {
+    if (!registerFind) return;
+    registerFind(find.openFind);
+    return () => registerFind(null);
+  }, [registerFind, find.openFind]);
+
   if (!chat.session) return null;
 
   const isEmpty = chat.session.messages.length === 0;
@@ -519,9 +532,11 @@ export function ChatWindow({
           />
         )}
         <div
+          ref={conversationRef}
           className="main-conversation flex min-h-0 min-w-0 flex-col"
           data-testid="main-conversation"
         >
+          {find.bar}
           {gate && gateStatus && (
             <GateChatStatusBar stepName={gate.step_name} status={gateStatus} />
           )}
@@ -543,45 +558,47 @@ export function ChatWindow({
               </button>
             </div>
           )}
-          <Profiler
-            id={`${sessionId}-transcript`}
-            onRender={() => renderObserver?.("transcript")}
-          >
-            <ChatMessages
-              sessionId={sessionId}
-              isVisible={true}
-              projectPath={chat.session.projectPath}
-              messages={chat.messages}
-              assistantLabel={chat.assistantLabel}
-              gate={chat.session.gate}
-              isEmpty={isEmpty}
-              isActive={chat.isActive || childControlAvailable}
-              isWaiting={chat.isWaiting}
-              activityLabel={chat.activityLabel}
-              compactionSummary={chat.compactionSummary}
-              streamingAssistant={chat.streamingAssistant}
-              isLoadingInitialHistory={
-                chat.session.providerReplay?.loading === "initial"
-              }
-              hasOlderMessages={chat.session.providerReplay?.hasMore === true}
-              isLoadingOlderMessages={
-                chat.session.providerReplay?.loading === "older"
-              }
-              replayError={chat.session.providerReplay?.error ?? null}
-              onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
-              onAddComment={handleAddComment}
-              footer={
-                gate && gateStatus && gateDraft ? (
-                  <GateSteering
-                    sessionId={sessionId}
-                    gate={gate}
-                    status={gateStatus}
-                    draft={gateDraft}
-                  />
-                ) : null
-              }
-            />
-          </Profiler>
+          <ThreadFindContext.Provider value={find.findQuery}>
+            <Profiler
+              id={`${sessionId}-transcript`}
+              onRender={() => renderObserver?.("transcript")}
+            >
+              <ChatMessages
+                sessionId={sessionId}
+                isVisible={true}
+                projectPath={chat.session.projectPath}
+                messages={chat.messages}
+                assistantLabel={chat.assistantLabel}
+                gate={chat.session.gate}
+                isEmpty={isEmpty}
+                isActive={chat.isActive || childControlAvailable}
+                isWaiting={chat.isWaiting}
+                activityLabel={chat.activityLabel}
+                compactionSummary={chat.compactionSummary}
+                streamingAssistant={chat.streamingAssistant}
+                isLoadingInitialHistory={
+                  chat.session.providerReplay?.loading === "initial"
+                }
+                hasOlderMessages={chat.session.providerReplay?.hasMore === true}
+                isLoadingOlderMessages={
+                  chat.session.providerReplay?.loading === "older"
+                }
+                replayError={chat.session.providerReplay?.error ?? null}
+                onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
+                onAddComment={handleAddComment}
+                footer={
+                  gate && gateStatus && gateDraft ? (
+                    <GateSteering
+                      sessionId={sessionId}
+                      gate={gate}
+                      status={gateStatus}
+                      draft={gateDraft}
+                    />
+                  ) : null
+                }
+              />
+            </Profiler>
+          </ThreadFindContext.Provider>
           <Profiler
             id={`${sessionId}-composer`}
             onRender={() => renderObserver?.("composer")}
