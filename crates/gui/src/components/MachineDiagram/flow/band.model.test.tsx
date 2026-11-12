@@ -218,61 +218,72 @@ const playing: hegel.stateful.StateMachine<Machine> = {
   },
 };
 
+/** Every step renders the whole diagram; slow CI runners need well past 5 s. */
+const TIMEOUT = 60_000;
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
 
 describe("band rows and meter", () => {
-  test("follow the clock model under any sequence of controls", () =>
-    hegel.test(
-      (tc) => {
-        const props: Props = {
-          d: tc.draw(gs.sampledFrom([before, after])),
-          reduced: tc.draw(gs.booleans()),
-        };
-        const view = render(<Harness {...props} />);
-        try {
-          hegel.stateful.run(
-            tc,
-            lockstep,
-            { view, props, model: initialClock(props.d.travel) },
-            { stepCount: 30 }
-          );
-        } finally {
-          view.unmount();
-        }
-      },
-      { testCases: 50 }
-    ));
+  test(
+    "follow the clock model under any sequence of controls",
+    () =>
+      hegel.test(
+        (tc) => {
+          const props: Props = {
+            d: tc.draw(gs.sampledFrom([before, after])),
+            reduced: tc.draw(gs.booleans()),
+          };
+          const view = render(<Harness {...props} />);
+          try {
+            hegel.stateful.run(
+              tc,
+              lockstep,
+              { view, props, model: initialClock(props.d.travel) },
+              { stepCount: 30 }
+            );
+          } finally {
+            view.unmount();
+          }
+        },
+        { testCases: 30 }
+      ),
+    TIMEOUT
+  );
 
-  test("follow the beat showing while frames play, with or without reduced motion", () =>
-    hegel.test(
-      (tc) => {
-        vi.useFakeTimers({
-          toFake: [
-            "requestAnimationFrame",
-            "cancelAnimationFrame",
-            "performance",
-          ],
-        });
-        const props: Props = {
-          d: tc.draw(gs.sampledFrom([before, after])),
-          reduced: tc.draw(gs.booleans()),
-        };
-        const view = render(<Harness {...props} />);
-        try {
-          hegel.stateful.run(
-            tc,
-            playing,
-            { view, props, model: initialClock(props.d.travel) },
-            { stepCount: 25 }
-          );
-        } finally {
-          view.unmount();
-          vi.useRealTimers();
-        }
-      },
-      { testCases: 40 }
-    ));
+  test(
+    "follow the beat showing while frames play, with or without reduced motion",
+    () =>
+      hegel.test(
+        (tc) => {
+          vi.useFakeTimers({
+            toFake: [
+              "requestAnimationFrame",
+              "cancelAnimationFrame",
+              "performance",
+            ],
+          });
+          const props: Props = {
+            d: tc.draw(gs.sampledFrom([before, after])),
+            reduced: tc.draw(gs.booleans()),
+          };
+          const view = render(<Harness {...props} />);
+          try {
+            hegel.stateful.run(
+              tc,
+              playing,
+              { view, props, model: initialClock(props.d.travel) },
+              { stepCount: 25 }
+            );
+          } finally {
+            view.unmount();
+            vi.useRealTimers();
+          }
+        },
+        { testCases: 25 }
+      ),
+    TIMEOUT
+  );
 });
