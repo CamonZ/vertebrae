@@ -34,6 +34,11 @@ export interface FlowPlayerProps {
    * in its inspector.
    */
   onActivatePart?: (partId: string) => void;
+  /**
+   * Hidden behind a drill-down: playback pauses so the beat is where it was
+   * left when the player is shown again.
+   */
+  suspended?: boolean;
 }
 
 const ARRANGEMENT_LABELS: Record<ArrangementName, string> = {
@@ -57,6 +62,7 @@ export function FlowPlayer({
   flow,
   reducedMotion,
   onActivatePart,
+  suspended = false,
 }: FlowPlayerProps) {
   const names = flow.arrangements.map((a) => a.arrangement);
   const [selected, setSelected] = useState<ArrangementName>(
@@ -71,6 +77,12 @@ export function FlowPlayer({
   const [followed, setFollowed] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
   const root = useRef<HTMLDivElement>(null);
+  const playingHidden = suspended && clock.playing;
+  useEffect(() => {
+    if (playingHidden) clock.pause();
+    // `clock` is a fresh object each render; only the hidden-and-playing edge matters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playingHidden]);
 
   const inspected = diagram.parts.find(
     (p) => p.id === (pinned ?? hovered) && p.presence !== "absent"

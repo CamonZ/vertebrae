@@ -7,23 +7,25 @@ aliases, nesting beyond eight levels and more than 64 inline sub-specs.
 Use an artifact to keep a large parent compact; its body and metadata follow
 the [saving contract](artifacts.md). See the [inline recipe](recipes/drill.md).
 
-The schema, compiler and per-level layout support references at this checkout.
-The [drill-down sibling](vtb://ticket/5bcac569-a55b-4f74-a0fc-679f152d978c)
-currently implements the following viewer behavior in its unmerged worktree:
+## Viewing
 
-- Parts with targets get a non-color-only affordance; click or keyboard
-  activation opens a child in the same viewport, with a breadcrumb and Back.
-- Parent players stay mounted, hidden and paused so returning preserves beat,
-  arrangement, pinned part and followed card. Esc goes up after the player
-  has no local selection/help to clear; breadcrumb ancestors can be selected.
+- A part with a target shows a stacked-frames badge outside its top-right
+  corner (a shape, not a colour), and its accessible name says it opens a
+  deeper diagram.
+- Clicking the part, or Enter/Space while it has focus, opens the child in
+  the same place, with a breadcrumb: Back returns one level and each ancestor
+  in the trail can be selected. Esc stays with the enclosing panel; it does
+  not go up a level.
+- The parent player stays mounted, hidden and paused, so returning finds its
+  beat, Before/After arrangement, pinned part and followed card as they were,
+  with focus back on the part that was opened.
 - Inline children use their compiled per-level layout; artifact children load
-  from the current project's artifact presentations and use their own layout.
-- Missing artifacts, non-flow metadata, loading failures and invalid bodies
-  show in-place errors; fetch failures offer Retry.
+  from the current project's artifact presentations and are laid out on their
+  own. A child may drill further and may have its own Before/After.
+- Missing artifacts, non-flow metadata, load failures and invalid bodies show
+  as errors in place of the child; load failures offer Retry.
 
-These navigation details are not shipped in this checkout; verify that
-implementation and tests before claiming availability. A child may have its
-own Before/After. Reconcile preservation during a morph with the
+Reconcile preservation during a morph with the
 [change-marking sibling](changes.md) when the two implementations meet.
 
 [Authoring index](../machine-diagrams.md).

@@ -45,7 +45,7 @@ kind names, ports, props, arguments and attachment fields. Read the
   Load when: summarising behavior across beats.
 - [Evidence](machine-diagrams/evidence.md): attachment choice and honest labels.
   Load when: supporting a claim with code, measurements or tests.
-- [Drill-down](machine-diagrams/drill.md): nested specs and viewer availability.
+- [Drill-down](machine-diagrams/drill.md): nested specs and how the viewer opens them.
   Load when: adding a deeper explanation behind a part.
 - [Artifacts](machine-diagrams/artifacts.md): saving, attaching and embedding.
   Load when: persisting an explanation for a ticket or PR.

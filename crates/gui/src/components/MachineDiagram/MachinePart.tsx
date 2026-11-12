@@ -70,6 +70,8 @@ export interface MachinePartProps {
   labels?: boolean;
   /** Draw the name · job title and "also" line. */
   title?: boolean;
+  /** Appended to an interactive part's accessible name (what activation does). */
+  activationHint?: string;
   /** Draw smear ghosts (still views turn this off). */
   smear?: boolean;
   /** Override the prefers-reduced-motion media query. */
@@ -101,6 +103,7 @@ export function MachinePart({
   labels,
   title = true,
   smear = true,
+  activationHint,
   reducedMotion,
   children,
 }: MachinePartProps) {
@@ -142,7 +145,9 @@ export function MachinePart({
         className="md-part"
         role={interactive ? "button" : "img"}
         aria-label={
-          interactive ? `${label} Now: ${frame.status.current.text}.` : label
+          interactive
+            ? `${label} Now: ${frame.status.current.text}.${activationHint ? ` ${activationHint}` : ""}`
+            : label
         }
         data-part={part.name}
         data-part-id={id}

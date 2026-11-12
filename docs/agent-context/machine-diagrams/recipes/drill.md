@@ -1,7 +1,7 @@
 # Add an inline deeper level
 
-The `drill` data shape is already supported; navigation is subject to the
-[viewer availability note](../drill.md). A child has a
+Activating a part with a `drill` opens its child in the same viewport (see
+[drill-down](../drill.md)). A child has a
 complete spec, a separate ID namespace and its own auto-layout. To reference
 a saved child instead, replace `drill.spec` with `drill.artifact` containing
 its real returned artifact UUID; never use an invented UUID in a delivered spec.
