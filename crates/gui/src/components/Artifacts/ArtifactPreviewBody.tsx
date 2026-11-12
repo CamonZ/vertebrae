@@ -1,5 +1,7 @@
 import { isStatechartMetadata } from "./statechart";
 import { StatechartPreview } from "./StatechartPreview";
+import { isFlowMetadata } from "./flowArtifact";
+import { FlowSpecView } from "../shared/FlowSpecView";
 import type { CSSProperties } from "react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -67,6 +69,10 @@ export function ArtifactPreviewBody({ artifact }: ArtifactPreviewBodyProps) {
 
   if (isStatechartMetadata(metadata)) {
     return <StatechartPreview body={artifact.body} />;
+  }
+
+  if (isFlowMetadata(metadata)) {
+    return <FlowSpecView key={artifact.id} source={artifact.body} />;
   }
 
   if (!metadata) {

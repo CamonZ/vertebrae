@@ -239,6 +239,18 @@ async saveStatechartArtifact(body: string, ticketId: string) : Promise<Result<Ar
 }
 },
 /**
+ * Promote a chat flow fence (JSON or YAML spec) to an artifact attached to
+ * its ticket.
+ */
+async saveFlowArtifact(body: string, ticketId: string) : Promise<Result<Artifact, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_flow_artifact", { body, ticketId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Read-only presentation projections for artifact entity links. Root artifact
  * reads have no attachment metadata, and Project.artifacts omits task links.
  */

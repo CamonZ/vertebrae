@@ -4,6 +4,8 @@ import { queryClient } from "../../query/queryClient";
 import { useArtifactPresentations } from "../../hooks/useArtifactPresentations";
 import { StatechartPreview } from "../Artifacts/StatechartPreview";
 import { isStatechartMetadata } from "../Artifacts/statechart";
+import { isFlowMetadata } from "../Artifacts/flowArtifact";
+import { FlowSpecView } from "./FlowSpecView";
 
 function ResolvedArtifactEmbed({
   id,
@@ -15,6 +17,7 @@ function ResolvedArtifactEmbed({
   const { artifacts, error, refetch } = useArtifactPresentations();
   const artifact = artifacts.find((item) => item.id === id);
   const showStatechart = artifact && isStatechartMetadata(artifact.metadata);
+  const showFlow = artifact && isFlowMetadata(artifact.metadata);
 
   return (
     <span>
@@ -28,6 +31,7 @@ function ResolvedArtifactEmbed({
         </span>
       )}
       {showStatechart && <StatechartPreview key={id} body={artifact.body} />}
+      {showFlow && <FlowSpecView key={id} source={artifact.body} />}
     </span>
   );
 }

@@ -98,7 +98,11 @@ describe("ToolChangeBlock with review comments", () => {
         <ToolChangeBlock delta={delta} toolName="Edit" toolId="t1" />
       </DiffReviewContext.Provider>
     );
-    expect(await screen.findByTestId("patch-diff")).toBeInTheDocument();
+    // The diff renderer is lazy; the first mount waits for its cold import,
+    // which can exceed findBy's 1 s default on slow CI runners.
+    expect(
+      await screen.findByTestId("patch-diff", {}, { timeout: 10_000 })
+    ).toBeInTheDocument();
     expect(annotations.seen[annotations.seen.length - 1]).toEqual([
       {
         side: "additions",
@@ -111,7 +115,7 @@ describe("ToolChangeBlock with review comments", () => {
   it("offers no comments for a block without a tool id", async () => {
     near.value = true;
     renderBlock(<ToolChangeBlock delta={delta} toolName="Edit" />);
-    await screen.findByTestId("patch-diff");
+    await screen.findByTestId("patch-diff", {}, { timeout: 10_000 });
     expect(annotations.seen[annotations.seen.length - 1]).toBeUndefined();
   });
 });
