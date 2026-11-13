@@ -1,8 +1,8 @@
 /** replication: story verbs compile protocol events on the shared clock. */
 import {
-  replicationMachine,
+  replicationSpec,
   type ReplicationExtra,
-} from "../../parts/replication";
+} from "../../parts/replicationSpec";
 import { dot } from "../../timeline";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
@@ -30,21 +30,21 @@ const initial = () => ({
   acked: [] as number[],
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const replicationPart: PartKindDef<
   Record<string, unknown>,
   ProtocolState
 > = {
   kind: "replication",
-  job: replicationMachine.part.job,
+  job: replicationSpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: replicationMachine.bb,
-  status: replicationMachine.status,
+  bb: replicationSpec.bb,
+  status: replicationSpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => replicationMachine.draw(t, p.state.extra),
   verbs: {
     replicate: {
       duration: 1.2,

@@ -1,34 +1,18 @@
 import { Ring } from "../fixtures";
-import type { LampStep } from "../geometry";
 import { type CardRole, type StateRole } from "../palette";
-import type { Point } from "../route";
-import {
-  dot,
-  note,
-  seal,
-  story,
-  type StatusNote,
-  type StoryDraft,
-} from "../timeline";
+import { dot, note, seal, story, type StoryDraft } from "../timeline";
 import { Cut, Halo, NodeLamp, Readout } from "./distributedFixtures";
 import { FadedText } from "./draw";
+import {
+  EL,
+  leaderElectionSpec,
+  type LeaderElectionExtra,
+} from "./leaderElectionSpec";
 import type { MachinePartDef, PartScenario } from "./types";
 
+export type { LeaderElectionExtra } from "./leaderElectionSpec";
+
 /** Gallery reference scenarios; fixtures are evaluated only from frame time. */
-export interface LeaderElectionExtra {
-  lamps: LampStep[][];
-  halo: [number, number][][];
-  rings: [number, number, number, StateRole][];
-  term: StatusNote[];
-  cut: number | null;
-}
-export const EL: Point[] = [
-  [320, 105],
-  [415, 174],
-  [379, 286],
-  [261, 286],
-  [225, 174],
-];
 const ELab: [number, number, "left" | "right" | "center"][] = [
   [282, 105, "right"],
   [447, 174, "left"],
@@ -148,16 +132,17 @@ function leaderElectionStory(index: number): PartScenario<LeaderElectionExtra> {
   note(S, 2.9, "heartbeats hold it", "dim");
   return done();
 }
+
 export const leaderElectionMachine: MachinePartDef<LeaderElectionExtra> = {
   part: {
     name: "leader election",
-    job: "picks one leader per term",
+    job: leaderElectionSpec.job,
     aka: "Raft \u00b7 Paxos \u00b7 bully \u00b7 lease leader",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [190, 70, 260, 260],
-  status: { x: 320, y: 352 },
+  bb: leaderElectionSpec.bb,
+  status: leaderElectionSpec.status,
   scenarios: [
     leaderElectionStory(0),
     leaderElectionStory(1),
@@ -198,3 +183,5 @@ export const leaderElectionMachine: MachinePartDef<LeaderElectionExtra> = {
     </>
   ),
 };
+
+export { EL } from "./leaderElectionSpec";

@@ -1,6 +1,6 @@
 /** shard ring: story verbs compile protocol events on the shared clock. */
-import { arcPoints, onCircle } from "../../parts/distributedFixtures";
-import { shardRingMachine, type ShardRingExtra } from "../../parts/shardRing";
+import { arcPoints, onCircle } from "../../parts/distributedGeometry";
+import { shardRingSpec, type ShardRingExtra } from "../../parts/shardRingSpec";
 import { dot } from "../../timeline";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
@@ -20,21 +20,21 @@ const initial = () => ({
   } as ShardRingExtra,
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const shardRingPart: PartKindDef<
   Record<string, unknown>,
   ProtocolState
 > = {
   kind: "shard ring",
-  job: shardRingMachine.part.job,
+  job: shardRingSpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: shardRingMachine.bb,
-  status: shardRingMachine.status,
+  bb: shardRingSpec.bb,
+  status: shardRingSpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => shardRingMachine.draw(t, p.state.extra),
   verbs: {
     route: {
       duration: 0.7,

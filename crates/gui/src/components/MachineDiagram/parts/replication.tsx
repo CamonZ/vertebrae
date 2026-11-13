@@ -1,5 +1,4 @@
 import { Burst, PartBox } from "../fixtures";
-import type { LampStep } from "../geometry";
 import { Rail } from "../Rail";
 import type { Point } from "../route";
 import {
@@ -9,20 +8,15 @@ import {
   note,
   seal,
   story,
-  type StatusNote,
   type StoryDraft,
 } from "../timeline";
 import { NodeLamp, Readout } from "./distributedFixtures";
+import { replicationSpec, type ReplicationExtra } from "./replicationSpec";
 import type { MachinePartDef, PartScenario } from "./types";
 
+export type { ReplicationExtra } from "./replicationSpec";
+
 /** Gallery reference scenarios; fixtures are evaluated only from frame time. */
-export interface ReplicationExtra {
-  fo: boolean;
-  down: number | null;
-  ver: StatusNote[][];
-  role: StatusNote[][];
-  lamps: LampStep[][];
-}
 const NAMES = [
   "replicated",
   "follower lags · stale read",
@@ -235,16 +229,17 @@ function replicationStory(index: number): PartScenario<ReplicationExtra> {
   note(S, 2.05, "2 of 2 followers at v8", "green");
   return done();
 }
+
 export const replicationMachine: MachinePartDef<ReplicationExtra> = {
   part: {
     name: "replication",
-    job: "copies writes to followers",
+    job: replicationSpec.job,
     aka: "leader / follower \u00b7 primary / replica",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [80, 95, 500, 210],
-  status: { x: 320, y: 340 },
+  bb: replicationSpec.bb,
+  status: replicationSpec.status,
   scenarios: [replicationStory(0), replicationStory(1), replicationStory(2)],
   draw: (t, S) => (
     <>

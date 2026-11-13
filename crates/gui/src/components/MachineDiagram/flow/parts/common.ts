@@ -1,6 +1,6 @@
 /** Shared geometry and helpers for the starter part kinds. */
-import { RAIL_Y } from "../../MachinePart";
 import type { BBox } from "../../ChangeMark";
+import { RAIL_Y } from "../../partGeometry";
 import { gateV, type GateSpec } from "../../timeline";
 import type { PortDef } from "../registry";
 

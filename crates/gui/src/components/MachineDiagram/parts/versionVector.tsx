@@ -1,20 +1,17 @@
 import { Hole, PartBox, Ring } from "../fixtures";
 import { Rail } from "../Rail";
 import { card, gateV, note, seal, story, type StoryDraft } from "../timeline";
-import {
-  Tiles,
-  tileSpec as TL,
-  type RingEvent,
-  type TileSpec,
-} from "./distributedFixtures";
+import { Tiles, tileSpec as TL } from "./distributedFixtures";
 import { FadedText } from "./draw";
 import type { MachinePartDef, PartScenario } from "./types";
+import {
+  versionVectorSpec,
+  type VersionVectorExtra,
+} from "./versionVectorSpec";
+
+export type { VersionVectorExtra } from "./versionVectorSpec";
 
 /** Gallery reference scenarios; fixtures are evaluated only from frame time. */
-export interface VersionVectorExtra {
-  rings: RingEvent[];
-  tl: TileSpec[];
-}
 const NAMES = ["ordered · replace", "concurrent · siblings", "merged"] as const;
 const STILLS = [2.4, 2.4, 3.1];
 function versionVectorStory(index: number): PartScenario<VersionVectorExtra> {
@@ -191,16 +188,17 @@ function versionVectorStory(index: number): PartScenario<VersionVectorExtra> {
   note(S, 2.1, "newer · replace", "green");
   return done();
 }
+
 export const versionVectorMachine: MachinePartDef<VersionVectorExtra> = {
   part: {
     name: "version vector",
-    job: "spots concurrent writes",
+    job: versionVectorSpec.job,
     aka: "vector clock \u00b7 causality \u00b7 siblings",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [180, 110, 410, 180],
-  status: { x: 320, y: 322 },
+  bb: versionVectorSpec.bb,
+  status: versionVectorSpec.status,
   scenarios: [
     versionVectorStory(0),
     versionVectorStory(1),

@@ -5,7 +5,7 @@
  * gallery "answered" story: the state seats in 0.6 s, a lamp lights every
  * 0.35 s, the schema check flashes for 0.6 s.
  */
-import { RAIL_Y as Y } from "../../MachinePart";
+import { RAIL_Y as Y } from "../../partGeometry";
 import { HELD, type PartKindDef } from "../registry";
 import { leg, sideGates } from "./common";
 

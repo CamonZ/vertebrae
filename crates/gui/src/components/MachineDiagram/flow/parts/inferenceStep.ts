@@ -5,7 +5,7 @@
  * gallery "done" and "tool calls" stories: the prompt seats in 0.6 s, each
  * tool call is out in 0.35 s and back in 0.3 s, the output leaves in 0.6 s.
  */
-import { RAIL_Y as Y } from "../../MachinePart";
+import { RAIL_Y as Y } from "../../partGeometry";
 import { dot } from "../../timeline";
 import { HELD, type PartKindDef } from "../registry";
 import { sideGates } from "./common";

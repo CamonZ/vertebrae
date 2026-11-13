@@ -83,6 +83,23 @@ A component ticket that adds a catalogue part should:
    against these frames, and also checks palette-only colours, text size,
    the labels-off silhouette, and that the registry matches the drawing.
 
+The flow registry contains validation and compilation specs only. Keep shared
+geometry and protocol state in plain `.ts` modules (for example,
+`partGeometry.ts`, `parts/distributedGeometry.ts` and `parts/*Spec.ts`), so the
+CLI validator never imports a drawing. `flow/drawings.ts` joins part kinds to
+GUI drawings through `FLOW_DRAWINGS`; `flow/attachmentRenderers.tsx` joins
+evidence kinds to renderers through `attachmentRenderers`. Custom kinds register
+their schemas with `FlowRegistryContext` and provide their GUI tables separately
+with `FlowDrawingsContext` or `AttachmentRenderersContext`, including the built-in
+table when extending it. Missing drawings use the frame fallback; missing
+evidence renderers show a diagnostic.
+
+After changing the spec language, run `npm run build:flow-validator` in
+`crates/gui` and include the regenerated `crates/cli/assets/flow-validator.js`.
+The bundle freshness test checks the complete dependency graph for presentation
+imports. Drawing-only changes do not require rebuilding this committed asset;
+Cargo continues to build the CLI without npm.
+
 ## Frontend Stack
 
 | Technology | Version | Purpose |

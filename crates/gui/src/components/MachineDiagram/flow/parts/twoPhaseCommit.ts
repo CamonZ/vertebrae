@@ -1,5 +1,5 @@
 /** two-phase commit: story verbs compile protocol events on the shared clock. */
-import { twoPhaseCommitMachine } from "../../parts/twoPhaseCommit";
+import { twoPhaseCommitSpec } from "../../parts/twoPhaseCommitSpec";
 import { dot } from "../../timeline";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
@@ -29,21 +29,21 @@ const initial = () => ({
   started: 0,
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const twoPhaseCommitPart: PartKindDef<
   Record<string, unknown>,
   ProtocolState
 > = {
   kind: "two-phase commit",
-  job: twoPhaseCommitMachine.part.job,
+  job: twoPhaseCommitSpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: twoPhaseCommitMachine.bb,
-  status: twoPhaseCommitMachine.status,
+  bb: twoPhaseCommitSpec.bb,
+  status: twoPhaseCommitSpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => twoPhaseCommitMachine.draw(t, p.state.extra),
   verbs: {
     stage: {
       duration: 1.1,

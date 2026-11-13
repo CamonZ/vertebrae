@@ -6,7 +6,7 @@
  * in 0.55 s, each rule is tried 0.3 s after the last, the arm swings 1.15 s
  * in and the run leaves 0.35 s later.
  */
-import { RAIL_Y as Y } from "../../MachinePart";
+import { RAIL_Y as Y } from "../../partGeometry";
 import { gateV } from "../../timeline";
 import type { PartKindDef, VerbContext } from "../registry";
 import { leg, sideGates } from "./common";

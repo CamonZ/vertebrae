@@ -1,24 +1,30 @@
-import { replicationPart } from "./parts/replication";
-import { quorumPart } from "./parts/quorum";
-import { leaderElectionPart } from "./parts/leaderElection";
-import { failureDetectorPart } from "./parts/failureDetector";
-import { gossipPart } from "./parts/gossip";
-import { shardRingPart } from "./parts/shardRing";
-import { versionVectorPart } from "./parts/versionVector";
-import { fencingTokenPart } from "./parts/fencingToken";
-import { twoPhaseCommitPart } from "./parts/twoPhaseCommit";
-import { serviceRegistryPart } from "./parts/serviceRegistry";
+import { failureDetectorMachine } from "../parts/failureDetector";
+import { fencingTokenMachine } from "../parts/fencingToken";
+import { gossipMachine } from "../parts/gossip";
+import { leaderElectionMachine } from "../parts/leaderElection";
+import { quorumMachine } from "../parts/quorum";
+import { replicationMachine } from "../parts/replication";
+import { serviceRegistryMachine } from "../parts/serviceRegistry";
+import { shardRingMachine } from "../parts/shardRing";
+import { twoPhaseCommitMachine } from "../parts/twoPhaseCommit";
+import { versionVectorMachine } from "../parts/versionVector";
 /** Flow-to-catalogue adapters. No gallery scenario or status prose is consulted. */
-import type { ReactNode } from "react";
-import { MACHINE_PARTS } from "../parts";
+import { createContext, useContext, type ReactNode } from "react";
 import type { LampStep } from "../geometry";
 import type { CardRole, StateRole } from "../palette";
+import { MACHINE_PARTS } from "../parts";
 import { TL, type TileSpec } from "../parts/eventTiles";
 import type { StatusNote } from "../timeline";
 import { upcastPlan } from "./parts/upcaster";
 import type { CompiledPart, CompiledPartStep } from "./registry";
 
-type Drawing = (t: number, compiled: CompiledPart) => ReactNode;
+export type Drawing = (t: number, compiled: CompiledPart) => ReactNode;
+
+/** Protocol specs carry the gallery's mechanism state under `extra`. */
+function protocolDrawing<E>(draw: (t: number, extra: E) => ReactNode): Drawing {
+  return (t, p) => draw(t, (p.state as { extra: E }).extra);
+}
+
 const latest = (steps: readonly CompiledPartStep[], t: number) =>
   steps.filter((s) => s.t <= t).at(-1);
 const strings = (value: unknown): readonly string[] | undefined =>
@@ -46,56 +52,16 @@ const resultRole = (s: CompiledPartStep | undefined): CardRole =>
   s?.verb === "fail" || s?.args.outcome === "error" ? "red" : "green";
 
 export const FLOW_DRAWINGS = {
-  replication: (t, p) =>
-    replicationPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof replicationPart.draw>>[1]
-    ),
-  quorum: (t, p) =>
-    quorumPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof quorumPart.draw>>[1]
-    ),
-  "leader election": (t, p) =>
-    leaderElectionPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof leaderElectionPart.draw>>[1]
-    ),
-  "failure detector": (t, p) =>
-    failureDetectorPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof failureDetectorPart.draw>>[1]
-    ),
-  gossip: (t, p) =>
-    gossipPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof gossipPart.draw>>[1]
-    ),
-  "shard ring": (t, p) =>
-    shardRingPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof shardRingPart.draw>>[1]
-    ),
-  "version vector": (t, p) =>
-    versionVectorPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof versionVectorPart.draw>>[1]
-    ),
-  "fencing token": (t, p) =>
-    fencingTokenPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof fencingTokenPart.draw>>[1]
-    ),
-  "two-phase commit": (t, p) =>
-    twoPhaseCommitPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof twoPhaseCommitPart.draw>>[1]
-    ),
-  "service registry": (t, p) =>
-    serviceRegistryPart.draw!(
-      t,
-      p as Parameters<NonNullable<typeof serviceRegistryPart.draw>>[1]
-    ),
+  replication: protocolDrawing(replicationMachine.draw),
+  quorum: protocolDrawing(quorumMachine.draw),
+  "leader election": protocolDrawing(leaderElectionMachine.draw),
+  "failure detector": protocolDrawing(failureDetectorMachine.draw),
+  gossip: protocolDrawing(gossipMachine.draw),
+  "shard ring": protocolDrawing(shardRingMachine.draw),
+  "version vector": protocolDrawing(versionVectorMachine.draw),
+  "fencing token": protocolDrawing(fencingTokenMachine.draw),
+  "two-phase commit": protocolDrawing(twoPhaseCommitMachine.draw),
+  "service registry": protocolDrawing(serviceRegistryMachine.draw),
 
   source: (t) => MACHINE_PARTS.source.draw(t, null),
   transform: (t, p) => {
@@ -1253,3 +1219,11 @@ export const FLOW_DRAWINGS = {
     });
   },
 } satisfies Record<keyof typeof MACHINE_PARTS, Drawing>;
+
+/** GUI extensions provide drawings independently of validation schemas. */
+export const FlowDrawingsContext =
+  createContext<Readonly<Record<string, Drawing>>>(FLOW_DRAWINGS);
+
+export function useFlowDrawings(): Readonly<Record<string, Drawing>> {
+  return useContext(FlowDrawingsContext);
+}

@@ -5,7 +5,7 @@
  * Durations from the gallery stories: the run seats in 0.6 s, the stop bar
  * drops 0.3 s later, finish fills the terminal 0.9 s after the run arrives.
  */
-import { RAIL_Y as Y } from "../../MachinePart";
+import { RAIL_Y as Y } from "../../partGeometry";
 import { card as makeCard } from "../../timeline";
 import { HELD, type PartKindDef } from "../registry";
 import { leg, sideGates } from "./common";

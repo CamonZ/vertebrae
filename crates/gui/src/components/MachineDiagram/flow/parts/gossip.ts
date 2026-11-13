@@ -1,5 +1,5 @@
 /** gossip: story verbs compile protocol events on the shared clock. */
-import { GN, gossipMachine, type GossipExtra } from "../../parts/gossip";
+import { GN, gossipSpec, type GossipExtra } from "../../parts/gossipSpec";
 import { dot } from "../../timeline";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
@@ -14,18 +14,18 @@ const initial = () => ({
   known: [0],
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const gossipPart: PartKindDef<Record<string, unknown>, ProtocolState> = {
   kind: "gossip",
-  job: gossipMachine.part.job,
+  job: gossipSpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: gossipMachine.bb,
-  status: gossipMachine.status,
+  bb: gossipSpec.bb,
+  status: gossipSpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => gossipMachine.draw(t, p.state.extra),
   verbs: {
     send: {
       duration: 0.4,

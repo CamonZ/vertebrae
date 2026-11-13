@@ -1,9 +1,9 @@
 /** version vector: story verbs compile protocol events on the shared clock. */
-import { tileSpec } from "../../parts/distributedFixtures";
+import { tileSpec } from "../../parts/distributedGeometry";
 import {
-  versionVectorMachine,
+  versionVectorSpec,
   type VersionVectorExtra,
-} from "../../parts/versionVector";
+} from "../../parts/versionVectorSpec";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
 import { incoming, port } from "./distributedCommon";
@@ -18,21 +18,21 @@ const initial = () => ({
   pending: [1, 1] as [number, number],
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const versionVectorPart: PartKindDef<
   Record<string, unknown>,
   ProtocolState
 > = {
   kind: "version vector",
-  job: versionVectorMachine.part.job,
+  job: versionVectorSpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: versionVectorMachine.bb,
-  status: versionVectorMachine.status,
+  bb: versionVectorSpec.bb,
+  status: versionVectorSpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => versionVectorMachine.draw(t, p.state.extra),
   verbs: {
     record: {
       duration: 0.6,

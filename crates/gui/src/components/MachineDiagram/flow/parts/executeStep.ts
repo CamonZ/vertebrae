@@ -7,8 +7,8 @@
  * the output leaves 0.2 s after that; a host call is out in 0.35 s and back
  * in 0.35 s.
  */
-import { RAIL_Y as Y } from "../../MachinePart";
-import { card as makeCard, dot } from "../../timeline";
+import { RAIL_Y as Y } from "../../partGeometry";
+import { dot, card as makeCard } from "../../timeline";
 import type { PartKindDef, VerbContext } from "../registry";
 import { leg, sideGates } from "./common";
 

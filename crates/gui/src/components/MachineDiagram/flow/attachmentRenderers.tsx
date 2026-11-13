@@ -1,9 +1,19 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
-import { queryClient } from "../../../query/queryClient";
+import type { ReactNode } from "react";
+import { createContext, useContext, useState } from "react";
 import { useArtifactPresentations } from "../../../hooks/useArtifactPresentations";
-import type { AttachmentKindDef } from "./registry";
+import { queryClient } from "../../../query/queryClient";
+import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
 import type { AttachmentSpec } from "./spec";
+
+export interface AttachmentRenderContext {
+  openSource?: (location: SourceLocation) => void;
+}
+
+export type AttachmentRenderer = (
+  attachment: AttachmentSpec,
+  context: AttachmentRenderContext
+) => ReactNode;
 
 const text = (value: unknown) =>
   typeof value === "string" ? value : JSON.stringify(value, null, 2);
@@ -25,10 +35,7 @@ const pair = (left: string, right: string, a: unknown, b: unknown) => (
   </div>
 );
 
-const source: NonNullable<AttachmentKindDef["render"]> = (
-  a,
-  { openSource }
-) => {
+const source: AttachmentRenderer = (a, { openSource }) => {
   const patchPath =
     typeof a.patch === "string"
       ? /^\+\+\+ (?:b\/)?([^\r\n]+)$/m.exec(a.patch)?.[1]
@@ -172,11 +179,8 @@ function Crop({ attachment }: { attachment: AttachmentSpec }) {
   );
 }
 
-/** Per-kind renderers are registered with the same definitions as validation. */
-export const attachmentRenderers: Record<
-  string,
-  NonNullable<AttachmentKindDef["render"]>
-> = {
+/** GUI renderers join the pure attachment specs by kind. */
+export const attachmentRenderers: Record<string, AttachmentRenderer> = {
   note: (a) => <p className="whitespace-pre-wrap">{text(a.text)}</p>,
   ref: source,
   diff: source,
@@ -223,3 +227,15 @@ export const attachmentRenderers: Record<
     </>
   ),
 };
+
+/** GUI extensions provide renderers independently of validation schemas. */
+export const AttachmentRenderersContext =
+  createContext<Readonly<Record<string, AttachmentRenderer>>>(
+    attachmentRenderers
+  );
+
+export function useAttachmentRenderers(): Readonly<
+  Record<string, AttachmentRenderer>
+> {
+  return useContext(AttachmentRenderersContext);
+}

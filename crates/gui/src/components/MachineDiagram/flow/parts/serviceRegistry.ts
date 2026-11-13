@@ -1,9 +1,9 @@
 /** service registry: story verbs compile protocol events on the shared clock. */
-import { tileSpec } from "../../parts/distributedFixtures";
+import { tileSpec } from "../../parts/distributedGeometry";
 import {
-  serviceRegistryMachine,
+  serviceRegistrySpec,
   type ServiceRegistryExtra,
-} from "../../parts/serviceRegistry";
+} from "../../parts/serviceRegistrySpec";
 import { dot } from "../../timeline";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
@@ -24,21 +24,21 @@ const initial = () => ({
   alive: true,
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const serviceRegistryPart: PartKindDef<
   Record<string, unknown>,
   ProtocolState
 > = {
   kind: "service registry",
-  job: serviceRegistryMachine.part.job,
+  job: serviceRegistrySpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: serviceRegistryMachine.bb,
-  status: serviceRegistryMachine.status,
+  bb: serviceRegistrySpec.bb,
+  status: serviceRegistrySpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => serviceRegistryMachine.draw(t, p.state.extra),
   verbs: {
     register: {
       duration: 0.7,
