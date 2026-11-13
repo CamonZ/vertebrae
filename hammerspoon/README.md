@@ -22,6 +22,12 @@ All functions return JSON strings and can be invoked via `hs -c`:
 # List windows for a specific application
 hs -c 'vtb.list_windows("Vertebrae")'
 
+# List every running instance (all name aliases) with pid, bundle path and windows
+hs -c 'vtb.list_instances("gui")'
+
+# Target one instance by pid when several share a name (e.g. per-worktree dev builds)
+hs -c 'vtb.list_windows("gui", 12345)'
+
 # Find windows by title substring within an app (case-insensitive)
 hs -c 'vtb.find_window("Settings", "Vertebrae")'
 
@@ -114,6 +120,10 @@ hs -c 'vtb.read_ui_elements_for_app("Vertebrae", 3)'
 All functions return JSON strings. Success responses include a `success: true` field. Error responses include an `error` field with a description.
 
 ## Design Notes
+
+The Vertebrae app is named `gui` in `tauri dev` builds and `Vertebrae` when installed; app lookups treat the two names as aliases, preferring the exact name. App-targeted functions and HTTP routes (`/window/list`, `/window/find`, `/screenshot/app`, `/ui-elements/app`) accept an optional `pid` that selects one instance when several are running, and `POST /app/instances` lists them. The MCP server maps a git worktree to that pid by each process's working directory; see `.claude/skills/gui-dev/SKILL.md`.
+
+The MCP server's pure logic has unit tests: `hammerspoon/mcp/.venv/bin/python -m unittest hammerspoon/mcp/test_server.py`.
 
 Window enumeration uses `hs.application.runningApplications()` with per-app window queries instead of `hs.window.allWindows()`. The latter can timeout when some applications are slow to respond to accessibility queries. For this reason, `list_windows` and `find_window` require an `app_name` parameter.
 
