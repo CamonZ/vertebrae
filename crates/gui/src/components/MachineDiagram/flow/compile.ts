@@ -1,6 +1,6 @@
 /**
  * The flow compiler: a validated spec → one diagram-level timeline per
- * arrangement (Before/After, or `current`). All parts share one clock: each
+ * arrangement (named arrangements, Before/After, or `current`). All parts share one clock: each
  * part gets its own `Timeline` (part space, evaluated by MachinePart with
  * `stateAt`), and cards travelling between parts ride the diagram's rail
  * layer, handed from part to part with a stable id. Beats carry
@@ -41,7 +41,7 @@ import {
   regionLabels,
   union,
 } from "./extent";
-import { withDefaults } from "./fields";
+import { own, withDefaults } from "./fields";
 import {
   HELD,
   TOKEN_SHAPES,
@@ -53,10 +53,15 @@ import {
   type StageDef,
   type StepCard,
 } from "./registry";
+import {
+  Arrangements,
+  planOf,
+  type PartReading,
+  type Presence,
+} from "./arrangements";
 import type {
   ArrangementName,
   AttachmentSpec,
-  Caption,
   CardDecl,
   FlowSpec,
   PartSpec,
@@ -91,7 +96,8 @@ export function railTravel(length: number): number {
   return 0.45 + 0.3 * Math.min(1, length / 900);
 }
 
-export type Presence = "live" | "absent" | "removed";
+export type { Presence } from "./arrangements";
+export { stepRuns } from "./arrangements";
 
 export interface DiagramPort {
   readonly name: string;
@@ -119,14 +125,14 @@ export interface DiagramPart {
   readonly positioned: "given" | "layout";
   readonly bb: BBox;
   readonly status: AnyPartKind["status"];
-  /** Mark drawn in this arrangement (Before draws everything unchanged). */
+  /** Mark drawn in this arrangement (the baseline draws everything unchanged). */
   readonly change: ChangeMark;
   readonly changeNote?: string;
-  /** Marked ports by name (none in Before). */
+  /** Marked ports by name (none in the baseline). */
   readonly portChanges: Readonly<
     Record<string, Exclude<ChangeMark, "unchanged">>
   >;
-  /** Marked stages (none in Before). */
+  /** Marked stages (none in the baseline). */
   readonly stageMarks: readonly DiagramStageMark[];
   readonly presence: Presence;
   readonly state: unknown;
@@ -174,7 +180,7 @@ export interface CompiledCard {
   readonly attachments: readonly AttachmentSpec[];
 }
 
-/** A marked story step, listed on its beat in the After arrangement. */
+/** A marked story step, listed on its beat outside the baseline. */
 export interface BeatChange {
   readonly part: string;
   readonly verb: string;
@@ -185,7 +191,7 @@ export interface BeatChange {
 
 export interface CompiledBeat extends Beat {
   readonly attachments: readonly AttachmentSpec[];
-  /** Marked steps of the beat (and of uncaptioned beats it continues); After only. */
+  /** Marked steps of the beat (and of uncaptioned beats it continues); none in the baseline. */
   readonly changes: readonly BeatChange[];
 }
 
@@ -222,8 +228,15 @@ export interface DiagramTimeline {
 export interface CompiledFlow {
   readonly version: number;
   readonly title?: string;
-  /** `[before, after]` for a spec with change marks, otherwise `[current]`. */
+  /**
+   * One per arrangement in spec order: the named arrangements, `[before,
+   * after]` for a spec with change marks, otherwise `[current]`.
+   */
   readonly arrangements: readonly DiagramTimeline[];
+  /** The arrangement the others are marked against. */
+  readonly baseline: ArrangementName;
+  /** What the player calls each arrangement, by name. */
+  readonly labels: Readonly<Record<ArrangementName, string>>;
   readonly cards: Readonly<Record<string, CompiledCard>>;
   readonly attachments: readonly AttachmentSpec[];
 }
@@ -264,7 +277,7 @@ export interface LevelLayout {
 /**
  * Fills in positions for parts without one. Called once per diagram level;
  * `path` names the parts drilled into to reach it (`[]` at the top). The
- * same result places every arrangement, so Before and After share it.
+ * same result places every arrangement, so they all share it.
  */
 export type LayoutFn = (
   parts: readonly LayoutPart[],
@@ -316,35 +329,9 @@ export function compileFlowOrThrow(
   return r.flow;
 }
 
-const marked = (m: string | undefined) => m !== undefined && m !== "unchanged";
-const anyMarked = (r: Readonly<Record<string, string>> | undefined) =>
-  Object.values(r ?? {}).some(marked);
-
+/** The arrangements a (validated) spec compiles to, in order. */
 export function arrangementsOf(spec: FlowSpec): ArrangementName[] {
-  const changed =
-    spec.parts.some(
-      (p) =>
-        marked(p.change) ||
-        p.before ||
-        p.after ||
-        anyMarked(p.portChanges) ||
-        anyMarked(p.stageChanges)
-    ) ||
-    (spec.rails ?? []).some((r) => marked(r.change)) ||
-    (spec.story ?? []).some((b) =>
-      (b.steps ?? []).some((s) => marked(s.change))
-    );
-  return changed ? ["before", "after"] : ["current"];
-}
-
-/** Whether a step marked `change` runs in arrangement `a` (+ only After, − only Before). */
-export function stepRuns(
-  change: string | undefined,
-  a: ArrangementName
-): boolean {
-  if (change === "added") return a !== "before";
-  if (change === "removed") return a === "before";
-  return true;
+  return [...planOf(spec).names];
 }
 
 function build(
@@ -416,13 +403,29 @@ function build(
       },
     ])
   );
-  const arranged = arrangementsOf(spec).map((a) =>
-    arrange(spec, a, defs, positions, routes, scaleOf, drills, errors, root)
+  const plan = new Arrangements(spec, (p, o) =>
+    resolvedProps(defs.get(p.id)!, p.props, o?.props)
+  );
+  const arranged = plan.plan.names.map((a) =>
+    arrange(
+      spec,
+      plan,
+      a,
+      defs,
+      positions,
+      routes,
+      scaleOf,
+      drills,
+      errors,
+      root
+    )
   );
   return {
     version: spec.version,
     ...(spec.title ? { title: spec.title } : {}),
     arrangements: withRegions(arranged, spec),
+    baseline: plan.plan.baseline,
+    labels: plan.plan.labels,
     cards,
     attachments: spec.attachments ?? [],
   };
@@ -430,6 +433,7 @@ function build(
 
 interface PartRun {
   readonly spec: PartSpec;
+  readonly reading: PartReading;
   readonly def: AnyPartKind;
   readonly props: Record<string, unknown>;
   readonly state: unknown;
@@ -450,31 +454,9 @@ interface CardRun {
   consumed: boolean;
 }
 
-/** The marked entries of a name → mark record. */
-function only(
-  r: Readonly<Record<string, ChangeMark>> | undefined
-): Record<string, ChangeMark> {
-  return Object.fromEntries(
-    Object.entries(r ?? {}).filter(([, m]) => m !== "unchanged")
-  );
-}
-
-function presenceOf(change: string | undefined, a: ArrangementName): Presence {
-  if (a === "before" && change === "added") return "absent";
-  if (a === "after" && change === "removed") return "removed";
-  return "live";
-}
-
-function captionFor(
-  c: Caption | undefined,
-  a: ArrangementName
-): string | undefined {
-  if (c === undefined || typeof c === "string") return c;
-  return a === "current" ? (c.after ?? c.before) : c[a];
-}
-
 function arrange(
   spec: FlowSpec,
+  plan: Arrangements,
   a: ArrangementName,
   defs: Map<string, AnyPartKind>,
   positions: Map<string, Position>,
@@ -495,15 +477,15 @@ function arrange(
   const runs = new Map<string, PartRun>();
   for (const p of spec.parts) {
     const def = defs.get(p.id)!;
-    const override =
-      a === "before" ? p.before : a === "after" ? p.after : undefined;
-    const props = resolvedProps(def, p.props, override?.props);
+    const reading = plan.part(p, a);
+    const props = resolvedProps(def, p.props, reading.override?.props);
     runs.set(p.id, {
       spec: p,
+      reading,
       def,
       props,
       state: def.init?.(props) ?? {},
-      presence: presenceOf(p.change, a),
+      presence: reading.presence,
       draft: story(0),
       markers: [],
       steps: [],
@@ -541,10 +523,10 @@ function arrange(
         .get(from.part)!
         .def.ports[from.port].tokens.filter((k) => accepts.includes(k))
     );
-    const own = presenceOf(r.change, a);
-    const ends = [runs.get(from.part)!.presence, runs.get(to.part)!.presence];
-    const presence: Presence =
-      own !== "live" ? own : (ends.find((e) => e !== "live") ?? "live");
+    const { presence, change } = plan.rail(r, a, [
+      runs.get(from.part)!.presence,
+      runs.get(to.part)!.presence,
+    ]);
     const routed = routes[r.id];
     rails.set(r.id, {
       id: r.id,
@@ -561,7 +543,7 @@ function arrange(
       ...(r.label ? { label: r.label } : {}),
       ...(routed?.labelAt ? { labelAt: routed.labelAt } : {}),
       conditional: r.conditional ?? false,
-      change: a === "before" ? "unchanged" : (r.change ?? "unchanged"),
+      change,
       presence,
       attachments: r.attachments ?? [],
     });
@@ -639,29 +621,27 @@ function arrange(
   let clock = STORY_LEAD;
   (spec.story ?? []).forEach((beat, b) => {
     const bp = `story[${b}]`;
-    const caption = captionFor(beat.caption, a);
+    const caption = plan.caption(beat.caption, a);
     const beatStart = clock;
     let groupStart = clock;
     let groupEnd = clock;
     let ran = 0;
-    const changes: BeatChange[] =
-      a === "before"
+    const changes: BeatChange[] = (beat.steps ?? []).flatMap((s) => {
+      const change = plan.stepMark(s, a);
+      return change === "unchanged"
         ? []
-        : (beat.steps ?? []).flatMap((s) =>
-            s.change && s.change !== "unchanged"
-              ? [
-                  {
-                    part: s.part,
-                    verb: s.verb,
-                    change: s.change,
-                    label: `${runs.get(s.part)!.spec.label ?? runs.get(s.part)!.def.kind} · ${s.verb}`,
-                  },
-                ]
-              : []
-          );
+        : [
+            {
+              part: s.part,
+              verb: s.verb,
+              change,
+              label: `${runs.get(s.part)!.spec.label ?? runs.get(s.part)!.def.kind} · ${s.verb}`,
+            },
+          ];
+    });
     (beat.steps ?? []).forEach((step: StepSpec, k) => {
       const sp = `${bp}.steps[${k}]`;
-      if (!stepRuns(step.change, a)) return;
+      if (!plan.runs(step, a)) return;
       const run = runs.get(step.part)!;
       const rail = step.via ? rails.get(step.via)! : undefined;
       if (run.presence !== "live" || (rail && rail.presence !== "live")) return;
@@ -795,6 +775,7 @@ function arrange(
         t: beatStart,
         caption,
         ...(beat.id ? { id: beat.id } : {}),
+        story: b,
         attachments: beat.attachments ?? [],
         changes,
       });
@@ -837,18 +818,17 @@ function arrange(
     d.cards = d.cards.map((c) => (c.dies >= HELD ? { ...c, dies: period } : c));
     return seal(d);
   };
-  const plainBeats: Beat[] = beats.map(({ t, caption, id }) => ({
+  const plainBeats: Beat[] = beats.map(({ t, caption, id, story }) => ({
     t,
     caption,
     ...(id ? { id } : {}),
+    story,
   }));
 
   const parts: DiagramPart[] = spec.parts.map((p) => {
     const run = runs.get(p.id)!;
     const s = scaleOf(p);
-    const override =
-      a === "before" ? p.before : a === "after" ? p.after : undefined;
-    const changeNote = override?.changeNote ?? p.changeNote;
+    const { change, changeNote, portChanges, stageChanges } = run.reading;
     const tl = finishDraft(run.draft);
     const drill = drills.get(p.id);
     return {
@@ -861,19 +841,16 @@ function arrange(
       positioned: p.position ? "given" : "layout",
       bb: run.def.bb,
       status: run.def.status,
-      change: a === "before" ? "unchanged" : (p.change ?? "unchanged"),
-      ...(changeNote && a !== "before" ? { changeNote } : {}),
-      portChanges:
-        a === "before"
-          ? {}
-          : (only(p.portChanges) as DiagramPart["portChanges"]),
+      change,
+      ...(changeNote ? { changeNote } : {}),
+      portChanges: portChanges as DiagramPart["portChanges"],
       stageMarks:
-        a === "before" || !p.stageChanges || !run.def.stages
+        Object.keys(stageChanges).length === 0 || !run.def.stages
           ? []
           : run.def.stages(run.props).flatMap((st: StageDef) => {
-              const change = p.stageChanges![st.name];
-              return change && change !== "unchanged"
-                ? [{ ...st, change }]
+              const mark = own(stageChanges, st.name);
+              return mark && mark !== "unchanged"
+                ? [{ ...st, change: mark }]
                 : [];
             }),
       presence: run.presence,
@@ -958,7 +935,7 @@ function withRegions(
       height: box.y1 - box.y0,
     };
   });
-  // One canvas for every arrangement, so Before and After line up.
+  // One canvas for every arrangement, so they all line up.
   const all = union([
     ...arranged.flatMap((d) => [
       { x0: 0, y0: 0, x1: d.width, y1: d.height },

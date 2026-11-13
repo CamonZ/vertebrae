@@ -226,6 +226,62 @@ const flowSpec = (placing: boolean, band: boolean | "maybe" = "maybe") =>
     return { spec, placed };
   });
 
+const NAMES = ["current", "A", "B"] as const;
+
+/**
+ * The same machine as named arrangements: each part in some of current, A
+ * and B (instead of change marks), each rail where both its parts are (or
+ * fewer), band values plain or keyed by every name.
+ */
+const namedSpec = (placing: boolean) =>
+  gs.composite<Generated>((tc) => {
+    const { spec, placed } = tc.draw(flowSpec(placing));
+    const some = (of: readonly string[]) => {
+      const out = of.filter(() => tc.draw(gs.booleans()));
+      return out.length > 0 ? out : [of[0]];
+    };
+    const unmarked = <T extends { change?: unknown }>(x: T): T => {
+      const c = { ...x };
+      delete c.change;
+      return c;
+    };
+    const partIn = new Map<string, readonly string[]>();
+    const parts = spec.parts.map(unmarked).map((p) => {
+      const members = tc.draw(gs.booleans()) ? [...NAMES] : some(NAMES);
+      partIn.set(p.id, members);
+      return members.length === NAMES.length ? p : { ...p, in: members };
+    });
+    const rails = (spec.rails ?? []).map(unmarked).flatMap((r) => {
+      const [a, b] = [r.from, r.to].map((e) => partIn.get(e.split(".")[0])!);
+      const shared = a.filter((n) => b.includes(n));
+      if (shared.length === 0) return [];
+      return [tc.draw(gs.booleans()) ? { ...r, in: some(shared) } : r];
+    });
+    const keyed = <T>(v: T | { before: T; after: T }) =>
+      typeof v === "object" && v !== null && "before" in v
+        ? Object.fromEntries(
+            NAMES.map((n) => [n, n === "current" ? v.before : v.after])
+          )
+        : v;
+    const band = spec.band && {
+      ...spec.band,
+      rows: spec.band.rows.map((r) => ({
+        ...r,
+        ...(r.note !== undefined ? { note: keyed(r.note) } : {}),
+        chips: keyed(r.chips),
+      })),
+    };
+    const named: FlowSpec = {
+      ...spec,
+      arrangements: [...NAMES],
+      parts,
+      rails,
+      ...(band ? { band } : {}),
+    } as FlowSpec;
+    tc.assume(compileFlow(named, { registry }).ok);
+    return { spec: named, placed };
+  });
+
 async function laidOut(spec: FlowSpec): Promise<CompiledFlow> {
   const r = await compileFlowLaidOut(spec, { registry });
   if (!r.ok) throw new Error(`layout rejected: ${JSON.stringify(r.errors)}`);
@@ -246,11 +302,16 @@ const SETTINGS = { testCases: 100 };
 /** ELK lays out every generated spec; a run takes seconds, not milliseconds. */
 const TIMEOUT = 120_000;
 
-test(
-  "laid-out diagrams keep labels, parts, rails and regions apart",
-  () =>
+const MODES = [
+  ["Before/After", flowSpec],
+  ["named arrangements", namedSpec],
+] as const;
+
+test.each(MODES)(
+  "laid-out diagrams keep labels, parts, rails and regions apart (%s)",
+  (_, specs) =>
     hegel.testAsync(async (tc) => {
-      const { spec } = tc.draw(flowSpec(false));
+      const { spec } = tc.draw(specs(false));
       const flow = await laidOut(spec);
       const backs = returnRails(
         spec.parts,
@@ -369,11 +430,11 @@ test(
   TIMEOUT
 );
 
-test(
-  "Before and After share every position, rail and region",
-  () =>
+test.each(MODES)(
+  "every arrangement shares every position, rail and region (%s)",
+  (_, specs) =>
     hegel.testAsync(async (tc) => {
-      const { spec } = tc.draw(flowSpec(true));
+      const { spec } = tc.draw(specs(true));
       const [first, ...rest] = (await laidOut(spec)).arrangements;
       for (const d of rest) {
         expect(d.parts.map((p) => [p.id, p.position])).toEqual(

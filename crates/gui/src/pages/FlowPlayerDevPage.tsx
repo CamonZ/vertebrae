@@ -8,6 +8,7 @@
 import { useMemo, useState } from "react";
 import inlineDiscussions from "../components/MachineDiagram/flow/__fixtures__/inlineDiscussions.flow.yaml?raw";
 import mechanisms from "../components/MachineDiagram/flow/__fixtures__/mechanisms.flow.yaml?raw";
+import burstOptions from "../components/MachineDiagram/flow/__fixtures__/burstOptions.flow.yaml?raw";
 import {
   FlowPlayer,
   parseFlowSpec,
@@ -20,6 +21,7 @@ import { useShellHeader } from "../hooks/useShellHeader";
 const SPECS = [
   ["inline discussions", inlineDiscussions, false],
   ["mechanisms", mechanisms, false],
+  ["three options", burstOptions, false],
   ["inline discussions · auto-layout", inlineDiscussions, true],
   ["mechanisms · auto-layout", mechanisms, true],
 ] as const;

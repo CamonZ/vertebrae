@@ -1,0 +1,62 @@
+version: 1
+title: Every Before/After mark
+parts:
+  - { id: src, kind: source }
+  - id: w
+    kind: worker
+    change: changed
+    changeNote: retries on crash
+    portChanges: { ctl: added, out: changed }
+    before: { changeNote: crashes stop the job }
+  - { id: q, kind: queue, change: added, changeNote: buffers bursts }
+  - { id: st, kind: store, change: removed }
+  - id: pipe
+    kind: pipeline
+    change: changed
+    before: { props: { stages: [build, test, ship] } }
+    after: { props: { stages: [build, lint, test] } }
+    stageChanges: { lint: added, test: changed }
+rails:
+  - { id: r1, from: src.out, to: w.in }
+  - { id: r2, from: src.out, to: q.in, change: added }
+  - { id: r3, from: src.out, to: st.in, change: removed }
+cards:
+  - { id: c1, token: request, origin: src }
+  - { id: c2, token: data, origin: src }
+  - { id: c3, token: data, origin: src }
+  - { id: c4, token: payload }
+story:
+  - id: b1
+    caption: a job arrives
+    steps:
+      - { verb: send, part: src, card: c1 }
+      - { verb: stage, part: w, card: c1, via: r1 }
+  - id: b2
+    caption: { before: it crashes, after: it finishes after a retry }
+    steps:
+      - { verb: finish, part: w, card: c1, change: changed }
+  - id: b3
+    caption: { after: queued now }
+    steps:
+      - { verb: send, part: src, card: c2 }
+      - { verb: send, part: q, card: c2, via: r2 }
+  - id: b4
+    caption: { before: stored before }
+    steps:
+      - { verb: send, part: src, card: c3, change: removed }
+      - { verb: record, part: st, card: c3, via: r3, change: removed }
+  - id: b5
+    caption: the pipeline
+    steps:
+      - { verb: stage, part: pipe, card: c4, change: added }
+band:
+  heading: WHERE JOBS GO
+  rows:
+    - name: crash
+      beats: [b2]
+      note: { before: lost, after: retried }
+      chips: { before: [crash, drop], after: [crash, retry, finish] }
+    - name: overflow
+      beats: [b3, b4]
+      chips: [buffer]
+  meter: { label: arrivals, marker: arrival }

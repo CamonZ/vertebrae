@@ -12,7 +12,9 @@ must accept its current token. Verbs can change a card's token while keeping
 its identity, or consume it so it cannot travel farther. Prefer the same card
 for a request becoming its result. `checkpoint` marks the end of the step.
 
-`caption` is text or `{before: "…", after: "…"}`; either side may be omitted.
+`caption` is text or one per arrangement by name (`{before: "…", after: "…"}`,
+or `{A: "…", B: "…"}`); an arrangement may be omitted and continues the
+previous caption.
 `hold` is nonnegative seconds after a beat (default 0.3 with steps, 1.6 for a
 caption-only beat). Timing is illustrative unless measured evidence says
 otherwise. Durations and holds do not make a scenario a recorded trace.

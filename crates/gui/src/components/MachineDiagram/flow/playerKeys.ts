@@ -8,7 +8,8 @@ export type PlayerCommand =
   | { readonly kind: "seek"; readonly beat: number }
   | { readonly kind: "speed"; readonly dir: 1 | -1 }
   | { readonly kind: "loop" }
-  | { readonly kind: "arrangement" }
+  /** Next (1) or previous (-1) arrangement; with two, a toggle. */
+  | { readonly kind: "arrangement"; readonly dir: 1 | -1 }
   | { readonly kind: "beats" }
   | { readonly kind: "clear" }
   | { readonly kind: "help" };
@@ -31,7 +32,7 @@ export const PLAYER_SHORTCUTS: readonly (readonly [
   ["1 – 9, Home, End", "jump to a beat"],
   ["− / +", "slower / faster"],
   ["L", "loop, or play once and stop at the end"],
-  ["B", "Before / After"],
+  ["B / ⇧B", "next / previous arrangement"],
   ["C", "show or hide the beats"],
   ["Tab, Enter", "focus and open a part or follow a card"],
   ["Esc", "stop following, unpin"],
@@ -72,8 +73,10 @@ export function playerCommand(
     case "_":
       return { kind: "speed", dir: -1 };
     case "b":
+      return { kind: "arrangement", dir: 1 };
     case "B":
-      return { kind: "arrangement" };
+      // Caps Lock types B without Shift: still the next arrangement.
+      return { kind: "arrangement", dir: m.shiftKey ? -1 : 1 };
     case "c":
     case "C":
       return { kind: "beats" };
@@ -116,4 +119,18 @@ export function leaveToTarget(
     return true;
   const nav = key.startsWith("Arrow") || key === "Home" || key === "End";
   return nav && target.closest("[role='radiogroup']") !== null;
+}
+
+/**
+ * The arrangement `dir` steps from `current` in `names`, wrapping around:
+ * with two arrangements both directions toggle.
+ */
+export function cycleArrangement<T>(
+  names: readonly T[],
+  current: T,
+  dir: 1 | -1
+): T {
+  const i = names.indexOf(current);
+  if (i < 0) return names[0] ?? current;
+  return names[(i + dir + names.length) % names.length];
 }

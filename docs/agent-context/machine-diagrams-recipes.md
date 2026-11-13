@@ -12,5 +12,7 @@ illustrative.
   Load when: diagramming real code, reviewing a PR, or explaining how a component works.
 - [Explain Before/After with the same inputs](machine-diagrams/recipes/before-after.md).
   Load when: writing the before-after example.
+- [Compare several options on one diagram](machine-diagrams/recipes/options.md).
+  Load when: weighing design alternatives (option A, option B) against the current machine.
 - [Add an inline deeper level](machine-diagrams/recipes/drill.md).
   Load when: writing the drill example.

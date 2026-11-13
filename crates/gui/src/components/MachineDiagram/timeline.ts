@@ -89,6 +89,11 @@ export interface Beat {
   readonly t: number;
   readonly caption: string;
   readonly id?: string;
+  /**
+   * Index of the story beat it starts at (compiled flows). Arrangements can
+   * caption different story beats, so switching keeps this, not the index.
+   */
+  readonly story?: number;
 }
 
 /**

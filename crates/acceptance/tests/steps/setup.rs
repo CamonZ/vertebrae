@@ -50,7 +50,11 @@ async fn configured_client(world: &mut SmokeWorld) {
     world.env.insert("VTB_URL".to_string(), base_url);
     world.env.insert("VTB_PROJECT_ID".to_string(), project_id);
 
-    // Find the vtb binary
+    world.vtb_binary = vtb_binary();
+}
+
+/// The vtb binary under test: `VTB_BINARY`, else the workspace's debug build.
+pub(crate) fn vtb_binary() -> std::path::PathBuf {
     let vtb_binary = std::env::var("VTB_BINARY").unwrap_or_else(|_| {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let workspace_root = std::path::Path::new(manifest_dir)
@@ -65,7 +69,7 @@ async fn configured_client(world: &mut SmokeWorld) {
             .to_string_lossy()
             .to_string()
     });
-    world.vtb_binary = std::path::PathBuf::from(vtb_binary);
+    std::path::PathBuf::from(vtb_binary)
 }
 
 #[given(expr = "I store the task ID as {string}")]

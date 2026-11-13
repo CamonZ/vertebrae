@@ -2,6 +2,7 @@ pub mod artifact;
 pub mod cli;
 pub mod daemon;
 pub mod daemons;
+pub mod flow_arrangements;
 pub mod gate_chat;
 pub mod install;
 pub mod navigation;

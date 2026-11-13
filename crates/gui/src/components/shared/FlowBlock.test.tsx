@@ -274,7 +274,7 @@ describe("flow playback", () => {
     expect(beats.size).toBeGreaterThanOrEqual(3);
   });
 
-  it("shows the Before/After toggle only with two arrangements and keeps the beat", () => {
+  it("shows the Before/After toggle only with two arrangements and keeps the story beat", () => {
     mockReducedMotion(false);
     renderFlow(plainSpec);
     expect(
@@ -294,7 +294,9 @@ describe("flow playback", () => {
     expect(shownBeat()).toBe(3);
     fireEvent.click(screen.getByRole("radio", { name: "Before" }));
     expect(player()).toHaveAttribute("data-arrangement", "before");
-    expect(shownBeat()).toBe(3);
-    expect(shownT()).toBe(beatOutcome(before.travel, 3));
+    // After's 4th beat (the denied edit) has no Before caption: Before
+    // still shows Q2, its 3rd beat.
+    expect(shownBeat()).toBe(2);
+    expect(shownT()).toBe(beatOutcome(before.travel, 2));
   });
 });

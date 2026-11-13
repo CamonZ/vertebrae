@@ -1,5 +1,6 @@
 import { sharesBadStretch } from "./layoutTestHelpers";
 import { describe, expect, it } from "vitest";
+import burstOptions from "./__fixtures__/burstOptions.flow.yaml?raw";
 import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
 import mechanisms from "./__fixtures__/mechanisms.flow.yaml?raw";
 import {
@@ -45,6 +46,7 @@ async function laidOut(s: FlowSpec): Promise<CompiledFlow> {
 const REFERENCE = [
   ["inline discussions", inlineDiscussions],
   ["mechanisms", mechanisms],
+  ["three options", burstOptions],
 ] as const;
 
 describe("auto-layout", () => {
@@ -177,7 +179,7 @@ describe("auto-layout", () => {
   );
 
   it.each(REFERENCE)(
-    "%s: Before and After share every position and rail",
+    "%s: every arrangement shares every position and rail",
     async (_name, source) => {
       const flow = await laidOut(unplaced(spec(source)));
       const [first, ...rest] = flow.arrangements;

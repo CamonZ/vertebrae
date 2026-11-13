@@ -11,6 +11,7 @@ import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
+import burstOptions from "./__fixtures__/burstOptions.flow.yaml?raw";
 import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
 import {
   compileFlow,
@@ -29,9 +30,12 @@ function check(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
 }
 
-const parsed = parseFlowSpec(inlineDiscussions);
-if (!parsed.ok) throw new Error("fixture does not parse");
-const placed = parsed.value as FlowSpec;
+function load(source: string): FlowSpec {
+  const parsed = parseFlowSpec(source);
+  if (!parsed.ok) throw new Error("fixture does not parse");
+  return parsed.value as FlowSpec;
+}
+const placed = load(inlineDiscussions);
 
 const unplace = (p: PartSpec): PartSpec => {
   const q = { ...p };
@@ -67,6 +71,7 @@ const INPUTS: readonly { name: string; input: unknown }[] = [
       ],
     },
   },
+  { name: "three options (named arrangements)", input: load(burstOptions) },
   {
     name: "invalid",
     input: { version: 1, parts: [{ id: "a", kind: "no-such-part" }] },

@@ -7,11 +7,12 @@
  *
  * The geometry — divider, heading, row lines, chip column, meter position
  * and the canvas it needs — is laid out once for every arrangement, below
- * everything the diagram draws, so Before and After line up and only the
+ * everything the diagram draws, so every arrangement lines up and only the
  * row contents and the meter change.
  */
 import type { TimelineMarker } from "../timeline";
-import type { ArrangementName, BandSpec, PerArrangement } from "./spec";
+import { valueIn } from "./arrangements";
+import type { ArrangementName, BandSpec } from "./spec";
 import { LINE_EM, textWidth, type Box } from "./measure";
 
 /** Space between the lowest drawn element and the divider. */
@@ -105,17 +106,6 @@ export function meterCount(m: Pick<DiagramBandMeter, "times">, t: number) {
   return n;
 }
 
-/** The value of a per-arrangement field (`current` reads the After side). */
-export function sideOf<T>(
-  v: PerArrangement<T> | undefined,
-  a: ArrangementName
-): T | undefined {
-  if (v === undefined) return undefined;
-  if (typeof v === "object" && v !== null && "before" in v && "after" in v)
-    return a === "before" ? v.before : v.after;
-  return v as T;
-}
-
 /** Width of the heading as drawn with its letter spacing. */
 export const headingWidth = (text: string) =>
   textWidth(text, BAND_HEADING_SIZE) + text.length * BAND_HEADING_SPACING;
@@ -176,8 +166,8 @@ export function layoutBand(
   const resolved = inputs.map((d) =>
     spec.rows.map((r) => ({
       name: r.name,
-      note: sideOf(r.note, d.arrangement),
-      chips: sideOf(r.chips, d.arrangement) ?? [],
+      note: valueIn(r.note, d.arrangement),
+      chips: valueIn(r.chips, d.arrangement) ?? [],
     }))
   );
   const nameW = Math.max(
