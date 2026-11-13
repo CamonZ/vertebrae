@@ -475,6 +475,63 @@ describe("auto-layout", () => {
     }
   );
 
+  it("steps a cramped same-port loop aside instead of doubling back", async () => {
+    // Hegel counterexample: p3 lands so close to p2 that the loop's stub sits
+    // in p3's extent and neither leg finds a way to the lane.
+    const d = (
+      await laidOut({
+        version: 1,
+        parts: [
+          { id: "p0", kind: "route step" },
+          { id: "p1", kind: "retry" },
+          { id: "p2", kind: "two-phase commit" },
+          { id: "p3", kind: "alert" },
+          { id: "p4", kind: "aggregator" },
+        ],
+        rails: [
+          { id: "r0", from: "p0.out1", to: "p3.in" },
+          { id: "r1", from: "p2.p1", to: "p2.p1" },
+          { id: "r2", from: "p2.p1", to: "p3.in" },
+        ],
+      })
+    ).arrangements[0];
+    const { points } = d.rails.find((r) => r.id === "r1")!;
+    for (let i = 2; i < points.length; i++) {
+      const [a, b, c] = [points[i - 2], points[i - 1], points[i]];
+      const dot = (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]);
+      expect(dot, `turns back at ${b}`).toBeGreaterThan(-1);
+    }
+  });
+
+  it("drops a boxed-in self-loop beside a rail that shares its port", async () => {
+    // Hegel counterexample: r1 passes just past p0.out's stub, so r0's first
+    // leg finds no way down and used to drop along r2's step.
+    const d = (
+      await laidOut({
+        version: 1,
+        parts: [
+          { id: "p0", kind: "aggregator" },
+          { id: "p1", kind: "aggregator" },
+          { id: "p2", kind: "approval" },
+          { id: "p3", kind: "aggregator" },
+          { id: "p4", kind: "aggregator" },
+          { id: "p5", kind: "aggregator" },
+        ],
+        rails: [
+          { id: "r0", from: "p0.out", to: "p0.in" },
+          { id: "r1", from: "p3.out", to: "p1.in" },
+          { id: "r2", from: "p0.out", to: "p3.in" },
+          { id: "r3", from: "p0.out", to: "p1.in" },
+        ],
+      })
+    ).arrangements[0];
+    for (const [i, a] of d.rails.entries())
+      for (const b of d.rails.slice(i + 1))
+        expect(sharesBadStretch(a, b), `${a.id} runs along ${b.id}`).toBe(
+          false
+        );
+  });
+
   it("finds return rails by model order", () => {
     const parts = ["a", "b", "c"].map((id) => ({ id }));
     expect(
