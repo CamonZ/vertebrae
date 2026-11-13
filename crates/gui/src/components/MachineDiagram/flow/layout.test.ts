@@ -1,3 +1,4 @@
+import { sharesBadStretch } from "./layoutTestHelpers";
 import { describe, expect, it } from "vitest";
 import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
 import mechanisms from "./__fixtures__/mechanisms.flow.yaml?raw";
@@ -47,6 +48,126 @@ const REFERENCE = [
 ] as const;
 
 describe("auto-layout", () => {
+  it("separates rails connected through different shared ports", async () => {
+    const flow = await laidOut({
+      version: 1,
+      parts: [0, 1, 2, 3].map((i) => ({ id: `p${i}`, kind: "aggregator" })),
+      rails: [
+        { id: "r0", from: "p0.out", to: "p0.in" },
+        { id: "r1", from: "p0.out", to: "p1.in" },
+        { id: "r2", from: "p3.out", to: "p1.in" },
+      ],
+    });
+    for (const d of flow.arrangements)
+      for (const [i, r] of d.rails.entries())
+        for (const q of d.rails.slice(i + 1))
+          expect(sharesBadStretch(r, q), `${r.id} × ${q.id}`).toBe(false);
+  });
+
+  it("keeps a rerouted forward fork orthogonal at fractional port coordinates", async () => {
+    const flow = await laidOut({
+      version: 1,
+      parts: ["aggregator", "event rail", "queue", "aggregator", "alert"].map(
+        (kind, i) => ({ id: `p${i}`, kind })
+      ),
+      rails: [
+        { id: "r0", from: "p2.out", to: "p3.in" },
+        { id: "r1", from: "p2.out", to: "p4.in", change: "added" },
+        { id: "r2", from: "p2.out", to: "p1.in" },
+      ],
+    });
+    for (const d of flow.arrangements)
+      for (const [i, r] of d.rails.entries()) {
+        for (const q of d.rails.slice(i + 1))
+          expect(sharesBadStretch(r, q)).toBe(false);
+        for (let j = 1; j < r.points.length; j++) {
+          const [a, b] = [r.points[j - 1], r.points[j]];
+          expect(
+            Math.min(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]))
+          ).toBeLessThan(0.01);
+        }
+      }
+  });
+
+  it("keeps signal-port forks separate without doubling back", async () => {
+    const flow = await laidOut({
+      version: 1,
+      parts: [
+        "decider",
+        "inference step",
+        "failure detector",
+        "inference step",
+        "version vector",
+      ].map((kind, i) => ({ id: `p${i}`, kind })),
+      rails: [
+        { id: "r0", from: "p1.tools", to: "p1.tools" },
+        { id: "r4", from: "p2.status", to: "p1.tools" },
+        { id: "r5", from: "p1.tools", to: "p2.heartbeat" },
+        { id: "r6", from: "p1.tools", to: "p3.tools" },
+      ],
+    });
+    for (const d of flow.arrangements) {
+      for (const [index, r] of d.rails.entries()) {
+        for (const q of d.rails.slice(index + 1))
+          expect(sharesBadStretch(r, q)).toBe(false);
+        for (let i = 2; i < r.points.length; i++) {
+          const [a, b, c] = [r.points[i - 2], r.points[i - 1], r.points[i]];
+          expect(
+            (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]),
+            r.id
+          ).toBeGreaterThan(-1);
+        }
+      }
+    }
+  });
+
+  it("lets a same-port loop fork around forward reservations", async () => {
+    const flow = await laidOut({
+      version: 1,
+      parts: [
+        "decider",
+        "inference step",
+        "approval",
+        "approval",
+        "approval",
+      ].map((kind, i) => ({ id: `p${i}`, kind })),
+      rails: [
+        { id: "r0", from: "p1.tools", to: "p1.tools" },
+        { id: "r1", from: "p3.out", to: "p0.in", change: "added" },
+        { id: "r2", from: "p3.out", to: "p1.in" },
+      ],
+    });
+    for (const d of flow.arrangements)
+      for (const [index, r] of d.rails.entries()) {
+        for (const q of d.rails.slice(index + 1))
+          expect(sharesBadStretch(r, q)).toBe(false);
+        for (let i = 2; i < r.points.length; i++) {
+          const [a, b, c] = [r.points[i - 2], r.points[i - 1], r.points[i]];
+          expect(
+            (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]),
+            r.id
+          ).toBeGreaterThan(-1);
+        }
+      }
+  });
+
+  it("separates the generated r2/r3 forward fork after a shared-port chain", async () => {
+    const flow = await laidOut({
+      version: 1,
+      parts: [0, 1, 2, 3].map((i) => ({ id: `p${i}`, kind: "aggregator" })),
+      rails: [
+        { id: "r0", from: "p0.out", to: "p2.in" },
+        { id: "r1", from: "p1.out", to: "p2.in" },
+        { id: "r2", from: "p1.out", to: "p0.in" },
+        { id: "r3", from: "p1.out", to: "p3.in" },
+      ],
+    });
+    for (const d of flow.arrangements)
+      for (const [i, r] of d.rails.entries())
+        for (const q of d.rails.slice(i + 1))
+          expect(sharesBadStretch(r, q), `${r.id} × ${q.id}`).toBe(false);
+  });
+
   it.each(REFERENCE)(
     "%s: no label overlaps a part, gate or label when laid out",
     async (_name, source) => {
