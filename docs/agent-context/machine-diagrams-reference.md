@@ -34,5 +34,3 @@ An absent default leaves the field unset. For attachments, also read
   Load when: authoring vertebrae workflows mechanisms.
 
 When vocabulary changes, update the relevant reference page, guide and recipes.
-The authoringDocs test enumerates schema kinds and per-kind verbs and fails
-when their entries are missing; it also validates and renders every recipe.

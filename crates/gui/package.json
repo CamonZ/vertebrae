@@ -25,7 +25,8 @@
     "package:debug": "../../scripts/build-package.sh --debug",
     "package:release": "../../scripts/build-package.sh --release",
     "test:sidecars": "node --test scripts/prepare-sidecars.test.mjs",
-    "test:selection": "node --test scripts/selection-style.test.mjs"
+    "test:selection": "node --test scripts/selection-style.test.mjs",
+    "build:flow-validator": "vite build --config vite.flow-validator.config.ts"
   },
   "dependencies": {
     "@hpcc-js/wasm-graphviz": "^1.28.0",

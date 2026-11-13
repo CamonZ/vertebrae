@@ -51,3 +51,23 @@ Remove `--limit` and `--offset` from scripts. Rust callers use
 `ArtifactService::list_artifacts()` or `list_task_artifacts(task_id)`;
 `ListArtifactInput` has been removed. Rhai and GUI command signatures are
 unchanged, but their listings now return every artifact in the requested scope.
+
+## Validating flow specs
+
+Before saving a machine-diagram flow artifact, check its body offline:
+
+```bash
+vtb flow validate explanation.flow.yaml
+cat explanation.flow.yaml | vtb flow validate -
+vtb --json flow validate explanation.flow.yaml
+```
+
+The command runs the GUI viewer's own parser and compiler in an embedded
+JavaScript engine, so it needs no project, backend connection, or Node. A valid
+spec prints `valid yaml flow spec` (or `json`) and exits 0. An invalid spec
+prints one `path: message` line per error to stderr, for example
+`parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); …`, and
+exits 1. With `--json` it prints `{valid, format, errors}` to stdout, where each
+error has `path`, `message`, optional `expected` names, and the formatted
+`line`, and still exits 1 when invalid. It does not check that evidence
+references point at real lines.

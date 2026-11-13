@@ -9,6 +9,7 @@ mod basic_tests;
 mod check_item_tests;
 mod criterion_ref_tests;
 mod delete_tests;
+mod flow_validate_tests;
 mod mock;
 mod ready_tests;
 mod refs_tests;

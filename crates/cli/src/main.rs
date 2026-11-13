@@ -61,6 +61,23 @@ async fn run_with_args(args: CliArgs) -> Result<(), ServiceError> {
         return Ok(());
     }
 
+    // Flow validation is offline: it needs no project or Sacrum connection,
+    // and reports an invalid spec (in text or JSON) with a non-zero exit.
+    if let Some(Command::Flow(ref cmd)) = args.command {
+        let report = cmd.execute()?;
+        if args.json {
+            print_json(&report)?;
+        } else if report.valid {
+            println!("{report}");
+        } else {
+            eprintln!("{report}");
+        }
+        if !report.valid {
+            process::exit(1);
+        }
+        return Ok(());
+    }
+
     // Load Sacrum configuration from ~/.config/vertebrae/config.toml
     let config = SacrumConfig::load().map_err(|e| {
         ServiceError::config_error(format!("Failed to load Sacrum configuration: {}", e))
