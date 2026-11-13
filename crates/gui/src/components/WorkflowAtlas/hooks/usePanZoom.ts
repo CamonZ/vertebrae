@@ -35,6 +35,13 @@ export interface UsePanZoomOptions {
   pad?: number;
   /** Initial scale (default 1). */
   scale?: number;
+  /**
+   * World-space rect to frame when fitting, instead of the whole content.
+   * Lets a surface fit what matters (e.g. factory markers) inside a larger world.
+   */
+  fitBounds?: { x: number; y: number; w: number; h: number } | null;
+  /** Upper bound for the scale chosen by fit (default `max`). */
+  fitMax?: number;
 }
 
 export interface UsePanZoomResult {
@@ -42,6 +49,10 @@ export interface UsePanZoomResult {
   transform: string;
   /** Current scale factor. */
   scale: number;
+  /** Current horizontal translation in container pixels. */
+  x: number;
+  /** Current vertical translation in container pixels. */
+  y: number;
   /** Whether the user has taken control of the camera since the last fit. */
   userControlled: boolean;
   /** Re-fit content to the container and re-enable auto-fit on resize. */
@@ -112,6 +123,9 @@ export function usePanZoom(
   const min = opts.min ?? 0.15;
   const max = opts.max ?? 2.4;
   const pad = opts.pad ?? 96;
+  const fitMax = Math.min(opts.fitMax ?? max, max);
+  const fitBoundsRef = useRef(opts.fitBounds ?? null);
+  fitBoundsRef.current = opts.fitBounds ?? null;
 
   const [t, setT] = useState<PanZoomTransform>({
     s: opts.scale ?? 1,
@@ -194,17 +208,19 @@ export function usePanZoom(
     };
     const autofit = () => {
       const el = ref.current;
-      const c = contentRef.current;
+      const bounds = fitBoundsRef.current;
+      const c = bounds ?? { x: 0, y: 0, ...contentRef.current };
       if (!el) return;
       const next = fitTransform(
         el.clientWidth,
         el.clientHeight,
         c,
         min,
-        max,
+        fitMax,
         pad
       );
-      if (next) setT(next);
+      if (next)
+        setT({ ...next, x: next.x - c.x * next.s, y: next.y - c.y * next.s });
     };
     return {
       _autofit: autofit,
@@ -219,7 +235,7 @@ export function usePanZoom(
         setT({ s: 1, x: 0, y: 0 });
       },
     };
-  }, [ref, min, max, pad]);
+  }, [ref, min, max, fitMax, pad]);
 
   // Auto-fit once the container actually has a size, and on resize — until the
   // user takes control. Fixes the first-paint case where fit() ran against a
@@ -237,6 +253,8 @@ export function usePanZoom(
   return {
     transform: `translate(${t.x}px,${t.y}px) scale(${t.s})`,
     scale: t.s,
+    x: t.x,
+    y: t.y,
     userControlled: moved.current,
     fit: api.fit,
     zoomIn: api.zoomIn,

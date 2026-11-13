@@ -506,6 +506,63 @@ describe("WorkflowAtlas", () => {
     ).toBeGreaterThan(0);
   });
 
+  it("links the factory index to the map and remembers the opened factory", async () => {
+    useFactoryFilterStore.getState().reset();
+    mockSummary.mockReturnValue({
+      summary: OVERVIEW_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+
+    render(<WorkflowAtlas />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Workflow Factories" })
+    ).toBeInTheDocument();
+    const index = screen.getByRole("navigation", { name: "Factories" });
+    expect(index).toHaveTextContent("Factory A");
+    expect(screen.getAllByTestId(/factory-index-row-/)).toHaveLength(4);
+
+    // Hovering a row lights its marker, keeps linked factories at rest and
+    // quiets the rest; the routes follow the same rule.
+    fireEvent.mouseEnter(screen.getByTestId("factory-index-row-Factory A"));
+    expect(screen.getByTestId("factory-node-Factory A")).toHaveClass("lit");
+    expect(screen.getByTestId("factory-node-Factory B")).not.toHaveClass("dim");
+    expect(screen.getByTestId("factory-node-Factory C")).toHaveClass("dim");
+    expect(
+      screen
+        .getByTestId("factory-transition-Factory A>Factory B")
+        .querySelector(".gedge")
+    ).toHaveClass("lit");
+    expect(
+      screen
+        .getByTestId("factory-transition-Factory B>Factory C")
+        .querySelector(".gedge")
+    ).toHaveClass("dim");
+
+    // Hovering a marker highlights the matching row.
+    fireEvent.mouseEnter(screen.getByTestId("factory-node-Factory C"));
+    expect(screen.getByTestId("factory-index-row-Factory C")).toHaveClass(
+      "is-hot"
+    );
+
+    // A factory search is dropped once the factory opens.
+    fireEvent.change(screen.getByPlaceholderText("Find a factory…"), {
+      target: { value: "factory b" },
+    });
+    expect(screen.getAllByTestId(/factory-index-row-/)).toHaveLength(1);
+    fireEvent.click(screen.getByTestId("factory-index-row-Factory B"));
+    expect(await screen.findByPlaceholderText("Find a workflow…")).toHaveValue(
+      ""
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Factories" }));
+    const recent = await screen.findByTestId("factory-index-row-Factory B");
+    expect(recent).toHaveAttribute("aria-current", "location");
+    expect(recent).toHaveTextContent("last opened");
+  });
+
   it("selects No Factory as an exact null workflow scope", async () => {
     useFactoryFilterStore.getState().reset();
     mockSummary.mockReturnValue({
@@ -580,9 +637,12 @@ describe("WorkflowAtlas", () => {
     await waitFor(() =>
       expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
+    // A factory scope replaces the topology crumb with a way back out.
+    const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
+    expect(breadcrumb).toHaveTextContent("Factories/Factory A");
     expect(
-      screen.getByText("design · workflow topology · elk")
-    ).toBeInTheDocument();
+      screen.queryByText("design · workflow topology · elk")
+    ).not.toBeInTheDocument();
     const graphNames = Array.from(document.querySelectorAll(".ag-wf-name")).map(
       (n) => n.textContent
     );

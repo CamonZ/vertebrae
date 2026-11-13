@@ -61,7 +61,70 @@ function factoryKey(factoryName: string | null): string {
   return factoryName === null ? NO_FACTORY_KEY : factoryName;
 }
 
-function routePoints(from: Rect, to: Rect): Point[] {
+/** Stable key for a factory group, matching the keys used by factory routes. */
+export function factoryGroupKey(group: { scope: FactoryFilterValue }): string {
+  return typeof group.scope === "string" ? group.scope : NO_FACTORY_KEY;
+}
+
+/** Key for any factory scope; `null` (all factories) has no key. */
+export function factoryScopeKey(scope: FactoryFilterValue): string | null {
+  if (scope === null) return null;
+  return typeof scope === "string" ? scope : NO_FACTORY_KEY;
+}
+
+/** Count the distinct other factories each factory exchanges work with. */
+export function factoryLinkCounts(
+  routes: readonly { from: string; to: string }[]
+): Map<string, number> {
+  const neighbours = new Map<string, Set<string>>();
+  const link = (from: string, to: string) => {
+    const set = neighbours.get(from) ?? new Set<string>();
+    set.add(to);
+    neighbours.set(from, set);
+  };
+  for (const route of routes) {
+    link(route.from, route.to);
+    link(route.to, route.from);
+  }
+  return new Map([...neighbours].map(([key, set]) => [key, set.size] as const));
+}
+
+/**
+ * Nudge fixed-size screen rects downward until none overlap. Factories whose
+ * regions share a centre would otherwise stack their markers on top of each
+ * other; a short downward shift keeps every name readable and clickable.
+ */
+export function separateRects(rects: readonly Rect[], gap: number): Rect[] {
+  const order = rects
+    .map((rect, index) => ({ rect, index }))
+    .sort((a, b) => a.rect.y - b.rect.y || a.rect.x - b.rect.x);
+  const placed: Rect[] = [];
+  const result: Rect[] = new Array(rects.length);
+  for (const { rect, index } of order) {
+    let y = rect.y;
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const other of placed) {
+        const overlapsX =
+          rect.x < other.x + other.w + gap && other.x < rect.x + rect.w + gap;
+        const overlapsY =
+          y < other.y + other.h + gap && other.y < y + rect.h + gap;
+        if (overlapsX && overlapsY) {
+          y = other.y + other.h + gap;
+          moved = true;
+        }
+      }
+    }
+    const next = { ...rect, y };
+    placed.push(next);
+    result[index] = next;
+  }
+  return result;
+}
+
+/** Straight route between two boxes, clipped to each box's border. */
+export function routePoints(from: Rect, to: Rect): Point[] {
   const fromCenter = { x: from.x + from.w / 2, y: from.y + from.h / 2 };
   const toCenter = { x: to.x + to.w / 2, y: to.y + to.h / 2 };
   return [
@@ -196,10 +259,7 @@ export function layoutFactoryOverview(
 
   const factoryRects = new Map<string, Rect>();
   factories.forEach((factory) => {
-    factoryRects.set(
-      typeof factory.scope === "string" ? factory.scope : NO_FACTORY_KEY,
-      factory.rect
-    );
+    factoryRects.set(factoryGroupKey(factory), factory.rect);
   });
 
   const factoryRoutes = new Map<

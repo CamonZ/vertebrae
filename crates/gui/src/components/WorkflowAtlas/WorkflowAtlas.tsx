@@ -66,6 +66,8 @@ import { KanbanBoard } from "../KanbanBoard";
 import {
   factoryScopeExists,
   filterByFactory,
+  isNoFactoryScope,
+  type FactoryFilterValue,
 } from "../../utils/workflowFactory";
 import { usePipelineSummary } from "../../hooks/usePipelineSummary";
 import { useSteps } from "../../hooks/useStep";
@@ -151,7 +153,17 @@ export function WorkflowAtlas() {
   const setFactoryFilter = useFactoryFilterStore(
     (state) => state.setFactoryName
   );
+  const lastFactory = useFactoryFilterStore((state) => state.lastFactoryName);
   const [query, setQuery] = useState("");
+  // Moving between the factory overview and a factory changes what the search
+  // box searches (factories vs. workflows), so a stale query is dropped.
+  const changeScope = useCallback(
+    (scope: FactoryFilterValue) => {
+      setQuery("");
+      setFactoryFilter(scope);
+    },
+    [setFactoryFilter]
+  );
   const [hover, setHover] = useState<string | null>(null);
   // Step-node hover: the ref of the step node under the cursor (graph view).
   // Its owning workflow drives `hover` (so the box stays traced while the cursor
@@ -670,11 +682,36 @@ export function WorkflowAtlas() {
     <main className="uv-main">
       <header className="uv-head">
         <div className="uv-name">
-          {!showFactoryOverview && (
-            <div className="crumb">design · workflow topology · elk</div>
+          {factoryFilter !== null ? (
+            <nav className="crumb uv-crumb" aria-label="Breadcrumb">
+              <button
+                type="button"
+                className="uv-crumb-back"
+                onClick={() => changeScope(null)}
+              >
+                Factories
+              </button>
+              <span aria-hidden="true">/</span>
+              <span className="uv-crumb-current" aria-current="page">
+                {isNoFactoryScope(factoryFilter) ? "No Factory" : factoryFilter}
+              </span>
+            </nav>
+          ) : (
+            !showFactoryOverview && (
+              <div className="crumb">design · workflow topology · elk</div>
+            )
           )}
           <h1>
-            Workflow <em>{isBoard ? "Board" : isGraph ? "Graph" : "Atlas"}</em>
+            Workflow{" "}
+            <em>
+              {showFactoryOverview
+                ? "Factories"
+                : isBoard
+                  ? "Board"
+                  : isGraph
+                    ? "Graph"
+                    : "Atlas"}
+            </em>
           </h1>
         </div>
         <div className="uv-controls">
@@ -696,7 +733,7 @@ export function WorkflowAtlas() {
             id="atlas-factory-filter"
             workflows={summary?.workflows ?? []}
             value={factoryFilter}
-            onChange={setFactoryFilter}
+            onChange={changeScope}
           />
           <SegmentedControl<AtlasView>
             ariaLabel="Workflow view"
@@ -738,7 +775,8 @@ export function WorkflowAtlas() {
               summary={summary}
               query={query}
               view={canvasView}
-              onSelect={setFactoryFilter}
+              recentFactory={lastFactory}
+              onSelect={changeScope}
             />
           )}
 
