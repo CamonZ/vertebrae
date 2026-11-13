@@ -1,5 +1,4 @@
 import { Hole, PartBox, Ring } from "../fixtures";
-import type { LampStep } from "../geometry";
 import { Rail } from "../Rail";
 import type { Point } from "../route";
 import {
@@ -9,20 +8,15 @@ import {
   note,
   seal,
   story,
-  type StatusNote,
   type StoryDraft,
 } from "../timeline";
-import { NodeLamp, Readout, type RingEvent } from "./distributedFixtures";
+import { NodeLamp, Readout } from "./distributedFixtures";
+import { quorumSpec, type QuorumExtra } from "./quorumSpec";
 import type { MachinePartDef, PartScenario } from "./types";
 
+export type { QuorumExtra } from "./quorumSpec";
+
 /** Gallery reference scenarios; fixtures are evaluated only from frame time. */
-export interface QuorumExtra {
-  rings: RingEvent[];
-  dn: boolean[];
-  ver: StatusNote[][];
-  lamps: LampStep[][];
-  ak: StatusNote[];
-}
 const NAMES = ["2 of 3 ack", "1 of 3 · no quorum", "read repair"] as const;
 const STILLS = [2.7, 3.6, 3.2];
 function quorumStory(index: number): PartScenario<QuorumExtra> {
@@ -234,16 +228,17 @@ function quorumStory(index: number): PartScenario<QuorumExtra> {
   note(S, 3.45, "r3 catches up", "dim");
   return done();
 }
+
 export const quorumMachine: MachinePartDef<QuorumExtra> = {
   part: {
     name: "quorum",
-    job: "needs a majority to agree",
+    job: quorumSpec.job,
     aka: "W + R > N \u00b7 majority write \u00b7 read repair",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [90, 84, 480, 232],
-  status: { x: 320, y: 346 },
+  bb: quorumSpec.bb,
+  status: quorumSpec.status,
   scenarios: [quorumStory(0), quorumStory(1), quorumStory(2)],
   draw: (t, S) => (
     <>

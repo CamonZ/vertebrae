@@ -1,6 +1,6 @@
 import { useContext } from "react";
 import { EvidenceNavigationContext } from "../../shared/EvidenceNavigationContext";
-import { useFlowRegistry } from "./registryContext";
+import { useAttachmentRenderers } from "./attachmentRenderers";
 import type { AttachmentSpec } from "./spec";
 
 /** The host knows only common evidence metadata, never individual kinds. */
@@ -11,7 +11,7 @@ export function AttachmentPanel({
   attachments: readonly AttachmentSpec[];
   label?: string;
 }) {
-  const registry = useFlowRegistry();
+  const attachmentRenderers = useAttachmentRenderers();
   const openSource = useContext(EvidenceNavigationContext);
   if (!attachments.length) return null;
   return (
@@ -36,9 +36,9 @@ export function AttachmentPanel({
               {a.source === "trace" ? "recorded trace" : "scenario"}
             </span>
           </div>
-          {registry.attachments.get(a.kind)?.render?.(a, { openSource }) ?? (
-            <p>No renderer registered for {a.kind}.</p>
-          )}
+          {(Object.prototype.hasOwnProperty.call(attachmentRenderers, a.kind)
+            ? attachmentRenderers[a.kind](a, { openSource })
+            : undefined) ?? <p>No renderer registered for {a.kind}.</p>}
         </li>
       ))}
     </ul>

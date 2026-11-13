@@ -5,7 +5,6 @@
  * attachment also carries `status` (verified | inferred) and `source`
  * (scenario | trace), checked by the validator for all kinds.
  */
-import { attachmentRenderers } from "./attachmentRenderers";
 import type { Fields } from "./fields";
 import type { AttachmentKindDef, AttachmentRegistry } from "./registry";
 
@@ -150,6 +149,5 @@ export const BUILTIN_ATTACHMENTS: readonly AttachmentKindDef[] = [
 ];
 
 export function registerBuiltinAttachments(r: AttachmentRegistry): void {
-  for (const def of BUILTIN_ATTACHMENTS)
-    r.register({ ...def, render: attachmentRenderers[def.kind] });
+  for (const def of BUILTIN_ATTACHMENTS) r.register(def);
 }

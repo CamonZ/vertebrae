@@ -1,27 +1,15 @@
 import { PartBox } from "../fixtures";
-import type { LampStep } from "../geometry";
 import { pop } from "../motion";
 import type { Point } from "../route";
 import { card, dot, note, seal, story, type StoryDraft } from "../timeline";
 import { Cut, NodeLamp } from "./distributedFixtures";
 import { FadedText } from "./draw";
+import { GN, gossipSpec, type GossipExtra } from "./gossipSpec";
 import type { MachinePartDef, PartScenario } from "./types";
 
+export type { GossipExtra } from "./gossipSpec";
+
 /** Gallery reference scenarios; fixtures are evaluated only from frame time. */
-export interface GossipExtra {
-  lamps: LampStep[][];
-  cut: number | null;
-  extra: LampStep[] | null;
-  xin: number;
-}
-export const GN: Point[] = [
-  [190, 150],
-  [320, 150],
-  [450, 150],
-  [190, 262],
-  [320, 262],
-  [450, 262],
-];
 const NAMES = ["spreads", "partitioned", "node joins"] as const;
 const STILLS = [2.75, 3.6, 2.3];
 function gossipStory(index: number): PartScenario<GossipExtra> {
@@ -126,16 +114,17 @@ function gossipStory(index: number): PartScenario<GossipExtra> {
   note(S, 3.4, "everyone knows · 3 rounds", "green");
   return done();
 }
+
 export const gossipMachine: MachinePartDef<GossipExtra> = {
   part: {
     name: "gossip",
-    job: "spreads news peer to peer",
+    job: gossipSpec.job,
     aka: "epidemic broadcast \u00b7 membership \u00b7 SWIM",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [160, 120, 320, 170],
-  status: { x: 320, y: 336 },
+  bb: gossipSpec.bb,
+  status: gossipSpec.status,
   scenarios: [gossipStory(0), gossipStory(1), gossipStory(2)],
   draw: (t, S) => (
     <>
@@ -163,3 +152,5 @@ export const gossipMachine: MachinePartDef<GossipExtra> = {
     </>
   ),
 };
+
+export { GN } from "./gossipSpec";

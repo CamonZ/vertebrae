@@ -11,13 +11,13 @@
  */
 import type { ChangeMark, PartIdentity } from "../accessibility";
 import type { BBox } from "../ChangeMark";
+import type { StateRole } from "../palette";
 import {
   FOOTPRINT_SCALE,
   PART_HEIGHT,
   PART_WIDTH,
   type Footprint,
-} from "../MachinePart";
-import type { StateRole } from "../palette";
+} from "../partGeometry";
 import { railBetween, route, type Point, type PortSide } from "../route";
 import {
   seal,
@@ -29,9 +29,19 @@ import {
   type Timeline,
   type TimelineMarker,
 } from "../timeline";
-import { FlowSpecErrors, type FlowSpecError } from "./errors";
-import { withDefaults } from "./fields";
+import { layoutBand, type DiagramBand } from "./band";
 import { createFlowRegistry } from "./defaults";
+import { FlowSpecErrors, type FlowSpecError } from "./errors";
+import {
+  REGION_HEAD,
+  REGION_PAD,
+  pad,
+  partExtent,
+  railLabels,
+  regionLabels,
+  union,
+} from "./extent";
+import { withDefaults } from "./fields";
 import {
   HELD,
   TOKEN_SHAPES,
@@ -56,25 +66,19 @@ import type {
   WireChangeMark,
 } from "./spec";
 import { resolvedProps, validateFlowSpec } from "./validate";
-import { layoutBand, type DiagramBand } from "./band";
-import {
-  partExtent,
-  railLabels,
-  regionLabels,
-  REGION_HEAD,
-  REGION_PAD,
-  pad,
-  union,
-} from "./extent";
 
 /** The first beat starts 0.6 s in, as every gallery story does. */
 export const STORY_LEAD = 0.6;
+
 /** Pause between beats. */
 export const BEAT_GAP = 0.3;
+
 /** How long a caption-only beat holds. */
 export const CAPTION_HOLD = 1.6;
+
 /** The final beat stays readable before the 0.6 s loop fade (VL-06). */
 export const END_HOLD = 2.4;
+
 /** Gap between cells in the fallback row layout. */
 export const LAYOUT_GAP = 40;
 

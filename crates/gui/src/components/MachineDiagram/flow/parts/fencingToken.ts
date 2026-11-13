@@ -1,8 +1,8 @@
 /** fencing token: story verbs compile protocol events on the shared clock. */
 import {
-  fencingTokenMachine,
+  fencingTokenSpec,
   type FencingTokenExtra,
-} from "../../parts/fencingToken";
+} from "../../parts/fencingTokenSpec";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
 import { incoming, port } from "./distributedCommon";
@@ -25,21 +25,21 @@ const initial = () => ({
   token: 34,
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const fencingTokenPart: PartKindDef<
   Record<string, unknown>,
   ProtocolState
 > = {
   kind: "fencing token",
-  job: fencingTokenMachine.part.job,
+  job: fencingTokenSpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: fencingTokenMachine.bb,
-  status: fencingTokenMachine.status,
+  bb: fencingTokenSpec.bb,
+  status: fencingTokenSpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => fencingTokenMachine.draw(t, p.state.extra),
   verbs: {
     fence: {
       duration: 0.4,

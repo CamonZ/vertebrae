@@ -18,6 +18,7 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 function validate(source: string): FlowValidation {
   const sandbox: { vtbValidateFlow?: (s: string) => string } = {};
   runInNewContext(committed, sandbox);
+
   return JSON.parse(sandbox.vtbValidateFlow!(source)) as FlowValidation;
 }
 
@@ -27,7 +28,7 @@ describe("embedded flow validator bundle", () => {
     const args = ["build", "--config", "vite.flow-validator.config.ts"];
     const run = spawnSync(
       process.execPath,
-      [vite, ...args, "--outDir", scratch],
+      [vite, ...args, "--outDir", scratch, "--mode", "module-graph"],
       {
         encoding: "utf8",
         // Build as `npm run build:flow-validator` does, not in vitest's test mode.
@@ -38,7 +39,25 @@ describe("embedded flow validator bundle", () => {
         ),
       }
     );
+
     expect(run.status, run.stderr).toBe(0);
+
+    const modules: string[] = JSON.parse(
+      readFileSync(join(scratch, "modules.json"), "utf8")
+    );
+    expect(modules.length).toBeGreaterThan(0);
+    expect(
+      modules.filter(
+        (id) =>
+          /\.tsx(?:$|\?)/.test(id) ||
+          /node_modules\/(?:react(?:-dom)?|scheduler)(?:\/|$)/.test(id) ||
+          /MachineDiagram\/(?:parts\/draw|fixtures|geometry|flow\/(?:drawings|attachmentRenderers))\./.test(
+            id
+          )
+      ),
+      "validator must depend only on spec modules"
+    ).toEqual([]);
+
     const fresh = readFileSync(join(scratch, BUNDLE), "utf8");
     expect(
       fresh === committed,
@@ -62,6 +81,7 @@ describe("embedded flow validator bundle", () => {
         "rails: [{from: a.out, to: b.in}]",
       ].join("\n")
     );
+
     expect(result.ok).toBe(false);
     expect(result.errors[0].path).toBe("parts[1].kind");
     expect(result.errors[0].line).toMatch(
@@ -71,6 +91,7 @@ describe("embedded flow validator bundle", () => {
 
   it("reports unparseable input at the document root", () => {
     const result = validate("parts: [a");
+
     expect(result.ok).toBe(false);
     expect(result.errors[0]).toMatchObject({ path: "" });
     expect(result.errors[0].line).toMatch(/^invalid YAML at line \d+:/);

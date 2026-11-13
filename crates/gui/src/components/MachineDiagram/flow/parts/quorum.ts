@@ -1,5 +1,5 @@
 /** quorum: story verbs compile protocol events on the shared clock. */
-import { quorumMachine, type QuorumExtra } from "../../parts/quorum";
+import { quorumSpec, type QuorumExtra } from "../../parts/quorumSpec";
 import { dot } from "../../timeline";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
@@ -23,18 +23,18 @@ const initial = () => ({
   started: 0,
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const quorumPart: PartKindDef<Record<string, unknown>, ProtocolState> = {
   kind: "quorum",
-  job: quorumMachine.part.job,
+  job: quorumSpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: quorumMachine.bb,
-  status: quorumMachine.status,
+  bb: quorumSpec.bb,
+  status: quorumSpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => quorumMachine.draw(t, p.state.extra),
   verbs: {
     replicate: {
       duration: 1.1,

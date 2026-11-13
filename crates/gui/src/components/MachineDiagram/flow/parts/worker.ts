@@ -4,7 +4,7 @@
  * job arrives 0.6 → working 1.35 (stage 0.75) → done 2.65 (finish 0.6 after
  * the work hold). A finished job leaves as a result with the same card id.
  */
-import { RAIL_Y as Y } from "../../MachinePart";
+import { RAIL_Y as Y } from "../../partGeometry";
 import { HELD, type PartKindDef } from "../registry";
 import { sideGates } from "./common";
 

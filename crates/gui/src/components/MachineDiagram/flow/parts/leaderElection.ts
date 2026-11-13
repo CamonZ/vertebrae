@@ -1,9 +1,9 @@
 /** leader election: story verbs compile protocol events on the shared clock. */
 import {
   EL,
-  leaderElectionMachine,
+  leaderElectionSpec,
   type LeaderElectionExtra,
-} from "../../parts/leaderElection";
+} from "../../parts/leaderElectionSpec";
 import { dot } from "../../timeline";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
@@ -23,21 +23,21 @@ const initial = () => ({
   leader: -1,
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const leaderElectionPart: PartKindDef<
   Record<string, unknown>,
   ProtocolState
 > = {
   kind: "leader election",
-  job: leaderElectionMachine.part.job,
+  job: leaderElectionSpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: leaderElectionMachine.bb,
-  status: leaderElectionMachine.status,
+  bb: leaderElectionSpec.bb,
+  status: leaderElectionSpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => leaderElectionMachine.draw(t, p.state.extra),
   verbs: {
     elect: {
       duration: 0.6,

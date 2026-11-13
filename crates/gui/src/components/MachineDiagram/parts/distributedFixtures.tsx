@@ -1,15 +1,24 @@
 /* eslint-disable react-refresh/only-export-components -- typed geometry and fixtures share one responsibility */
+import type { TileSpec } from "./distributedGeometry";
+
+export {
+  arcPoints,
+  onCircle,
+  tileSpec,
+  type RingEvent,
+  type TileSpec,
+} from "./distributedGeometry";
+
 /** Fixtures local to distributed-system mechanisms; motion comes from the core. */
 import { Burst, Lamp } from "../fixtures";
 import { arcPath, lampAt, type LampStep } from "../geometry";
 import { clamp, pop, smoothstep, track, valueAt } from "../motion";
-import { roleColor, type CardRole, type StateRole } from "../palette";
+import { roleColor } from "../palette";
 import { usePart } from "../partContext";
-import type { Point } from "../route";
 import { StatusLine } from "../StatusLine";
 import { statusAt, type StatusNote } from "../timeline";
 import { FadedText } from "./draw";
-export type RingEvent = [number, number, StateRole];
+
 export function NodeLamp({
   x,
   y,
@@ -26,6 +35,7 @@ export function NodeLamp({
   const [role, k] = lampAt(steps, t);
   return <Lamp x={x} y={y} r={r} role={role} k={k} />;
 }
+
 export function Readout({
   steps,
   t,
@@ -51,6 +61,7 @@ export function Readout({
     />
   );
 }
+
 export function Halo({
   x,
   y,
@@ -78,6 +89,7 @@ export function Halo({
     />
   ) : null;
 }
+
 export function Cut({
   x1,
   y1,
@@ -109,6 +121,7 @@ export function Cut({
     />
   );
 }
+
 export function Fuse({
   x,
   y,
@@ -160,43 +173,7 @@ export function Fuse({
     </>
   );
 }
-export function onCircle(cx: number, cy: number, r: number, a: number): Point {
-  return [
-    cx + r * Math.sin((a * Math.PI) / 180),
-    cy - r * Math.cos((a * Math.PI) / 180),
-  ];
-}
-export function arcPoints(
-  cx: number,
-  cy: number,
-  r: number,
-  a0: number,
-  a1: number,
-  n = 28
-): Point[] {
-  return Array.from({ length: n + 1 }, (_, i) =>
-    onCircle(cx, cy, r, a0 + ((a1 - a0) * i) / n)
-  );
-}
-export interface TileSpec {
-  x: number;
-  y: number;
-  s: string;
-  at: number;
-  col: [number, CardRole][];
-  w?: number;
-  gone?: number;
-}
-export function tileSpec(
-  x: number,
-  y: number,
-  s: string,
-  at = -1,
-  cl: [number, CardRole][] = [],
-  o: { w?: number; gone?: number } = {}
-): TileSpec {
-  return { x, y, s, at, col: [[-1e9, "edge"], ...cl], ...o };
-}
+
 export function Tiles({ list, t }: { list: readonly TileSpec[]; t: number }) {
   const { fade } = usePart();
   return (

@@ -1,8 +1,8 @@
 /** failure detector: story verbs compile protocol events on the shared clock. */
 import {
-  failureDetectorMachine,
+  failureDetectorSpec,
   type FailureDetectorExtra,
-} from "../../parts/failureDetector";
+} from "../../parts/failureDetectorSpec";
 import { dot } from "../../timeline";
 import type { PartKindDef } from "../registry";
 import { sideGates } from "./common";
@@ -23,21 +23,21 @@ const initial = () => ({
   } as FailureDetectorExtra,
 });
 type ProtocolState = ReturnType<typeof initial>;
+
 export const failureDetectorPart: PartKindDef<
   Record<string, unknown>,
   ProtocolState
 > = {
   kind: "failure detector",
-  job: failureDetectorMachine.part.job,
+  job: failureDetectorSpec.job,
   family: "distributed systems",
   footprint: "L",
-  bb: failureDetectorMachine.bb,
-  status: failureDetectorMachine.status,
+  bb: failureDetectorSpec.bb,
+  status: failureDetectorSpec.status,
   props: {},
   ports,
   gates: () => sideGates(ports),
   init: initial,
-  draw: (t, p) => failureDetectorMachine.draw(t, p.state.extra),
   verbs: {
     heartbeat: {
       duration: 0.5,

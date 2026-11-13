@@ -11,25 +11,29 @@ import { defineConfig } from "vite";
 const guiRoot = fileURLToPath(new URL(".", import.meta.url));
 const flowDir = `${guiRoot}src/components/MachineDiagram/flow`;
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   configFile: false,
   root: guiRoot,
   logLevel: "warn",
   define: { "process.env.NODE_ENV": JSON.stringify("production") },
   esbuild: { jsx: "automatic", legalComments: "none" },
-  plugins: [
-    {
-      // Evidence renderers pull in the app's query client, stores and Tauri
-      // bindings; validation never renders, so swap in an empty table.
-      name: "headless-attachment-renderers",
-      enforce: "pre",
-      resolveId(source, importer) {
-        if (source === "./attachmentRenderers" && importer?.startsWith(flowDir))
-          return `${flowDir}/headlessAttachmentRenderers.ts`;
-        return null;
-      },
-    },
-  ],
+  // The freshness test inspects Rollup's complete graph, including modules
+  // removed by tree shaking, so presentation imports cannot silently return.
+  plugins:
+    mode === "module-graph"
+      ? [
+          {
+            name: "validator-module-graph",
+            generateBundle() {
+              this.emitFile({
+                type: "asset",
+                fileName: "modules.json",
+                source: JSON.stringify([...this.getModuleIds()].sort()),
+              });
+            },
+          },
+        ]
+      : [],
   build: {
     outDir: `${guiRoot}../cli/assets`,
     emptyOutDir: false,
@@ -44,4 +48,4 @@ export default defineConfig({
       fileName: () => "flow-validator.js",
     },
   },
-});
+}));

@@ -11,14 +11,14 @@ import {
   type FitInsets,
 } from "../MachineDiagramViewport";
 import { MachinePart } from "../MachinePart";
+import { Wire } from "../Rail";
 import { RailCards } from "../RailCards";
 import { SvgText } from "../SvgText";
-import { Wire } from "../Rail";
+import type { DiagramPart, DiagramRail, DiagramTimeline } from "./compile";
+import { useFlowDrawings } from "./drawings";
 import { DrillMark } from "./DrillMark";
 import { nameLabelLocal, regionLabelAt } from "./extent";
 import { FlowBand } from "./FlowBand";
-import { useFlowRegistry } from "./registryContext";
-import type { DiagramPart, DiagramRail, DiagramTimeline } from "./compile";
 import {
   morphEase,
   morphLayers,
@@ -26,7 +26,6 @@ import {
   railDiffers,
   type DiagramMorph,
 } from "./morph";
-import type { FlowRegistry } from "./registry";
 
 /**
  * Smallest flow frame: room for the floating beats list and controls (the
@@ -82,7 +81,6 @@ export const FlowDiagram = memo(function FlowDiagram({
   overlayRef,
   fitInsets,
 }: FlowDiagramProps) {
-  const registry = useFlowRegistry();
   const e = morph ? morphEase(morph.progress) : undefined;
   const fromPart = new Map(morph?.from.parts.map((p) => [p.id, p]));
   const fromRail = new Map(morph?.from.rails.map((r) => [r.id, r]));
@@ -148,7 +146,6 @@ export const FlowDiagram = memo(function FlowDiagram({
                   part={p}
                   t={t}
                   arrangement={d.arrangement}
-                  registry={registry}
                   reducedMotion={reducedMotion}
                   markMorph={layers.morphing ? e : undefined}
                 />
@@ -160,7 +157,6 @@ export const FlowDiagram = memo(function FlowDiagram({
                     part={from!}
                     t={morph!.t}
                     arrangement={morph!.from.arrangement}
-                    registry={registry}
                     reducedMotion={reducedMotion}
                     leaving
                   />
@@ -263,7 +259,6 @@ function PartView({
   part: p,
   t,
   arrangement,
-  registry,
   reducedMotion,
   markMorph,
   leaving,
@@ -271,12 +266,12 @@ function PartView({
   part: DiagramPart;
   t: number;
   arrangement: string;
-  registry: FlowRegistry;
   reducedMotion?: boolean;
   markMorph?: number;
   /** The morph's leaving copy: no `data-part-id`, so lookups find the live part. */
   leaving?: boolean;
 }) {
+  const drawings = useFlowDrawings();
   return (
     <MachinePart
       id={leaving ? undefined : p.id}
@@ -296,7 +291,9 @@ function PartView({
       activationHint={p.drill && !leaving ? DRILL_HINT : undefined}
     >
       {(frame) => {
-        const draw = registry.parts.get(p.kind)?.draw;
+        const draw = Object.prototype.hasOwnProperty.call(drawings, p.kind)
+          ? drawings[p.kind]
+          : undefined;
         return (
           <>
             {draw ? (

@@ -1,25 +1,18 @@
 import { Burst, PartBox, Ring } from "../fixtures";
-import type { LampStep } from "../geometry";
-import { type StateRole } from "../palette";
 import { Rail } from "../Rail";
 import type { Point } from "../route";
 import { card, dot, note, seal, story, type StoryDraft } from "../timeline";
-import {
-  NodeLamp,
-  Tiles,
-  tileSpec as TL,
-  type TileSpec,
-} from "./distributedFixtures";
+import { NodeLamp, Tiles, tileSpec as TL } from "./distributedFixtures";
 import { FadedText } from "./draw";
+import {
+  serviceRegistrySpec,
+  type ServiceRegistryExtra,
+} from "./serviceRegistrySpec";
 import type { MachinePartDef, PartScenario } from "./types";
 
+export type { ServiceRegistryExtra } from "./serviceRegistrySpec";
+
 /** Gallery reference scenarios; fixtures are evaluated only from frame time. */
-export interface ServiceRegistryExtra {
-  lamps: LampStep[][];
-  rings: [number, number, number, StateRole][];
-  crash: number | null;
-  tl: TileSpec[];
-}
 const NAMES = [
   "resolves",
   "stale entry · dead address",
@@ -158,16 +151,17 @@ function serviceRegistryStory(
   note(S, 3.95, "call s1 · ok", "green");
   return done();
 }
+
 export const serviceRegistryMachine: MachinePartDef<ServiceRegistryExtra> = {
   part: {
     name: "service registry",
-    job: "maps names to addresses",
+    job: serviceRegistrySpec.job,
     aka: "service discovery \u00b7 DNS \u00b7 Consul \u00b7 etcd",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [40, 90, 550, 240],
-  status: { x: 300, y: 350 },
+  bb: serviceRegistrySpec.bb,
+  status: serviceRegistrySpec.status,
   scenarios: [
     serviceRegistryStory(0),
     serviceRegistryStory(1),

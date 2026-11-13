@@ -1,32 +1,17 @@
 import { Bar, Hole, PartBox, Ring } from "../fixtures";
-import type { LampStep } from "../geometry";
 import { valueAt, windowed } from "../motion";
-import { roleColor, type CardRole } from "../palette";
+import { roleColor } from "../palette";
 import { Rail } from "../Rail";
 import type { Point } from "../route";
-import {
-  card,
-  gateV,
-  note,
-  seal,
-  story,
-  type StatusNote,
-  type StoryDraft,
-} from "../timeline";
-import { NodeLamp, Readout, type RingEvent } from "./distributedFixtures";
+import { card, gateV, note, seal, story, type StoryDraft } from "../timeline";
+import { NodeLamp, Readout } from "./distributedFixtures";
 import { FadedText } from "./draw";
+import { fencingTokenSpec, type FencingTokenExtra } from "./fencingTokenSpec";
 import type { MachinePartDef, PartScenario } from "./types";
 
+export type { FencingTokenExtra } from "./fencingTokenSpec";
+
 /** Gallery reference scenarios; fixtures are evaluated only from frame time. */
-export interface FencingTokenExtra {
-  tok: StatusNote[][];
-  cl: LampStep[][];
-  max: StatusNote[];
-  rings: RingEvent[];
-  data: [number, CardRole][];
-  nocheck: boolean;
-  pause: [number, number] | null;
-}
 const NAMES = [
   "accepted",
   "zombie · stale token rejected",
@@ -145,16 +130,17 @@ function fencingTokenStory(index: number): PartScenario<FencingTokenExtra> {
   note(S, 1.95, "34 ≥ 33 · accepted", "green");
   return done();
 }
+
 export const fencingTokenMachine: MachinePartDef<FencingTokenExtra> = {
   part: {
     name: "fencing token",
-    job: "stops a stale holder writing",
+    job: fencingTokenSpec.job,
     aka: "epoch \u00b7 generation \u00b7 term check",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [40, 150, 550, 160],
-  status: { x: 320, y: 340 },
+  bb: fencingTokenSpec.bb,
+  status: fencingTokenSpec.status,
   scenarios: [fencingTokenStory(0), fencingTokenStory(1), fencingTokenStory(2)],
   draw: (t, S) => (
     <>

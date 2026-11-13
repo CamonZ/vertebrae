@@ -4,25 +4,11 @@ import type { StateRole } from "../palette";
 import { Rail } from "../Rail";
 import { StatusLine } from "../StatusLine";
 import { SvgText } from "../SvgText";
-import {
-  card,
-  dot,
-  gateV,
-  note,
-  seal,
-  statusAt,
-  story,
-  type StatusNote,
-} from "../timeline";
+import { card, dot, gateV, note, seal, statusAt, story } from "../timeline";
+import { twoPhaseCommitSpec, type TwoPhaseExtra } from "./twoPhaseCommitSpec";
 import type { MachinePartDef, PartScenario } from "./types";
 
-export interface TwoPhaseExtra {
-  readonly lamps: readonly (readonly LampStep[])[];
-  readonly rings: readonly (readonly [number, number, StateRole])[];
-  readonly phase: readonly StatusNote[];
-  readonly crash: number | null;
-  readonly spin: readonly [number, number] | null;
-}
+export type { TwoPhaseExtra } from "./twoPhaseCommitSpec";
 
 const PARTICIPANTS = [110, 200, 290] as const;
 
@@ -156,13 +142,13 @@ function twoPhaseStory(
 export const twoPhaseCommitMachine: MachinePartDef<TwoPhaseExtra> = {
   part: {
     name: "two-phase commit",
-    job: "all commit or none do",
+    job: twoPhaseCommitSpec.job,
     aka: "2PC · XA · atomic commit",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [70, 84, 500, 232],
-  status: { x: 320, y: 346 },
+  bb: twoPhaseCommitSpec.bb,
+  status: twoPhaseCommitSpec.status,
   scenarios: [
     twoPhaseStory("commits"),
     twoPhaseStory("one votes no · abort"),

@@ -1,3 +1,8 @@
+/* eslint-disable react-refresh/only-export-components -- typed geometry and fixtures share one responsibility */
+import { shardRingSpec, type ShardRingExtra } from "./shardRingSpec";
+
+export type { ShardRingExtra } from "./shardRingSpec";
+
 /* eslint-disable react-refresh/only-export-components -- part definitions and their fixtures are shared as data */
 import { Bar, Lamp } from "../fixtures";
 import { arcPath } from "../geometry";
@@ -10,13 +15,6 @@ import { FadedText } from "./draw";
 import type { MachinePartDef, PartScenario } from "./types";
 
 /** Gallery reference scenarios; fixtures are evaluated only from frame time. */
-export interface ShardRingExtra {
-  nodes: [string, number, number][];
-  load: Record<string, [number, number][]>;
-  pulse: [string, number][];
-  arc: [number, number] | null;
-  red: number | null;
-}
 const RC = [230, 205] as const,
   RR = 95;
 const NAMES = ["key routed", "hot shard", "node added · keys move"] as const;
@@ -109,16 +107,17 @@ function shardRingStory(index: number): PartScenario<ShardRingExtra> {
   note(S, 3.9, "next node clockwise owns it", "green");
   return done();
 }
+
 export const shardRingMachine: MachinePartDef<ShardRingExtra> = {
   part: {
     name: "shard ring",
-    job: "maps each key to one node",
+    job: shardRingSpec.job,
     aka: "consistent hash \u00b7 partitioner \u00b7 shard map",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [120, 95, 500, 220],
-  status: { x: 320, y: 346 },
+  bb: shardRingSpec.bb,
+  status: shardRingSpec.status,
   scenarios: [shardRingStory(0), shardRingStory(1), shardRingStory(2)],
   draw: (t, S) => <ShardRingDrawing t={t} S={S} />,
 };

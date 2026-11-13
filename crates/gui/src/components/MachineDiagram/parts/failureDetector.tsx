@@ -1,30 +1,19 @@
 import { Burst, Hole, PartBox } from "../fixtures";
-import type { LampStep } from "../geometry";
 import { windowed } from "../motion";
 import { type CardRole } from "../palette";
 import { Rail } from "../Rail";
-import {
-  dot,
-  gateV,
-  note,
-  seal,
-  story,
-  type StatusNote,
-  type StoryDraft,
-} from "../timeline";
+import { dot, gateV, note, seal, story, type StoryDraft } from "../timeline";
 import { Fuse, NodeLamp, Readout } from "./distributedFixtures";
 import { FadedText } from "./draw";
+import {
+  failureDetectorSpec,
+  type FailureDetectorExtra,
+} from "./failureDetectorSpec";
 import type { MachinePartDef, PartScenario } from "./types";
 
+export type { FailureDetectorExtra } from "./failureDetectorSpec";
+
 /** Gallery reference scenarios; fixtures are evaluated only from frame time. */
-export interface FailureDetectorExtra {
-  beats: number[];
-  node: LampStep[];
-  vd: StatusNote[];
-  vl: LampStep[];
-  crash: number | null;
-  pause: [number, number] | null;
-}
 const NAMES = [
   "alive",
   "missed beats · declared dead",
@@ -104,16 +93,17 @@ function failureDetectorStory(
   note(S, 3.95, "late beat · false positive", "amber");
   return done();
 }
+
 export const failureDetectorMachine: MachinePartDef<FailureDetectorExtra> = {
   part: {
     name: "failure detector",
-    job: "decides who is dead",
+    job: failureDetectorSpec.job,
     aka: "heartbeat \u00b7 phi accrual \u00b7 liveness probe",
   },
   family: "distributed systems",
   footprint: "L",
-  bb: [70, 130, 520, 140],
-  status: { x: 320, y: 330 },
+  bb: failureDetectorSpec.bb,
+  status: failureDetectorSpec.status,
   scenarios: [
     failureDetectorStory(0),
     failureDetectorStory(1),
