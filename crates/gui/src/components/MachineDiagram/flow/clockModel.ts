@@ -3,9 +3,11 @@
  * it actions (controls, keyboard, animation frames); every rule about where
  * the clock lands lives here, so it can be checked without React or timers.
  *
- * Playback either loops at the period or plays once: it stops on the last
- * beat's outcome, and playing again from there starts over. Playing a single
- * beat (a chapter) animates it from its start and stops on its outcome.
+ * Opening a flow, stepping or jumping to a beat lands paused on that beat's
+ * start, so Play animates the beat being shown. Playback either loops at the
+ * period or plays once: it stops on the last beat's outcome, and playing
+ * again from there starts over. Playing a single beat (a chapter) animates it
+ * from its start and stops on its outcome.
  *
  * `raw` is the running position on the timeline. What is drawn is
  * `shownTime`: `raw` itself, or under reduced motion the outcome of the beat
@@ -36,11 +38,11 @@ export type ClockAction =
   | { readonly type: "play" }
   | { readonly type: "pause" }
   | { readonly type: "toggle" }
-  /** Previous/next beat, wrapping at the ends; pauses on its outcome. */
+  /** Previous/next beat, wrapping at the ends; pauses on its start. */
   | { readonly type: "step"; readonly dir: 1 | -1 }
   /** One frame back/forward; pauses. A beat step under reduced motion. */
   | { readonly type: "frame"; readonly dir: 1 | -1 }
-  /** Jump to a beat; pauses on its outcome. */
+  /** Jump to a beat; pauses on its start. */
   | { readonly type: "seek"; readonly beat: number }
   /**
    * Play one beat (a chapter): from its start to its outcome, then pause.
@@ -61,7 +63,7 @@ export function beatOutcome(tl: Timeline, i: number): number {
 }
 
 /** Start time of beat `i` (clamped; 0 without beats). */
-function beatStart(tl: Timeline, i: number): number {
+export function beatStart(tl: Timeline, i: number): number {
   const beats = tl.beats ?? [];
   if (beats.length === 0) return 0;
   return beats[Math.max(0, Math.min(beats.length - 1, i))].t;
@@ -76,10 +78,10 @@ export function playEnd(tl: Timeline): number {
   return beatOutcomeTime(tl, tl.period);
 }
 
-/** The clock at rest on the first beat's outcome, set to play once. */
+/** The clock at rest on the first beat's start, set to play once. */
 export function initialClock(tl: Timeline): ClockState {
   return {
-    raw: beatOutcome(tl, 0),
+    raw: beatStart(tl, 0),
     playing: false,
     speed: 1,
     loop: false,
@@ -118,7 +120,7 @@ function stepBeat(
   if (n === 0) return s;
   const i = shownBeat(tl, s, reduced);
   const next = dir === 1 ? (i + 1 >= n ? 0 : i + 1) : i - 1 < 0 ? n - 1 : i - 1;
-  return rest(s, beatOutcome(tl, next));
+  return rest(s, beatStart(tl, next));
 }
 
 /** Paused at `raw`. */
@@ -162,7 +164,7 @@ export function clockStep(
       return rest(s, wrap(s.raw + a.dir * FRAME, tl.period));
     case "seek":
       if (n === 0 || !Number.isFinite(a.beat)) return s;
-      return rest(s, beatOutcome(tl, Math.trunc(a.beat)));
+      return rest(s, beatStart(tl, Math.trunc(a.beat)));
     case "playBeat": {
       if (n === 0 || !Number.isFinite(a.beat)) return s;
       const i = Math.trunc(a.beat);
@@ -208,9 +210,10 @@ export function sameBeat(from: Timeline, to: Timeline, i: number): number {
 
 /**
  * The clock moved onto another arrangement's timeline: keep the story beat
- * (see `sameBeat`), landing on its outcome (its start while playing under
- * reduced motion, so the beat is held in full). A beat being played on its
- * own stops on the new arrangement's outcome of that beat.
+ * (see `sameBeat`). Paused, it lands on that beat's start, as a seek does;
+ * playing, on its outcome, so playback carries on into the next beat (its
+ * start under reduced motion, so the beat is held in full). A beat being
+ * played on its own stops on the new arrangement's outcome of that beat.
  */
 export function retarget(
   from: Timeline,
@@ -224,7 +227,7 @@ export function retarget(
   if (s.until !== null) return rest(s, beatOutcome(to, j));
   return {
     ...s,
-    raw: reduced && s.playing ? beatStart(to, j) : beatOutcome(to, j),
+    raw: s.playing && !reduced ? beatOutcome(to, j) : beatStart(to, j),
   };
 }
 

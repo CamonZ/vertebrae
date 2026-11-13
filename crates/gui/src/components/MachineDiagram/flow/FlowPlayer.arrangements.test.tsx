@@ -116,7 +116,8 @@ describe("the arrangement selector", () => {
     expect(shown()).toBe("B");
     expect(player()).toHaveAttribute("data-morph", "A→B");
     expect(shownBeat()).toBe(1);
-    expect(shownT()).toBe(beatOutcome(arrangement(flow, "B")!.travel, 1));
+    // Paused, the switch lands on the beat's start, as a seek does.
+    expect(shownT()).toBe(arrangement(flow, "B")!.travel.beats![1].t);
     act(() => player().focus());
     key("b");
     expect(shown()).toBe("current");
@@ -130,6 +131,9 @@ describe("the arrangement selector", () => {
 
   it("keeps the pinned part and the followed card across arrangements", () => {
     renderPlayer();
+    // j1 is drawn once the first beat has played out.
+    key("2");
+    key(",");
     fireEvent.click(part("api")!);
     fireEvent.click(
       player().querySelector(".md-card[data-card-id='j1']") as SVGGElement

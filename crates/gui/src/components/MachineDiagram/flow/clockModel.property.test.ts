@@ -17,6 +17,7 @@ import {
   MAX_FRAME_DT,
   SPEEDS,
   beatOutcome,
+  beatStart,
   clockStep,
   initialClock,
   nextSpeed,
@@ -79,6 +80,14 @@ const timeline = gs.oneOf(gs.sampledFrom(FIXTURES), generatedTimeline);
 const outcomes = (tl: Timeline) =>
   (tl.beats ?? []).map((_, i) => beatOutcome(tl, i));
 
+/**
+ * What a landing on beat `i` (opening, step, seek, a paused switch) draws:
+ * the beat's start, so Play animates it; its outcome under reduced motion,
+ * which only ever draws settled beats.
+ */
+const landing = (tl: Timeline, i: number, reduced: boolean) =>
+  reduced ? beatOutcome(tl, i) : beatStart(tl, i);
+
 /** Forward distance from `a` to `b` around a loop of `period`. */
 const forward = (a: number, b: number, period: number) =>
   (((b - a) % period) + period) % period;
@@ -105,9 +114,10 @@ const beat = (m: Machine) => shownBeat(m.tl, m.s, m.reduced);
 function landedOnBeat(m: Machine, s: ClockState, want: number, what: string) {
   check(!s.playing, `${what} left the clock playing`);
   const at = shownTime(m.tl, s, m.reduced);
+  const expected = landing(m.tl, want, m.reduced);
   check(
-    at === beatOutcome(m.tl, want),
-    `${what}: expected beat ${want}'s outcome ${beatOutcome(m.tl, want)}, got ${at}`
+    at === expected,
+    `${what}: expected beat ${want} at ${expected}, got ${at}`
   );
   check(shownBeat(m.tl, s, m.reduced) === want, `${what}: wrong beat index`);
 }
@@ -183,7 +193,12 @@ const clockMachine: hegel.stateful.StateMachine<Machine> = {
       const end = beatOutcome(m.tl, want);
       if (m.reduced || !(end > start)) {
         // Nothing to animate: a plain jump to the beat's outcome.
-        landedOnBeat(m, next, want, "playing a beat under reduced motion");
+        check(!next.playing, "playing an empty beat left the clock playing");
+        check(
+          shownTime(m.tl, next, m.reduced) === end,
+          `playing beat ${want} without motion drew ${shownTime(m.tl, next, m.reduced)}, not ${end}`
+        );
+        check(shownBeat(m.tl, next, m.reduced) === want, "wrong beat index");
       } else {
         check(next.playing, "playing a beat did not start playback");
         check(
@@ -380,8 +395,8 @@ test("the clock obeys the player's rules under any sequence of actions", async (
       const s = initialClock(tl);
       if ((tl.beats?.length ?? 0) > 0)
         check(
-          shownTime(tl, s, reduced) === beatOutcome(tl, 0),
-          "the clock does not start on the first beat's outcome"
+          shownTime(tl, s, reduced) === landing(tl, 0, reduced),
+          "the clock does not start on the first beat's start"
         );
       check(!s.playing, "the clock starts playing");
       hegel.stateful.run(tc, clockMachine, { tl, s, reduced });
@@ -452,11 +467,15 @@ test("switching arrangement keeps the story beat", () =>
       `beat ${i} became ${shownBeat(b, moved, reduced)}`
     );
     check(moved.playing === playing, "switching changed playback");
-    if (!(reduced && playing))
-      check(
-        shownTime(b, moved, reduced) === beatOutcome(b, want),
-        "switching did not land on the beat's outcome"
-      );
+    // Paused, a switch lands like a seek; playing, it carries on from the
+    // beat's outcome (held from its start under reduced motion).
+    check(
+      shownTime(b, moved, reduced) ===
+        (playing && !reduced
+          ? beatOutcome(b, want)
+          : landing(b, want, reduced)),
+      "switching did not land where a seek would"
+    );
     check(Math.abs(moved.raw) < b.period + EPS, "raw outside the new loop");
   }));
 
@@ -529,6 +548,66 @@ test("playing once always ends on the last beat, and plays again from the start"
     check(
       shownTime(tl, again, reduced) <= shownTime(tl, s, reduced),
       "playing again did not start over"
+    );
+  }));
+
+test("play after any landing animates the landed beat from its start", () =>
+  hegel.test((tc) => {
+    const tl = tc.draw(timeline);
+    const n = tl.beats?.length ?? 0;
+    tc.assume(n > 0);
+    const base = {
+      ...initialClock(tl),
+      speed: tc.draw(gs.sampledFrom(SPEEDS)),
+    };
+    const how = tc.draw(
+      gs.sampledFrom(["open", "seek", "next", "back", "home", "end"] as const)
+    );
+    const to = tc.draw(gs.integers({ minValue: 0, maxValue: n - 1 }));
+    const from = clockStep(tl, base, { type: "seek", beat: to }, false);
+    const landed =
+      how === "open"
+        ? base
+        : how === "seek"
+          ? from
+          : how === "next"
+            ? clockStep(tl, from, { type: "step", dir: 1 }, false)
+            : how === "back"
+              ? clockStep(tl, from, { type: "step", dir: -1 }, false)
+              : clockStep(
+                  tl,
+                  base,
+                  { type: "seek", beat: how === "home" ? 0 : n - 1 },
+                  false
+                );
+    const i = shownBeat(tl, landed, false);
+    const start = tl.beats![i].t;
+    const end = beatOutcome(tl, i);
+    check(landed.raw === start, `${how} landed on ${landed.raw}, not ${start}`);
+    let s = clockStep(tl, landed, { type: "play" }, false);
+    check(s.playing, "play did not start");
+    // Small ticks pass through the whole beat, from its start, before the next.
+    const dt = 0.005;
+    const drawn = [shownTime(tl, s, false)];
+    const limit = Math.ceil((end - start) / (dt * s.speed)) + 2;
+    for (let k = 0; s.playing && k < limit && s.raw < end; k++) {
+      s = clockStep(tl, s, { type: "tick", dt }, false);
+      drawn.push(shownTime(tl, s, false));
+    }
+    check(drawn[0] === start, `play began at ${drawn[0]}, not ${start}`);
+    for (const t of drawn.filter((t) => t < end))
+      check(
+        shownBeat(tl, { ...s, raw: t }, false) === i,
+        "left the beat early"
+      );
+    for (let k = 1; k < drawn.length; k++)
+      check(
+        drawn[k] - drawn[k - 1] <= dt * s.speed + EPS,
+        `skipped ${drawn[k - 1]} → ${drawn[k]} inside beat ${i}`
+      );
+    check(
+      drawn[drawn.length - 1] >= end - EPS || !s.playing,
+      "never reached the beat's outcome"
     );
   }));
 

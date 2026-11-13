@@ -14,7 +14,7 @@ import {
 export { beatOutcome } from "./clockModel";
 
 export interface FlowClock {
-  /** The time to draw: a beat outcome under reduced motion and after beat steps and chapter jumps. */
+  /** The time to draw: a beat outcome under reduced motion and after a chapter plays. */
   readonly t: number;
   readonly playing: boolean;
   /** Index of the beat showing at `t` (-1 before the first). */
@@ -33,7 +33,7 @@ export interface FlowClock {
   /** One frame forward/back (a beat under reduced motion); pauses. */
   frameForward(): void;
   frameBack(): void;
-  /** Jump to beat `i` and pause on its outcome. */
+  /** Jump to beat `i` and pause on its start. */
   seek(i: number): void;
   /** Play beat `i` (a chapter) from its start, pausing on its outcome; a jump under reduced motion. */
   playBeat(i: number): void;
@@ -49,9 +49,9 @@ export interface FlowClockOptions {
 /**
  * Playback clock for a flow diagram, driven by requestAnimationFrame. The
  * rules live in the pure model (clockModel.ts): starts paused on the first
- * beat's outcome; play runs once to the last beat's outcome, or loops at the
+ * beat's start; play runs once to the last beat's outcome, or loops at the
  * timeline's period, at the chosen speed;
- * beat steps pause on a beat's outcome, wrapping at the ends; a chapter
+ * beat steps and jumps pause on a beat's start, wrapping at the ends; a chapter
  * plays just its beat and pauses on the outcome; frame steps pause one frame away. Under reduced motion only beat
  * outcomes are shown. When `tl` changes (another arrangement) the story beat is kept.
  */

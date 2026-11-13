@@ -45,6 +45,7 @@ const compiled = compileFlowOrThrow(parsed.value);
 const after = arrangement(compiled, "after")!;
 const before = arrangement(compiled, "before")!;
 const afterOutcomes = after.beats.map((_, i) => beatOutcome(after.travel, i));
+const afterStarts = after.beats.map((b) => b.t);
 
 /** A spec without change marks: one arrangement, no toggle. */
 const plainSpec = `
@@ -218,7 +219,8 @@ describe("flow playback", () => {
     mockReducedMotion(false);
     renderFlow(inlineDiscussions);
     const start = shownT();
-    expect(start).toBeCloseTo(afterOutcomes[0], 9);
+    // Opens on beat 1's start, so Play animates beat 1.
+    expect(start).toBe(afterStarts[0]);
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
     act(() => vi.advanceTimersByTime(500));
     const playing = shownT();
@@ -228,7 +230,7 @@ describe("flow playback", () => {
     expect(shownT()).toBe(playing);
   });
 
-  it("steps land exactly on beat outcomes and wrap at both ends", () => {
+  it("steps land exactly on beat starts and wrap at both ends", () => {
     mockReducedMotion(false);
     renderFlow(inlineDiscussions);
     const next = screen.getByRole("button", { name: "Next beat" });
@@ -236,27 +238,27 @@ describe("flow playback", () => {
     const n = after.beats.length;
     for (let i = 1; i < n; i++) {
       fireEvent.click(next);
-      expect(shownT()).toBe(afterOutcomes[i]);
+      expect(shownT()).toBe(afterStarts[i]);
       expect(shownBeat()).toBe(i);
     }
     fireEvent.click(next);
-    expect(shownT()).toBe(afterOutcomes[0]);
+    expect(shownT()).toBe(afterStarts[0]);
     fireEvent.click(prev);
-    expect(shownT()).toBe(afterOutcomes[n - 1]);
+    expect(shownT()).toBe(afterStarts[n - 1]);
     fireEvent.click(prev);
-    expect(shownT()).toBe(afterOutcomes[n - 2]);
+    expect(shownT()).toBe(afterStarts[n - 2]);
   });
 
-  it("stepping while playing pauses on the next beat's outcome", () => {
+  it("stepping while playing pauses on the next beat's start", () => {
     mockReducedMotion(false);
     renderFlow(inlineDiscussions);
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
     act(() => vi.advanceTimersByTime(300));
     const showing = shownBeat();
-    expect(shownT()).not.toBe(afterOutcomes[showing]);
+    expect(shownT()).not.toBe(afterStarts[showing]);
     fireEvent.click(screen.getByRole("button", { name: "Next beat" }));
     expect(player()).toHaveAttribute("data-playing", "false");
-    expect(shownT()).toBe(afterOutcomes[showing + 1]);
+    expect(shownT()).toBe(afterStarts[showing + 1]);
   });
 
   it("under reduced motion, play advances beat by beat and only shows outcomes", () => {
@@ -297,6 +299,6 @@ describe("flow playback", () => {
     // After's 4th beat (the denied edit) has no Before caption: Before
     // still shows Q2, its 3rd beat.
     expect(shownBeat()).toBe(2);
-    expect(shownT()).toBe(beatOutcome(before.travel, 2));
+    expect(shownT()).toBe(before.travel.beats![2].t);
   });
 });
