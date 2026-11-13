@@ -47,6 +47,7 @@ import {
   REGION_PAD,
   partExtentLocal,
   railLabelText,
+  regionLabels,
   pad,
   textWidth,
   union,
@@ -512,6 +513,43 @@ async function layoutLevel(
     };
     routedReturns.push(r);
     lane += LANE_STEP;
+  }
+
+  /* region names: a rail label ELK (or a lane) put on one moves to a clear
+     run of its own rail */
+  const regionNames = first.regions.flatMap((g) => {
+    const box = pad(
+      union(g.parts.filter((p) => nodes.has(p)).map(extentOf)),
+      REGION_PAD,
+      REGION_HEAD
+    );
+    return regionLabels({
+      ...g,
+      x: box.x0,
+      y: box.y0,
+      width: box.x1 - box.x0,
+      height: box.y1 - box.y0,
+    });
+  });
+  for (const [id, route] of Object.entries(routes)) {
+    const text = labelOf(id);
+    if (!text || !route.labelAt) continue;
+    const box = labelBox(route.labelAt, text);
+    if (!regionNames.some((n) => crosses(box, n))) continue;
+    const labelAt = labelOnRoute(route.points, text, [
+      ...extents,
+      ...regionNames,
+      ...Object.entries(routes)
+        .filter(([other]) => other !== id)
+        .flatMap(([other, q]) => {
+          const label = labelOf(other);
+          return [
+            ...segments(q.points).map(segmentBox),
+            ...(label && q.labelAt ? [labelBox(q.labelAt, label)] : []),
+          ];
+        }),
+    ]);
+    if (labelAt) routes[id] = { ...route, labelAt };
   }
   return keptOnCanvas(positions, routes, extents, labelOf);
 }
