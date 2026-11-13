@@ -236,6 +236,76 @@ pub struct LocalChatCompactionEvent {
     pub pre_tokens: Option<u32>,
 }
 
+/// Not tied to the foreground turn: it can arrive between turns.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
+pub struct LocalChatBackgroundWorkEvent {
+    pub backend_session_id: String,
+    pub harness: LocalChatHarnessKind,
+    pub event_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub thread_id: Option<String>,
+    pub work_id: String,
+    pub generation: u32,
+    /// `command` or `other`.
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub provider_kind: Option<String>,
+    /// `running`, `completed`, `failed`, `cancelled` or `unknown`.
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub progress: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub launch_tool_id: Option<String>,
+    /// RFC 3339.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub started_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub finished_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub error: Option<String>,
+    /// RFC 3339.
+    pub observed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
+pub struct LocalChatBackgroundRosterEntry {
+    pub work_id: String,
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub provider_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub description: Option<String>,
+}
+
+/// Every background task the provider reports as running; replaces the last.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
+pub struct LocalChatBackgroundRosterEvent {
+    pub backend_session_id: String,
+    pub harness: LocalChatHarnessKind,
+    pub event_id: String,
+    /// Work first seen in this roster belongs to this turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub turn_id: Option<String>,
+    pub work: Vec<LocalChatBackgroundRosterEntry>,
+    pub observed_at: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum LocalChatEvent {
     Init(LocalChatSessionInitEvent),
@@ -250,6 +320,8 @@ pub(crate) enum LocalChatEvent {
     Error(LocalChatSessionErrorEvent),
     Warning(LocalChatSessionWarningEvent),
     Compaction(LocalChatCompactionEvent),
+    BackgroundWork(Box<LocalChatBackgroundWorkEvent>),
+    BackgroundRoster(LocalChatBackgroundRosterEvent),
     Annotation(LocalChatAnnotationEvent),
 }
 
@@ -269,6 +341,8 @@ impl LocalChatEvent {
             LocalChatEvent::Error(_) => "local-chat-session-error-event",
             LocalChatEvent::Warning(_) => "local-chat-session-warning-event",
             LocalChatEvent::Compaction(_) => "local-chat-compaction-event",
+            LocalChatEvent::BackgroundWork(_) => "local-chat-background-work-event",
+            LocalChatEvent::BackgroundRoster(_) => "local-chat-background-roster-event",
             LocalChatEvent::Annotation(_) => "local-chat-annotation-event",
         }
     }
@@ -360,6 +434,8 @@ impl LocalChatEventSink {
             LocalChatEvent::Error(payload) => payload.emit(app_handle),
             LocalChatEvent::Warning(payload) => payload.emit(app_handle),
             LocalChatEvent::Compaction(payload) => payload.emit(app_handle),
+            LocalChatEvent::BackgroundWork(payload) => payload.emit(app_handle),
+            LocalChatEvent::BackgroundRoster(payload) => payload.emit(app_handle),
             LocalChatEvent::Annotation(payload) => payload.emit(app_handle),
         };
         result.map_err(|error| error.to_string())

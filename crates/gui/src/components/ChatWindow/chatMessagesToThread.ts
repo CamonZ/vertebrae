@@ -315,6 +315,33 @@ export function chatMessagesToThread(
         continue;
       }
 
+      case "background_outcome": {
+        // Like task notifications, this keeps a trailing partial assistant
+        // message streaming.
+        openDraft().events.push({
+          kind: "background_work",
+          timestamp: m.timestamp,
+          update: {
+            eventId: `${m.workId}:${m.generation}:${m.status}`,
+            workId: m.workId,
+            generation: m.generation,
+            kind: m.workKind,
+            providerKind: null,
+            status: m.status,
+            description: m.description,
+            progress: m.summary,
+            launchToolId: m.launchToolId,
+            startedAt: null,
+            finishedAt: null,
+            error: m.error,
+            observedAt: m.timestamp,
+            turnId: null,
+            threadId: null,
+          },
+        });
+        continue;
+      }
+
       case "error":
       case "warning": {
         drafts.push({

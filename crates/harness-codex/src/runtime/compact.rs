@@ -14,7 +14,7 @@ impl SessionState {
             return Err(HarnessError::Operation("Codex session is closed".into()));
         }
         let connection = self.connection_for_turn().await?;
-        let mut notifications = connection.lock_notifications().await;
+        let mut notifications = self.claim_notifications(&connection).await;
         let mut closed = self.closed_rx.clone();
         let mut connection_closed = connection.closed.subscribe();
         let turn_id = TurnId::new(format!("{}:compact", self.root_session_id.as_str()));

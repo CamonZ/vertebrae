@@ -21,6 +21,8 @@ run_rust() {
   cargo llvm-cov --workspace --exclude gui --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75
   # The GUI crate is outside coverage; its Hegel property tests run here.
   cargo test --locked -p gui --lib local_chat::worktree_delta
+  # Background-work bridge mapping (harness event -> local chat event).
+  cargo test --locked -p gui --lib local_chat::harnesses::shared::tests::background_work_bridge
 }
 
 run_gui() {

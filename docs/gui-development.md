@@ -525,6 +525,33 @@ Only exact commands (with optional surrounding whitespace) are recognized in
 Codex chat. Arguments, autocomplete, custom prompts and commands in other
 harnesses are outside this implementation; other input retains normal chat behavior.
 
+### Background activity in local chat
+
+Provider-native background commands are normalized by the adapters into
+`background_work` updates and, where the provider has one, `background_roster`
+snapshots (`vertebrae-harness-core` `background.rs` defines the contract; the
+chat store's `stores/backgroundWork.ts` is the only projection). Subagents are not background work: they already appear
+with their threads in the threads panel. While a session has background work,
+the chat header shows a **Background tasks** toggle with the count of confirmed
+running commands. It opens a side panel in the same slot as Changes and
+Evidence, so opening one closes the others. The panel lists each command's
+description, latest provider progress and elapsed time when the provider
+reports a start. Terminal outcomes (completed, failed, cancelled, or ended
+without a reported outcome) become timeline rows. Background work never keeps
+the foreground reply streaming or blocks composition.
+
+The state is runtime-only. Replay never claims work is running now, and a lost
+or replaced backend connection marks earlier work *unconfirmed* rather than
+finished. No percentage, ETA or heartbeat is synthesized.
+
+Provider coverage: Claude reports `task_started`, `task_updated`,
+`task_notification` and `background_tasks_changed` for `local_bash` and
+`monitor` tasks; agent tasks are ignored. Codex App Server reports a
+backgrounded command as a `commandExecution` item that is still open when the
+turn completes; its `item/completed` carries the exit code and usually arrives
+between turns, so a Codex session keeps reading notifications while idle.
+Codex reports no progress for these commands.
+
 ### Claude compaction lifecycle
 
 Claude context compaction is exposed as lifecycle state, not as transcript

@@ -1,0 +1,132 @@
+[
+  {
+    "event": "local-chat-turn-started-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "codex",
+      "turn_id": "turn-1",
+      "thread_id": "root-thread",
+      "is_root": true
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "codex",
+      "event_id": "codex-2",
+      "turn_id": "turn-1",
+      "thread_id": "root-thread",
+      "work_id": "call-dev",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "commandExecution",
+      "status": "running",
+      "description": "npm run dev",
+      "launch_tool_id": "call-dev",
+      "started_at": "2027-01-15T08:00:01+00:00",
+      "observed_at": "2027-01-15T08:00:02+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "codex",
+      "event_id": "codex-3",
+      "turn_id": "turn-1",
+      "thread_id": "root-thread",
+      "work_id": "call-watch",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "commandExecution",
+      "status": "running",
+      "description": "cargo watch -x test",
+      "launch_tool_id": "call-watch",
+      "started_at": "2027-01-15T08:00:02+00:00",
+      "observed_at": "2027-01-15T08:00:03+00:00"
+    }
+  },
+  {
+    "event": "local-chat-session-end-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "codex",
+      "turn_id": "turn-1",
+      "thread_id": "root-thread",
+      "is_root": true,
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result": "",
+      "is_error": false,
+      "context_tokens": 0,
+      "context_window": 1000,
+      "completion_status": "completed"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "codex",
+      "event_id": "codex-5",
+      "thread_id": "root-thread",
+      "work_id": "call-dev",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "commandExecution",
+      "status": "completed",
+      "launch_tool_id": "call-dev",
+      "finished_at": "2027-01-15T08:01:00+00:00",
+      "observed_at": "2027-01-15T08:00:05+00:00"
+    }
+  },
+  {
+    "event": "local-chat-turn-started-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "codex",
+      "turn_id": "turn-2",
+      "thread_id": "root-thread",
+      "is_root": true
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "codex",
+      "event_id": "codex-7",
+      "turn_id": "turn-2",
+      "thread_id": "root-thread",
+      "work_id": "call-watch",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "commandExecution",
+      "status": "failed",
+      "launch_tool_id": "call-watch",
+      "finished_at": "2027-01-15T08:01:10+00:00",
+      "error": "exit code 1",
+      "observed_at": "2027-01-15T08:00:07+00:00"
+    }
+  },
+  {
+    "event": "local-chat-session-end-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "codex",
+      "turn_id": "turn-2",
+      "thread_id": "root-thread",
+      "is_root": true,
+      "duration_ms": 0,
+      "cost_usd": 0.0,
+      "num_turns": 0,
+      "result": "",
+      "is_error": false,
+      "context_tokens": 0,
+      "context_window": 1000,
+      "completion_status": "completed"
+    }
+  }
+]

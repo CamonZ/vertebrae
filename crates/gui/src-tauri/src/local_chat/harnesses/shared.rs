@@ -16,6 +16,7 @@ use vertebrae_harness_core::{
 
 use crate::local_chat::worktree_delta::RecordingTap;
 use crate::local_chat::{
+    LocalChatBackgroundRosterEntry, LocalChatBackgroundRosterEvent, LocalChatBackgroundWorkEvent,
     LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
     LocalChatFileChangeEvent, LocalChatHarnessKind, LocalChatRuntime, LocalChatSessionEndEvent,
     LocalChatSessionErrorEvent, LocalChatSessionInitEvent, LocalChatSessionTitleEvent,
@@ -219,6 +220,8 @@ impl EventSink for LocalChatHarnessEventSink {
             .as_ref()
             .map(ToString::to_string);
         let item_id = event.correlation.item_id.as_ref().map(ToString::to_string);
+        let event_id = event.event_id.to_string();
+        let observed_at = event.timestamp.to_rfc3339();
         self.recording.forward(
             &event.payload,
             event.semantics,
@@ -479,6 +482,50 @@ impl EventSink for LocalChatHarnessEventSink {
                     warning: value.message,
                 }))?;
             }
+            HarnessEventPayloadV1::BackgroundWork(work) => {
+                self.emit_local(LocalChatEvent::BackgroundWork(Box::new(
+                    LocalChatBackgroundWorkEvent {
+                        backend_session_id,
+                        harness,
+                        event_id,
+                        turn_id,
+                        thread_id,
+                        work_id: work.work_id.to_string(),
+                        generation: work.generation,
+                        kind: wire_name(work.kind),
+                        provider_kind: work.provider_kind,
+                        status: wire_name(work.status),
+                        description: work.description,
+                        progress: work.progress,
+                        launch_tool_id: work.launch_tool_call_id.map(|id| id.to_string()),
+                        started_at: work.started_at.map(|at| at.to_rfc3339()),
+                        finished_at: work.finished_at.map(|at| at.to_rfc3339()),
+                        error: work.error,
+                        observed_at,
+                    },
+                )))?;
+            }
+            HarnessEventPayloadV1::BackgroundRoster(roster) => {
+                self.emit_local(LocalChatEvent::BackgroundRoster(
+                    LocalChatBackgroundRosterEvent {
+                        backend_session_id,
+                        harness,
+                        event_id,
+                        turn_id,
+                        work: roster
+                            .work
+                            .into_iter()
+                            .map(|entry| LocalChatBackgroundRosterEntry {
+                                work_id: entry.work_id.to_string(),
+                                kind: wire_name(entry.kind),
+                                provider_kind: entry.provider_kind,
+                                description: entry.description,
+                            })
+                            .collect(),
+                        observed_at,
+                    },
+                ))?;
+            }
             HarnessEventPayloadV1::Error(value) => {
                 self.emit_local(LocalChatEvent::Error(LocalChatSessionErrorEvent {
                     backend_session_id,
@@ -494,6 +541,14 @@ impl EventSink for LocalChatHarnessEventSink {
         }
         Ok(())
     }
+}
+
+/// The snake_case name the harness contract serializes the value as.
+fn wire_name(value: impl serde::Serialize) -> String {
+    serde_json::to_value(value)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default()
 }
 
 fn file_change_status(status: ToolStatus) -> String {
@@ -667,6 +722,167 @@ mod tests {
                 && completed.trigger.as_deref() == Some("auto")
                 && completed.pre_tokens == Some(4_096)
         ));
+    }
+
+    fn background_event(
+        id: &str,
+        sequence: u64,
+        turn: Option<&str>,
+        payload: HarnessEventPayloadV1,
+    ) -> HarnessEventV1 {
+        HarnessEventV1 {
+            event_id: EventId::new(id),
+            stream_id: StreamId::new("local-chat:backend-1"),
+            sequence,
+            correlation: EventCorrelation {
+                thread_id: Some(vertebrae_harness_core::ThreadId::new("root-thread")),
+                turn_id: turn.map(vertebrae_harness_core::TurnId::new),
+                ..EventCorrelation::default()
+            },
+            timestamp: chrono::DateTime::parse_from_rfc3339("2026-11-13T12:00:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+            semantics: UpdateSemantics::Snapshot,
+            provider_sequence: None,
+            payload,
+        }
+    }
+
+    #[tokio::test]
+    async fn background_work_bridge_forwards_lifecycle_and_roster() {
+        let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
+        let sink = LocalChatHarnessEventSink::new(
+            "backend-1".into(),
+            LocalChatHarnessKind::Claude,
+            event_sink,
+            Some("sonnet".into()),
+            1_000,
+            false,
+        );
+        let mut running = vertebrae_harness_core::BackgroundWorkEvent::new(
+            "task-1",
+            vertebrae_harness_core::BackgroundWorkKind::Command,
+            vertebrae_harness_core::BackgroundWorkStatus::Running,
+        );
+        running.description = Some("npm run dev".into());
+        running.launch_tool_call_id = Some(ToolCallId::new("toolu_1"));
+        running.started_at = Some(
+            chrono::DateTime::parse_from_rfc3339("2026-11-13T11:59:00Z")
+                .unwrap()
+                .with_timezone(&chrono::Utc),
+        );
+        let roster = vertebrae_harness_core::BackgroundRosterEvent {
+            work: vec![vertebrae_harness_core::BackgroundRosterEntry {
+                work_id: vertebrae_harness_core::BackgroundWorkId::new("task-1"),
+                kind: vertebrae_harness_core::BackgroundWorkKind::Command,
+                provider_kind: Some("local_bash".into()),
+                description: None,
+            }],
+        };
+
+        sink.emit(background_event(
+            "work-1",
+            1,
+            Some("root-turn"),
+            HarnessEventPayloadV1::BackgroundWork(running),
+        ))
+        .await
+        .unwrap();
+        sink.emit(background_event(
+            "roster-1",
+            2,
+            None,
+            HarnessEventPayloadV1::BackgroundRoster(roster),
+        ))
+        .await
+        .unwrap();
+
+        let captured = captured.lock().unwrap();
+        let [LocalChatEvent::BackgroundWork(work), LocalChatEvent::BackgroundRoster(roster)] =
+            captured.as_slice()
+        else {
+            panic!("unexpected events: {captured:?}");
+        };
+
+        assert_eq!(work.event_id, "work-1");
+        assert_eq!(work.work_id, "task-1");
+        assert_eq!(work.kind, "command");
+        assert_eq!(work.status, "running");
+        assert_eq!(work.turn_id.as_deref(), Some("root-turn"));
+        assert_eq!(work.launch_tool_id.as_deref(), Some("toolu_1"));
+        assert_eq!(
+            work.started_at.as_deref(),
+            Some("2026-11-13T11:59:00+00:00")
+        );
+        assert_eq!(work.observed_at, "2026-11-13T12:00:00+00:00");
+        assert_eq!(work.progress, None);
+        assert_eq!(roster.work.len(), 1);
+        assert_eq!(roster.work[0].provider_kind.as_deref(), Some("local_bash"));
+    }
+
+    /// Reads the goldens the adapter tests write and writes the input of the
+    /// TypeScript integration test. Set `VERTEBRAE_UPDATE_GOLDEN=1` to rewrite.
+    #[tokio::test]
+    async fn background_work_bridge_translates_adapter_goldens() {
+        for (harness, kind, input) in [
+            (
+                "claude",
+                LocalChatHarnessKind::Claude,
+                include_str!("fixtures/background-claude.harness.json"),
+            ),
+            (
+                "codex",
+                LocalChatHarnessKind::Codex,
+                include_str!("fixtures/background-codex.harness.json"),
+            ),
+        ] {
+            let (event_sink, captured) = LocalChatEventSink::capturing_for_tests();
+            let sink = LocalChatHarnessEventSink::new(
+                "backend-1".into(),
+                kind,
+                event_sink,
+                Some("model".into()),
+                1_000,
+                false,
+            );
+            let events: Vec<HarnessEventV1> = serde_json::from_str(input).unwrap();
+
+            for event in events {
+                sink.emit(event).await.unwrap();
+            }
+
+            let delivered: Vec<serde_json::Value> = captured
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|event| {
+                    let payload = match event {
+                        LocalChatEvent::BackgroundWork(payload) => serde_json::to_value(payload),
+                        LocalChatEvent::BackgroundRoster(payload) => serde_json::to_value(payload),
+                        LocalChatEvent::TurnStarted(payload) => serde_json::to_value(payload),
+                        LocalChatEvent::End(payload) => serde_json::to_value(payload),
+                        other => panic!("unexpected bridge event {other:?}"),
+                    }
+                    .unwrap();
+                    serde_json::json!({"event": event.tauri_event_name(), "payload": payload})
+                })
+                .collect();
+
+            let actual = serde_json::to_string_pretty(&delivered).unwrap() + "\n";
+            let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+                "../src/test/fixtures/localChatBackground.{harness}.json"
+            ));
+            if std::env::var_os("VERTEBRAE_UPDATE_GOLDEN").is_some() {
+                std::fs::write(&golden_path, &actual).unwrap();
+            }
+            let golden = std::fs::read_to_string(&golden_path)
+                .unwrap_or_else(|error| panic!("{}: {error}", golden_path.display()));
+
+            assert_eq!(
+                actual, golden,
+                "{harness}: regenerate with VERTEBRAE_UPDATE_GOLDEN=1"
+            );
+        }
     }
 
     #[tokio::test]

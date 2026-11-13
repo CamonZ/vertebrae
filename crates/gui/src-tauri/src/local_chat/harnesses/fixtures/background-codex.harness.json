@@ -1,0 +1,166 @@
+[
+  {
+    "version": 1,
+    "event_id": "codex-1",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 1,
+    "correlation": {
+      "session_id": "root-thread",
+      "thread_id": "root-thread",
+      "turn_id": "turn-1"
+    },
+    "timestamp": "2027-01-15T08:00:01Z",
+    "semantics": "snapshot",
+    "type": "turn_started",
+    "data": {
+      "input_summary": "go"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "codex-2",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 2,
+    "correlation": {
+      "session_id": "root-thread",
+      "thread_id": "root-thread",
+      "turn_id": "turn-1"
+    },
+    "timestamp": "2027-01-15T08:00:02Z",
+    "semantics": "snapshot",
+    "type": "background_work",
+    "data": {
+      "description": "npm run dev",
+      "generation": 0,
+      "kind": "command",
+      "launch_tool_call_id": "call-dev",
+      "provider_kind": "commandExecution",
+      "started_at": "2027-01-15T08:00:01Z",
+      "status": "running",
+      "work_id": "call-dev"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "codex-3",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 3,
+    "correlation": {
+      "session_id": "root-thread",
+      "thread_id": "root-thread",
+      "turn_id": "turn-1"
+    },
+    "timestamp": "2027-01-15T08:00:03Z",
+    "semantics": "snapshot",
+    "type": "background_work",
+    "data": {
+      "description": "cargo watch -x test",
+      "generation": 0,
+      "kind": "command",
+      "launch_tool_call_id": "call-watch",
+      "provider_kind": "commandExecution",
+      "started_at": "2027-01-15T08:00:02Z",
+      "status": "running",
+      "work_id": "call-watch"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "codex-4",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 4,
+    "correlation": {
+      "session_id": "root-thread",
+      "thread_id": "root-thread",
+      "turn_id": "turn-1"
+    },
+    "timestamp": "2027-01-15T08:00:04Z",
+    "semantics": "snapshot",
+    "type": "turn_finished",
+    "data": {
+      "metrics": {},
+      "status": "completed"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "codex-5",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 5,
+    "correlation": {
+      "session_id": "root-thread",
+      "thread_id": "root-thread"
+    },
+    "timestamp": "2027-01-15T08:00:05Z",
+    "semantics": "snapshot",
+    "type": "background_work",
+    "data": {
+      "finished_at": "2027-01-15T08:01:00Z",
+      "generation": 0,
+      "kind": "command",
+      "launch_tool_call_id": "call-dev",
+      "provider_kind": "commandExecution",
+      "status": "completed",
+      "work_id": "call-dev"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "codex-6",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 6,
+    "correlation": {
+      "session_id": "root-thread",
+      "thread_id": "root-thread",
+      "turn_id": "turn-2"
+    },
+    "timestamp": "2027-01-15T08:00:06Z",
+    "semantics": "snapshot",
+    "type": "turn_started",
+    "data": {
+      "input_summary": "go"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "codex-7",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 7,
+    "correlation": {
+      "session_id": "root-thread",
+      "thread_id": "root-thread",
+      "turn_id": "turn-2"
+    },
+    "timestamp": "2027-01-15T08:00:07Z",
+    "semantics": "snapshot",
+    "type": "background_work",
+    "data": {
+      "error": "exit code 1",
+      "finished_at": "2027-01-15T08:01:10Z",
+      "generation": 0,
+      "kind": "command",
+      "launch_tool_call_id": "call-watch",
+      "provider_kind": "commandExecution",
+      "status": "failed",
+      "work_id": "call-watch"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "codex-8",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 8,
+    "correlation": {
+      "session_id": "root-thread",
+      "thread_id": "root-thread",
+      "turn_id": "turn-2"
+    },
+    "timestamp": "2027-01-15T08:00:08Z",
+    "semantics": "snapshot",
+    "type": "turn_finished",
+    "data": {
+      "metrics": {},
+      "status": "completed"
+    }
+  }
+]

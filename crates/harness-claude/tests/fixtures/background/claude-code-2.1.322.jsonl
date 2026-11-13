@@ -1,0 +1,22 @@
+{"type":"system","subtype":"init","session_id":"sess-bg","model":"claude-opus-5-5","tools":["Bash","Agent"],"uuid":"u0"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b7x2k","task_type":"local_bash","description":"npm run dev"}],"session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_started","task_id":"b7x2k","tool_use_id":"toolu_bash","description":"npm run dev","task_type":"local_bash","is_backgrounded":true,"session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_started","task_id":"c4d","tool_use_id":"toolu_watch","description":"cargo watch -x test","task_type":"local_bash","is_backgrounded":true,"session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_started","task_id":"a91fe","tool_use_id":"toolu_agent","description":"Audit dependencies","subagent_type":"general-purpose","task_type":"local_agent","is_backgrounded":true,"spawn_depth":1,"session_id":"sess-bg","uuid":"u"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_watch","content":"Command running in background with ID: c4d"}]},"parent_tool_use_id":null,"session_id":"sess-bg","uuid":"u"}
+{"type":"result","subtype":"success","is_error":false,"result":"Started both.","num_turns":1,"duration_ms":1200,"total_cost_usd":0.01,"session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_progress","task_id":"a91fe","tool_use_id":"toolu_agent","description":"Audit dependencies","subagent_type":"general-purpose","usage":{"total_tokens":900,"tool_uses":2,"duration_ms":4000},"last_tool_name":"Read","summary":"Reading Cargo.toml","session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_started","task_id":"hk1","description":"housekeeping","task_type":"dream","ambient":true,"skip_transcript":true,"session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_started","task_id":"m3q","description":"Index workspace","task_type":"future_task_kind","session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"b7x2k","task_type":"local_bash","description":"npm run dev"},{"task_id":"c4d","task_type":"local_bash","description":"cargo watch -x test"},{"task_id":"a91fe","task_type":"local_agent","subagent_type":"general-purpose","description":"Audit dependencies"},{"task_id":"m3q","task_type":"future_task_kind","description":"Index workspace"}],"session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_notification","task_id":"c4d","tool_use_id":"toolu_watch","status":"completed","output_file":"/tmp/c4d.output","summary":"Tests passed","session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_notification","task_id":"c4d","tool_use_id":"toolu_watch","status":"completed","output_file":"/tmp/c4d.output","summary":"Tests passed","session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_updated","task_id":"c4d","patch":{"status":"running"},"session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_updated","task_id":"b7x2k","patch":{"status":"failed","end_time":1800000060000,"error":"exit code 1"},"session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_notification","task_id":"b7x2k","tool_use_id":"toolu_bash","status":"failed","output_file":"/tmp/b7x2k.output","summary":"Dev server exited","session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_started","task_id":"c4d","tool_use_id":"toolu_watch","description":"cargo watch -x test","task_type":"local_bash","is_backgrounded":true,"session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_notification","task_id":"c4d","tool_use_id":"toolu_watch","status":"stopped","output_file":"/tmp/c4d.output","summary":"","session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_notification","task_id":"zz9","status":"completed","output_file":"","summary":"","session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_notification","task_id":"m3q","status":"stopped","reason":"worker_restart","output_file":"","summary":"","session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"task_notification","task_id":"a91fe","tool_use_id":"toolu_agent","status":"completed","output_file":"","summary":"Found 2 outdated crates","session_id":"sess-bg","uuid":"u"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[],"session_id":"sess-bg","uuid":"u"}

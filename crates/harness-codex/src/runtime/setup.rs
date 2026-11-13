@@ -137,6 +137,9 @@ pub(crate) async fn setup_session(
         declared_threads: Mutex::new([thread.clone()].into_iter().collect()),
         closed,
         closed_rx,
+        background_commands: Mutex::default(),
+        foreground_claims: watch::channel(0).0,
+        connection_generation: watch::channel(0).0,
     });
     if let Err(error) = emit_direct(
         &state.sink,

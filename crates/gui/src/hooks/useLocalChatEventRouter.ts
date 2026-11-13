@@ -3,6 +3,8 @@ import { useEffect } from "react";
 import { events } from "../bindings";
 import type {
   LocalChatAnnotationEvent,
+  LocalChatBackgroundRosterEvent,
+  LocalChatBackgroundWorkEvent,
   LocalChatSessionEndEvent,
   LocalChatSessionErrorEvent,
   LocalChatSessionInitEvent,
@@ -40,6 +42,10 @@ import {
   handleWarningEvent,
   handleCompactionEvent,
 } from "./useLocalChat";
+import {
+  backgroundRosterFromEvent,
+  backgroundUpdateFromEvent,
+} from "../stores/backgroundWork";
 
 type Unlisten = () => void;
 
@@ -608,6 +614,34 @@ export function routeLocalChatCompactionEvent(
 }
 
 /**
+ * Background work is routed by backend session, not by turn, so it keeps
+ * arriving between turns and is dropped once that backend session is gone.
+ */
+export function routeLocalChatBackgroundWorkEvent(
+  payload: LocalChatBackgroundWorkEvent
+): boolean {
+  const sessionId = resolveSessionId(payload.backend_session_id);
+  if (!sessionId) return false;
+
+  useChatStore
+    .getState()
+    .applyBackgroundWork(sessionId, backgroundUpdateFromEvent(payload));
+  return true;
+}
+
+export function routeLocalChatBackgroundRosterEvent(
+  payload: LocalChatBackgroundRosterEvent
+): boolean {
+  const sessionId = resolveSessionId(payload.backend_session_id);
+  if (!sessionId) return false;
+
+  useChatStore
+    .getState()
+    .applyBackgroundRoster(sessionId, backgroundRosterFromEvent(payload));
+  return true;
+}
+
+/**
  * Annotations are keyed by the persistent chat session id, so no backend
  * session lookup is needed. Sessions not open in this webview load the entry
  * from disk when they are opened.
@@ -814,6 +848,22 @@ function subscribeLocalChatEvents(): Unlisten {
       routeLocalChatCompactionEvent(event.payload);
     })
   );
+  if (events.localChatBackgroundWorkEvent) {
+    void register(
+      events.localChatBackgroundWorkEvent.listen((event) => {
+        textBatch.flush();
+        routeLocalChatBackgroundWorkEvent(event.payload);
+      })
+    );
+  }
+  if (events.localChatBackgroundRosterEvent) {
+    void register(
+      events.localChatBackgroundRosterEvent.listen((event) => {
+        textBatch.flush();
+        routeLocalChatBackgroundRosterEvent(event.payload);
+      })
+    );
+  }
   void register(
     events.localChatAnnotationEvent.listen((event) => {
       textBatch.flush();

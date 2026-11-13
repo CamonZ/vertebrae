@@ -8,6 +8,12 @@
 
 import type { SessionLog } from "../bindings";
 import { isHiddenTurn } from "../utils/gateChat";
+import {
+  backgroundWorkKind,
+  backgroundWorkStatus,
+  type BackgroundRosterUpdate,
+  type BackgroundWorkUpdate,
+} from "../stores/backgroundWork";
 
 /** Persisted provider-neutral event emitted by the shared harness runtime. */
 interface HarnessRawEvent {
@@ -127,6 +133,17 @@ export interface TaskStartedEvent extends BaseEvent {
   taskId?: string;
   description: string;
   subagentType?: string;
+}
+
+export interface BackgroundWorkConversationEvent extends BaseEvent {
+  kind: "background_work";
+  update: BackgroundWorkUpdate;
+}
+
+/** Every background task the provider reports as running; replaces the last. */
+export interface BackgroundRosterConversationEvent extends BaseEvent {
+  kind: "background_roster";
+  roster: BackgroundRosterUpdate;
 }
 
 /** Task-level notification event from the normalized transcript. */
@@ -262,6 +279,8 @@ export type ConversationEvent =
   | TaskProgressEvent
   | TaskStartedEvent
   | TaskNotificationEvent
+  | BackgroundWorkConversationEvent
+  | BackgroundRosterConversationEvent
   | RateLimitEvent;
 
 // ============================================================================
@@ -600,6 +619,63 @@ function parseHarnessEvent(
       if (text) {
         events.push({ kind: "thinking", timestamp, text });
       }
+      break;
+    }
+    case "background_work": {
+      const workId = readString(data.work_id);
+      if (!workId) break;
+
+      const optional = (key: string) => readString(data[key]) ?? null;
+
+      events.push({
+        kind: "background_work",
+        timestamp,
+        update: {
+          eventId: readString(raw.event_id) ?? `${workId}:${timestamp}`,
+          workId,
+          generation: readNumber(data.generation) ?? 0,
+          kind: backgroundWorkKind(readString(data.kind)),
+          providerKind: optional("provider_kind"),
+          status: backgroundWorkStatus(readString(data.status)),
+          description: optional("description"),
+          progress: optional("progress"),
+          launchToolId: optional("launch_tool_call_id"),
+          startedAt: optional("started_at"),
+          finishedAt: optional("finished_at"),
+          error: optional("error"),
+          observedAt: timestamp,
+          turnId: readString(correlation?.turn_id) ?? null,
+          threadId: readString(correlation?.thread_id) ?? null,
+        },
+      });
+      break;
+    }
+    case "background_roster": {
+      const work = Array.isArray(data.work) ? data.work : [];
+
+      events.push({
+        kind: "background_roster",
+        timestamp,
+        roster: {
+          eventId: readString(raw.event_id) ?? `roster:${timestamp}`,
+          observedAt: timestamp,
+          turnId: readString(correlation?.turn_id) ?? null,
+          work: work.flatMap((entry) => {
+            const record = readRecord(entry);
+            const workId = readString(record?.work_id);
+            if (!record || !workId) return [];
+
+            return [
+              {
+                workId,
+                kind: backgroundWorkKind(readString(record.kind)),
+                providerKind: readString(record.provider_kind) ?? null,
+                description: readString(record.description) ?? null,
+              },
+            ];
+          }),
+        },
+      });
       break;
     }
     case "plan": {

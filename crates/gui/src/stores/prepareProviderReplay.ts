@@ -5,6 +5,11 @@ import {
 } from "../types/conversation";
 import { sanitizeSessionMessages } from "./chatMessagePolicy";
 import {
+  backgroundOutcomeMessages,
+  EMPTY_BACKGROUND_WORK,
+  foldBackgroundEvent,
+} from "./backgroundWork";
+import {
   mergeReplayMessages,
   reconcileReplayMessages,
   unmatchedMessages,
@@ -215,12 +220,27 @@ export function replayLinesToChatMessages(
     };
   });
 
-  return sanitizeSessionMessages(
-    parseSessionLogs(logs)
-      .map(conversationEventToChatMessage)
-      .filter((message): message is ChatMessage => message !== null),
-    session.providerResumeId
-  );
+  let background = EMPTY_BACKGROUND_WORK;
+  const messages: ChatMessage[] = [];
+
+  for (const event of parseSessionLogs(logs)) {
+    if (
+      event.kind === "background_work" ||
+      event.kind === "background_roster"
+    ) {
+      // Replayed work is history, so it is never shown as running now.
+      const result = foldBackgroundEvent(background, event, { live: false });
+
+      background = result.state;
+      messages.push(...backgroundOutcomeMessages(result.transitions));
+      continue;
+    }
+
+    const message = conversationEventToChatMessage(event);
+    if (message) messages.push(message);
+  }
+
+  return sanitizeSessionMessages(messages, session.providerResumeId);
 }
 
 /** Deterministic content digest for lines without a harness event ID. */

@@ -247,12 +247,16 @@ fn task_notification_continuation_gets_a_correlated_root_turn() {
         )
         .unwrap();
 
-    assert!(decoder
+    let notification = decoder
         .decode_line(
             r#"{"type":"system","subtype":"task_notification","task_id":"task-1","status":"completed","session_id":"task-notification-session"}"#,
         )
-        .unwrap()
-        .is_empty());
+        .unwrap();
+    // The notification is the task's outcome; it opens no turn by itself.
+    assert!(notification.iter().all(|draft| matches!(
+        &draft.payload,
+        HarnessEventPayloadV1::BackgroundWork(work) if work.work_id.as_str() == "task-1"
+    )));
 
     let started_events = decoder
         .decode_line(

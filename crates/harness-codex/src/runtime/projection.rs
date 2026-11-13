@@ -18,6 +18,9 @@ impl SessionState {
         root_turn: &mut TurnAccumulator,
     ) -> Result<Option<TurnOutcome>, HarnessError> {
         let params = notification.params().clone();
+        self.emit_background(notification.method(), &params, normalized_root_turn)
+            .await?;
+
         let thread_id = optional_string(&params, &["/threadId", "/thread/id"]);
         let is_child = thread_id
             .as_deref()
@@ -54,6 +57,7 @@ impl SessionState {
                 .unwrap_or_else(|| self.root_thread_id.clone());
             self.remember_spawn(item, id, parent_thread).await;
         }
+
         match notification {
             CodexNotification::AgentMessageDelta(params) => {
                 correlation.item_id =

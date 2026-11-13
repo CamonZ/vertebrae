@@ -87,7 +87,7 @@ impl SessionState {
                 // exactly once, while the websocket reader applies
                 // backpressure to the provider instead of dropping messages
                 // from a broadcast ring.
-                let notifications = connection.lock_notifications().await;
+                let notifications = self.claim_notifications(&connection).await;
                 let connection_closed = connection.closed.subscribe();
                 connection.begin_root_turn(turn_id.clone());
                 let response = connection
@@ -255,7 +255,7 @@ impl SessionState {
                                 {
                                     RecoveredTurn::Finished(outcome) => break *outcome,
                                     RecoveredTurn::Running(reattached) => {
-                                        notifications = reattached.lock_notifications().await;
+                                        notifications = self.claim_notifications(&reattached).await;
                                         connection_closed = reattached.closed.subscribe();
                                         connection = reattached;
                                     }
