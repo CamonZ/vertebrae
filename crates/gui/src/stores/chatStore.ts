@@ -19,6 +19,19 @@ import {
 } from "./liveAssistantMessages";
 import { create } from "zustand";
 import {
+  applyBackgroundRoster,
+  applyBackgroundUpdate,
+  backgroundOutcomeMessages,
+  EMPTY_BACKGROUND_WORK,
+  markBackgroundWorkStale,
+  type BackgroundApplyResult,
+  type BackgroundRosterUpdate,
+  type BackgroundWorkKind,
+  type BackgroundWorkState,
+  type BackgroundWorkStatus,
+  type BackgroundWorkUpdate,
+} from "./backgroundWork";
+import {
   clearLastUsedLocalChatModelId,
   compareLocalChatSessionRecency,
   DEFAULT_LOCAL_CHAT_HARNESS,
@@ -158,6 +171,18 @@ export type ChatMessage =
   /** Harness-originated notice (e.g. a background subagent finished). */
   | { kind: "task_notification"; message: string; timestamp: string }
   | {
+      kind: "background_outcome";
+      workId: string;
+      generation: number;
+      workKind: BackgroundWorkKind;
+      status: Exclude<BackgroundWorkStatus, "running">;
+      description: string | null;
+      summary: string | null;
+      error: string | null;
+      launchToolId: string | null;
+      timestamp: string;
+    }
+  | {
       kind: "session_end";
       successful?: boolean;
       durationMs: number;
@@ -290,6 +315,43 @@ function coalesceParentAssistantMessage(
   return messages;
 }
 
+function withBackgroundResult(
+  session: ChatSession,
+  result: BackgroundApplyResult
+): ChatSession {
+  if (
+    result.state === session.backgroundWork &&
+    result.transitions.length === 0
+  ) {
+    return session;
+  }
+
+  const outcomes = backgroundOutcomeMessages(result.transitions);
+
+  if (outcomes.length === 0) {
+    return { ...session, backgroundWork: result.state };
+  }
+
+  // Outcomes go after the text already streamed, so that text is committed
+  // to `messages` first.
+  const materialized = materializeLiveAssistantMessages(session);
+
+  return {
+    ...materialized,
+    backgroundWork: result.state,
+    messages: [...materialized.messages, ...outcomes],
+  };
+}
+
+function withStaleBackgroundWork(session: ChatSession): ChatSession {
+  if (!session.backgroundWork) return session;
+
+  return {
+    ...session,
+    backgroundWork: markBackgroundWorkStale(session.backgroundWork),
+  };
+}
+
 export type LocalChatLifecycle =
   | "idle"
   | "starting"
@@ -408,6 +470,10 @@ export interface ChatSession {
   compactionActive?: boolean;
   /** Runtime-only metadata from the most recent completed compaction. */
   compactionSummary?: ChatCompactionSummary | null;
+  /**
+   * Runtime-only, so a reopened session never claims work is still running.
+   */
+  backgroundWork?: BackgroundWorkState;
   /** Runtime ownership and provider-reported work state for a separate child view. */
   providerChildrenStopped?: boolean;
   providerChild?: {
@@ -751,6 +817,16 @@ interface ChatStoreActions {
   shiftQueuedMessage: (sessionId: string) => string | null;
   /** Clear queued user messages for a local session */
   clearQueuedMessages: (sessionId: string) => void;
+  /** Apply live background work; finished work is added to the timeline */
+  applyBackgroundWork: (
+    sessionId: string,
+    update: BackgroundWorkUpdate
+  ) => void;
+  /** Replace the live background roster */
+  applyBackgroundRoster: (
+    sessionId: string,
+    roster: BackgroundRosterUpdate
+  ) => void;
   /** Set the runtime backend session ID */
   setBackendSessionId: (
     sessionId: string,
@@ -3823,10 +3899,45 @@ export const useChatStore = create<ChatStore>((set, get) => {
       );
     },
 
+    applyBackgroundWork: (sessionId, update) => {
+      updateSession(
+        sessionId,
+        (session) => {
+          const result = applyBackgroundUpdate(
+            session.backgroundWork ?? EMPTY_BACKGROUND_WORK,
+            update,
+            { live: true }
+          );
+
+          return withBackgroundResult(session, result);
+        },
+        { persist: false }
+      );
+    },
+
+    applyBackgroundRoster: (sessionId, roster) => {
+      updateSession(
+        sessionId,
+        (session) => {
+          const result = applyBackgroundRoster(
+            session.backgroundWork ?? EMPTY_BACKGROUND_WORK,
+            roster,
+            { live: true }
+          );
+
+          return withBackgroundResult(session, result);
+        },
+        { persist: false }
+      );
+    },
+
     setBackendSessionId: (sessionId, backendSessionId) => {
       updateSession(
         sessionId,
-        (session) => ({ ...session, backendSessionId }),
+        (session) =>
+          session.backendSessionId === backendSessionId
+            ? session
+            : { ...withStaleBackgroundWork(session), backendSessionId },
         {
           persist: false,
         }
@@ -4086,7 +4197,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const session = get().sessions[sessionId];
       if (!session) return;
       const closedSession = {
-        ...session,
+        ...withStaleBackgroundWork(session),
         status: "open" as const,
         backendSessionId: null,
         lifecycle: "closed" as const,

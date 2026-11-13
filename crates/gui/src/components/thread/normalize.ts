@@ -430,6 +430,18 @@ function formatRateLimitText(ev: ConversationEvent): string {
     .join(" · ");
 }
 
+const BACKGROUND_OUTCOME_TEXT = {
+  completed: "completed",
+  failed: "failed",
+  cancelled: "cancelled",
+  unknown: "ended without a reported outcome",
+} as const;
+
+const BACKGROUND_SUBJECT = {
+  command: "Background command",
+  other: "Background task",
+} as const;
+
 function activityMessage(
   ev: ConversationEvent,
   runStartMs: number | null
@@ -467,6 +479,27 @@ function activityMessage(
         label: ev.subagentType ?? "subagent",
         text: ev.description,
       };
+    case "background_work": {
+      const work = ev.update;
+      // Running work is shown in the Background tasks panel, not the timeline.
+      if (work.status === "running") return null;
+
+      const outcome = BACKGROUND_OUTCOME_TEXT[work.status];
+      const detail = work.error ?? work.progress;
+
+      return {
+        evt: `background-${work.workId}-${work.generation}-${work.status}`,
+        type: "activity",
+        variant: "notification",
+        tone: work.status === "completed" ? "info" : "warn",
+        at: clock(ev.timestamp),
+        rel: rel(runStartMs, ms(ev.timestamp)),
+        label: BACKGROUND_SUBJECT[work.kind],
+        text: [work.description ?? work.workId, outcome, detail]
+          .filter(Boolean)
+          .join(" · "),
+      };
+    }
     case "task_notification":
       return {
         evt: nextEvt("task-notification"),
@@ -954,6 +987,7 @@ function eventsToMessages(
       case "task_progress":
       case "task_started":
       case "task_notification":
+      case "background_work":
       case "rate_limit": {
         const msg = activityMessage(ev, runStartMs);
         if (msg) out.push(msg);

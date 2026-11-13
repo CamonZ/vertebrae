@@ -13,6 +13,7 @@ use vertebrae_harness_core::{
 
 use crate::ClaudeRootLocatorResolver;
 
+mod background;
 mod controls;
 mod drafts;
 mod lineage;
@@ -107,6 +108,7 @@ pub struct ClaudeStreamDecoder {
     pending_root_records: VecDeque<BufferedRootRecord>,
     pending_agent_records: VecDeque<BufferedAgentRecord>,
     pending_background_turn: Option<TurnId>,
+    background_tasks: HashMap<String, background::TaskTrack>,
     agent_locators: HashMap<String, ProviderThreadRef>,
     agent_spawn_tools: HashMap<String, ToolCallId>,
     provider_control_inputs: HashMap<ControlRequestId, Value>,
@@ -141,6 +143,7 @@ impl ClaudeStreamDecoder {
             pending_root_records: VecDeque::new(),
             pending_agent_records: VecDeque::new(),
             pending_background_turn: None,
+            background_tasks: HashMap::new(),
             agent_locators: HashMap::new(),
             agent_spawn_tools: HashMap::new(),
             provider_control_inputs: HashMap::new(),

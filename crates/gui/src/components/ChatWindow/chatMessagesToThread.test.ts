@@ -278,6 +278,35 @@ describe("chatMessagesToThread", () => {
     expect(agent.streaming).toBe(true);
   });
 
+  it("maps a background outcome to an activity row and keeps a partial reply streaming", () => {
+    const thread = build([
+      { kind: "user", text: "q", timestamp: TS },
+      { kind: "assistant", text: "thinking…", timestamp: TS, isPartial: true },
+      {
+        kind: "background_outcome",
+        workId: "dev",
+        generation: 0,
+        workKind: "command",
+        status: "failed",
+        description: "npm run dev",
+        summary: null,
+        error: "exit code 1",
+        launchToolId: "toolu_1",
+        timestamp: TS,
+      },
+    ]);
+
+    const rows = thread.turns[0].messages;
+    const activity = rows.find((m) => m.type === "activity");
+    const agent = rows.find((m) => m.type === "agent") as AgentMessage;
+
+    expect(activity && "text" in activity ? activity.text : "").toBe(
+      "npm run dev · failed · exit code 1"
+    );
+    expect(activity && "tone" in activity ? activity.tone : null).toBe("warn");
+    expect(agent.streaming).toBe(true);
+  });
+
   it("maps an assistant message to an agent message with a provider speaker + prose", () => {
     const thread = build(
       [

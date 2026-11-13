@@ -1437,6 +1437,8 @@ daemonChangedEvent: DaemonChangedEvent,
 daemonMetricsEvent: DaemonMetricsEvent,
 localBackendProgressEvent: LocalBackendProgressEvent,
 localChatAnnotationEvent: LocalChatAnnotationEvent,
+localChatBackgroundRosterEvent: LocalChatBackgroundRosterEvent,
+localChatBackgroundWorkEvent: LocalChatBackgroundWorkEvent,
 localChatCompactionEvent: LocalChatCompactionEvent,
 localChatFileChangeEvent: LocalChatFileChangeEvent,
 localChatSessionEndEvent: LocalChatSessionEndEvent,
@@ -1470,6 +1472,8 @@ daemonChangedEvent: "daemon-changed-event",
 daemonMetricsEvent: "daemon-metrics-event",
 localBackendProgressEvent: "local-backend-progress-event",
 localChatAnnotationEvent: "local-chat-annotation-event",
+localChatBackgroundRosterEvent: "local-chat-background-roster-event",
+localChatBackgroundWorkEvent: "local-chat-background-work-event",
 localChatCompactionEvent: "local-chat-compaction-event",
 localChatFileChangeEvent: "local-chat-file-change-event",
 localChatSessionEndEvent: "local-chat-session-end-event",
@@ -1990,6 +1994,35 @@ export type LocalChatAnnotation = { session_id: string; tool_id: string; kind: s
  */
 recorded_at: string }
 export type LocalChatAnnotationEvent = { session_id: string; annotation: LocalChatAnnotation }
+export type LocalChatBackgroundRosterEntry = { work_id: string; kind: string; provider_kind?: string | null; description?: string | null }
+/**
+ * Every background task the provider reports as running; replaces the last.
+ */
+export type LocalChatBackgroundRosterEvent = { backend_session_id: string; harness: LocalChatHarnessKind; event_id: string;
+/**
+ * Work first seen in this roster belongs to this turn.
+ */
+turn_id?: string | null; work: LocalChatBackgroundRosterEntry[]; observed_at: string }
+/**
+ * Not tied to the foreground turn: it can arrive between turns.
+ */
+export type LocalChatBackgroundWorkEvent = { backend_session_id: string; harness: LocalChatHarnessKind; event_id: string; turn_id?: string | null; thread_id?: string | null; work_id: string; generation: number;
+/**
+ * `command` or `other`.
+ */
+kind: string; provider_kind?: string | null;
+/**
+ * `running`, `completed`, `failed`, `cancelled` or `unknown`.
+ */
+status: string; description?: string | null; progress?: string | null; launch_tool_id?: string | null;
+/**
+ * RFC 3339.
+ */
+started_at?: string | null; finished_at?: string | null; error?: string | null;
+/**
+ * RFC 3339.
+ */
+observed_at: string }
 /**
  * A provider-owned child conversation available in the Chat Sessions panel.
  */

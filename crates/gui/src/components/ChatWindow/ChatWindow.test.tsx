@@ -14,6 +14,10 @@ import userEvent from "@testing-library/user-event";
 import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
+import {
+  applyBackgroundUpdate,
+  EMPTY_BACKGROUND_WORK,
+} from "../../stores/backgroundWork";
 import { commands } from "../../bindings";
 import { useDocumentStore } from "./workspace/documentStore";
 import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
@@ -474,6 +478,85 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(screen.queryByRole("button", { name: "Changes" })).toBeNull();
+  });
+
+  it("opens running background tasks in the side panel in place of Changes", async () => {
+    const backgroundWork = applyBackgroundUpdate(
+      EMPTY_BACKGROUND_WORK,
+      {
+        eventId: "e1",
+        workId: "dev",
+        generation: 0,
+        kind: "command",
+        providerKind: null,
+        status: "running",
+        description: "npm run dev",
+        progress: null,
+        launchToolId: null,
+        startedAt: null,
+        finishedAt: null,
+        error: null,
+        observedAt: "2026-11-13T12:00:00Z",
+        turnId: null,
+        threadId: null,
+      },
+      { live: true }
+    ).state;
+    const association = {
+      ticketId: null,
+      ticketTitle: null,
+      worktreePath: "/worktree",
+      branch: "feature",
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    };
+    useChatStore.setState({
+      sessions: {
+        "test-session": createSession({ association, backgroundWork }),
+      },
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+    const toggle = screen.getByRole("button", {
+      name: "Background tasks, 1 running",
+    });
+
+    expect(
+      screen.queryByRole("complementary", { name: "Background tasks panel" })
+    ).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("complementary", { name: "Background tasks panel" })
+    ).toHaveTextContent("npm run dev");
+    expect(screen.getByTestId("local-chat-composer")).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    await screen.findByText("No changes against this baseline.");
+
+    expect(
+      screen.queryByRole("complementary", { name: "Background tasks panel" })
+    ).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(
+      screen.queryByRole("complementary", { name: "Changes panel" })
+    ).toBeNull();
+    expect(
+      screen.getByRole("complementary", { name: "Background tasks panel" })
+    ).toBeVisible();
+  });
+
+  it("hides the background toggle when no background work was reported", () => {
+    useChatStore.setState({ sessions: { "test-session": createSession() } });
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.queryByTestId("local-chat-view-background")).toBeNull();
   });
 
   it("returns null when session does not exist", () => {

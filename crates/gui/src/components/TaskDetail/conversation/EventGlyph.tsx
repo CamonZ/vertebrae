@@ -166,6 +166,13 @@ export function resolveGlyph(input: GlyphInput): ResolvedGlyph {
       };
     case "task_notification":
       return { glyph: "flag", variant: "default", label: "task notification" };
+    case "background_work":
+    case "background_roster":
+      return {
+        glyph: "git-branch",
+        variant: "default",
+        label: "background work",
+      };
     case "rate_limit":
       return { glyph: "flag", variant: "default", label: "rate limit" };
     case "gate_evaluation":

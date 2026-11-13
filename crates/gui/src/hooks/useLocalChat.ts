@@ -209,6 +209,10 @@ function formatTitleInferenceEntry(message: ChatMessage): string {
       return `Error: ${message.message}`;
     case "gate_evaluation":
       return `Gate evaluation: attempt ${message.attempt}`;
+    case "background_outcome":
+      return `Background ${message.workKind} ${message.status}: ${
+        message.description ?? message.workId
+      }`;
   }
 }
 

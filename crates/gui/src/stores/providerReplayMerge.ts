@@ -43,6 +43,8 @@ function chatMessageKey(message: ChatMessage): string {
       return `${message.kind}:${message.message}`;
     case "gate_evaluation":
       return `${message.kind}:${message.attempt}:${JSON.stringify(message.verdict)}`;
+    case "background_outcome":
+      return `${message.kind}:${message.workId}:${message.generation}:${message.status}`;
   }
 }
 
@@ -79,17 +81,14 @@ function mergeHydratedMatch(
   current: ChatMessage
 ): ChatMessage {
   if (replayed.kind === "assistant" && current.kind === "assistant") {
-    const replayLifecycle = replayed.lifecycle ??
-      (replayed.isPartial ? "streaming" : "completed");
-    const currentLifecycle = current.lifecycle ??
-      (current.isPartial ? "streaming" : "completed");
+    const replayLifecycle =
+      replayed.lifecycle ?? (replayed.isPartial ? "streaming" : "completed");
+    const currentLifecycle =
+      current.lifecycle ?? (current.isPartial ? "streaming" : "completed");
     // Durable terminal history settles a live item that was still streaming
     // when hydration began. A newer live terminal state remains authoritative
     // when the replay page is stale.
-    if (
-      currentLifecycle === "streaming" &&
-      replayLifecycle !== "streaming"
-    ) {
+    if (currentLifecycle === "streaming" && replayLifecycle !== "streaming") {
       return replayed;
     }
     return current;

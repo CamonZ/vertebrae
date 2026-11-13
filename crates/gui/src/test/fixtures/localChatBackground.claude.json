@@ -1,0 +1,279 @@
+[
+  {
+    "event": "local-chat-background-roster-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-1",
+      "turn_id": "turn-1",
+      "work": [
+        {
+          "work_id": "b7x2k",
+          "kind": "command",
+          "provider_kind": "local_bash",
+          "description": "npm run dev"
+        }
+      ],
+      "observed_at": "2027-01-15T08:00:01+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-2",
+      "turn_id": "turn-1",
+      "thread_id": "sess-bg",
+      "work_id": "b7x2k",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "local_bash",
+      "status": "running",
+      "description": "npm run dev",
+      "launch_tool_id": "toolu_bash",
+      "started_at": "2027-01-15T08:00:02+00:00",
+      "observed_at": "2027-01-15T08:00:02+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-3",
+      "turn_id": "turn-1",
+      "thread_id": "sess-bg",
+      "work_id": "c4d",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "local_bash",
+      "status": "running",
+      "description": "cargo watch -x test",
+      "launch_tool_id": "toolu_watch",
+      "started_at": "2027-01-15T08:00:03+00:00",
+      "observed_at": "2027-01-15T08:00:03+00:00"
+    }
+  },
+  {
+    "event": "local-chat-session-end-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "turn_id": "turn-1",
+      "thread_id": "sess-bg",
+      "is_root": true,
+      "duration_ms": 1200,
+      "cost_usd": 0.01,
+      "num_turns": 1,
+      "result": "Started both.",
+      "is_error": false,
+      "context_tokens": 0,
+      "context_window": 200000,
+      "completion_status": "completed"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-5",
+      "thread_id": "sess-bg",
+      "work_id": "m3q",
+      "generation": 0,
+      "kind": "other",
+      "provider_kind": "future_task_kind",
+      "status": "running",
+      "description": "Index workspace",
+      "started_at": "2027-01-15T08:00:09+00:00",
+      "observed_at": "2027-01-15T08:00:09+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-roster-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-6",
+      "work": [
+        {
+          "work_id": "b7x2k",
+          "kind": "command",
+          "provider_kind": "local_bash",
+          "description": "npm run dev"
+        },
+        {
+          "work_id": "c4d",
+          "kind": "command",
+          "provider_kind": "local_bash",
+          "description": "cargo watch -x test"
+        },
+        {
+          "work_id": "m3q",
+          "kind": "other",
+          "provider_kind": "future_task_kind",
+          "description": "Index workspace"
+        }
+      ],
+      "observed_at": "2027-01-15T08:00:10+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-7",
+      "turn_id": "turn-2",
+      "thread_id": "sess-bg",
+      "work_id": "c4d",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "local_bash",
+      "status": "completed",
+      "progress": "Tests passed",
+      "launch_tool_id": "toolu_watch",
+      "finished_at": "2027-01-15T08:00:11+00:00",
+      "observed_at": "2027-01-15T08:00:11+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-8",
+      "turn_id": "turn-2",
+      "thread_id": "sess-bg",
+      "work_id": "c4d",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "local_bash",
+      "status": "completed",
+      "progress": "Tests passed",
+      "launch_tool_id": "toolu_watch",
+      "finished_at": "2027-01-15T08:00:12+00:00",
+      "observed_at": "2027-01-15T08:00:12+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-9",
+      "turn_id": "turn-2",
+      "thread_id": "sess-bg",
+      "work_id": "b7x2k",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "local_bash",
+      "status": "failed",
+      "finished_at": "2027-01-15T08:01:00+00:00",
+      "error": "exit code 1",
+      "observed_at": "2027-01-15T08:00:14+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-10",
+      "turn_id": "turn-2",
+      "thread_id": "sess-bg",
+      "work_id": "b7x2k",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "local_bash",
+      "status": "failed",
+      "progress": "Dev server exited",
+      "launch_tool_id": "toolu_bash",
+      "finished_at": "2027-01-15T08:00:15+00:00",
+      "observed_at": "2027-01-15T08:00:15+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-11",
+      "turn_id": "turn-2",
+      "thread_id": "sess-bg",
+      "work_id": "c4d",
+      "generation": 1,
+      "kind": "command",
+      "provider_kind": "local_bash",
+      "status": "running",
+      "description": "cargo watch -x test",
+      "launch_tool_id": "toolu_watch",
+      "started_at": "2027-01-15T08:00:16+00:00",
+      "observed_at": "2027-01-15T08:00:16+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-12",
+      "turn_id": "turn-2",
+      "thread_id": "sess-bg",
+      "work_id": "c4d",
+      "generation": 1,
+      "kind": "command",
+      "provider_kind": "local_bash",
+      "status": "cancelled",
+      "launch_tool_id": "toolu_watch",
+      "finished_at": "2027-01-15T08:00:17+00:00",
+      "observed_at": "2027-01-15T08:00:17+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-13",
+      "turn_id": "turn-2",
+      "thread_id": "sess-bg",
+      "work_id": "zz9",
+      "generation": 0,
+      "kind": "other",
+      "status": "completed",
+      "finished_at": "2027-01-15T08:00:18+00:00",
+      "observed_at": "2027-01-15T08:00:18+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-work-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-14",
+      "turn_id": "turn-2",
+      "thread_id": "sess-bg",
+      "work_id": "m3q",
+      "generation": 0,
+      "kind": "other",
+      "provider_kind": "future_task_kind",
+      "status": "unknown",
+      "finished_at": "2027-01-15T08:00:19+00:00",
+      "error": "Claude restarted and found the task orphaned",
+      "observed_at": "2027-01-15T08:00:19+00:00"
+    }
+  },
+  {
+    "event": "local-chat-background-roster-event",
+    "payload": {
+      "backend_session_id": "backend-1",
+      "harness": "claude",
+      "event_id": "claude-15",
+      "turn_id": "turn-2",
+      "work": [],
+      "observed_at": "2027-01-15T08:00:21+00:00"
+    }
+  }
+]

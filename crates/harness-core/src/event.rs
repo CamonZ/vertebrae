@@ -5,8 +5,9 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_json::Value;
 
 use crate::{
-    CompletionStatus, ControlRequestEnvelope, ControlResolution, RunOutcome, SessionCloseOutcome,
-    SessionUsage, SpeedTierStatus, TurnOutcome, TurnUsage,
+    BackgroundRosterEvent, BackgroundWorkEvent, CompletionStatus, ControlRequestEnvelope,
+    ControlResolution, RunOutcome, SessionCloseOutcome, SessionUsage, SpeedTierStatus, TurnOutcome,
+    TurnUsage,
 };
 
 macro_rules! string_id {
@@ -343,6 +344,9 @@ pub enum HarnessEventPayloadV1 {
     Warning(DiagnosticEvent),
     Error(DiagnosticEvent),
     Compaction(CompactionEvent),
+    /// Not tied to the foreground turn: it can arrive between turns.
+    BackgroundWork(BackgroundWorkEvent),
+    BackgroundRoster(BackgroundRosterEvent),
     ControlRequested(ControlRequestEnvelope),
     ControlResolved(ControlResolution),
     /// The single terminal event for an accepted interactive turn. For a
@@ -380,6 +384,8 @@ impl HarnessEventPayloadV1 {
             Self::Warning(_) => "warning",
             Self::Error(_) => "error",
             Self::Compaction(_) => "compaction",
+            Self::BackgroundWork(_) => "background_work",
+            Self::BackgroundRoster(_) => "background_roster",
             Self::ControlRequested(_) => "control_requested",
             Self::ControlResolved(_) => "control_resolved",
             Self::TurnFinished(_) => "turn_finished",
@@ -413,6 +419,8 @@ impl HarnessEventPayloadV1 {
             Self::Warning(value) => serde_json::to_value(value),
             Self::Error(value) => serde_json::to_value(value),
             Self::Compaction(value) => serde_json::to_value(value),
+            Self::BackgroundWork(value) => serde_json::to_value(value),
+            Self::BackgroundRoster(value) => serde_json::to_value(value),
             Self::ControlRequested(value) => serde_json::to_value(value),
             Self::ControlResolved(value) => serde_json::to_value(value),
             Self::TurnFinished(value) => serde_json::to_value(value),
@@ -445,6 +453,8 @@ impl HarnessEventPayloadV1 {
             "warning" => decode!(Warning, DiagnosticEvent),
             "error" => decode!(Error, DiagnosticEvent),
             "compaction" => decode!(Compaction, CompactionEvent),
+            "background_work" => decode!(BackgroundWork, BackgroundWorkEvent),
+            "background_roster" => decode!(BackgroundRoster, BackgroundRosterEvent),
             "control_requested" => decode!(ControlRequested, ControlRequestEnvelope),
             "control_resolved" => decode!(ControlResolved, ControlResolution),
             "turn_finished" => decode!(TurnFinished, TurnOutcome),

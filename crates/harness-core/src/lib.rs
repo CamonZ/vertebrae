@@ -5,6 +5,7 @@
 //! daemon, persistence, and replay consumers share the event and projection
 //! contracts exposed here.
 
+mod background;
 mod capabilities;
 mod control;
 mod event;
@@ -14,6 +15,7 @@ mod projection;
 mod replay;
 mod runtime;
 
+pub use background::*;
 pub use capabilities::*;
 pub use control::*;
 pub use event::*;

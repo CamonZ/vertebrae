@@ -14,6 +14,9 @@ interface ChatHeaderProps {
   onToggleHistory?: () => void;
   onToggleChanges?: () => void;
   changesOpen?: boolean;
+  onToggleBackground?: () => void;
+  backgroundOpen?: boolean;
+  backgroundRunning?: number;
   onToggleWide?: () => void;
   isWide?: boolean;
   onSplitPane?: () => void;
@@ -40,6 +43,7 @@ export interface HeaderAction {
   className?: string;
   testId?: string;
   pressed?: boolean;
+  badge?: number;
   icon: React.ReactNode;
 }
 
@@ -199,10 +203,17 @@ export function HeaderActionButtons({ actions }: { actions: HeaderAction[] }) {
             data-testid={action.testId}
             aria-pressed={action.pressed}
             aria-expanded={
-              action.key === "changes" ? action.pressed : undefined
+              action.key === "changes" || action.key === "background"
+                ? action.pressed
+                : undefined
             }
           >
             {action.icon}
+            {!!action.badge && (
+              <span className="hc-ctrl-badge" aria-hidden>
+                {action.badge}
+              </span>
+            )}
           </button>
         ))}
     </div>
@@ -230,6 +241,9 @@ export function ChatHeader({
   onToggleHistory,
   onToggleChanges,
   changesOpen = false,
+  onToggleBackground,
+  backgroundOpen = false,
+  backgroundRunning = 0,
   onToggleWide,
   isWide = false,
   onSplitPane,
@@ -348,6 +362,27 @@ export function ChatHeader({
         <SvgIcon size="h-3.5 w-3.5">
           <rect x="3" y="4" width="18" height="16" rx="2" />
           <path d="M15 4v16M6 9h6M9 6v6M6 16h6" />
+        </SvgIcon>
+      ),
+    },
+    {
+      key: "background",
+      title: backgroundOpen
+        ? "Hide Background tasks panel"
+        : "Show Background tasks panel",
+      ariaLabel:
+        backgroundRunning > 0
+          ? `Background tasks, ${backgroundRunning} running`
+          : "Background tasks",
+      onClick: onToggleBackground!,
+      show: !!onToggleBackground,
+      pressed: backgroundOpen,
+      badge: backgroundRunning,
+      testId: "local-chat-view-background",
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 8v4l2.5 2.5" />
         </SvgIcon>
       ),
     },

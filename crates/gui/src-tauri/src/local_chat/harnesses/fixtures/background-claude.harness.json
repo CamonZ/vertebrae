@@ -1,0 +1,389 @@
+[
+  {
+    "version": 1,
+    "event_id": "claude-1",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 1,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-1",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:01Z",
+    "semantics": "snapshot",
+    "provider_sequence": 2,
+    "type": "background_roster",
+    "data": {
+      "work": [
+        {
+          "description": "npm run dev",
+          "kind": "command",
+          "provider_kind": "local_bash",
+          "work_id": "b7x2k"
+        }
+      ]
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-2",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 2,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-1",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:02Z",
+    "semantics": "snapshot",
+    "provider_sequence": 3,
+    "type": "background_work",
+    "data": {
+      "description": "npm run dev",
+      "generation": 0,
+      "kind": "command",
+      "launch_tool_call_id": "toolu_bash",
+      "provider_kind": "local_bash",
+      "started_at": "2027-01-15T08:00:02Z",
+      "status": "running",
+      "work_id": "b7x2k"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-3",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 3,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-1",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:03Z",
+    "semantics": "snapshot",
+    "provider_sequence": 4,
+    "type": "background_work",
+    "data": {
+      "description": "cargo watch -x test",
+      "generation": 0,
+      "kind": "command",
+      "launch_tool_call_id": "toolu_watch",
+      "provider_kind": "local_bash",
+      "started_at": "2027-01-15T08:00:03Z",
+      "status": "running",
+      "work_id": "c4d"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-4",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 4,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-1",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:06Z",
+    "semantics": "snapshot",
+    "provider_sequence": 7,
+    "type": "turn_finished",
+    "data": {
+      "metrics": {
+        "context_tokens": 0,
+        "context_window": 200000,
+        "duration_ms": 1200,
+        "total_cost_usd": 0.01,
+        "turn_count": 1
+      },
+      "result_text": "Started both.",
+      "status": "completed"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-5",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 5,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:09Z",
+    "semantics": "snapshot",
+    "provider_sequence": 10,
+    "type": "background_work",
+    "data": {
+      "description": "Index workspace",
+      "generation": 0,
+      "kind": "other",
+      "provider_kind": "future_task_kind",
+      "started_at": "2027-01-15T08:00:09Z",
+      "status": "running",
+      "work_id": "m3q"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-6",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 6,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:10Z",
+    "semantics": "snapshot",
+    "provider_sequence": 11,
+    "type": "background_roster",
+    "data": {
+      "work": [
+        {
+          "description": "npm run dev",
+          "kind": "command",
+          "provider_kind": "local_bash",
+          "work_id": "b7x2k"
+        },
+        {
+          "description": "cargo watch -x test",
+          "kind": "command",
+          "provider_kind": "local_bash",
+          "work_id": "c4d"
+        },
+        {
+          "description": "Index workspace",
+          "kind": "other",
+          "provider_kind": "future_task_kind",
+          "work_id": "m3q"
+        }
+      ]
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-7",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 7,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-2",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:11Z",
+    "semantics": "snapshot",
+    "provider_sequence": 12,
+    "type": "background_work",
+    "data": {
+      "finished_at": "2027-01-15T08:00:11Z",
+      "generation": 0,
+      "kind": "command",
+      "launch_tool_call_id": "toolu_watch",
+      "progress": "Tests passed",
+      "provider_kind": "local_bash",
+      "status": "completed",
+      "work_id": "c4d"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-8",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 8,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-2",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:12Z",
+    "semantics": "snapshot",
+    "provider_sequence": 13,
+    "type": "background_work",
+    "data": {
+      "finished_at": "2027-01-15T08:00:12Z",
+      "generation": 0,
+      "kind": "command",
+      "launch_tool_call_id": "toolu_watch",
+      "progress": "Tests passed",
+      "provider_kind": "local_bash",
+      "status": "completed",
+      "work_id": "c4d"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-9",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 9,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-2",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:14Z",
+    "semantics": "snapshot",
+    "provider_sequence": 15,
+    "type": "background_work",
+    "data": {
+      "error": "exit code 1",
+      "finished_at": "2027-01-15T08:01:00Z",
+      "generation": 0,
+      "kind": "command",
+      "provider_kind": "local_bash",
+      "status": "failed",
+      "work_id": "b7x2k"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-10",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 10,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-2",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:15Z",
+    "semantics": "snapshot",
+    "provider_sequence": 16,
+    "type": "background_work",
+    "data": {
+      "finished_at": "2027-01-15T08:00:15Z",
+      "generation": 0,
+      "kind": "command",
+      "launch_tool_call_id": "toolu_bash",
+      "progress": "Dev server exited",
+      "provider_kind": "local_bash",
+      "status": "failed",
+      "work_id": "b7x2k"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-11",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 11,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-2",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:16Z",
+    "semantics": "snapshot",
+    "provider_sequence": 17,
+    "type": "background_work",
+    "data": {
+      "description": "cargo watch -x test",
+      "generation": 1,
+      "kind": "command",
+      "launch_tool_call_id": "toolu_watch",
+      "provider_kind": "local_bash",
+      "started_at": "2027-01-15T08:00:16Z",
+      "status": "running",
+      "work_id": "c4d"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-12",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 12,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-2",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:17Z",
+    "semantics": "snapshot",
+    "provider_sequence": 18,
+    "type": "background_work",
+    "data": {
+      "finished_at": "2027-01-15T08:00:17Z",
+      "generation": 1,
+      "kind": "command",
+      "launch_tool_call_id": "toolu_watch",
+      "provider_kind": "local_bash",
+      "status": "cancelled",
+      "work_id": "c4d"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-13",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 13,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-2",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:18Z",
+    "semantics": "snapshot",
+    "provider_sequence": 19,
+    "type": "background_work",
+    "data": {
+      "finished_at": "2027-01-15T08:00:18Z",
+      "generation": 0,
+      "kind": "other",
+      "status": "completed",
+      "work_id": "zz9"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-14",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 14,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-2",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:19Z",
+    "semantics": "snapshot",
+    "provider_sequence": 20,
+    "type": "background_work",
+    "data": {
+      "error": "Claude restarted and found the task orphaned",
+      "finished_at": "2027-01-15T08:00:19Z",
+      "generation": 0,
+      "kind": "other",
+      "provider_kind": "future_task_kind",
+      "status": "unknown",
+      "work_id": "m3q"
+    }
+  },
+  {
+    "version": 1,
+    "event_id": "claude-15",
+    "stream_id": "local-chat:backend-1",
+    "sequence": 15,
+    "correlation": {
+      "session_id": "sess-bg",
+      "thread_id": "sess-bg",
+      "turn_id": "turn-2",
+      "provider_resume_id": "sess-bg"
+    },
+    "timestamp": "2027-01-15T08:00:21Z",
+    "semantics": "snapshot",
+    "provider_sequence": 22,
+    "type": "background_roster",
+    "data": {
+      "work": []
+    }
+  }
+]

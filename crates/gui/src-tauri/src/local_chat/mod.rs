@@ -71,6 +71,7 @@ fn chat_developer_instructions_for(docs_root: &std::path::Path) -> String {
 pub use annotations::LocalChatAnnotationStore;
 pub(crate) use annotations::{LocalChatAnnotation, LocalChatAnnotationEvent};
 pub(crate) use events::{
+    LocalChatBackgroundRosterEntry, LocalChatBackgroundRosterEvent, LocalChatBackgroundWorkEvent,
     LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
     LocalChatFileChangeEvent, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
     LocalChatSessionInitEvent, LocalChatSessionTitleEvent, LocalChatSessionUsageEvent,

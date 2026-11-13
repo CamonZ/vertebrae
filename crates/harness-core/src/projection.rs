@@ -774,6 +774,9 @@ impl HarnessProjection {
             HarnessEventPayloadV1::Warning(warning) => stream.warnings.push(warning),
             HarnessEventPayloadV1::Error(error) => stream.errors.push(error),
             HarnessEventPayloadV1::Compaction(compaction) => stream.compaction = Some(compaction),
+            // Projected by the GUI chat store.
+            HarnessEventPayloadV1::BackgroundWork(_)
+            | HarnessEventPayloadV1::BackgroundRoster(_) => {}
             HarnessEventPayloadV1::ControlRequested(request) => {
                 stream
                     .pending_controls

@@ -52,6 +52,10 @@ pub(crate) struct SessionState {
     pub(super) declared_threads: Mutex<HashSet<String>>,
     pub(super) closed: watch::Sender<bool>,
     pub(super) closed_rx: watch::Receiver<bool>,
+    pub(super) background_commands: Mutex<super::background::BackgroundCommands>,
+    /// Foreground operations waiting for the notification receiver.
+    pub(super) foreground_claims: watch::Sender<usize>,
+    pub(super) connection_generation: watch::Sender<u64>,
 }
 
 #[derive(Clone)]
@@ -168,6 +172,9 @@ impl SessionState {
             .connection
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::clone(&connection);
+        self.connection_generation
+            .send_modify(|generation| *generation += 1);
+
         log::info!(
             "[Codex] reattached thread {} to the App Server daemon",
             self.root_thread_id

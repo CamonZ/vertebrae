@@ -1,12 +1,13 @@
 use serde_json::{Map, Value};
 use vertebrae_harness_core::{
     CompactionEvent, CompactionState, ControlDecision, ControlResolution, DiagnosticEvent,
-    HarnessEventDraftV1, HarnessEventPayloadV1, ItemId, PlanEntry, PlanEvent, ProviderResumeId,
-    ResolutionSource, SessionId, SessionStarted, SessionTitle, SpeedTier, SpeedTierStatus,
-    StreamId, TextEvent, ThreadDeclared, ThreadId, ThreadKind, ToolCallId, ToolOutputEvent,
-    ToolStatus, TurnId, TurnInput, TurnInputProvenance, UpdateSemantics,
+    HarnessEventDraftV1, HarnessEventPayloadV1, ItemId, ProviderResumeId, ResolutionSource,
+    SessionId, SessionStarted, SessionTitle, SpeedTier, SpeedTierStatus, StreamId, TextEvent,
+    ThreadDeclared, ThreadId, ThreadKind, ToolCallId, ToolOutputEvent, ToolStatus, TurnId,
+    TurnInput, TurnInputProvenance, UpdateSemantics,
 };
 
+use super::background;
 use super::controls::decode_control_request;
 use super::drafts::{
     RateLimitClassification, classify_rate_limit_event, claude_init_tools,
@@ -260,25 +261,12 @@ impl ClaudeStreamDecoder {
                     }),
                 ));
             }
-            "system" if string(object, "subtype") == Some("task_progress") => {
-                if let Some(description) = string(object, "description") {
-                    drafts.push(self.draft(
-                        stream_id,
-                        &thread_id,
-                        parent_tool_call,
-                        UpdateSemantics::Snapshot,
-                        HarnessEventPayloadV1::Plan(PlanEvent {
-                            entries: vec![PlanEntry {
-                                id: string(object, "task_id").unwrap_or("task").into(),
-                                text: description.into(),
-                                status: string(object, "status").map(str::to_owned),
-                            }],
-                        }),
-                    ));
-                }
-            }
-            "system" if string(object, "subtype") == Some("task_notification") => {
-                if self.root_declared
+            "system"
+                if string(object, "subtype").is_some_and(background::is_background_subtype) =>
+            {
+                let subtype = string(object, "subtype").unwrap_or_default();
+                if subtype == "task_notification"
+                    && self.root_declared
                     && self.context.turn_id.is_none()
                     && self.context.run_id.is_none()
                     && self.pending_background_turn.is_none()
@@ -287,6 +275,14 @@ impl ClaudeStreamDecoder {
                         "claude-task-notification-{provider_sequence}"
                     )));
                 }
+
+                drafts.extend(self.decode_background_record(
+                    subtype,
+                    object,
+                    &stream_id,
+                    &thread_id,
+                    parent_tool_call.as_ref(),
+                ));
             }
             "system" if string(object, "subtype") == Some("status") => {
                 self.decode_compaction_status(

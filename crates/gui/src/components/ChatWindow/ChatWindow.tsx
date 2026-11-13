@@ -41,6 +41,11 @@ import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
+import { BackgroundActivityPanel } from "./BackgroundActivityPanel";
+import {
+  activeBackgroundWorkCount,
+  backgroundWorkRows,
+} from "../../stores/backgroundWork";
 import { GateChatStatusBar } from "./GateChatStatusBar";
 import { GateDraftProgress } from "./GateDraftProgress";
 import { GateSteering } from "./GateSteering";
@@ -131,6 +136,9 @@ export function ChatWindow({
     label: "Resize Changes panel",
   });
   const [changesSession, setChangesSession] = useState<string | null>(null);
+  const [backgroundSession, setBackgroundSession] = useState<string | null>(
+    null
+  );
   // Dirty documents that block leaving the Changes view until resolved.
   const [leaving, setLeaving] = useState<string[] | null>(null);
   const [leaveBusy, setLeaveBusy] = useState(false);
@@ -325,6 +333,7 @@ export function ChatWindow({
       }));
       // Open documents keep their drafts in the store while hidden.
       setChangesSession(null);
+      setBackgroundSession(null);
     },
     [evidenceCheckout, sessionId]
   );
@@ -415,6 +424,7 @@ export function ChatWindow({
 
     if (!showChanges) {
       setEvidence(null);
+      setBackgroundSession(null);
       setChangesSession(sessionId);
     } else {
       const dirty = dirtyPaths(worktreePath);
@@ -422,6 +432,20 @@ export function ChatWindow({
       else setChangesSession(null);
     }
   }, [worktreePath, showChanges, sessionId]);
+
+  const showBackground =
+    backgroundSession === sessionId && !showChanges && !shownEvidence;
+  const toggleBackground = useCallback(() => {
+    if (showBackground) {
+      setBackgroundSession(null);
+      return;
+    }
+
+    // Open documents keep their drafts in the store while hidden.
+    setEvidence(null);
+    setChangesSession(null);
+    setBackgroundSession(sessionId);
+  }, [showBackground, sessionId]);
 
   useEffect(() => {
     if (!registerChangesToggle || !worktreePath || !autoFocusComposer) return;
@@ -473,6 +497,8 @@ export function ChatWindow({
   if (!chat.session) return null;
 
   const isEmpty = chat.session.messages.length === 0;
+  const backgroundWork = chat.session.backgroundWork;
+  const hasBackgroundWork = backgroundWorkRows(backgroundWork).length > 0;
 
   const content = (
     <div
@@ -492,6 +518,11 @@ export function ChatWindow({
         onToggleHistory={onToggleHistory}
         changesOpen={showChanges}
         onToggleChanges={worktreePath ? toggleChanges : undefined}
+        backgroundOpen={showBackground}
+        backgroundRunning={activeBackgroundWorkCount(backgroundWork)}
+        onToggleBackground={
+          hasBackgroundWork || showBackground ? toggleBackground : undefined
+        }
         onToggleWide={onToggleWide}
         isWide={isWide}
         onSplitPane={onSplitPane}
@@ -512,7 +543,9 @@ export function ChatWindow({
       <div
         ref={panelResize.containerRef}
         className="chat-with-changes min-h-0 flex-1"
-        data-changes-open={showChanges || shownEvidence != null}
+        data-changes-open={
+          showChanges || shownEvidence != null || showBackground
+        }
       >
         {showChanges && (
           <aside
@@ -551,7 +584,19 @@ export function ChatWindow({
             />
           </aside>
         )}
-        {(showChanges || shownEvidence) && (
+        {showBackground && (
+          <aside
+            aria-label="Background tasks panel"
+            className="changes-side-panel"
+            style={{ flexBasis: panelResize.width }}
+          >
+            <BackgroundActivityPanel
+              work={backgroundWork}
+              onClose={() => setBackgroundSession(null)}
+            />
+          </aside>
+        )}
+        {(showChanges || shownEvidence || showBackground) && (
           <div {...panelResize.handleProps} className="changes-resize-handle" />
         )}
         {worktreePath && (

@@ -1,3 +1,4 @@
+mod background;
 mod compact;
 mod connection;
 mod control;
@@ -95,6 +96,7 @@ impl HarnessRuntime for CodexRuntime {
             control_sink,
         )
         .await?;
+        background::spawn_idle_pump(&state);
         let handle = CodexSessionHandle {
             session_id: state.root_session_id.clone(),
             provider_resume_id: ProviderResumeId::new(state.root_thread_id.as_str()),
