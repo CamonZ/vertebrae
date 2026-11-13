@@ -190,8 +190,25 @@ export function clockStep(
 }
 
 /**
- * The clock moved onto another arrangement's timeline (Before/After): keep
- * the beat index, landing on its outcome (its start while playing under
+ * The beat of `to` showing the story beat that beat `i` of `from` starts at:
+ * the last of `to`'s beats starting at or before it (its first beat when none
+ * does). Arrangements caption different story beats, and an uncaptioned one
+ * continues the previous caption. Timelines without story indices keep `i`.
+ */
+export function sameBeat(from: Timeline, to: Timeline, i: number): number {
+  const story = from.beats?.[i]?.story;
+  const beats = to.beats ?? [];
+  if (story === undefined || beats.some((b) => b.story === undefined)) return i;
+  let j = 0;
+  beats.forEach((b, k) => {
+    if (b.story! <= story) j = k;
+  });
+  return j;
+}
+
+/**
+ * The clock moved onto another arrangement's timeline: keep the story beat
+ * (see `sameBeat`), landing on its outcome (its start while playing under
  * reduced motion, so the beat is held in full). A beat being played on its
  * own stops on the new arrangement's outcome of that beat.
  */
@@ -202,11 +219,12 @@ export function retarget(
   reduced: boolean
 ): ClockState {
   const i = shownBeat(from, s, reduced);
-  if (s.until !== null) return rest(s, beatOutcome(to, Math.max(0, i)));
-  if (i < 0) return { ...s, raw: 0 };
+  if (i < 0 && s.until === null) return { ...s, raw: 0 };
+  const j = sameBeat(from, to, Math.max(0, i));
+  if (s.until !== null) return rest(s, beatOutcome(to, j));
   return {
     ...s,
-    raw: reduced && s.playing ? beatStart(to, i) : beatOutcome(to, i),
+    raw: reduced && s.playing ? beatStart(to, j) : beatOutcome(to, j),
   };
 }
 

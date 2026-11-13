@@ -17,11 +17,11 @@ the [saving contract](artifacts.md). See the [inline recipe](recipes/drill.md).
   in the trail can be selected. Esc stays with the enclosing panel; it does
   not go up a level.
 - The parent player stays mounted, hidden and paused, so returning finds its
-  beat, Before/After arrangement, pinned part and followed card as they were,
+  beat, arrangement, pinned part and followed card as they were,
   with focus back on the part that was opened.
 - Inline children use their compiled per-level layout; artifact children load
   from the current project's artifact presentations and are laid out on their
-  own. A child may drill further and may have its own Before/After.
+  own. A child may drill further and may have its own arrangements.
 - Missing artifacts, non-flow metadata, load failures and invalid bodies show
   as errors in place of the child; load failures offer Retry.
 

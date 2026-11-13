@@ -8,6 +8,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, test } from "vitest";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
+import burstOptions from "./__fixtures__/burstOptions.flow.yaml?raw";
 import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
 import mechanisms from "./__fixtures__/mechanisms.flow.yaml?raw";
 import { noteIndex } from "../timeline";
@@ -34,6 +35,7 @@ function arrangements(source: string): DiagramTimeline[] {
 const DIAGRAMS = [
   ...arrangements(inlineDiscussions),
   ...arrangements(mechanisms),
+  ...arrangements(burstOptions),
 ];
 
 /** Cards with ids that this arrangement actually draws. */

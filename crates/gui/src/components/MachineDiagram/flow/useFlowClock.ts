@@ -53,7 +53,7 @@ export interface FlowClockOptions {
  * timeline's period, at the chosen speed;
  * beat steps pause on a beat's outcome, wrapping at the ends; a chapter
  * plays just its beat and pauses on the outcome; frame steps pause one frame away. Under reduced motion only beat
- * outcomes are shown. When `tl` changes (Before/After) the beat index is kept.
+ * outcomes are shown. When `tl` changes (another arrangement) the story beat is kept.
  */
 export function useFlowClock(
   tl: Timeline,

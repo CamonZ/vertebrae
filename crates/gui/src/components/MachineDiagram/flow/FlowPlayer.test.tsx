@@ -342,6 +342,23 @@ describe("parts", () => {
     key("Escape");
     expect(screen.queryByTestId("flow-part-inspector")).toBeNull();
   });
+
+  it("a hovered part's inspector moves nothing under the pointer and lets it through; pinned, it takes input", () => {
+    renderPlayer();
+    const bottom = screen.getByTestId("flow-bottom-panel");
+    const before = [...bottom.children];
+    fireEvent.mouseEnter(part("process"));
+    const inspector = screen.getByTestId("flow-part-inspector");
+    // The stack is anchored at its foot: the inspector opens above it all.
+    expect(bottom.firstElementChild).toContainElement(inspector);
+    expect([...bottom.children].slice(1)).toEqual(before);
+    expect(inspector).toHaveClass("pointer-events-none");
+    expect(inspector).not.toHaveClass("pointer-events-auto");
+    fireEvent.click(part("process"));
+    expect(screen.getByTestId("flow-part-inspector")).toHaveClass(
+      "pointer-events-auto"
+    );
+  });
 });
 
 describe("following a card", () => {
@@ -489,9 +506,16 @@ describe("reduced motion", () => {
     expect(shownT()).toBe(outcomes[4]);
   });
 
-  it("Before keeps the beat under reduced motion too", () => {
+  it("Before keeps the story beat under reduced motion too", () => {
     renderPlayer({ reducedMotion: true });
+    // After's beat 4 ("edit attempt denied") has no Before caption, so
+    // Before still shows Q2, its beat 3; After's Q3 is Before's beat 4.
     key("4");
+    key("b");
+    expect(shownBeat()).toBe(2);
+    expect(shownT()).toBe(beatOutcome(before.travel, 2));
+    key("b");
+    key("5");
     key("b");
     expect(shownBeat()).toBe(3);
     expect(shownT()).toBe(beatOutcome(before.travel, 3));

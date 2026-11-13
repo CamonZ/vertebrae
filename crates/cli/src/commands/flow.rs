@@ -189,6 +189,105 @@ mod tests {
         );
     }
 
+    /// Options A and B over today's machine: x, y, z in A; only y and z in B, wired differently.
+    const OPTIONS: &str = "version: 1
+arrangements: [current, A, B]
+parts:
+  - {id: src, kind: source}
+  - {id: w, kind: worker}
+  - {id: x, kind: rate limiter, in: [A]}
+  - {id: y, kind: queue, in: [A, B]}
+  - {id: z, kind: store, in: [A, B]}
+rails:
+  - {id: direct, from: src.out, to: w.in, in: [current]}
+  - {id: sx, from: src.out, to: x.in}
+  - {id: xy, from: x.out, to: y.in}
+  - {id: sy, from: src.out, to: y.in, in: [B]}
+  - {id: yzDead, from: y.dead, to: z.in, in: [A]}
+  - {id: yzOut, from: y.out, to: z.in, in: [B]}
+cards:
+  - {id: c, token: request, origin: src}
+story:
+  - caption: {current: straight in, A: limited, B: queued}
+    steps:
+      - {verb: send, part: src, card: c}
+      - {verb: stage, part: w, card: c, via: direct}
+      - {verb: send, part: x, card: c, via: sx}
+      - {verb: send, part: y, card: c, via: xy}
+      - {verb: send, part: y, card: c, via: sy}
+";
+
+    #[test]
+    fn named_arrangements_pass() {
+        let result = validate_flow_source(OPTIONS).unwrap();
+        assert!(result.valid, "{result:?}");
+    }
+
+    #[test]
+    fn named_arrangement_errors_name_the_arrangement() {
+        let broken = OPTIONS
+            .replace(
+                "kind: rate limiter, in: [A]",
+                "kind: rate limiter, in: [A, C]",
+            )
+            .replace(
+                "{verb: send, part: x, card: c, via: sx}",
+                "{verb: send, part: x, card: c, via: sx, in: [B]}",
+            )
+            .replace("A: limited", "D: limited");
+        let result = validate_flow_source(&broken).unwrap();
+        assert!(!result.valid);
+        let lines: Vec<&str> = result.errors.iter().map(|e| e.line.as_str()).collect();
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with(r#"parts[2].in[1]: unknown arrangement "C""#)),
+            "{lines:?}"
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|l| l
+                    .starts_with(r#"story[0].caption.D: caption names unknown arrangement "D""#)),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|l| l.starts_with(
+                r#"story[0].steps[2].in: lists arrangement "B", where its part "x" is absent"#
+            )),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn a_missing_baseline_is_reported() {
+        let result = validate_flow_source(&OPTIONS.replace(
+            "arrangements: [current, A, B]",
+            "arrangements: [current, A, B]\nbaseline: before",
+        ))
+        .unwrap();
+        assert!(!result.valid);
+        assert_eq!(result.errors[0].path, "baseline");
+        assert!(
+            result.errors[0]
+                .line
+                .contains(r#"baseline names missing arrangement "before""#),
+            "{}",
+            result.errors[0].line
+        );
+    }
+
+    #[test]
+    fn shorthand_marks_beside_named_arrangements_are_rejected() {
+        let result = validate_flow_source(&OPTIONS.replace(
+            "{id: w, kind: worker}",
+            "{id: w, kind: worker, change: added}",
+        ))
+        .unwrap();
+        assert!(!result.valid);
+        assert_eq!(result.errors[0].path, "parts[1].change");
+    }
+
     #[test]
     fn unparseable_text_is_reported_at_the_root() {
         let result = validate_flow_source("parts: [a").unwrap();

@@ -40,6 +40,10 @@ the system works today. These principles matter more than any template.
   Re-check evidence after new pushes.
 - **Merged PR.** The same, read at the merge commit; refs to the default
   branch stay valid until the code moves.
+- **Design options or competing PRs.** One change is Before/After; two or
+  more alternatives are [named arrangements](options.md) over the current
+  machine, so each option is marked against what exists today and the
+  reader compares outcomes on the same story. Cite each option's own diff.
 - **Part of the system.** No diff: start at an entry point (a command,
   handler or event), follow one input to its observable end, and cite the
   current default branch. Use one arrangement; put deeper mechanisms behind

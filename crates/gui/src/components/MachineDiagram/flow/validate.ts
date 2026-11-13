@@ -21,6 +21,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const TOP_FIELDS = [
   "version",
   "title",
+  "arrangements",
+  "baseline",
   "parts",
   "rails",
   "regions",
@@ -41,6 +43,8 @@ const PART_FIELDS = [
   "stageChanges",
   "before",
   "after",
+  "in",
+  "arrangement",
   "position",
   "scale",
   "attachments",
@@ -53,6 +57,7 @@ const RAIL_FIELDS = [
   "label",
   "conditional",
   "change",
+  "in",
   "attachments",
 ];
 const REGION_FIELDS = ["id", "label", "parts"];
@@ -75,11 +80,19 @@ const STEP_FIELDS = [
   "args",
   "checkpoint",
   "change",
+  "in",
 ];
 const BAND_FIELDS = ["heading", "rows", "meter"];
 const BAND_ROW_FIELDS = ["name", "note", "chips", "beats"];
 const BAND_METER_FIELDS = ["label", "marker", "footnote"];
 const SIDES = ["before", "after"];
+const ARRANGEMENT_FIELDS = ["name", "label"];
+const NAMED_OVERRIDE_FIELDS = [
+  "props",
+  "changeNote",
+  "portChanges",
+  "stageChanges",
+];
 const PAYLOAD_FIELDS = ["type", "value", "eventTime", "fields"];
 /** Drill-down nesting and total sub-spec limits (YAML aliases can repeat or loop a spec). */
 export const MAX_DRILL_DEPTH = 8;
@@ -218,6 +231,195 @@ class Checker {
   }
 }
 
+/**
+ * A spec's named arrangements while it is checked; absent for the
+ * Before/After shorthand. Membership is by part, rail and step: where each
+ * is present.
+ */
+interface Named {
+  readonly names: readonly string[];
+  readonly baseline: string;
+  readonly parts: Map<string, ReadonlySet<string>>;
+  readonly rails: Map<string, ReadonlySet<string>>;
+}
+
+/** Shorthand-only fields, and what to write instead with named arrangements. */
+const SHORTHAND_ONLY: Readonly<Record<string, string>> = {
+  change:
+    "with named arrangements marks are computed from in: (added: not in the baseline, removed: only in the baseline); list where it is present instead",
+  before:
+    "before/after overrides are the Before/After shorthand; with named arrangements give them under arrangement: {<name>: {props, changeNote}}",
+  after:
+    "before/after overrides are the Before/After shorthand; with named arrangements give them under arrangement: {<name>: {props, changeNote}}",
+  portChanges:
+    "with named arrangements give portChanges per arrangement, under arrangement: {<name>: {portChanges}}",
+  stageChanges:
+    "with named arrangements give stageChanges per arrangement, under arrangement: {<name>: {stageChanges}}",
+};
+
+/** Report shorthand-only fields of a part, rail or step in a named spec. */
+function shorthandOnly(
+  c: Checker,
+  raw: Record<string, unknown>,
+  keys: readonly string[],
+  p: string
+) {
+  for (const k of keys)
+    if (raw[k] !== undefined) c.err(join(p, k), SHORTHAND_ONLY[k]);
+}
+
+/** Report named-only fields in a shorthand spec. */
+function namedOnly(
+  c: Checker,
+  raw: Record<string, unknown>,
+  keys: readonly string[],
+  p: string
+) {
+  for (const k of keys)
+    if (raw[k] !== undefined)
+      c.err(
+        join(p, k),
+        `${k} names arrangements; it needs a top-level arrangements list`
+      );
+}
+
+/** The top-level `arrangements` and `baseline`; undefined for the shorthand. */
+function checkArrangements(
+  c: Checker,
+  input: Record<string, unknown>,
+  root: string
+): Named | undefined {
+  if (input.arrangements === undefined) {
+    if (input.baseline !== undefined)
+      c.err(
+        join(root, "baseline"),
+        "needs a top-level arrangements list to name the baseline from"
+      );
+    return undefined;
+  }
+  const lp = join(root, "arrangements");
+  const list = c.list(input, "arrangements", root);
+  if (Array.isArray(input.arrangements) && list.length === 0)
+    c.err(lp, "needs at least one arrangement");
+  const seen = new Map<string, string>();
+  list.forEach((raw, i) => {
+    const p = join(lp, i);
+    let name: unknown = raw;
+    let np = p;
+    if (isRecord(raw)) {
+      c.unknownFields(raw, ARRANGEMENT_FIELDS, p);
+      c.str(raw, "label", p);
+      if (raw.name === undefined) return c.err(join(p, "name"), "is required");
+      name = raw.name;
+      np = join(p, "name");
+    }
+    if (typeof name !== "string" || !ID.test(name))
+      return c.err(
+        np,
+        "expected an arrangement name: a letter, then letters, digits, - or _ (or { name, label })"
+      );
+    const prev = seen.get(name);
+    if (prev !== undefined)
+      return c.err(
+        np,
+        `duplicate arrangement "${name}" (first declared at ${prev})`
+      );
+    seen.set(name, np);
+  });
+  const names = [...seen.keys()];
+  let baseline = names[0] ?? "";
+  const b = c.str(input, "baseline", root);
+  if (b !== undefined) {
+    if (seen.has(b)) baseline = b;
+    else
+      c.missing(
+        join(root, "baseline"),
+        "baseline names missing arrangement",
+        b,
+        names,
+        "arrangements"
+      );
+  }
+  return { names, baseline, parts: new Map(), rails: new Map() };
+}
+
+/**
+ * An `in` list: known arrangement names, each once. Returns the set given,
+ * or undefined when absent (present everywhere it can be) or invalid.
+ */
+function checkIn(
+  c: Checker,
+  raw: Record<string, unknown>,
+  p: string,
+  named: Named
+): ReadonlySet<string> | undefined {
+  if (raw.in === undefined) return undefined;
+  const ip = join(p, "in");
+  if (!Array.isArray(raw.in)) {
+    c.err(ip, "expected a list of arrangement names");
+    return undefined;
+  }
+  if (raw.in.length === 0) c.err(ip, "needs at least one arrangement");
+  const out = new Set<string>();
+  raw.in.forEach((a, i) => {
+    const ap = join(ip, i);
+    if (typeof a !== "string" || a === "")
+      return c.err(ap, "expected an arrangement name");
+    if (!named.names.includes(a))
+      return c.missing(
+        ap,
+        "unknown arrangement",
+        a,
+        named.names,
+        "arrangements"
+      );
+    if (out.has(a)) return c.err(ap, `arrangement "${a}" is listed twice`);
+    out.add(a);
+  });
+  return out;
+}
+
+/** An error for each arrangement listed in `own` where `what` is absent. */
+function presentWithin(
+  c: Checker,
+  own: ReadonlySet<string> | undefined,
+  within: ReadonlySet<string> | undefined,
+  p: string,
+  what: string
+) {
+  if (!own || !within) return;
+  for (const a of own)
+    if (!within.has(a))
+      c.err(
+        join(p, "in"),
+        `lists arrangement "${a}", where ${what} is absent (${what} is in: ${[...within].join(", ") || "none"})`
+      );
+}
+
+/** An error when a rail or step is in no arrangement at all. */
+function presentSomewhere(
+  c: Checker,
+  members: ReadonlySet<string> | undefined,
+  p: string,
+  what: string
+) {
+  if (members && members.size === 0)
+    c.err(
+      p,
+      what === "rail"
+        ? "the rail is in no arrangement: its two parts (and its in: list) share none"
+        : "the step runs in no arrangement: its part, its via rail and its in: list share none"
+    );
+}
+
+const intersect = (
+  ...sets: (ReadonlySet<string> | undefined)[]
+): ReadonlySet<string> | undefined => {
+  const given = sets.filter((x): x is ReadonlySet<string> => x !== undefined);
+  if (given.length === 0) return undefined;
+  return new Set([...given[0]].filter((a) => given.every((g) => g.has(a))));
+};
+
 /** Validate a parsed spec (JSON value) against the registries. */
 export function validateFlowSpec(
   input: unknown,
@@ -254,6 +456,7 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
     );
   if (input.title !== undefined) c.str(input, "title", root);
   c.attachments(input, root);
+  const named = checkArrangements(c, input, root);
 
   /* parts */
   const partIds = new Map<string, string>();
@@ -299,6 +502,22 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
       );
     const fields = def.props ?? {};
     checkFields(raw.props, fields, join(p, "props"), c.errors);
+    if (named) {
+      shorthandOnly(
+        c,
+        raw,
+        ["change", "before", "after", "portChanges", "stageChanges"],
+        p
+      );
+      const members = checkIn(c, raw, p, named);
+      checkNamedOverrides(c, raw, def, p, named, members);
+      if (id !== undefined) {
+        named.parts.set(id, members ?? new Set(named.names));
+        parts.set(id, { def, path: p });
+      }
+      return;
+    }
+    namedOnly(c, raw, ["in", "arrangement"], p);
     for (const side of ["before", "after"] as const) {
       const o = raw[side];
       if (o === undefined) continue;
@@ -317,7 +536,15 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
           `per-arrangement overrides need change: changed (this part is ${String(raw.change ?? "unchanged")})`
         );
     }
-    checkInnerMarks(c, raw, def, p);
+    checkInnerMarks(
+      c,
+      raw,
+      def,
+      p,
+      isRecord(raw.after) && isRecord(raw.after.props)
+        ? raw.after.props
+        : undefined
+    );
     if (id !== undefined) parts.set(id, { def, path: p });
   });
 
@@ -380,6 +607,9 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
     if (id !== undefined && partIds.has(id))
       c.err(join(p, "id"), `rail id "${id}" is also a part id`);
     c.str(raw, "label", p);
+    const own = named ? checkIn(c, raw, p, named) : undefined;
+    if (named) shorthandOnly(c, raw, ["change"], p);
+    else namedOnly(c, raw, ["in"], p);
     if (raw.conditional !== undefined)
       checkField(
         raw.conditional,
@@ -388,6 +618,7 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
         c.errors
       );
     if (
+      !named &&
       raw.change !== undefined &&
       !WIRE_CHANGE_MARKS.includes(raw.change as never)
     )
@@ -409,6 +640,16 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
           p,
           `${from[0]}.${from[1]} carries ${from[2].join(", ")} but ${to[0]}.${to[1]} accepts ${to[2].join(", ")}; no token kind can travel this rail`
         );
+    }
+    if (named) {
+      const ends = [from, to].map((e) => e && named.parts.get(e[0]));
+      if (from) presentWithin(c, own, ends[0], p, `its part "${from[0]}"`);
+      if (to && to[0] !== from?.[0])
+        presentWithin(c, own, ends[1], p, `its part "${to[0]}"`);
+      const members = intersect(own, ends[0], ends[1]);
+      if (from && to) presentSomewhere(c, members, p, "rail");
+      if (id !== undefined)
+        named.rails.set(id, members ?? new Set(named.names));
     }
     if (id !== undefined)
       rails.set(id, {
@@ -497,7 +738,25 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
     if (raw.id !== undefined) c.id(raw, p, beatIds, "beat");
     if (raw.caption !== undefined && typeof raw.caption !== "string") {
       if (!isRecord(raw.caption))
-        c.err(join(p, "caption"), "expected a string or { before, after }");
+        c.err(
+          join(p, "caption"),
+          named
+            ? "expected a string or one per arrangement, by name"
+            : "expected a string or { before, after }"
+        );
+      else if (named)
+        for (const [a, v] of Object.entries(raw.caption)) {
+          const cp = join(join(p, "caption"), a);
+          if (!named.names.includes(a))
+            c.missing(
+              cp,
+              "caption names unknown arrangement",
+              a,
+              named.names,
+              "arrangements"
+            );
+          else if (typeof v !== "string") c.err(cp, "expected a string");
+        }
       else
         checkFields(
           raw.caption,
@@ -518,12 +777,74 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
     if (steps.length === 0 && raw.caption === undefined)
       c.err(p, "a beat needs a caption or at least one step");
     steps.forEach((s, k) =>
-      checkStep(c, s, join(join(p, "steps"), k), parts, partIds, rails, cards)
+      checkStep(
+        c,
+        s,
+        join(join(p, "steps"), k),
+        parts,
+        partIds,
+        rails,
+        cards,
+        named
+      )
     );
   });
 
   if (input.band !== undefined)
-    checkBand(c, input.band, join(root, "band"), beatIds);
+    checkBand(c, input.band, join(root, "band"), beatIds, named);
+}
+
+/**
+ * A named spec's per-arrangement overrides: `arrangement: {name: {props,
+ * changeNote, portChanges, stageChanges}}`, each for an arrangement the part
+ * is in; props update the base props, marks name the kind's ports and the
+ * stages as that arrangement's props name them.
+ */
+function checkNamedOverrides(
+  c: Checker,
+  raw: Record<string, unknown>,
+  def: AnyPartKind,
+  p: string,
+  named: Named,
+  members: ReadonlySet<string> | undefined
+) {
+  const v = raw.arrangement;
+  if (v === undefined) return;
+  const op = join(p, "arrangement");
+  if (!isRecord(v)) return c.err(op, "expected overrides by arrangement name");
+  for (const [a, o] of Object.entries(v)) {
+    const ap = join(op, a);
+    if (!named.names.includes(a)) {
+      c.missing(
+        ap,
+        "override names unknown arrangement",
+        a,
+        named.names,
+        "arrangements"
+      );
+      continue;
+    }
+    if (members && !members.has(a))
+      c.err(
+        ap,
+        `the part is not in arrangement "${a}" (in: ${[...members].join(", ")})`
+      );
+    if (!isRecord(o)) {
+      c.err(ap, "expected an object with props and/or changeNote");
+      continue;
+    }
+    c.unknownFields(o, NAMED_OVERRIDE_FIELDS, ap);
+    c.str(o, "changeNote", ap);
+    checkFields(o.props, def.props ?? {}, join(ap, "props"), c.errors, true);
+    checkInnerMarks(
+      c,
+      o,
+      def,
+      ap,
+      isRecord(o.props) ? o.props : undefined,
+      isRecord(raw.props) ? raw.props : undefined
+    );
+  }
 }
 
 /** A band: heading, rows naming story beats by id, and an optional meter. */
@@ -531,7 +852,8 @@ function checkBand(
   c: Checker,
   raw: unknown,
   p: string,
-  beatIds: Map<string, string>
+  beatIds: Map<string, string>,
+  named: Named | undefined
 ) {
   if (!isRecord(raw)) return c.err(p, "expected a band object with rows");
   c.unknownFields(raw, BAND_FIELDS, p);
@@ -544,13 +866,13 @@ function checkBand(
     if (!isRecord(row)) return c.err(rp, "expected a band row object");
     c.unknownFields(row, BAND_ROW_FIELDS, rp);
     c.str(row, "name", rp, true);
-    perArrangement(c, row, "note", rp, (v, vp) => {
+    perArrangement(c, row, "note", rp, named, (v, vp) => {
       if (typeof v !== "string" || v === "")
         c.err(vp, "expected a non-empty string");
     });
     if (row.chips === undefined) c.err(join(rp, "chips"), "is required");
     else
-      perArrangement(c, row, "chips", rp, (v, vp) => {
+      perArrangement(c, row, "chips", rp, named, (v, vp) => {
         if (!Array.isArray(v))
           return c.err(vp, "expected a list of chip texts");
         if (v.length === 0) return c.err(vp, "needs at least one chip");
@@ -598,24 +920,36 @@ function checkBand(
 }
 
 /**
- * A field that is either one value or `{ before, after }`, each checked by
- * `each`. The per-arrangement form needs both sides.
+ * A field that is either one value or one per arrangement, by name
+ * (`{ before, after }` in the shorthand), each checked by `each`. The
+ * per-arrangement form gives every arrangement.
  */
 function perArrangement(
   c: Checker,
   obj: Record<string, unknown>,
   key: string,
   path: string,
+  named: Named | undefined,
   each: (v: unknown, p: string) => void
 ) {
   const v = obj[key];
   if (v === undefined) return;
   const p = join(path, key);
   if (!isRecord(v)) return each(v, p);
-  c.unknownFields(v, SIDES, p);
-  for (const side of SIDES)
+  const sides = named?.names ?? SIDES;
+  if (named) {
+    for (const a of Object.keys(v))
+      if (!sides.includes(a))
+        c.missing(join(p, a), "unknown arrangement", a, sides, "arrangements");
+  } else c.unknownFields(v, SIDES, p);
+  for (const side of sides)
     if (v[side] === undefined)
-      c.err(join(p, side), "is required (give both before and after)");
+      c.err(
+        join(p, side),
+        named
+          ? `is required (give every arrangement: ${sides.join(", ")})`
+          : "is required (give both before and after)"
+      );
     else each(v[side], join(p, side));
 }
 
@@ -695,16 +1029,35 @@ function checkStep(
     string,
     { from?: [string, string]; to?: [string, string]; tokens: TokenKind[] }
   >,
-  cards: Map<string, TokenKind>
+  cards: Map<string, TokenKind>,
+  named: Named | undefined
 ) {
   if (!isRecord(raw)) return c.err(p, "expected a step object");
   c.unknownFields(raw, STEP_FIELDS, p);
+  if (named) {
+    shorthandOnly(c, raw, ["change"], p);
+    const own = checkIn(c, raw, p, named);
+    if (typeof raw.part === "string")
+      presentWithin(
+        c,
+        own,
+        named.parts.get(raw.part),
+        p,
+        `its part "${raw.part}"`
+      );
+    const rail =
+      typeof raw.via === "string" ? named.rails.get(raw.via) : undefined;
+    if (rail) presentWithin(c, own, rail, p, `its rail "${raw.via}"`);
+    const part =
+      typeof raw.part === "string" ? named.parts.get(raw.part) : undefined;
+    if (part) presentSomewhere(c, intersect(own, part, rail), p, "step");
+  } else namedOnly(c, raw, ["in"], p);
   const verb = c.str(raw, "verb", p, true);
   const pid = c.str(raw, "part", p, true);
   const cardId = c.str(raw, "card", p);
   const via = c.str(raw, "via", p);
   c.str(raw, "checkpoint", p);
-  c.changeMark(raw.change, join(p, "change"));
+  if (!named) c.changeMark(raw.change, join(p, "change"));
   if (raw.with !== undefined)
     checkField(raw.with, { type: "boolean" }, join(p, "with"), c.errors);
   if (raw.delay !== undefined)
@@ -785,13 +1138,18 @@ function checkStep(
 
 /**
  * `portChanges` keys must be the kind's ports and `stageChanges` keys its
- * stages as the After arrangement names them (where the marks are drawn).
+ * stages as the arrangement drawing the marks names them: After in the
+ * shorthand (`override` is After's props), or the override's own.
  */
 function checkInnerMarks(
   c: Checker,
   raw: Record<string, unknown>,
   def: AnyPartKind,
-  p: string
+  p: string,
+  override: Record<string, unknown> | undefined,
+  base: Record<string, unknown> | undefined = isRecord(raw.props)
+    ? raw.props
+    : undefined
 ) {
   const marks = (key: string, names: readonly string[], what: string) => {
     const v = raw[key];
@@ -815,14 +1173,9 @@ function checkInnerMarks(
   if (raw.stageChanges === undefined) return;
   if (!def.stages)
     return c.err(join(p, "stageChanges"), `${def.kind} has no stages to mark`);
-  const after =
-    isRecord(raw.after) && isRecord(raw.after.props)
-      ? raw.after.props
-      : undefined;
-  const base = isRecord(raw.props) ? raw.props : undefined;
   let names: string[] = [];
   try {
-    names = def.stages(resolvedProps(def, base, after)).map((s) => s.name);
+    names = def.stages(resolvedProps(def, base, override)).map((s) => s.name);
   } catch {
     // Bad props are reported against props; nothing to match stages against.
     return;

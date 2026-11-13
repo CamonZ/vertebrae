@@ -40,9 +40,18 @@ export const WIRE_CHANGE_MARKS: readonly WireChangeMark[] = [
   "removed",
 ];
 
+/** The two arrangements of the Before/After shorthand. */
 export type Arrangement = "before" | "after";
-/** A spec without change marks compiles one arrangement, `current`. */
-export type ArrangementName = Arrangement | "current";
+/**
+ * An arrangement's name: `before`/`after` for the shorthand, `current` for a
+ * spec without change marks, otherwise a name from the spec's `arrangements`.
+ */
+export type ArrangementName = string;
+
+/** An entry of `arrangements`: a name, or a name with a display label. */
+export type ArrangementDecl =
+  | string
+  | { readonly name: string; readonly label?: string };
 
 /** Common to every attachment; the rest of the body is the attachment kind's fields. */
 export interface AttachmentSpec {
@@ -65,6 +74,10 @@ export interface Position {
 export interface ArrangementOverride {
   readonly props?: Readonly<Record<string, unknown>>;
   readonly changeNote?: string;
+  /** Named arrangements only: port marks drawn in this arrangement. */
+  readonly portChanges?: Readonly<Record<string, ChangeMark>>;
+  /** Named arrangements only: stage marks drawn in this arrangement. */
+  readonly stageChanges?: Readonly<Record<string, ChangeMark>>;
 }
 
 /** A deeper diagram behind a part: inline, or a saved flow artifact. */
@@ -96,6 +109,10 @@ export interface PartSpec {
   readonly stageChanges?: Readonly<Record<string, ChangeMark>>;
   readonly before?: ArrangementOverride;
   readonly after?: ArrangementOverride;
+  /** Named arrangements the part is in (default: all of them). */
+  readonly in?: readonly string[];
+  /** Named arrangements only: overrides by arrangement name. */
+  readonly arrangement?: Readonly<Record<string, ArrangementOverride>>;
   /** Hand-given placement of the part's 640×400 cell; auto-layout fills it in when absent. */
   readonly position?: Position;
   /** Cell scale; defaults to the kind's footprint (S 0.5, M 0.75, L 1). */
@@ -114,6 +131,8 @@ export interface RailSpec {
   /** Dashed lane that only carries on a condition (VL-05). */
   readonly conditional?: boolean;
   readonly change?: WireChangeMark;
+  /** Named arrangements the rail is in (default: every one both its parts are in). */
+  readonly in?: readonly string[];
   readonly attachments?: readonly AttachmentSpec[];
 }
 
@@ -160,12 +179,19 @@ export interface StepSpec {
    * only in Before; both and changed steps are listed on their beat in After.
    */
   readonly change?: ChangeMark;
+  /**
+   * Named arrangements the step runs in (default: every one its part and
+   * `via` rail are in).
+   */
+  readonly in?: readonly string[];
 }
 
-/** A caption, or one per arrangement when the two sides read differently. */
-export type Caption =
-  | string
-  | { readonly before?: string; readonly after?: string };
+/**
+ * A caption, or one per arrangement when the sides read differently, keyed
+ * by arrangement name (`before`/`after` in the shorthand). An arrangement
+ * without one continues the previous beat's caption.
+ */
+export type Caption = string | Readonly<Record<string, string>>;
 
 export interface BeatSpec {
   readonly id?: string;
@@ -176,8 +202,11 @@ export interface BeatSpec {
   readonly attachments?: readonly AttachmentSpec[];
 }
 
-/** A value that reads the same in both arrangements, or one per arrangement. */
-export type PerArrangement<T> = T | { readonly before: T; readonly after: T };
+/**
+ * A value that reads the same in every arrangement, or one per arrangement
+ * keyed by its name (`{ before, after }` in the shorthand; every one given).
+ */
+export type PerArrangement<T> = T | Readonly<Record<string, T>>;
 
 /**
  * One situation in a band: a name, a note, and a chain of chips saying what
@@ -205,7 +234,7 @@ export interface BandMeterSpec {
    * `[spawn, resume]` counts every process start.
    */
   readonly marker: string | readonly string[];
-  /** Dim line under the rings; defaults to "before: n · after: m" for a change. */
+  /** Dim line under the rings; defaults to "before: n · after: m" (one count per arrangement). */
   readonly footnote?: string;
 }
 
@@ -223,6 +252,13 @@ export interface BandSpec {
 export interface FlowSpec {
   readonly version: number;
   readonly title?: string;
+  /**
+   * Named arrangements of the machine (options A, B…). Absent: Before/After
+   * when anything is marked, otherwise one `current` arrangement.
+   */
+  readonly arrangements?: readonly ArrangementDecl[];
+  /** The arrangement marks are computed against (default: the first). */
+  readonly baseline?: string;
   readonly parts: readonly PartSpec[];
   readonly rails?: readonly RailSpec[];
   readonly regions?: readonly RegionSpec[];

@@ -16,7 +16,12 @@ import { beatOutcome, nextSpeed, SPEEDS } from "./clockModel";
 import type { BeatChange, CompiledFlow, DiagramTimeline } from "./compile";
 import { AttachmentPanel } from "./AttachmentPanel";
 import { FlowDiagram } from "./FlowDiagram";
-import { leaveToTarget, playerCommand, PLAYER_SHORTCUTS } from "./playerKeys";
+import {
+  cycleArrangement,
+  leaveToTarget,
+  playerCommand,
+  PLAYER_SHORTCUTS,
+} from "./playerKeys";
 import type { ArrangementName } from "./spec";
 import { useArrangementMorph } from "./useArrangementMorph";
 import { useFlowClock, type FlowClock } from "./useFlowClock";
@@ -45,20 +50,20 @@ export interface FlowPlayerProps {
   suspended?: boolean;
 }
 
-const ARRANGEMENT_LABELS: Record<ArrangementName, string> = {
-  before: "Before",
-  after: "After",
-  current: "Current",
-};
+/** The arrangement shown first: the first one marked against the baseline (After, option A). */
+const firstShown = (flow: CompiledFlow): ArrangementName =>
+  (
+    flow.arrangements.find((a) => a.arrangement !== flow.baseline) ??
+    flow.arrangements[0]
+  ).arrangement;
 
 const speedLabel = (s: number) => `${s}×`;
 
-/**
- * Floating panels: a borderless glass card laid on the diagram, sized to
- * its content, that takes input (the overlay layer itself does not).
- */
-const floating =
-  "pointer-events-auto rounded-[var(--radius-md)] bg-[color-mix(in_srgb,var(--color-bg-1)_86%,transparent)] shadow-[var(--shadow-2)] backdrop-blur-md";
+/** A borderless glass card laid on the diagram, sized to its content. */
+const glass =
+  "rounded-[var(--radius-md)] bg-[color-mix(in_srgb,var(--color-bg-1)_86%,transparent)] shadow-[var(--shadow-2)] backdrop-blur-md";
+/** Floating panels take input (the overlay layer itself does not). */
+const floating = `pointer-events-auto ${glass}`;
 
 /** Height kept under a fitted diagram for the floating controls bar. */
 const CONTROLS_ROOM = 56;
@@ -74,8 +79,8 @@ const insetsBeside = (width: number): FitInsets => ({
  * An interactive flow explorer. The diagram fills a resizable frame; the
  * beats (a list of chapters, paused by default) float over its right side
  * and can be hidden, and the controls, evidence and inspectors float over
- * its foot. Beat and frame stepping, optional playback at a chosen speed, a Before/After
- * toggle that keeps the beat, hover/focus on a part to inspect its state and
+ * its foot. Beat and frame stepping, optional playback at a chosen speed, an
+ * arrangement selector (Before/After, or options A, B…) that keeps the beat, hover/focus on a part to inspect its state and
  * source refs, and click a card to follow it with a narrated caption. Every
  * control has a keyboard shortcut; beat captions and the followed card are
  * announced through a live region.
@@ -87,8 +92,8 @@ export function FlowPlayer({
   suspended = false,
 }: FlowPlayerProps) {
   const names = flow.arrangements.map((a) => a.arrangement);
-  const [selected, setSelected] = useState<ArrangementName>(
-    names[names.length - 1]
+  const [selected, setSelected] = useState<ArrangementName>(() =>
+    firstShown(flow)
   );
   const diagram =
     flow.arrangements.find((a) => a.arrangement === selected) ??
@@ -155,11 +160,6 @@ export function FlowPlayer({
     setSelected(a);
   };
 
-  const toggleArrangement = () => {
-    if (names.length !== 2) return;
-    choose(names[0] === diagram.arrangement ? names[1] : names[0]);
-  };
-
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (e.defaultPrevented || !root.current) return;
     const cmd = playerCommand(e.key, e);
@@ -187,8 +187,8 @@ export function FlowPlayer({
         clock.setLoop(!clock.loop);
         break;
       case "arrangement":
-        if (names.length !== 2) return;
-        toggleArrangement();
+        if (names.length < 2) return;
+        choose(cycleArrangement(names, diagram.arrangement, cmd.dir));
         break;
       case "beats":
         if (!hasBeats) return;
@@ -214,7 +214,7 @@ export function FlowPlayer({
       ref={root}
       role="group"
       aria-label={label}
-      aria-keyshortcuts="Space ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Home End C"
+      aria-keyshortcuts={`Space ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Home End C${names.length > 1 ? " B Shift+B" : ""}`}
       tabIndex={0}
       onKeyDown={onKeyDown}
       className="flex flex-col gap-2 rounded-[var(--radius-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
@@ -265,51 +265,8 @@ export function FlowPlayer({
               style={{ left: ZOOM_GUTTER }}
               data-testid="flow-bottom-panel"
             >
-              {help && <ShortcutHelp />}
-              {followed && (
-                <div
-                  className={`${floating} flex max-w-xl items-center gap-2 px-3 py-1.5 text-sm text-fg`}
-                  data-testid="flow-narration"
-                >
-                  <span
-                    className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]"
-                    aria-hidden
-                  />
-                  <span>
-                    {narrateCard(
-                      flow,
-                      diagram,
-                      followed,
-                      clock.t,
-                      clock.reducedMotion
-                    )}
-                  </span>
-                </div>
-              )}
-              {flow.attachments.length > 0 && (
-                <div className={`${floating} max-w-xl px-3 py-1.5`}>
-                  <AttachmentPanel
-                    attachments={flow.attachments}
-                    label="Flow evidence"
-                  />
-                </div>
-              )}
-              {diagram.rails
-                .filter(
-                  (rail) =>
-                    rail.presence !== "absent" && rail.attachments.length > 0
-                )
-                .map((rail) => (
-                  <details key={rail.id} className={panel}>
-                    <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
-                      Rail: {rail.label ?? rail.id}
-                    </summary>
-                    <AttachmentPanel
-                      attachments={rail.attachments}
-                      label={`Rail ${rail.label ?? rail.id} evidence`}
-                    />
-                  </details>
-                ))}
+              {/* Inspectors sit above the rest: the stack is anchored at its
+                  foot, so one opening on hover moves nothing under the pointer. */}
               {(inspected || followed) && (
                 <div className="grid w-full max-w-3xl gap-2 sm:grid-cols-2">
                   {inspected && (
@@ -332,10 +289,64 @@ export function FlowPlayer({
                   )}
                 </div>
               )}
+              {help && <ShortcutHelp />}
+              {followed && (
+                <div
+                  className={`${floating} flex max-w-xl items-center gap-2 px-3 py-1.5 text-sm text-fg`}
+                  data-testid="flow-narration"
+                >
+                  <span
+                    className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]"
+                    aria-hidden
+                  />
+                  <span>
+                    {narrateCard(
+                      flow,
+                      diagram,
+                      followed,
+                      clock.t,
+                      clock.reducedMotion
+                    )}
+                  </span>
+                </div>
+              )}
+              {flow.attachments.length > 0 && (
+                // Collapsed until asked for, like rail evidence: open, it
+                // would cover a small diagram the whole time.
+                <details
+                  className={`${panel} max-w-xl`}
+                  data-testid="flow-evidence"
+                >
+                  <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+                    Flow evidence ({flow.attachments.length})
+                  </summary>
+                  <AttachmentPanel
+                    attachments={flow.attachments}
+                    label="Flow evidence"
+                  />
+                </details>
+              )}
+              {diagram.rails
+                .filter(
+                  (rail) =>
+                    rail.presence !== "absent" && rail.attachments.length > 0
+                )
+                .map((rail) => (
+                  <details key={rail.id} className={panel}>
+                    <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
+                      Rail: {rail.label ?? rail.id}
+                    </summary>
+                    <AttachmentPanel
+                      attachments={rail.attachments}
+                      label={`Rail ${rail.label ?? rail.id} evidence`}
+                    />
+                  </details>
+                ))}
               <div className={`${floating} max-w-full p-0.5`}>
                 <Controls
                   clock={clock}
                   names={names}
+                  labels={flow.labels}
                   arrangement={diagram.arrangement}
                   onArrangement={choose}
                   help={help}
@@ -489,7 +500,8 @@ const STEP_GLYPH = { added: "+", changed: "~", removed: "−" } as const;
 
 /**
  * Marked story steps of a beat, as tags that read without colour: + solid,
- * ~ outlined, − dashed and struck through (it does not run in After).
+ * ~ outlined, − dashed and struck through (it does not run in this
+ * arrangement, only in the baseline).
  */
 function StepMarks({ changes }: { changes: readonly BeatChange[] }) {
   return (
@@ -603,6 +615,7 @@ function IconButton({
 function Controls({
   clock,
   names,
+  labels,
   arrangement,
   onArrangement,
   help,
@@ -611,6 +624,7 @@ function Controls({
 }: {
   clock: FlowClock;
   names: readonly ArrangementName[];
+  labels: Readonly<Record<ArrangementName, string>>;
   arrangement: ArrangementName;
   onArrangement: (a: ArrangementName) => void;
   help: boolean;
@@ -676,14 +690,14 @@ function Controls({
         onClick={() => clock.setLoop(!clock.loop)}
         pressed={clock.loop}
       />
-      {names.length === 2 && (
+      {names.length > 1 && (
         <>
           <Divider />
           <SegmentedControl
             ariaLabel="Arrangement"
             options={names.map((n) => ({
               value: n,
-              label: ARRANGEMENT_LABELS[n],
+              label: labels[n] ?? n,
             }))}
             value={arrangement}
             onChange={onArrangement}
@@ -742,6 +756,12 @@ function ShortcutHelp() {
 /* ---------- inspectors ---------- */
 
 const panel = `${floating} min-w-0 px-3 py-2 text-xs`;
+/**
+ * A part inspector shown only while its part is hovered or focused: it lets
+ * the pointer through, so where it covers the diagram it cannot take the
+ * hover from the part that opened it. Pinned, it takes input.
+ */
+const passing = `pointer-events-none ${glass} min-w-0 px-3 py-2 text-xs`;
 
 function PartInspector({
   flow,
@@ -765,7 +785,7 @@ function PartInspector({
   const inside = cardsInPart(part, t);
   return (
     <section
-      className={panel}
+      className={pinned ? panel : passing}
       aria-label={`Part ${part.identity.name}`}
       data-testid="flow-part-inspector"
       data-part-id={part.id}

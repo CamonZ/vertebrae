@@ -23,17 +23,29 @@ const endpoint = {
 const ref = (name: string) => ({ $ref: `#/$defs/${name}` });
 const text = { type: "string", minLength: 1 };
 const chips = { type: "array", minItems: 1, items: text };
-/** One value, or `{ before, after }` when the arrangements differ. */
+/**
+ * One value, or one per arrangement by name when they differ (`{ before,
+ * after }` in the shorthand). The validator checks every arrangement is given.
+ */
 const perArrangement = (v: JsonSchema): JsonSchema => ({
   oneOf: [
     v,
     {
       type: "object",
-      required: ["before", "after"],
-      additionalProperties: false,
-      properties: { before: v, after: v },
+      description: "one value per arrangement, by arrangement name",
+      minProperties: 1,
+      propertyNames: id,
+      additionalProperties: v,
     },
   ],
+});
+/** Names from the spec's `arrangements` list. */
+const arrangementList = (what: string): JsonSchema => ({
+  type: "array",
+  minItems: 1,
+  uniqueItems: true,
+  items: id,
+  description: `named arrangements ${what} (default: every one it can be in); needs a top-level arrangements list`,
 });
 
 export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
@@ -57,6 +69,28 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
     properties: {
       version: { const: FLOW_SPEC_VERSION },
       title: { type: "string" },
+      arrangements: {
+        type: "array",
+        minItems: 1,
+        description:
+          "named arrangements of the machine (options A, B…), switched in place; absent: Before/After when anything is marked, otherwise one current arrangement",
+        items: {
+          oneOf: [
+            id,
+            {
+              type: "object",
+              required: ["name"],
+              additionalProperties: false,
+              properties: { name: id, label: { type: "string" } },
+            },
+          ],
+        },
+      },
+      baseline: {
+        ...id,
+        description:
+          "the arrangement the others are marked against (default: the first)",
+      },
       parts: { type: "array", minItems: 1, items: ref("part") },
       rails: { type: "array", items: ref("rail") },
       regions: { type: "array", items: ref("region") },
@@ -112,6 +146,14 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           },
           before: ref("override"),
           after: ref("override"),
+          in: arrangementList("the part is in"),
+          arrangement: {
+            type: "object",
+            description:
+              "named arrangements only: overrides by arrangement name; a part whose override differs from the baseline's is marked changed",
+            propertyNames: id,
+            additionalProperties: ref("namedOverride"),
+          },
           position: ref("position"),
           scale: { type: "number", minimum: 0.1, maximum: 4 },
           attachments: ref("attachments"),
@@ -150,6 +192,17 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
                 ...(def.stages ? {} : { stageChanges: false }),
                 before: { properties: { props: update } },
                 after: { properties: { props: update } },
+                arrangement: {
+                  additionalProperties: {
+                    properties: {
+                      props: update,
+                      portChanges: {
+                        propertyNames: { enum: Object.keys(def.ports) },
+                      },
+                      ...(def.stages ? {} : { stageChanges: false }),
+                    },
+                  },
+                },
               },
             },
           };
@@ -163,6 +216,26 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           changeNote: { type: "string" },
         },
       },
+      namedOverride: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          props: { type: "object" },
+          changeNote: { type: "string" },
+          portChanges: {
+            type: "object",
+            description:
+              "change marks on the part's ports in this arrangement, by port name",
+            additionalProperties: { enum: CHANGE_MARKS },
+          },
+          stageChanges: {
+            type: "object",
+            description:
+              "change marks on the part's stages in this arrangement, by stage name",
+            additionalProperties: { enum: CHANGE_MARKS },
+          },
+        },
+      },
       rail: {
         type: "object",
         required: ["id", "from", "to"],
@@ -174,6 +247,7 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           label: { type: "string" },
           conditional: { type: "boolean" },
           change: { enum: WIRE_CHANGE_MARKS },
+          in: arrangementList("the rail is in"),
           attachments: ref("attachments"),
         },
       },
@@ -230,11 +304,10 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
               { type: "string" },
               {
                 type: "object",
-                additionalProperties: false,
-                properties: {
-                  before: { type: "string" },
-                  after: { type: "string" },
-                },
+                description:
+                  "one caption per arrangement, by name ({ before, after } in the shorthand); an arrangement without one continues the previous caption",
+                propertyNames: id,
+                additionalProperties: { type: "string" },
               },
             ],
           },
@@ -316,8 +389,9 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           change: {
             enum: CHANGE_MARKS,
             description:
-              "added: runs only in After; removed: runs only in Before; marked on its beat in After",
+              "Before/After shorthand: added runs only in After; removed only in Before; marked on its beat in After",
           },
+          in: arrangementList("the step runs in"),
         },
       },
     },

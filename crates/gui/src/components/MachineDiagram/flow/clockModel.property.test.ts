@@ -8,6 +8,7 @@
 import { test } from "vitest";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
+import burstOptions from "./__fixtures__/burstOptions.flow.yaml?raw";
 import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
 import mechanisms from "./__fixtures__/mechanisms.flow.yaml?raw";
 import { beatIndex, type Timeline } from "../timeline";
@@ -42,6 +43,7 @@ function compiled(source: string) {
 const FIXTURES: readonly Timeline[] = [
   ...compiled(inlineDiscussions).arrangements.map((a) => a.travel),
   ...compiled(mechanisms).arrangements.map((a) => a.travel),
+  ...compiled(burstOptions).arrangements.map((a) => a.travel),
 ];
 
 /** A beats-only timeline: distinct beats at least 0.1 s apart, ending before the loop fade. */
@@ -54,12 +56,21 @@ const generatedTimeline = gs.composite<Timeline>((tc) => {
   for (const g of gaps) times.push(times[times.length - 1] + g);
   const tail = tc.draw(gs.floats({ minValue: 0.7, maxValue: 3 }));
   const withBeats = tc.draw(gs.booleans());
+  // Compiled flows number each beat by the story beat it starts at, rising
+  // with gaps where this arrangement leaves a story beat uncaptioned.
+  const stories = tc.draw(gs.booleans());
+  let story = tc.draw(gs.integers({ minValue: 0, maxValue: 2 }));
+  const beats = times.map((t, i) => {
+    const b = { t, caption: `beat ${i}`, ...(stories ? { story } : {}) };
+    story += tc.draw(gs.integers({ minValue: 1, maxValue: 3 }));
+    return b;
+  });
   return {
     period: times[times.length - 1] + tail,
     cards: [],
     gates: [],
     notes: [[0, "idle", "dim"]],
-    beats: withBeats ? times.map((t, i) => ({ t, caption: `beat ${i}` })) : [],
+    beats: withBeats ? beats : [],
   };
 });
 
@@ -405,7 +416,22 @@ test("ticks at 2× cover the same ground as two ticks at 1×", () =>
     );
   }));
 
-test("switching arrangement keeps the beat index", () =>
+/**
+ * Model of the beat a switch lands on: the last beat of `to` starting at or
+ * before the story beat `i` of `from` starts at (its first when none does);
+ * without story indices, the index (clamped).
+ */
+function landsOn(from: Timeline, to: Timeline, i: number): number {
+  const fb = from.beats ?? [];
+  const tb = to.beats ?? [];
+  const story = fb[i].story;
+  if (story === undefined || tb.some((b) => b.story === undefined))
+    return Math.min(i, tb.length - 1);
+  const before = tb.filter((b) => b.story! <= story);
+  return before.length === 0 ? 0 : before.length - 1;
+}
+
+test("switching arrangement keeps the story beat", () =>
   hegel.test((tc) => {
     const a = tc.draw(timeline);
     const b = tc.draw(timeline);
@@ -420,7 +446,7 @@ test("switching arrangement keeps the beat index", () =>
       playing,
     };
     const moved = retarget(a, b, s, reduced);
-    const want = Math.min(i, nb - 1);
+    const want = landsOn(a, b, i);
     check(
       shownBeat(b, moved, reduced) === want,
       `beat ${i} became ${shownBeat(b, moved, reduced)}`
