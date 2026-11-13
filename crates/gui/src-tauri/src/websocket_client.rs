@@ -886,7 +886,22 @@ impl SacrumSocket {
                 return Ok(());
             }
 
-            if topic == ACCOUNTS_TOPIC && !account_joined {
+            // Sacrum mirrors project broadcasts onto accounts:me. Project stores
+            // consume only the selected project channel: forwarding account copies
+            // would double-apply deltas and leak other projects into those stores.
+            if topic == ACCOUNTS_TOPIC
+                && (!account_joined
+                    || !matches!(
+                        event,
+                        "daemon_created"
+                            | "daemon_updated"
+                            | "daemon_deleted"
+                            | "daemon_metrics"
+                            | "phx_reply"
+                            | "phx_error"
+                            | "phx_close"
+                    ))
+            {
                 return Ok(());
             }
 
@@ -4054,6 +4069,103 @@ mod tests {
         let msg = r#"["ref1", "1", "project:test", "session_log_created", {"id": "log123", "step_execution_id": "exec123"}]"#;
         let result = SacrumSocket::handle_phoenix_message(msg, handle, "test");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn parallel_account_delivery_emits_each_task_change_once() {
+        // Sacrum #255 publishes the same serialized event on both topics.
+        // Include #256's number/key fields to exercise the current wire shape.
+        for account_first in [false, true] {
+            let app = build_test_app();
+            let (tx, rx) = mpsc::channel();
+            app.listen_any("task-changed-event", move |event| {
+                tx.send(event.payload().to_string()).unwrap();
+            });
+            let task = serde_json::json!({
+                "schema_version": 1, "id": "task-a", "number": 1, "key": "VTB-1",
+                "title": "Pipeline task", "level": "task", "archived": false,
+                "project_id": "project-a", "workflow_id": "workflow-a",
+                "current_step_id": "step-a", "tags": []
+            });
+            let mut updated = task.clone();
+            updated["archived"] = serde_json::json!(true);
+            updated["previous"] = serde_json::json!({"archived": false});
+            let deleted = serde_json::json!({
+                "schema_version": 1, "id": "task-a", "level": "task",
+                "archived": true, "workflow_id": "workflow-a", "current_step_id": "step-a"
+            });
+            let topics = if account_first {
+                ["accounts:me", "project:project-a"]
+            } else {
+                ["project:project-a", "accounts:me"]
+            };
+            for (name, payload, change_type) in [
+                ("task_created", task, "Created"),
+                ("task_updated", updated, "Updated"),
+                ("task_deleted", deleted, "Deleted"),
+            ] {
+                for topic in topics {
+                    let mut copy = payload.clone();
+                    if topic == ACCOUNTS_TOPIC {
+                        copy["project_id"] = serde_json::json!("project-a");
+                    }
+                    let message = serde_json::json!(["join", null, topic, name, copy]);
+                    SacrumSocket::handle_phoenix_message_for_topic(
+                        &message.to_string(),
+                        app.handle(),
+                        Some("project:project-a"),
+                        true,
+                        "test-connection",
+                    )
+                    .unwrap();
+                }
+                let emitted: serde_json::Value =
+                    serde_json::from_str(&rx.recv_timeout(StdDuration::from_secs(1)).unwrap())
+                        .unwrap();
+                assert_eq!(emitted["change_type"], change_type);
+                assert_eq!(emitted["current_step_id"], "step-a");
+                assert_eq!(emitted["level"], "task");
+                if name != "task_deleted" {
+                    assert_eq!(emitted["task"]["id"], "task-a");
+                }
+                if name == "task_updated" {
+                    assert_eq!(emitted["previous"]["archived"], false);
+                }
+                assert!(
+                    rx.try_recv().is_err(),
+                    "{name} must reach reducers exactly once"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_account_delivery_does_not_forward_project_events_without_subscription() {
+        for current_topic in [Some("project:project-a"), None] {
+            let app = build_test_app();
+            let (tx, rx) = mpsc::channel();
+            app.listen_any("task-changed-event", move |event| {
+                tx.send(event.payload().to_string()).unwrap();
+            });
+            for project_id in ["project-a", "project-b"] {
+                let message = serde_json::json!([
+                    "join", null, "accounts:me", "task_created",
+                    {"id": "task-other", "title": "Other task", "project_id": project_id}
+                ]);
+                SacrumSocket::handle_phoenix_message_for_topic(
+                    &message.to_string(),
+                    app.handle(),
+                    current_topic,
+                    true,
+                    "test-connection",
+                )
+                .unwrap();
+            }
+            assert!(
+                rx.try_recv().is_err(),
+                "account copies must not enter project stores"
+            );
+        }
     }
 
     #[test]

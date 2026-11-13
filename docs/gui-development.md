@@ -804,6 +804,13 @@ The GUI maintains a WebSocket connection to Sacrum via Phoenix channels:
   `StepExecutionChangedEvent`, `NotificationChangedEvent`,
   `DaemonChangedEvent`, and `DaemonMetricsEvent`
 
+Sacrum also mirrors project events onto `accounts:me`. The GUI consumes project
+events only from its selected `project:{project_id}` subscription and ignores
+those account copies. This gives additive pipeline reducers one delivery per
+broadcast and keeps other projects' events out of selected-project stores.
+The account subscription handles daemon lifecycle/metrics and Phoenix control
+messages only.
+
 The daemon fleet performs one account-scoped snapshot on initial load and after
 reconnect recovery. Sacrum's GraphQL fleet/detail response is authoritative for
 the durable identity and the current live snapshot. Between snapshots,
