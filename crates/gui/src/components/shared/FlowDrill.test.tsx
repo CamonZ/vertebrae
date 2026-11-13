@@ -136,7 +136,10 @@ describe("drilling in and back", () => {
     renderView();
     const top = playerAt(0);
     act(() => top.focus());
-    // q1 is drawn on the first beat's outcome; following survives beats.
+    // q1 is drawn once the first beat has played out (one frame before
+    // beat 2); following survives beats.
+    fireEvent.keyDown(top, { key: "2" });
+    fireEvent.keyDown(top, { key: "," });
     fireEvent.click(top.querySelector(".md-card[data-card-id='q1']")!);
     fireEvent.keyDown(top, { key: "ArrowRight" });
     fireEvent.keyDown(top, { key: "ArrowRight" });

@@ -26,6 +26,7 @@ const flow = compileFlowOrThrow(parsed.value);
 const after = arrangement(flow, "after")!;
 const before = arrangement(flow, "before")!;
 const outcomes = after.beats.map((_, i) => beatOutcome(after.travel, i));
+const starts = after.beats.map((b) => b.t);
 
 const player = () => screen.getByTestId("flow-player");
 const shownT = () => Number(player().getAttribute("data-t"));
@@ -43,6 +44,13 @@ const progressBars = () =>
 const part = (id: string) =>
   player().querySelector(`[data-part-id='${id}']`) as SVGGElement;
 
+/** Beat 1 played out: one frame before beat 2 starts, its cards drawn. */
+function settleFirstBeat() {
+  key("2");
+  key(",");
+  expect(shownBeat()).toBe(0);
+}
+
 function renderPlayer(props: Partial<Parameters<typeof FlowPlayer>[0]> = {}) {
   const r = render(<FlowPlayer flow={flow} reducedMotion={false} {...props} />);
   act(() => player().focus());
@@ -57,23 +65,30 @@ afterEach(() => {
 describe("keyboard control", () => {
   it("drives every control from the keyboard", () => {
     renderPlayer();
+    // A newly opened flow rests on beat 1's start, so Play animates it.
+    expect(shownBeat()).toBe(0);
+    expect(shownT()).toBe(starts[0]);
     key("ArrowRight");
     expect(shownBeat()).toBe(1);
-    expect(shownT()).toBe(outcomes[1]);
+    expect(shownT()).toBe(starts[1]);
     key("ArrowLeft");
     expect(shownBeat()).toBe(0);
+    expect(shownT()).toBe(starts[0]);
     key(".");
-    expect(shownT()).toBeCloseTo(outcomes[0] + 1 / 30, 9);
+    expect(shownT()).toBeCloseTo(starts[0] + 1 / 30, 9);
     key(",");
-    expect(shownT()).toBeCloseTo(outcomes[0], 9);
+    expect(shownT()).toBeCloseTo(starts[0], 9);
     key("ArrowRight", { shiftKey: true });
-    expect(shownT()).toBeCloseTo(outcomes[0] + 1 / 30, 9);
+    expect(shownT()).toBeCloseTo(starts[0] + 1 / 30, 9);
     key("3");
     expect(shownBeat()).toBe(2);
+    expect(shownT()).toBe(starts[2]);
     key("End");
     expect(shownBeat()).toBe(after.beats.length - 1);
+    expect(shownT()).toBe(starts[after.beats.length - 1]);
     key("Home");
     expect(shownBeat()).toBe(0);
+    expect(shownT()).toBe(starts[0]);
     key("+");
     expect(player()).toHaveAttribute("data-speed", "2");
     key("-");
@@ -233,12 +248,12 @@ describe("chapters and announcements", () => {
     renderPlayer();
     const n = after.beats.length;
     key("3");
-    // Resting on beat 3's outcome: it and every earlier beat read full.
+    // Resting on beat 3's start: every earlier beat reads full, it empty.
     expect(progressBars()).toEqual(
-      Array.from({ length: n }, (_, i) => (i <= 2 ? 1 : 0))
+      Array.from({ length: n }, (_, i) => (i < 2 ? 1 : 0))
     );
     // Part way through the beat, the current bar is part full.
-    for (let f = 0; f < 15; f++) key(",");
+    for (let f = 0; f < 15; f++) key(".");
     expect(shownBeat()).toBe(2);
     const mid = progressBars()[2];
     expect(mid).toBeGreaterThan(0);
@@ -368,7 +383,8 @@ describe("following a card", () => {
       [
         ...player().querySelectorAll(".md-card[data-card-id='q1']"),
       ] as SVGGElement[];
-    // q1 is drawn on the first beat's outcome.
+    // q1 is drawn once the first beat has played out.
+    settleFirstBeat();
     expect(q1().length).toBeGreaterThan(0);
     fireEvent.click(q1()[0]);
     expect(player()).toHaveAttribute("data-following", "q1");
@@ -394,8 +410,8 @@ describe("following a card", () => {
     }
     // Followed between frames too: step back frame by frame through q1's
     // trip from the client to the session.
-    key("1");
-    const frames = Math.ceil((outcomes[0] - after.beats[0].t) * 30) + 1;
+    key("2");
+    const frames = Math.ceil((starts[1] - starts[0]) * 30);
     for (let f = 0; f < frames; f++) {
       key(",");
       for (const g of q1()) {
@@ -414,6 +430,7 @@ describe("following a card", () => {
 
   it("narrates where the followed card is, in the live region per beat", () => {
     renderPlayer();
+    settleFirstBeat();
     fireEvent.click(
       player().querySelector(".md-card[data-card-id='q1']") as SVGGElement
     );
@@ -426,6 +443,7 @@ describe("following a card", () => {
 
   it("Enter on a focused card follows it", () => {
     renderPlayer();
+    settleFirstBeat();
     const card = player().querySelector(
       ".md-card[data-card-id='q1']"
     ) as SVGGElement;
@@ -583,6 +601,7 @@ describe("hiding the beats and resizing the diagram", () => {
   });
   /** Following q1, the tools part pinned, at beat 3. */
   function placeInStory() {
+    settleFirstBeat();
     fireEvent.click(
       player().querySelector(".md-card[data-card-id='q1']") as SVGGElement
     );

@@ -311,6 +311,33 @@ describe("auto-layout", () => {
     expect(flow.arrangements[0].regions).toEqual(flow.arrangements[1].regions);
   });
 
+  it("moves a rail label off a region's name", async () => {
+    // Found by layout.property.test.ts: ELK runs r5 over the region's
+    // head, with its label on the region's name.
+    const flow = await laidOut({
+      version: 1,
+      arrangements: ["current", "A", "B"],
+      parts: [
+        { id: "p0", kind: "document", in: ["current"] },
+        { id: "p1", kind: "approval", in: ["B"] },
+        { id: "p2", kind: "route step", in: ["current"] },
+        { id: "p3", kind: "approval", in: ["current"] },
+        { id: "p4", kind: "client" },
+      ],
+      rails: [
+        { id: "r0", from: "p4.request", to: "p2.in" },
+        { id: "r1", from: "p1.out", to: "p1.in" },
+        { id: "r2", from: "p2.out1", to: "p0.in" },
+        { id: "r5", from: "p2.out2", to: "p0.in", label: "ok" },
+      ],
+      regions: [{ id: "g0", label: "REGION", parts: ["p2", "p4"] }],
+    } as FlowSpec);
+    for (const d of flow.arrangements) {
+      expect(d.rails.find((r) => r.id === "r5")?.labelAt).toBeDefined();
+      expect(labelCollisions(d)).toEqual([]);
+    }
+  });
+
   it("lays out each drill-down level on its own", async () => {
     const inner = unplaced(spec(mechanisms));
     const s: FlowSpec = {

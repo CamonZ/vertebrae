@@ -423,8 +423,9 @@ function Chapters({
         data-testid="flow-chapters"
       >
         {beats.map((b, i) => {
-          // Progress runs from the beat's start to its outcome, so a beat
-          // resting on its outcome (always, under reduced motion) reads full.
+          // Progress runs from the beat's start to its outcome: a beat just
+          // landed on reads empty, one played out (always, under reduced
+          // motion) reads full.
           const span = beatOutcome(diagram.travel, i) - b.t;
           const current = i === clock.beat;
           const progress = current
