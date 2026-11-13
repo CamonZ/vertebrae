@@ -1,6 +1,6 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { createContext, useContext, useState } from "react";
+import { createContext, lazy, Suspense, useContext, useState } from "react";
 import { useArtifactPresentations } from "../../../hooks/useArtifactPresentations";
 import { queryClient } from "../../../query/queryClient";
 import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
@@ -35,6 +35,9 @@ const pair = (left: string, right: string, a: unknown, b: unknown) => (
   </div>
 );
 
+const PatchFiles = lazy(() => import("../../thread/toolChange/PatchFiles"));
+const PATCH_HEIGHT = 320;
+
 const source: AttachmentRenderer = (a, { openSource }) => {
   const patchPath =
     typeof a.patch === "string"
@@ -51,6 +54,11 @@ const source: AttachmentRenderer = (a, { openSource }) => {
   const location = path
     ? `${path}${line ? `:${line}${endLine ? `–${endLine}` : ""}` : ""}`
     : undefined;
+  const base = typeof a.base === "string" ? a.base : undefined;
+  const head = typeof a.head === "string" ? a.head : undefined;
+  // A pasted patch needs no checkout; a range is read from the checkout.
+  const patch =
+    typeof a.patch === "string" && base === undefined ? a.patch : undefined;
   return (
     <>
       {path ? (
@@ -64,6 +72,8 @@ const source: AttachmentRenderer = (a, { openSource }) => {
               line,
               endLine,
               side: a.side === "old" ? "old" : "new",
+              ...(base !== undefined ? { base } : {}),
+              ...(head !== undefined ? { head } : {}),
             })
           }
         >
@@ -79,9 +89,14 @@ const source: AttachmentRenderer = (a, { openSource }) => {
           Base: {text(a.base)} · Head: {text(a.head)}
         </p>
       )}
-      {!openSource && path && (
+      {patch !== undefined && (
+        <Suspense fallback={<p role="status">Loading diff…</p>}>
+          <PatchFiles patch={patch} maxHeight={PATCH_HEIGHT} />
+        </Suspense>
+      )}
+      {!openSource && path && patch === undefined && (
         <p className="text-fg-mute">
-          Open this evidence in a conversation with a worktree to view Changes.
+          Open this flow in a project conversation to view the source.
         </p>
       )}
     </>

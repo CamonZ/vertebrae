@@ -42,7 +42,8 @@ export const BUILTIN_ATTACHMENTS: readonly AttachmentKindDef[] = [
   },
   {
     kind: "ref",
-    description: "a file:line reference (opens in the Changes tab)",
+    description:
+      "a file:line reference (opens the file at those lines, or its diff when it changed)",
     fields: {
       path: { type: "string", required: true },
       line: { type: "integer", min: 1 },
@@ -54,7 +55,8 @@ export const BUILTIN_ATTACHMENTS: readonly AttachmentKindDef[] = [
   },
   {
     kind: "diff",
-    description: "a git diff hunk or range",
+    description:
+      "a git diff: an inline patch, or base/head revisions opened as a diff",
     fields: {
       path: { type: "string" },
       patch: { type: "string", description: "unified diff text" },

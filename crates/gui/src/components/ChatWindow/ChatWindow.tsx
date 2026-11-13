@@ -3,6 +3,10 @@ import {
   type SourceLocation,
 } from "../shared/EvidenceNavigationContext";
 import type { JumpTarget } from "./workspace/AllChangesView";
+import {
+  SourceEvidence,
+  type EvidenceTarget,
+} from "./workspace/SourceEvidence";
 import { commands } from "../../bindings";
 import { ThreadFindContext } from "../thread/find";
 import { usePaneFind } from "./usePaneFind";
@@ -302,21 +306,42 @@ export function ChatWindow({
     worktreePath: string;
     target: JumpTarget;
   } | null>(null);
+  const ownWorktreePath = association.record?.worktreePath;
+  // Flow evidence reads the conversation's own worktree, else its project.
+  const evidenceCheckout =
+    ownWorktreePath ?? chat.session?.projectPath ?? undefined;
+  const [evidence, setEvidence] = useState<{
+    sessionId: string;
+    checkout: string;
+    target: EvidenceTarget;
+  } | null>(null);
   const openEvidence = useCallback(
     (location: SourceLocation) => {
-      const path = association.record?.worktreePath;
-      if (!path) return;
-      activate(path, null);
+      if (!evidenceCheckout) return;
+      setEvidence((previous) => ({
+        sessionId,
+        checkout: evidenceCheckout,
+        target: { ...location, nonce: (previous?.target.nonce ?? 0) + 1 },
+      }));
+      // Open documents keep their drafts in the store while hidden.
+      setChangesSession(null);
+    },
+    [evidenceCheckout, sessionId]
+  );
+  const openEvidenceInChanges = useCallback(
+    (location: EvidenceTarget) => {
+      if (!ownWorktreePath) return;
+      activate(ownWorktreePath, null);
+      setEvidence(null);
       setChangesSession(sessionId);
       setEvidenceJump((previous) => ({
         sessionId,
-        worktreePath: path,
+        worktreePath: ownWorktreePath,
         target: { ...location, nonce: (previous?.target.nonce ?? 0) + 1 },
       }));
     },
-    [association.record?.worktreePath, sessionId]
+    [ownWorktreePath, sessionId]
   );
-  const ownWorktreePath = association.record?.worktreePath;
   const attachSelection = (
     anchor: CodeSelection,
     outdated = false,
@@ -379,11 +404,19 @@ export function ChatWindow({
 
   const worktreePath = association.record?.worktreePath;
   const showChanges = !!worktreePath && changesSession === sessionId;
+  const shownEvidence =
+    !showChanges &&
+    evidence?.sessionId === sessionId &&
+    evidence.checkout === evidenceCheckout
+      ? evidence
+      : null;
   const toggleChanges = useCallback(() => {
     if (!worktreePath) return;
 
-    if (!showChanges) setChangesSession(sessionId);
-    else {
+    if (!showChanges) {
+      setEvidence(null);
+      setChangesSession(sessionId);
+    } else {
       const dirty = dirtyPaths(worktreePath);
       if (dirty.length) setLeaving(dirty);
       else setChangesSession(null);
@@ -479,7 +512,7 @@ export function ChatWindow({
       <div
         ref={panelResize.containerRef}
         className="chat-with-changes min-h-0 flex-1"
-        data-changes-open={showChanges}
+        data-changes-open={showChanges || shownEvidence != null}
       >
         {showChanges && (
           <aside
@@ -500,7 +533,25 @@ export function ChatWindow({
             />
           </aside>
         )}
-        {showChanges && (
+        {shownEvidence && (
+          <aside
+            aria-label="Evidence panel"
+            className="changes-side-panel"
+            style={{ flexBasis: panelResize.width }}
+          >
+            <SourceEvidence
+              checkout={shownEvidence.checkout}
+              target={shownEvidence.target}
+              onClose={() => setEvidence(null)}
+              onOpenInChanges={
+                ownWorktreePath && shownEvidence.target.base === undefined
+                  ? () => openEvidenceInChanges(shownEvidence.target)
+                  : undefined
+              }
+            />
+          </aside>
+        )}
+        {(showChanges || shownEvidence) && (
           <div {...panelResize.handleProps} className="changes-resize-handle" />
         )}
         {worktreePath && (
@@ -650,7 +701,7 @@ export function ChatWindow({
   );
   return (
     <EvidenceNavigationContext.Provider
-      value={ownWorktreePath ? openEvidence : undefined}
+      value={evidenceCheckout ? openEvidence : undefined}
     >
       <DiffReviewContext.Provider value={diffReview}>
         <SelectionDiscussionProvider

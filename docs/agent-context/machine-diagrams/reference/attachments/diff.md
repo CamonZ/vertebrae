@@ -1,6 +1,6 @@
 ## Attachment: diff
 
-Use for a git diff hunk or range.
+Use for a git diff: an inline patch, or base/head revisions opened as a diff.
 
 - `path`: `{"type":"string"}`
 - `patch`: `{"type":"string"}` — unified diff text

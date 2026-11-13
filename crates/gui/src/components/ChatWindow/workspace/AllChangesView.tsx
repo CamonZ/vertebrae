@@ -258,19 +258,25 @@ export default function AllChangesView({
       return;
     }
     if (itemPaths.has(path)) {
-      handledJump.current = jumpTarget.nonce;
-      viewRef.current?.scrollTo(
-        jumpTarget.line !== undefined
-          ? {
-              type: "line",
-              id: path,
-              lineNumber: jumpTarget.line,
-              side: jumpTarget.side === "old" ? "deletions" : "additions",
-              align: "center",
-            }
-          : { type: "item", id: path, align: "start" }
-      );
-      return;
+      const target = jumpTarget;
+      // A request made while Changes mounts arrives before Pierre's first
+      // layout; scroll once that frame has been laid out. A re-run before
+      // then cancels this frame and schedules the jump again.
+      const frame = requestAnimationFrame(() => {
+        handledJump.current = target.nonce;
+        viewRef.current?.scrollTo(
+          target.line !== undefined
+            ? {
+                type: "line",
+                id: path,
+                lineNumber: target.line,
+                side: target.side === "old" ? "deletions" : "additions",
+                align: "center",
+              }
+            : { type: "item", id: path, align: "start" }
+        );
+      });
+      return () => cancelAnimationFrame(frame);
     }
     const container = containerRef.current;
     const target = container?.querySelector<HTMLElement>(

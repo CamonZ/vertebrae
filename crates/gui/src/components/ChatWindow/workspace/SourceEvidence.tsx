@@ -1,7 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
 import { resolveSource, type ResolvedSource } from "./resolveSource";
-import "../worktreeChanges.css";
 import "./evidencePanel.css";
 
 const SourceEvidenceCode = lazy(() => import("./SourceEvidenceCode"));
