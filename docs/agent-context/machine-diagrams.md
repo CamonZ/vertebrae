@@ -23,9 +23,10 @@ kind names, ports, props, arguments and attachment fields. Read the
 4. Leave positions absent for ELK layout. Give evidence its honest status.
    Keep chat fences at most 240 lines; split a large explanation into levels
    or artifacts. The chat renderer leaves longer fences as code.
-5. Fix every displayed diagnostic before delivering. Replay the story, inspect
-   payloads, and for a change toggle both arrangements at the same beat. Check
-   that the captions describe the compiled result rather than inventing it.
+5. Run `vtb flow validate <file>` and fix every `path: message` line until it
+   exits 0; it runs the viewer's own compiler offline. Replay the story,
+   inspect payloads, and for a change toggle both arrangements at the same
+   beat. Check that captions describe the compiled result, not invent it.
 
 ## Read only the needed topic
 
@@ -40,7 +41,7 @@ kind names, ports, props, arguments and attachment fields. Read the
 - [Cards](machine-diagrams/cards.md): tokens, identity and payloads.
   Load when: declaring inputs and following results.
 - [Changes](machine-diagrams/changes.md): Before/After, marks and sibling work.
-  Load when: explaining a PR or comparing arrangements.
+  Load when: inspecting or explaining a PR, or comparing arrangements.
 - [Band](machine-diagrams/band.md): situation rows and compile-derived meters.
   Load when: summarising behavior across beats.
 - [Evidence](machine-diagrams/evidence.md): attachment choice and honest labels.
@@ -49,7 +50,7 @@ kind names, ports, props, arguments and attachment fields. Read the
   Load when: adding a deeper explanation behind a part.
 - [Artifacts](machine-diagrams/artifacts.md): saving, attaching and embedding.
   Load when: persisting an explanation for a ticket or PR.
-- [Recipes](machine-diagrams-recipes.md): complete system, merged-PR and change examples.
-  Load when: copying a working flow spec.
-- [Diagnostics and maintenance](machine-diagrams/maintenance.md): errors and coverage tests.
+- [Recipes](machine-diagrams-recipes.md): principles for explaining code, plus system, change and drill examples.
+  Load when: explaining an open or merged PR or a part of the system, or copying a working spec.
+- [Diagnostics and maintenance](machine-diagrams/maintenance.md): errors, the validator bundle and doc limits.
   Load when: fixing a spec or adding vocabulary.

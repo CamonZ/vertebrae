@@ -12,6 +12,7 @@ pub mod check_item;
 pub mod criterion_ref;
 pub mod delete;
 pub mod depend;
+pub mod flow;
 pub mod gate;
 pub mod init;
 pub mod list;
@@ -41,6 +42,7 @@ pub use check_item::CheckItemCommand;
 pub use criterion_ref::CriterionRefCommand;
 pub use delete::DeleteCommand;
 pub use depend::DependCommand;
+pub use flow::FlowCommand;
 pub use gate::GateCommand;
 pub use init::InitCommand;
 pub use list::ListCommand;
@@ -153,6 +155,9 @@ pub enum Command {
     Delete(DeleteCommand),
     /// Create a dependency relationship between tasks
     Depend(DependCommand),
+    /// Machine-diagram flow spec tools (offline)
+    #[command(subcommand)]
+    Flow(FlowCommand),
     /// Answer a waiting human_input gate field by field through its draft
     #[command(subcommand)]
     Gate(GateCommand),
@@ -502,7 +507,7 @@ impl Command {
                 cmd.id = resolve_id(&cmd.id, services).await?;
                 cmd.blocker_id = resolve_id(&cmd.blocker_id, services).await?;
             }
-            Command::Gate(_) | Command::Init(_) | Command::Ready(_) => {}
+            Command::Flow(_) | Command::Gate(_) | Command::Init(_) | Command::Ready(_) => {}
             Command::List(cmd) => {
                 resolve_optional_id(&mut cmd.parent, services).await?;
                 resolve_optional_workflow_id(&mut cmd.workflow, services).await?;
@@ -654,6 +659,9 @@ impl Command {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(format!("{}", result)))
             }
+            Command::Flow(cmd) => Ok(CommandResult::Message(
+                cmd.execute()?.into_result()?.to_string(),
+            )),
             Command::Gate(cmd) => {
                 let result = cmd.execute(services).await?;
                 Ok(CommandResult::Message(result))
@@ -793,6 +801,7 @@ impl Command {
                 )
             }
             Command::Artifact(cmd) => cmd.execute_json(services).await?,
+            Command::Flow(cmd) => json_value(cmd.execute()?.into_result()?)?,
             Command::Gate(cmd) => json_value(cmd.execute_result(services).await?)?,
             Command::Show(cmd) => {
                 let detail = cmd.execute(services).await?;
