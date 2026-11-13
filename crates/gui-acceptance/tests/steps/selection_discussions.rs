@@ -1316,13 +1316,6 @@ async fn themed_layout(world: &mut GuiWorld) {
         button.click().await.unwrap();
     }
 
-    let hide_files_button = Locator::Css("[aria-label='Hide files']");
-
-    if let Ok(button) = client.find(hide_files_button).await {
-        gui_acceptance::wait_actionable(&button).await;
-        button.click().await.unwrap();
-    }
-
     let geometry_settled = r#"
         const panel = document.querySelector('.hc-panel');
         const bounds = panel.getBoundingClientRect();
@@ -1345,6 +1338,16 @@ async fn themed_layout(world: &mut GuiWorld) {
         setup_timeout,
     )
     .await;
+
+    // Widening reflows the Changes controls; clicking before it settles can
+    // land on whatever moved under the old position (a diff's fold toggle).
+    let hide_files_button = Locator::Css("[aria-label='Hide files']");
+
+    if let Ok(button) = client.find(hide_files_button).await {
+        gui_acceptance::wait_actionable(&button).await;
+        button.click().await.unwrap();
+    }
+
     drop(client);
 
     gesture(world, false, false).await;

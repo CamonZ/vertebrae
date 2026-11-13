@@ -16,8 +16,16 @@ and bounds in the [attachment reference](reference/attachments.md).
 
 Ref line numbers start at 1; `endLine` must be at least `line`. Diff requires
 `patch` or `base` (provide `head` too for a useful range); schema diff requires
-`before` or `after`. Source navigation opens in Changes when its host supports
-that capability. A test summary reports actual commands and results; it does
-not run tests or prove a claim automatically.
+`before` or `after`. A test summary reports actual commands and results; it
+does not run tests or prove a claim automatically.
+
+In a chat, clicking a ref or diff location opens a read-only viewer on the
+chat's worktree, or its project checkout. Paths are repo-relative. A ref
+shows the file with `line`–`endLine` selected; if the file changed against
+the default branch, the diff shows instead, labelled added, deleted or
+modified. A diff with `base` compares `base` to `head` (the working copy when
+`head` is absent); `side` says which side the lines number. A patch without
+`base` renders in place, with no checkout. A path missing at a revision is
+reported in the viewer. Flows opened outside a chat cannot open sources.
 
 [Authoring index](../machine-diagrams.md).

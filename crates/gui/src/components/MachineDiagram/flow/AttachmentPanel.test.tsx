@@ -37,7 +37,9 @@ const attachments: AttachmentSpec[] = [
   {
     kind: "diff",
     path: "src/b.ts",
-    patch: "secret patch should stay in Changes",
+    patch: "patch beside a range is not rendered",
+    base: "abc123",
+    head: "def456",
     line: 5,
     endLine: 7,
     side: "old",
@@ -72,6 +74,11 @@ vi.mock("../../../hooks/useArtifactPresentations", () => ({
     refetch: vi.fn(),
   }),
 }));
+vi.mock("../../thread/toolChange/PatchFiles", () => ({
+  default: ({ patch }: { patch: string }) => (
+    <pre data-testid="inline-patch">{patch}</pre>
+  ),
+}));
 afterEach(() => {
   cleanup();
   imageArtifacts.artifacts = [];
@@ -105,7 +112,8 @@ it("renders every built-in with provenance and opens file ranges by keyboard", a
   expect(screen.getByRole("img")).toHaveStyle({
     transform: "translate(-10px, -20px)",
   });
-  expect(screen.queryByText(/secret patch/)).toBeNull();
+  expect(screen.queryByText(/patch beside a range/)).toBeNull();
+  expect(screen.queryByText(/to view the source/)).toBeNull();
 
   screen.getByRole("button", { name: "src/a.ts:12–16" }).focus();
   await userEvent.keyboard("{Enter}");
@@ -122,7 +130,30 @@ it("renders every built-in with provenance and opens file ranges by keyboard", a
     line: 5,
     endLine: 7,
     side: "old",
+    base: "abc123",
+    head: "def456",
   });
+});
+
+it("renders an inline patch in place without a checkout", async () => {
+  render(
+    <AttachmentPanel
+      attachments={[
+        {
+          kind: "diff",
+          patch: "--- a/src/c.ts\n+++ b/src/c.ts\n@@ -1 +1 @@\n-a\n+b\n",
+        },
+        { kind: "ref", path: "src/d.ts", line: 3 },
+      ]}
+    />
+  );
+  expect(await screen.findByTestId("inline-patch")).toHaveTextContent(
+    "+++ b/src/c.ts"
+  );
+  expect(screen.getByRole("button", { name: "src/c.ts" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "src/d.ts:3" })).toBeDisabled();
+  // Only the ref, which has nothing to show without a chat, explains why.
+  expect(screen.getAllByText(/to view the source/)).toHaveLength(1);
 });
 
 it("uses a newly registered kind without changing the host", () => {

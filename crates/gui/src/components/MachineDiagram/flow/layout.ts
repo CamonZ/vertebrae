@@ -479,30 +479,21 @@ async function layoutLevel(
     const horizontals = reserved.filter(
       ([a, b]) => Math.abs(a[1] - b[1]) < SNAP
     );
-    const out = legToLane(
-      exit,
-      fromSide,
-      lane,
-      extents,
-      verticals,
-      horizontals
-    ) ?? [exit, [exit[0], lane]];
-    const home = legToLane(
-      entry,
-      toSide,
-      lane,
-      extents,
-      [
-        ...verticals,
-        ...verticalRuns(
-          // A same-port loop can share its first straight run, then fork.
-          r.from.part === r.to.part && r.from.port === r.to.port
-            ? out.slice(Math.max(0, portRunEnd(out) - 1))
-            : out
-        ),
-      ],
-      horizontals
-    ) ?? [entry, [entry[0], lane]];
+    const out =
+      legToLane(exit, fromSide, lane, extents, verticals, horizontals) ??
+      fallbackLeg(exit, fromSide, lane, verticals);
+    const homeVerticals = [
+      ...verticals,
+      ...verticalRuns(
+        // A same-port loop can share its first straight run, then fork.
+        r.from.part === r.to.part && r.from.port === r.to.port
+          ? out.slice(Math.max(0, portRunEnd(out) - 1))
+          : out
+      ),
+    ];
+    const home =
+      legToLane(entry, toSide, lane, extents, homeVerticals, horizontals) ??
+      fallbackLeg(entry, toSide, lane, homeVerticals);
     const [downAt, upAt] = [out[out.length - 1][0], home[home.length - 1][0]];
     routes[r.id] = {
       points: dedupe([
@@ -723,6 +714,38 @@ function collectEdges(
   };
   gather(root);
   return out;
+}
+
+/**
+ * A return-rail leg for when no way to the lane was found: straight down
+ * from its stub. If that drop would run along a reserved vertical (another
+ * rail, or this rail's own first leg), leave the stub early instead: drop
+ * from its middle for a sideways port, or one rail gap aside for a port on
+ * the top or bottom. Crossings stay possible; running along a rail does not.
+ */
+function fallbackLeg(
+  stub: Point,
+  side: PortSide,
+  lane: number,
+  verticals: readonly VerticalRun[]
+): Point[] {
+  const blocked = verticals.some(
+    (v) =>
+      Math.abs(v.x - stub[0]) < SNAP &&
+      v.y0 < Math.max(stub[1], lane) - SNAP &&
+      Math.min(stub[1], lane) + SNAP < v.y1
+  );
+  if (!blocked) return [stub, [stub[0], lane]];
+  const [outward] = OUTWARD[side];
+  if (outward !== 0) {
+    const x = stub[0] - (outward * LANE_STUB) / 2;
+    return [
+      [x, stub[1]],
+      [x, lane],
+    ];
+  }
+  const x = stub[0] + RAIL_GAP;
+  return [stub, [x, stub[1]], [x, lane]];
 }
 
 /** Reserve every run except a straight fork/join connected to a common port. */

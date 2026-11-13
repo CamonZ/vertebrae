@@ -11,7 +11,7 @@ import {
   type Ref,
 } from "react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CodeViewDiffItem } from "@pierre/diffs/react";
 import AllChangesRenderer, { type AllChangesViewProps } from "./AllChangesView";
 import { preparePatches } from "../../thread/toolChange/preparePatches";
@@ -89,7 +89,15 @@ beforeEach(() => {
   containerScroll.mockReset();
   HTMLElement.prototype.scrollTo =
     containerScroll as unknown as HTMLElement["scrollTo"];
+  // Jumps wait one frame for Pierre's layout; run that frame immediately so
+  // the navigation model stays synchronous.
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
+  vi.stubGlobal("cancelAnimationFrame", () => {});
 });
+afterEach(() => vi.unstubAllGlobals());
 
 describe("AllChangesView", () => {
   it("virtualizes text diffs and lists fallbacks above them", () => {

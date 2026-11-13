@@ -1,6 +1,6 @@
 ## Attachment: ref
 
-Use for a file:line reference (opens in the Changes tab).
+Use for a file:line reference (opens the file at those lines, or its diff when it changed).
 
 - `path`: `{"type":"string","required":true}`
 - `line`: `{"type":"integer","min":1}`
