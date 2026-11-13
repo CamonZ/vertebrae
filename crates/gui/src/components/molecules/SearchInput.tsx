@@ -27,7 +27,10 @@ const inputClasses =
   "border border-[var(--color-line-strong)] rounded-[var(--radius-md)] " +
   "font-sans text-xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] " +
   "transition-[border-color,box-shadow] duration-[var(--t-fast)] ease-[var(--ease-default)] " +
-  "focus:outline-none focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_var(--color-accent-wash)]";
+  "focus:outline-none focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_var(--color-accent-wash)] " +
+  // WebKit draws its own cancel button on type="search"; the component renders
+  // a single, labelled clear button instead.
+  "[&::-webkit-search-cancel-button]:appearance-none";
 
 /**
  * Filter/search input. Debounces calls to onSearch (default 150ms) so list
@@ -114,9 +117,17 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
             type="button"
             onClick={handleClear}
             aria-label="Clear search"
-            className="absolute right-2 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--color-fg-mute)] hover:text-[var(--color-fg)]"
+            className="absolute right-2 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--color-fg-mute)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:text-[var(--color-fg)]"
           >
-            ×
+            <svg aria-hidden className="h-3.5 w-3.5" viewBox="0 0 16 16">
+              <circle cx="8" cy="8" r="7" fill="currentColor" />
+              <path
+                d="m5.5 5.5 5 5m0-5-5 5"
+                stroke="var(--color-bg-1)"
+                strokeWidth={1.5}
+                strokeLinecap="round"
+              />
+            </svg>
           </button>
         ) : (
           hint && (

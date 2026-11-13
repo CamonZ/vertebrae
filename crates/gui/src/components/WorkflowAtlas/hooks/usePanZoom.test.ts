@@ -64,7 +64,9 @@ describe("fitTransform", () => {
 
   it("returns null for empty content", () => {
     expect(fitTransform(1000, 1000, { w: 0, h: 0 }, 0.15, 2.4, 96)).toBeNull();
-    expect(fitTransform(1000, 1000, { w: -5, h: 100 }, 0.15, 2.4, 96)).toBeNull();
+    expect(
+      fitTransform(1000, 1000, { w: -5, h: 100 }, 0.15, 2.4, 96)
+    ).toBeNull();
   });
 
   it("produces no NaN for valid inputs", () => {
@@ -119,8 +121,14 @@ describe("zoomAt", () => {
 describe("usePanZoom wheel handling", () => {
   function mount() {
     const el = document.createElement("div");
-    Object.defineProperty(el, "clientWidth", { value: 800, configurable: true });
-    Object.defineProperty(el, "clientHeight", { value: 600, configurable: true });
+    Object.defineProperty(el, "clientWidth", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(el, "clientHeight", {
+      value: 600,
+      configurable: true,
+    });
     const panel = document.createElement("div");
     panel.setAttribute("data-no-pan", "");
     el.appendChild(panel);
@@ -159,6 +167,52 @@ describe("usePanZoom wheel handling", () => {
     const prevented = dispatchWheel(panel);
     expect(prevented).toBe(false); // native scroll preserved
     expect(view.result.current.transform).toBe(before);
+    cleanup();
+  });
+});
+
+describe("usePanZoom fitBounds", () => {
+  function mountWith(opts: Parameters<typeof usePanZoom>[2]) {
+    const el = document.createElement("div");
+    Object.defineProperty(el, "clientWidth", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(el, "clientHeight", {
+      value: 600,
+      configurable: true,
+    });
+    document.body.appendChild(el);
+    const ref = { current: el } as React.RefObject<HTMLElement>;
+    const view = renderHook(() => usePanZoom(ref, { w: 4000, h: 3000 }, opts));
+    return { view, cleanup: () => document.body.removeChild(el) };
+  }
+
+  it("frames the bounds rect instead of the whole content", () => {
+    const { view, cleanup } = mountWith({
+      pad: 0,
+      fitBounds: { x: 1000, y: 500, w: 400, h: 300 },
+    });
+    act(() => view.result.current.fit());
+    const { scale, x, y } = view.result.current;
+    expect(scale).toBe(2);
+    // The bounds' top-left lands at the container's top-left.
+    expect(x + 1000 * scale).toBe(0);
+    expect(y + 500 * scale).toBe(0);
+    cleanup();
+  });
+
+  it("caps the fitted scale at fitMax", () => {
+    const { view, cleanup } = mountWith({
+      pad: 0,
+      fitBounds: { x: 0, y: 0, w: 80, h: 60 },
+      fitMax: 1,
+    });
+    act(() => view.result.current.fit());
+    expect(view.result.current.scale).toBe(1);
+    // Centred: (800 - 80) / 2 and (600 - 60) / 2.
+    expect(view.result.current.x).toBe(360);
+    expect(view.result.current.y).toBe(270);
     cleanup();
   });
 });

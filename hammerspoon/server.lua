@@ -85,10 +85,19 @@ end
 
 local function handle_window_list(params, vtb)
     local app_name = params.app_name
+    if (not app_name or app_name == "") and not params.pid then
+        return nil, "app_name is required"
+    end
+    local result = vtb.list_windows(app_name, params.pid)
+    return hs.json.decode(result)
+end
+
+local function handle_app_instances(params, vtb)
+    local app_name = params.app_name
     if not app_name or app_name == "" then
         return nil, "app_name is required"
     end
-    local result = vtb.list_windows(app_name)
+    local result = vtb.list_instances(app_name)
     return hs.json.decode(result)
 end
 
@@ -98,10 +107,10 @@ local function handle_window_find(params, vtb)
     if not title or title == "" then
         return nil, "title is required"
     end
-    if not app_name or app_name == "" then
+    if (not app_name or app_name == "") and not params.pid then
         return nil, "app_name is required"
     end
-    local result = vtb.find_window(title, app_name)
+    local result = vtb.find_window(title, app_name, params.pid)
     return hs.json.decode(result)
 end
 
@@ -182,19 +191,19 @@ end
 
 local function handle_screenshot_app(params, vtb)
     local app_name = params.app_name
-    if not app_name or app_name == "" then
+    if (not app_name or app_name == "") and not params.pid then
         return nil, "app_name is required"
     end
 
     -- Reuse vtb internal logic: find the app and its windows
-    local result_json = vtb.list_windows(app_name)
+    local result_json = vtb.list_windows(app_name, params.pid)
     local windows = hs.json.decode(result_json)
 
     if windows.error then
         return nil, windows.error
     end
     if #windows == 0 then
-        return nil, "no windows found for app: " .. app_name
+        return nil, "no windows found for app: " .. (app_name or ("pid " .. params.pid))
     end
 
     -- Find matching window
@@ -233,16 +242,17 @@ end
 
 local function handle_ui_elements_app(params, vtb)
     local app_name = params.app_name
-    if not app_name or app_name == "" then
+    if (not app_name or app_name == "") and not params.pid then
         return nil, "app_name is required"
     end
-    local result = vtb.read_ui_elements_for_app(app_name, params.max_depth or 3)
+    local result = vtb.read_ui_elements_for_app(app_name, params.max_depth or 3, params.pid)
     return hs.json.decode(result)
 end
 
 -- Route table: method + path -> handler
 local routes = {
     ["POST /window/list"]     = handle_window_list,
+    ["POST /app/instances"]   = handle_app_instances,
     ["POST /window/find"]     = handle_window_find,
     ["POST /window/focus"]    = handle_window_focus,
     ["GET /window/focused"]   = handle_window_focused,

@@ -73,9 +73,13 @@ describe("WfBox factory variant", () => {
     expect(container.querySelector(".uv-factory-face")).toBeInTheDocument();
     expect(container.querySelector(".uv-face-graph")).not.toBeInTheDocument();
     expect(container.querySelector(".uv-face-map")).not.toBeInTheDocument();
-    expect(getByTestId("factory-node-Factory A")).toHaveTextContent(
-      "2 workflows"
+    const node = getByTestId("factory-node-Factory A");
+    expect(node).toHaveTextContent("Factory A2");
+    expect(node).toHaveAccessibleName("Factory Factory A");
+    expect(node).toHaveAccessibleDescription(
+      "2 workflows · 4 items · 1 active"
     );
+    expect(container.querySelector(".factory-marker-live")).toBeInTheDocument();
 
     fireEvent.click(getByTestId("factory-node-Factory A"));
     expect(onSelect).toHaveBeenCalledWith("Factory A");

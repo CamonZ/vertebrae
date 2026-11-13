@@ -21,6 +21,25 @@ describe("SearchInput", () => {
     expect(onSearch).toHaveBeenCalledExactlyOnceWith("abc");
   });
 
+  it("renders a single clear button and hides the native search cancel", () => {
+    const onChange = vi.fn();
+    render(
+      <SearchInput aria-label="q" defaultValue="abc" onChange={onChange} />,
+    );
+    const input = screen.getByLabelText("q") as HTMLInputElement;
+    expect(input.className).toContain(
+      "[&::-webkit-search-cancel-button]:appearance-none",
+    );
+    const clear = screen.getByRole("button", { name: "Clear search" });
+    expect(clear).not.toHaveTextContent("×");
+    fireEvent.click(clear);
+    expect(input.value).toBe("");
+    expect(onChange).toHaveBeenLastCalledWith("");
+    expect(
+      screen.queryByRole("button", { name: "Clear search" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("clears on Escape", () => {
     const onSearch = vi.fn();
     render(

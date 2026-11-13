@@ -44,6 +44,34 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
+.uv-crumb {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-width: 0;
+}
+.uv-crumb-back {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--fg-mute);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  transition: color var(--t-fast) var(--ease);
+}
+.uv-crumb-back:hover,
+.uv-crumb-back:focus-visible {
+  color: var(--accent);
+  outline: none;
+}
+.uv-crumb-current {
+  overflow: hidden;
+  color: var(--fg-soft);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .uv-name h1 {
   font-family: var(--serif);
   font-size: var(--text-22);
@@ -96,34 +124,184 @@
   cursor: grabbing;
 }
 
-/* ── Factory overview ── */
+/* ── Factory overview ──
+   A quiet two-pane surface: the factory index (a scannable list, the primary
+   way in) beside a map of the same factories. Both share one highlight, so
+   pointing at a factory on either side finds it on the other. */
 .factory-overview {
   position: absolute;
   inset: 0;
+  display: grid;
+  grid-template-columns: clamp(232px, 24vw, 300px) minmax(0, 1fr);
   overflow: hidden;
 }
-.factory-overview-heading {
+.factory-overview-map {
   position: relative;
-  z-index: 4;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* ── Factory index (rail) ── */
+.factory-index {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+  cursor: auto;
+}
+.factory-index-head {
   display: flex;
   align-items: baseline;
-  justify-content: flex-start;
-  gap: var(--s-4);
-  padding: clamp(var(--s-5), 6vh, var(--s-10));
-  max-width: 980px;
-  margin: 0 auto;
-  pointer-events: none;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-5) var(--s-5) 0;
 }
-.factory-overview-eyebrow,
-.factory-overview-label {
+.factory-index-title {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 1.125rem;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--fg);
+  letter-spacing: -0.01em;
+}
+.factory-index-count {
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  color: var(--fg-mute);
+  font-variant-numeric: tabular-nums;
+}
+.factory-index-hint {
+  margin: var(--s-1) 0 0;
+  padding: 0 var(--s-5) var(--s-4);
+  border-bottom: 1px solid var(--line-soft);
+  font-size: var(--text-12);
+  line-height: 1.45;
+  color: var(--fg-mute);
+}
+.factory-index-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: var(--s-2) var(--s-2) var(--s-6);
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.factory-index-row {
+  position: relative;
+  display: grid;
+  gap: var(--s-1);
+  width: 100%;
+  padding: var(--s-2h) var(--s-3) var(--s-2h) var(--s-4);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--fg-soft);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+/* A hairline on the leading edge marks the highlighted row without moving
+   any text. */
+.factory-index-row::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background-color var(--t-fast) var(--ease);
+}
+.factory-index-row:hover,
+.factory-index-row.is-hot {
+  background: var(--bg-1);
+  color: var(--fg);
+}
+.factory-index-row.is-hot::before {
+  background: var(--accent);
+}
+.factory-index-row:focus-visible {
+  outline: none;
+  border-color: var(--accent-mute);
+  background: var(--bg-1);
+  color: var(--fg);
+}
+.factory-index-row.is-recent {
+  background: var(--color-selection);
+  color: var(--fg);
+}
+.factory-index-name {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--text-13);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.factory-index-meta,
+.factory-index-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--s-2);
+  row-gap: 2px;
   font-family: var(--mono);
   font-size: var(--text-10);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  color: var(--fg-mute);
+  font-variant-numeric: tabular-nums;
 }
-.factory-overview-eyebrow {
+.factory-index-meta > span + span::before {
+  content: "·";
+  margin-right: var(--s-2);
   color: var(--fg-faint);
 }
+.factory-index-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--accent);
+}
+.factory-index-active i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.factory-index-recent {
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  color: var(--fg-soft);
+  letter-spacing: 0.04em;
+}
+.factory-index-empty {
+  display: grid;
+  gap: var(--s-2);
+  margin: var(--s-6) var(--s-5);
+  color: var(--fg-soft);
+  font-size: var(--text-13);
+}
+.factory-index-empty q {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+.factory-index-empty small {
+  color: var(--fg-mute);
+  font-size: var(--text-12);
+  line-height: 1.45;
+}
+
+/* ── Factory map ── */
 .factory-overview-stage {
   position: absolute;
   inset: 0;
@@ -171,8 +349,13 @@
 .factory-overview-workflows.is-collapsed .uv-steplayer .ag-step {
   pointer-events: none;
 }
-.factory-overview-workflow-edges {
+.factory-overview-workflow-edges,
+.factory-overview-map-columns {
   transition: opacity 0.32s var(--ease);
+}
+/* Column titles are only legible once the regions expand. */
+.factory-overview-map-columns.is-hidden {
+  opacity: 0;
 }
 .factory-overview-regions,
 .factory-overview-factories,
@@ -205,6 +388,10 @@
   border: 1px dashed color-mix(in oklch, var(--fg-faint) 70%, transparent);
   border-radius: var(--r-lg);
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--line) 40%, transparent);
+  transition: border-color var(--t-fast) var(--ease);
+}
+.factory-overview-region.is-hot {
+  border-color: var(--accent-mute);
 }
 .factory-overview-region-name,
 .factory-overview-region-meta {
@@ -223,85 +410,91 @@
   right: 18px;
   color: var(--fg-faint);
 }
-.factory-overview-factories {
-  z-index: 6;
-  pointer-events: none;
-}
-.factory-overview-factories .uv-wf.factory-node {
-  position: absolute;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--s-2);
-  padding: var(--s-3) var(--s-4);
-  border: 1px solid #303030;
-  border-radius: var(--r-md);
-  background: #050505;
-  color: #f5f5f5;
-  text-align: left;
-  pointer-events: auto;
-  box-shadow: 0 12px 30px rgb(0 0 0 / 24%);
-  cursor: pointer;
-  transition:
-    border-color var(--t-fast) var(--ease),
-    transform var(--t-fast) var(--ease),
-    box-shadow var(--t-fast) var(--ease);
-}
-.factory-overview-factories .uv-wf.factory-node:hover,
-.factory-overview-factories .uv-wf.factory-node:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 16px 36px rgb(0 0 0 / 36%);
-  outline: none;
-}
-.factory-overview-factories .uv-wf.factory-node .factory-overview-label {
-  color: #8f8f8f;
-}
+
+/* Screen-space overlay: markers, routes and route counts. */
 .factory-overview-factory-edges {
   position: absolute;
   inset: 0;
   z-index: 5;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   overflow: visible;
   transition: opacity 0.32s var(--ease);
+}
+.factory-overview-factories {
+  z-index: 6;
+  pointer-events: none;
 }
 .factory-overview-route-labels {
   z-index: 7;
   pointer-events: none;
 }
-.uv-factory-face {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
+.factory-overview-factories .uv-wf.factory-node {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: flex-end;
+  align-items: center;
+  padding: 0 var(--s-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-full);
+  background: var(--bg-1);
+  color: var(--fg-soft);
+  pointer-events: auto;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+  /* Markers follow the camera every frame; never animate their position. */
+  transition:
+    border-color var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    opacity var(--t-base) var(--ease);
+}
+.factory-overview-factories .uv-wf.factory-node:hover,
+.factory-overview-factories .uv-wf.factory-node.lit {
+  border-color: var(--accent-mute);
+  background: var(--bg-2);
+  color: var(--fg);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+}
+.factory-overview-factories .uv-wf.factory-node:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.factory-overview-factories .uv-wf.factory-node.dim {
+  opacity: 0.35;
+}
+.uv-factory-face {
+  display: flex;
+  flex: 1;
+  align-items: center;
   gap: var(--s-2);
-  padding: var(--s-4);
+  min-width: 0;
 }
 .factory-overview-name {
-  max-width: 100%;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
-  font-family: var(--serif);
-  font-size: var(--text-22);
-  font-weight: 400;
-  line-height: 1.1;
+  font-size: var(--text-12);
+  font-weight: 450;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.factory-overview-meta,
-.factory-overview-active {
+.factory-overview-meta {
+  flex: none;
   font-family: var(--mono);
   font-size: var(--text-10);
-  color: #a8a8a8;
+  color: var(--fg-mute);
+  font-variant-numeric: tabular-nums;
 }
-.factory-overview-active {
-  color: var(--accent);
+.factory-marker-live {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 .factory-overview-empty {
   display: grid;
   min-height: 180px;
+  height: 100%;
   place-items: center;
   color: var(--fg-faint);
   font-family: var(--mono);

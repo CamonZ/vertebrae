@@ -28,24 +28,57 @@ local function window_to_table(win)
     }
 end
 
--- Find a running application by exact name (case-insensitive).
--- Uses manual iteration of runningApplications() instead of hs.application.find()
--- because the latter uses Spotlight and can hang for non-existent app names.
-local function find_app_by_name(app_name)
-    local lower_name = app_name:lower()
-    for _, app in ipairs(hs.application.runningApplications()) do
-        local name = app:name()
-        if name and name:lower() == lower_name then
-            return app
+-- The Vertebrae desktop app reports its name as "gui" when launched from
+-- `tauri dev` and as "Vertebrae" when installed as a bundle. Treat either name
+-- as a request for whichever build is running, preferring the exact match.
+local VERTEBRAE_APP_NAMES = { "gui", "vertebrae" }
+
+local function candidate_names(lower_name)
+    for _, alias in ipairs(VERTEBRAE_APP_NAMES) do
+        if alias == lower_name then
+            local names = { lower_name }
+            for _, other in ipairs(VERTEBRAE_APP_NAMES) do
+                if other ~= lower_name then
+                    table.insert(names, other)
+                end
+            end
+            return names
         end
     end
-    return nil
+    return { lower_name }
 end
 
--- Get windows from a specific application by name.
+-- Every running application whose name matches app_name or its aliases,
+-- exact name first (case-insensitive).
+-- Uses manual iteration of runningApplications() instead of hs.application.find()
+-- because the latter uses Spotlight and can hang for non-existent app names.
+local function find_apps_by_name(app_name)
+    local result = {}
+    local apps = hs.application.runningApplications()
+    for _, wanted in ipairs(candidate_names(app_name:lower())) do
+        for _, app in ipairs(apps) do
+            local name = app:name()
+            if name and name:lower() == wanted then
+                table.insert(result, app)
+            end
+        end
+    end
+    return result
+end
+
+-- Resolve the target application: an explicit pid selects one instance when
+-- several share a name (e.g. dev builds running from different worktrees).
+local function resolve_app(app_name, pid)
+    if pid then
+        return hs.application.applicationForPID(pid)
+    end
+    return find_apps_by_name(app_name)[1]
+end
+
+-- Get windows from a specific application by name (or pid).
 -- Returns a list of hs.window objects.
-local function windows_for_app(app_name)
-    local app = find_app_by_name(app_name)
+local function windows_for_app(app_name, pid)
+    local app = resolve_app(app_name, pid)
     if not app then
         return {}
     end
@@ -69,11 +102,11 @@ end
 
 --- List windows for a given application name.
 --- Returns a JSON array of objects with id, title, app, and frame.
-function vtb.list_windows(app_name)
-    if not app_name or app_name == "" then
+function vtb.list_windows(app_name, pid)
+    if (not app_name or app_name == "") and not pid then
         return hs.json.encode({ error = "app_name is required" })
     end
-    local windows = windows_for_app(app_name)
+    local windows = windows_for_app(app_name, pid)
     local result = {}
     for _, win in ipairs(windows) do
         table.insert(result, window_to_table(win))
@@ -84,21 +117,45 @@ end
 --- Find windows whose title contains the given substring (case-insensitive).
 --- app_name is required to avoid slow global window enumeration.
 --- Returns a JSON array of matching window objects.
-function vtb.find_window(title_substring, app_name)
+function vtb.find_window(title_substring, app_name, pid)
     if not title_substring or title_substring == "" then
         return hs.json.encode({ error = "title_substring is required" })
     end
-    if not app_name or app_name == "" then
+    if (not app_name or app_name == "") and not pid then
         return hs.json.encode({ error = "app_name is required" })
     end
 
     local pattern = title_substring:lower()
-    local windows = windows_for_app(app_name)
+    local windows = windows_for_app(app_name, pid)
     local result = {}
     for _, win in ipairs(windows) do
         if win:title():lower():find(pattern, 1, true) then
             table.insert(result, window_to_table(win))
         end
+    end
+    return hs.json.encode(result)
+end
+
+--- List every running instance of an application (all name aliases), with
+--- pid, bundle path, and titled windows. Callers use the pid to pick one
+--- instance when several share a name.
+function vtb.list_instances(app_name)
+    if not app_name or app_name == "" then
+        return hs.json.encode({ error = "app_name is required" })
+    end
+    local result = {}
+    for _, app in ipairs(find_apps_by_name(app_name)) do
+        local windows = {}
+        for _, win in ipairs(windows_for_app(nil, app:pid())) do
+            table.insert(windows, window_to_table(win))
+        end
+        table.insert(result, {
+            pid = app:pid(),
+            name = app:name(),
+            path = app:path(),
+            bundle_id = app:bundleID(),
+            windows = windows,
+        })
     end
     return hs.json.encode(result)
 end
@@ -217,13 +274,14 @@ end
 
 --- Take a screenshot of a window found by app name and optional title substring.
 --- If title_substring is nil, captures the first window of the app.
-function vtb.screenshot_app(app_name, title_substring)
-    if not app_name or app_name == "" then
+--- An optional pid picks one instance when several share the app name.
+function vtb.screenshot_app(app_name, title_substring, pid)
+    if (not app_name or app_name == "") and not pid then
         return hs.json.encode({ error = "app_name is required" })
     end
-    local windows = windows_for_app(app_name)
+    local windows = windows_for_app(app_name, pid)
     if #windows == 0 then
-        return hs.json.encode({ error = "no windows found for app: " .. app_name })
+        return hs.json.encode({ error = "no windows found for app: " .. (app_name or ("pid " .. pid)) })
     end
 
     local target = windows[1]
@@ -355,14 +413,14 @@ end
 
 --- Read UI elements for the first window of a given application.
 --- Convenience wrapper around list_windows + read_ui_elements.
-function vtb.read_ui_elements_for_app(app_name, max_depth)
-    if not app_name or app_name == "" then
+function vtb.read_ui_elements_for_app(app_name, max_depth, pid)
+    if (not app_name or app_name == "") and not pid then
         return hs.json.encode({ error = "app_name is required" })
     end
     max_depth = max_depth or 3
-    local windows = windows_for_app(app_name)
+    local windows = windows_for_app(app_name, pid)
     if #windows == 0 then
-        return hs.json.encode({ error = "no windows found for app: " .. app_name })
+        return hs.json.encode({ error = "no windows found for app: " .. (app_name or ("pid " .. pid)) })
     end
     return vtb.read_ui_elements(windows[1]:id(), max_depth)
 end

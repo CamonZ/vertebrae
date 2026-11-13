@@ -127,6 +127,13 @@ export function WfBox({
       select();
     };
     const cls = "uv-wf factory-node" + (state ? " " + state : "");
+    const workflows = `${factory.workflowCount} workflow${factory.workflowCount === 1 ? "" : "s"}`;
+    const items =
+      factory.workItemCount > 0
+        ? ` · ${factory.workItemCount} item${factory.workItemCount === 1 ? "" : "s"}`
+        : "";
+    const active =
+      factory.activeCount > 0 ? ` · ${factory.activeCount} active` : "";
     return (
       <div
         className={cls}
@@ -135,27 +142,22 @@ export function WfBox({
         role={onSelect ? "button" : undefined}
         tabIndex={onSelect ? 0 : undefined}
         aria-label={`Factory ${factory.name}`}
+        aria-description={`${workflows}${items}${active}`}
+        title={`${factory.name}\n${workflows}${items}${active}`}
         style={{ left: rect.x, top: rect.y, width: rect.w, height: rect.h }}
         onKeyDown={onSelect ? handleKeyDown : undefined}
         onClick={onSelect ? select : undefined}
+        onMouseEnter={onHover ? () => onHover(factory.id) : undefined}
+        onMouseLeave={onHover ? () => onHover(null) : undefined}
+        onFocus={onHover ? () => onHover(factory.id) : undefined}
+        onBlur={onHover ? () => onHover(null) : undefined}
       >
         <div className="uv-factory-face">
-          <span className="factory-overview-label">
-            {factory.name === "No Factory" ? "Scope" : "Factory"}
-          </span>
+          {factory.activeCount > 0 ? (
+            <i className="factory-marker-live" aria-hidden="true" />
+          ) : null}
           <strong className="factory-overview-name">{factory.name}</strong>
-          <span className="factory-overview-meta">
-            {factory.workflowCount} workflow
-            {factory.workflowCount === 1 ? "" : "s"}
-            {factory.workItemCount > 0
-              ? ` · ${factory.workItemCount} work item${factory.workItemCount === 1 ? "" : "s"}`
-              : ""}
-          </span>
-          {factory.activeCount > 0 && (
-            <span className="factory-overview-active">
-              {factory.activeCount} active
-            </span>
-          )}
+          <span className="factory-overview-meta">{factory.workflowCount}</span>
         </div>
       </div>
     );
