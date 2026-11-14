@@ -28,6 +28,7 @@
 mod binary;
 mod claude_plugin_dir;
 mod error;
+mod installation;
 mod paths;
 mod service;
 
@@ -39,6 +40,7 @@ pub mod macos;
 pub use binary::{BinaryTransaction, install_binary, uninstall_binary};
 pub use claude_plugin_dir::{ClaudePluginDirResolution, resolve_claude_plugin_dir};
 pub use error::InstallerError;
+pub use installation::{installation_id, installation_id_in};
 pub use paths::{
     bin_dir, data_bin_dir, data_dir, installed_agent_context_dir, installed_skills_dir, log_dir,
     provision_installed_skills_dir, symlink_path,

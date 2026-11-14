@@ -15,6 +15,7 @@ import {
 import { useGateChatSync } from "../hooks/useGateChatSync";
 import { useLocalChatEventRouter } from "../hooks/useLocalChatEventRouter";
 import { ChatAssociationDrivers } from "./ChatAssociationDrivers";
+import { useChatCatalogSync } from "../hooks/useChatCatalogSync";
 
 /**
  * Invisible component that activates app-level realtime listeners at the root.
@@ -26,6 +27,7 @@ import { ChatAssociationDrivers } from "./ChatAssociationDrivers";
  * subscription lives here.
  */
 export function GlobalListeners() {
+  useChatCatalogSync();
   useArtifactChangeListener();
   useDaemonChangeListener();
   useTaskChangeListener();

@@ -940,9 +940,9 @@ async resolveChatAssociationEntity(projectRoot: string, id: string) : Promise<Re
  * Uses the configured decision role only. Disabled/unavailable models leave
  * commands unclassified. No transcript, result, or worktree delta is supplied.
  */
-async classifyToolOperations(commands: string[]) : Promise<Result<string[][], CommandError>> {
+async classifyToolOperations(commands: string[], projectPath: string | null, sessionId: string | null) : Promise<Result<string[][], CommandError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("classify_tool_operations", { commands }) };
+    return { status: "ok", data: await TAURI_INVOKE("classify_tool_operations", { commands, projectPath, sessionId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1988,6 +1988,7 @@ export type LocalBackendUpdateDiagnostic = { code: string; retryable: boolean; m
 export type LocalBackendUpdateRelease = { channel: string; version: string; build: string; image_ref: string; generated_at: string | null }
 export type LocalBackendUpdateResult = { channel: string; version: string; build: string; image_ref: string; generated_at: string | null }
 export type LocalBackendUpdateStatus = { management: string; configured: boolean; channel: string | null; current_version: string | null; current_build: string | null; current_image_ref: string | null; current_generated_at: string | null; latest: LocalBackendUpdateRelease | null; available: boolean; adoption_message: string | null; diagnostic: LocalBackendUpdateDiagnostic | null }
+export type LocalChatActivityStatus = "idle" | "working"
 export type LocalChatAnnotation = { session_id: string; tool_id: string; kind: string; payload: JsonValue;
 /**
  * RFC 3339 timestamp of when Vertebrae recorded the entry.
@@ -2110,7 +2111,7 @@ export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id: string; thread_id?: string | null; is_root: boolean; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number; item_id?: string | null; completion_status?: string | null }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { CompactionFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind } | { InvalidChatSessionId: string } | { InvalidRecordingWorktree: string }
 export type LocalChatSessionErrorEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; error: string; item_id?: string | null }
-export type LocalChatSessionIndexEntry = {
+export type LocalChatSessionIndexEntry = { activityStatus?: LocalChatActivityStatus;
 /**
  * Optional association metadata; no raw tool payloads.
  */
@@ -2119,11 +2120,11 @@ association?: JsonValue | null; id: string; label: string; title: string | null;
  * Provider the session was started with; absent means the harness's
  * built-in provider.
  */
-providerId?: string | null; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null;
+providerId?: string | null; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedSpeedTier?: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null;
 /**
  * Provider lineage used to group history without opening conversations.
  */
-providerParentResumeId?: string | null; threadTotalTokens: number | null; messageCount: number; lifecycle: string; status: string;
+providerParentResumeId?: string | null; threadTotalTokens: number | null; messageCount: number; hasUserMessage?: boolean | null; lifecycle: string; status: string;
 /**
  * Waiting `human_input` gate the chat resolves; Resolve reopens the chat
  * bound to the same run and step.
@@ -2272,7 +2273,7 @@ url: string;
  * Whether a non-empty API token is configured.
  */
 has_token: boolean }
-export type SaveLocalChatSessionIndexInput = { sessions: LocalChatSessionIndexEntry[] }
+export type SaveLocalChatSessionIndexInput = { sessions: LocalChatSessionIndexEntry[]; deletedIds?: string[]; changedIds?: string[] | null }
 export type SaveOutcome = { kind: "saved"; revision: string } |
 /**
  * The file no longer matches the expected revision; nothing was written.

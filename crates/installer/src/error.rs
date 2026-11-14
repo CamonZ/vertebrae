@@ -15,6 +15,10 @@ pub enum InstallerError {
     #[error("Could not determine home directory")]
     HomeDir,
 
+    /// Installation identity could not be safely read or provisioned.
+    #[error("Could not provision installation identity: {reason}")]
+    InstallationIdentity { reason: String },
+
     /// A required source binary was missing.
     #[error("Source binary not found at {path}")]
     SourceNotFound { path: PathBuf },

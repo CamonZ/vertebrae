@@ -8,6 +8,7 @@ import {
   persistLocalChatSession,
 } from "../utils/localChatPersistence";
 import { commands } from "../bindings";
+import * as persistence from "../utils/localChatPersistence";
 import { routeLocalChatTextEvent } from "../hooks/useLocalChatEventRouter";
 import { doRegenerateSessionTitle } from "../hooks/useLocalChat";
 import { associationDriverSessionIds } from "../utils/chatAssociation/driverSessions";
@@ -39,6 +40,49 @@ describe("chatStore", () => {
   afterEach(() => {
     vi.restoreAllMocks();
     vi.useRealTimers();
+  });
+
+  it("preserves live gate details on catalog refresh but accepts a new execution", async () => {
+    const id = useChatStore.getState().openSession("Gate chat");
+    const gate = {
+      task_run_id: "run",
+      step_name: "approve",
+      execution_id: "execution",
+      artifact: "approval",
+      draftable: true,
+      fields: [
+        {
+          name: "approved",
+          question: "Approve?",
+          required: true,
+          type: "boolean",
+          value_type: "boolean",
+          choices: null,
+          multiple: false,
+          format: null,
+        },
+      ],
+    };
+    const existing = { ...useChatStore.getState().sessions[id], gate };
+    useChatStore.setState({ sessions: { [id]: existing } });
+    const refresh = vi.spyOn(persistence, "refreshLocalChatSessionIndex");
+    const persistedGate = {
+      task_run_id: "run",
+      step_name: "approve",
+      execution_id: "execution",
+      artifact: "approval",
+    };
+    refresh.mockResolvedValue({ [id]: { ...existing, gate: persistedGate } });
+
+    await useChatStore.getState().refreshLocalSessionIndex(() => true);
+
+    expect(useChatStore.getState().sessions[id].gate).toBe(gate);
+
+    const replacement = { ...persistedGate, execution_id: "new-execution" };
+    refresh.mockResolvedValue({ [id]: { ...existing, gate: replacement } });
+    await useChatStore.getState().refreshLocalSessionIndex(() => true);
+
+    expect(useChatStore.getState().sessions[id].gate).toBe(replacement);
   });
 
   describe("openSession", () => {
@@ -3172,6 +3216,30 @@ describe("chatStore", () => {
   });
 
   describe("markStreamingIfSending", () => {
+    it("persists working/idle boundaries while keeping runtime lifecycle local", () => {
+      const store = useChatStore.getState();
+      const id = store.openSession("Activity", "/repo/root");
+      store.setSessionLifecycle(id, "sending");
+      expect(loadPersistedLocalChatSession(id)?.activityStatus).toBe("working");
+      expect(loadPersistedLocalChatSession(id)?.lifecycle).toBe("idle");
+
+      store.beginActiveTurn(id);
+      store.setSessionLifecycle(id, "idle");
+      expect(loadPersistedLocalChatSession(id)?.activityStatus).toBe("working");
+      store.settleActiveTurn(id);
+      expect(loadPersistedLocalChatSession(id)?.activityStatus).toBe("idle");
+
+      store.setSessionCompaction(id, true);
+      expect(loadPersistedLocalChatSession(id)?.activityStatus).toBe("working");
+      store.setSessionCompaction(id, false);
+      expect(loadPersistedLocalChatSession(id)?.activityStatus).toBe("idle");
+
+      store.setSessionLifecycle(id, "streaming");
+      store.setSessionLifecycle(id, "error", "failed");
+      expect(loadPersistedLocalChatSession(id)?.activityStatus).toBe("idle");
+      expect(useChatStore.getState().sessions[id].status).toBe("open");
+    });
+
     it("upgrades sending sessions to streaming without persisting transcript state", () => {
       const id = useChatStore.getState().openSession("T1", "/repo/root");
       useChatStore.getState().setSessionLifecycle(id, "sending");
