@@ -13,6 +13,16 @@ import type { ActivityAnalysis } from "./types";
 vi.mock("../../../bindings", () => ({
   commands: { classifyToolOperations: vi.fn() },
 }));
+const scope = vi.hoisted(() => ({ projectPath: null as string | null }));
+vi.mock("../../../stores/chatStore", () => ({
+  useChatStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      sessions: {
+        a: { projectPath: scope.projectPath },
+        b: { projectPath: scope.projectPath },
+      },
+    }),
+}));
 const classify = vi.mocked(commands.classifyToolOperations);
 const row = (source: string, eligible = true): ActivityAnalysis => ({
   operations: [
@@ -27,6 +37,7 @@ const row = (source: string, eligible = true): ActivityAnalysis => ({
 });
 beforeEach(() => {
   classify.mockReset();
+  scope.projectPath = null;
 });
 
 it("never overwrites deterministic classification or changes source, targets, observations, and uncertainty", () =>
@@ -129,7 +140,9 @@ it("sends one bounded request and leaves scheduling and caching to the backend",
     ])
   );
   expect(classify).toHaveBeenCalledExactlyOnceWith(
-    rows.map((r) => r.operations[0].source)
+    rows.map((r) => r.operations[0].source),
+    null,
+    "a"
   );
   expect(view.result.current[0].operations).toHaveLength(1);
   view.rerender({ open: false });
@@ -172,4 +185,30 @@ it("discards late answers from another session and leaves unavailable decisions 
   expect(view.result.current[0].operations[0].unresolved).toBe(
     "Unsupported executable"
   );
+});
+
+it("drops responses when the same chat changes project scope", async () => {
+  let resolve!: (value: Awaited<ReturnType<typeof classify>>) => void;
+  scope.projectPath = "/project-a";
+  classify.mockImplementationOnce(
+    () =>
+      new Promise((finish) => {
+        resolve = finish;
+      })
+  );
+  classify.mockResolvedValue({ status: "ok", data: [["checks"]] });
+
+  const view = renderHook(() =>
+    useDecisionActivities([row("opaque")], "a", true)
+  );
+
+  scope.projectPath = "/project-b";
+  view.rerender();
+  await act(async () => resolve({ status: "ok", data: [["file edits"]] }));
+  await waitFor(() =>
+    expect(view.result.current[0].operations[0].activities).toEqual(["checks"])
+  );
+
+  expect(classify).toHaveBeenNthCalledWith(1, ["opaque"], "/project-a", "a");
+  expect(classify).toHaveBeenNthCalledWith(2, ["opaque"], "/project-b", "a");
 });

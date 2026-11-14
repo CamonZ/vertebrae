@@ -54,6 +54,17 @@ describe("localChatPersistence", () => {
     vi.restoreAllMocks();
   });
 
+  it("retains activity without replaying a busy runtime from persisted metadata", async () => {
+    await persistLocalChatSession(makeSession({ lifecycle: "streaming" }));
+    const persisted = loadPersistedLocalChatSession("s-1");
+    expect(persisted?.activityStatus).toBe("working");
+    expect(persisted?.lifecycle).toBe("idle");
+    expect(normalizeLocalChatSession(persisted)?.activityStatus).toBe(
+      "working"
+    );
+    expect(normalizeLocalChatSession(persisted)?.backendSessionId).toBeNull();
+  });
+
   it("round-trips resumable local chat metadata", () => {
     persistLocalChatSession(
       makeSession({
@@ -422,6 +433,153 @@ describe("localChatPersistence", () => {
       messageCount: 1,
       messages: [],
     });
+  });
+
+  it("reconciles remote removal while preserving an edit and deletion racing refresh", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    const load = vi.spyOn(freshCommands, "loadLocalChatSessionIndex");
+    load.mockResolvedValue({ status: "ok", data: [] });
+    vi.spyOn(freshCommands, "saveLocalChatSessionIndex").mockResolvedValue({
+      status: "ok",
+      data: null,
+    });
+    const persistence = await import("./localChatPersistence");
+    await persistence.hydrateLocalChatSessionIndex();
+    await persistence.persistLocalChatSession(makeSession({ id: "edited" }));
+    await persistence.persistLocalChatSession(makeSession({ id: "deleted" }));
+    await persistence.persistLocalChatSession(
+      makeSession({ id: "remote-deleted" })
+    );
+
+    let deliver!: (
+      value: Awaited<ReturnType<typeof freshCommands.loadLocalChatSessionIndex>>
+    ) => void;
+    load.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          deliver = resolve;
+        })
+    );
+
+    const refresh = persistence.refreshLocalChatSessionIndex(() => true);
+    await waitFor(() => expect(deliver).toBeTypeOf("function"));
+
+    await persistence.persistLocalChatSession(
+      makeSession({ id: "edited", title: "Manual correction" })
+    );
+    persistence.removePersistedLocalChatSession("deleted");
+
+    // The transport returns an older snapshot containing the locally deleted chat.
+    deliver({
+      status: "ok",
+      data: [
+        makeSession({ id: "deleted" }),
+        makeSession({ id: "edited", title: "Old" }),
+      ],
+    } as never);
+    await refresh;
+
+    expect(persistence.loadPersistedLocalChatSession("edited")?.title).toBe(
+      "Manual correction"
+    );
+    expect(persistence.loadPersistedLocalChatSession("deleted")).toBeNull();
+    expect(
+      persistence.loadPersistedLocalChatSession("remote-deleted")
+    ).toBeNull();
+  });
+
+  it("drops a snapshot whose project scope retired during the read", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    const load = vi
+      .spyOn(freshCommands, "loadLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: [] });
+    const persistence = await import("./localChatPersistence");
+    await persistence.hydrateLocalChatSessionIndex();
+
+    let current = true;
+    load.mockImplementationOnce(async () => {
+      current = false;
+      return {
+        status: "ok",
+        data: [makeSession({ id: "old-project" })],
+      } as never;
+    });
+    expect(
+      await persistence.refreshLocalChatSessionIndex(() => current)
+    ).toBeNull();
+    expect(persistence.loadPersistedLocalChatSession("old-project")).toBeNull();
+  });
+
+  it("saves explicit edits and deletions without treating untouched snapshot rows as edits", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    vi.spyOn(freshCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    const save = vi
+      .spyOn(freshCommands, "saveLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: null });
+    const persistence = await import("./localChatPersistence");
+    await persistence.hydrateLocalChatSessionIndex();
+    await persistence.persistLocalChatSession(makeSession({ id: "untouched" }));
+    await persistence.persistLocalChatSession(makeSession({ id: "edited" }));
+
+    save.mockClear();
+
+    await persistence.persistLocalChatSession(
+      makeSession({ id: "edited", title: "Correction" })
+    );
+    expect(save.mock.calls[0][0].changedIds).toEqual(["edited"]);
+    expect(save.mock.calls[0][0].sessions.map((s) => s.id)).toEqual([
+      "untouched",
+      "edited",
+    ]);
+
+    save.mockClear();
+    persistence.removePersistedLocalChatSession("edited");
+    await waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][0].deletedIds).toEqual(["edited"]);
+    expect(save.mock.calls[0][0].changedIds).toEqual([]);
+  });
+
+  it("retains a second edit while the first edit is awaiting durable acknowledgement", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    vi.spyOn(freshCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    const save = vi
+      .spyOn(freshCommands, "saveLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: null });
+    const persistence = await import("./localChatPersistence");
+    await persistence.hydrateLocalChatSessionIndex();
+
+    let acknowledge!: () => void;
+    save.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = () => resolve({ status: "ok", data: null });
+        })
+    );
+
+    const first = persistence.persistLocalChatSession(
+      makeSession({ id: "edited", title: "First" })
+    );
+    await waitFor(() => expect(acknowledge).toBeTypeOf("function"));
+    const second = persistence.persistLocalChatSession(
+      makeSession({ id: "edited", title: "Second" })
+    );
+
+    acknowledge();
+    await Promise.all([first, second]);
+
+    expect(save).toHaveBeenCalledTimes(2);
+    expect(save.mock.calls[1][0].changedIds).toEqual(["edited"]);
+    expect(save.mock.calls[1][0].sessions[0].title).toBe("Second");
   });
 
   it("merges existing app index entries before the first async save", async () => {

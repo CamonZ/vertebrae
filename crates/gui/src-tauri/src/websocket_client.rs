@@ -913,6 +913,15 @@ impl SacrumSocket {
                 );
             }
             match event {
+                "chat_catalog_created" | "chat_catalog_updated" | "chat_catalog_deleted" => {
+                    // Invalidate only: machine-filtered reads remain authoritative.
+                    // Never project catalog metadata into an unrelated installation.
+                    if topic.starts_with("project:") {
+                        app_handle
+                            .emit("chat-catalog-changed", ())
+                            .map_err(|_| "Failed to invalidate chat catalog".to_string())?;
+                    }
+                }
                 "artifact_created" | "artifact_updated" | "artifact_deleted" => {
                     Self::handle_artifact_event(event, payload, app_handle)?;
                 }

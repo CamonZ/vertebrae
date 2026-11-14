@@ -15,6 +15,11 @@ const mockUseStepTransitionChangeListener = vi.fn();
 const mockUseWorkflowTransitionChangeListener = vi.fn();
 const mockUseLocalChatEventRouter = vi.fn();
 const mockUseGateChatSync = vi.fn();
+const mockUseChatCatalogSync = vi.fn();
+
+vi.mock("../hooks/useChatCatalogSync", () => ({
+  useChatCatalogSync: () => mockUseChatCatalogSync(),
+}));
 
 vi.mock("../hooks", () => ({
   useArtifactChangeListener: (...args: unknown[]) =>
@@ -77,6 +82,7 @@ describe("GlobalListeners", () => {
     expect(mockUseWorkflowTransitionChangeListener).toHaveBeenCalled();
     expect(mockUseLocalChatEventRouter).toHaveBeenCalled();
     expect(mockUseGateChatSync).toHaveBeenCalled();
+    expect(mockUseChatCatalogSync).toHaveBeenCalled();
   });
 
   it("calls each listener hook with no arguments (base store-level subscription)", () => {

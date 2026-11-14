@@ -26,6 +26,7 @@ pub fn install_binary(name: &str, source_path: &Path) -> Result<PathBuf, Install
         });
     }
 
+    crate::installation_id()?;
     let data_dir = data_bin_dir()?;
     fs::create_dir_all(&data_dir).map_err(|e| InstallerError::CreateDir {
         path: data_dir.clone(),

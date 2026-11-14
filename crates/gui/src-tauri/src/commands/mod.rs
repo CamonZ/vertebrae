@@ -71,6 +71,7 @@ impl CommandError {
 mod artifact;
 mod backend;
 mod chat_association;
+mod chat_catalog;
 mod daemon;
 mod execution;
 mod external_editor;

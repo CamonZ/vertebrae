@@ -153,6 +153,12 @@ impl GraphqlClient {
         &self.project_id
     }
 
+    /// Stable backend namespace, independent of bearer-token rotation.
+    pub fn backend_identity(&self) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(self.endpoint.as_bytes()))
+    }
+
     pub fn connection_identity(&self) -> &str {
         &self.connection_identity
     }

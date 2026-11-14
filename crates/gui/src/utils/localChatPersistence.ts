@@ -1,3 +1,4 @@
+import { localChatActivityStatus } from "./localChatActivity";
 import type {
   ChatMessage,
   ChatSession,
@@ -55,12 +56,19 @@ type LocalChatSessionIndexCommands = typeof commands & {
   >;
   saveLocalChatSessionIndex?: (input: {
     sessions: LocalChatSessionIndexEntry[];
+    deletedIds?: string[];
+    changedIds?: string[];
   }) => Promise<
     { status: "ok"; data: null } | { status: "error"; error: unknown }
   >;
 };
 
 let sessionIndexCache: Record<string, ChatSession> = {};
+const pendingDeletedIds = new Set<string>();
+
+// A per-entry generation keeps a second edit pending while its first write awaits.
+const pendingChangedIds = new Map<string, number>();
+let nextChangeGeneration = 0;
 let indexSaveInFlight = false;
 let indexSaveQueued = false;
 let indexSavePromise: Promise<boolean> | null = null;
@@ -68,6 +76,7 @@ let sessionIndexHydrated = false;
 let sessionIndexHydratePromise: Promise<boolean> | null = null;
 
 export interface LocalChatSessionSummary {
+  activityStatus?: "working" | "idle";
   association?: JsonValue | null;
   id: string;
   label: string;
@@ -210,6 +219,7 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     messages,
     hasUserMessage,
     status: candidate.status,
+    activityStatus: candidate.activityStatus === "working" ? "working" : "idle",
     harness: normalizeHarness(candidate.harness),
     backendSessionId: null,
     providerResumeId,
@@ -419,6 +429,7 @@ function serializeSession(
     messages,
     hasUserMessage: hasLocalChatUserMessage(session),
     status: session.status,
+    activityStatus: localChatActivityStatus(session),
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     providerId: session.providerId ?? null,
     backendSessionId: null,
@@ -454,6 +465,7 @@ function readSessions(): Record<string, ChatSession> {
 
 function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
   return {
+    activityStatus: session.activityStatus ?? localChatActivityStatus(session),
     association: session.association ?? null,
     id: session.id,
     label: session.label,
@@ -513,6 +525,7 @@ function deduplicateDefaultEmptyLocalChatSessions(
     candidates.sort(compareLocalChatSessionRecency);
     for (const duplicate of candidates.slice(1)) {
       delete deduplicated[duplicate.id];
+      pendingDeletedIds.add(duplicate.id);
       changed = true;
     }
   }
@@ -548,15 +561,29 @@ async function flushIndexSaveQueue(): Promise<boolean> {
     while (indexSaveQueued) {
       indexSaveQueued = false;
       const sessions = Object.values(sessionIndexCache).map(toIndexEntry);
-      const result = await save({ sessions });
+      const deletedIds = [...pendingDeletedIds];
+      const changes = new Map(pendingChangedIds);
+      const result = await save({
+        sessions,
+        deletedIds,
+        changedIds: [...changes.keys()],
+      });
+
       if (result.status === "error") {
         succeeded = false;
-        console.warn("Failed to save local chat session index", result.error);
+        console.warn("[ChatCatalogSync] index_save_failed");
+      } else {
+        for (const id of deletedIds) pendingDeletedIds.delete(id);
+        for (const [id, generation] of changes) {
+          if (pendingChangedIds.get(id) === generation) {
+            pendingChangedIds.delete(id);
+          }
+        }
       }
     }
-  } catch (error) {
+  } catch {
     succeeded = false;
-    console.warn("Failed to save local chat session index", error);
+    console.warn("[ChatCatalogSync] index_save_failed");
   } finally {
     indexSaveInFlight = false;
     if (indexSaveQueued && !blockedByHydration) {
@@ -584,10 +611,10 @@ async function loadSessionIndexFromCommand(): Promise<Record<
           .map((session) => [session.id, session])
       );
     }
-    console.warn("Failed to load local chat session index", result.error);
+    console.warn("[ChatCatalogSync] index_load_failed");
     return null;
-  } catch (error) {
-    console.warn("Failed to load local chat session index", error);
+  } catch {
+    console.warn("[ChatCatalogSync] index_load_failed");
     return null;
   }
 }
@@ -624,6 +651,48 @@ export async function hydrateLocalChatSessionIndex(): Promise<{
   return {
     sessions: sessionIndexCache,
   };
+}
+
+/**
+ * Reload after reconnect. Edits and deletions made during the read win locally;
+ * the Rust outbox resolves remote revisions before returning this snapshot.
+ */
+export async function refreshLocalChatSessionIndex(
+  isCurrent: () => boolean
+): Promise<Record<string, ChatSession> | null> {
+  await hydrateSessionIndexCache();
+  await indexSavePromise;
+  if (!isCurrent()) {
+    return null;
+  }
+
+  const before = { ...sessionIndexCache };
+  const loaded = await loadSessionIndexFromCommand();
+  if (!isCurrent() || loaded === null) {
+    return null;
+  }
+
+  const merged = { ...loaded };
+
+  // Retain edits made while the backend snapshot was in flight.
+  for (const id of new Set([
+    ...Object.keys(before),
+    ...Object.keys(sessionIndexCache),
+  ])) {
+    if (sessionIndexCache[id] !== before[id]) {
+      if (sessionIndexCache[id]) {
+        merged[id] = sessionIndexCache[id];
+      } else {
+        delete merged[id];
+      }
+    }
+  }
+
+  sessionIndexCache = Object.fromEntries(
+    Object.entries(merged).filter(([id]) => !isLocalChatSessionCleared(id))
+  );
+
+  return sessionIndexCache;
 }
 
 export function projectPathMatches(
@@ -675,6 +744,7 @@ export function summarizeLocalChatSession(
   session: ChatSession
 ): LocalChatSessionSummary {
   return {
+    activityStatus: session.activityStatus ?? localChatActivityStatus(session),
     id: session.id,
     association: session.association ?? null,
     label: session.label,
@@ -783,9 +853,11 @@ export function persistLocalChatSession(
   const serialized = serializeSession(session, sessions[session.id]);
   if (isDisposableClosedLocalChatSession(session)) {
     delete sessions[session.id];
+    pendingDeletedIds.add(session.id);
     return writeSessions(sessions);
   }
   sessions[session.id] = serialized;
+  pendingChangedIds.set(session.id, ++nextChangeGeneration);
   const persistence = writeSessions(
     deduplicateDefaultEmptyLocalChatSessions(sessions).sessions
   );
@@ -796,10 +868,12 @@ export function persistLocalChatSession(
 export function removePersistedLocalChatSession(sessionId: string): void {
   const sessions = readSessions();
   delete sessions[sessionId];
+  pendingDeletedIds.add(sessionId);
   writeSessions(sessions);
 }
 
 export function clearPersistedLocalChatSessions(): void {
+  for (const id of Object.keys(sessionIndexCache)) pendingDeletedIds.add(id);
   sessionIndexCache = {};
   sessionIndexHydrated = true;
   sessionIndexHydratePromise = null;

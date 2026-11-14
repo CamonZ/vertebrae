@@ -1,3 +1,4 @@
+import { localChatActivityStatus } from "../utils/localChatActivity";
 import {
   isSelfProviderAgentToolCall,
   sanitizeSessionMessages,
@@ -52,6 +53,7 @@ import {
   persistLocalChatSession,
   projectPathMatches,
   hydrateLocalChatSessionIndex,
+  refreshLocalChatSessionIndex,
   summarizeLocalChatSession,
 } from "../utils/localChatPersistence";
 import {
@@ -92,6 +94,8 @@ import {
   toolAnnotationLoadToken,
   type ToolAnnotations,
 } from "./toolAnnotations";
+
+export { isLocalChatLifecycleBusy } from "../utils/localChatActivity";
 
 /**
  * Message types for the Claude chat
@@ -428,6 +432,8 @@ export interface ChatSession {
   messages: ChatMessage[];
   /** Whether the user has sent at least one message in this session. */
   hasUserMessage?: boolean;
+  /** Last reported activity; runtime lifecycle remains local. */
+  activityStatus?: "working" | "idle";
   /** Session status */
   status: "open" | "closed";
   /** Local chat harness that owns the runtime session. */
@@ -698,6 +704,7 @@ interface ChatStoreActions {
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
   /** Hydrate local chat metadata from the app-managed index file. */
   hydrateLocalSessionIndex: () => Promise<void>;
+  refreshLocalSessionIndex: (isCurrent: () => boolean) => Promise<void>;
   /** Hydrate and focus a persisted local chat session */
   selectPersistedSession: (
     sessionId: string,
@@ -1196,19 +1203,6 @@ export function getLocalChatLifecycle(
   if (!session) return "idle";
   if (session.lifecycle) return session.lifecycle;
   return "idle";
-}
-
-export function isLocalChatLifecycleBusy(
-  lifecycle: LocalChatLifecycle
-): boolean {
-  return (
-    lifecycle === "starting" ||
-    lifecycle === "resuming" ||
-    lifecycle === "sending" ||
-    lifecycle === "streaming" ||
-    lifecycle === "compacting" ||
-    lifecycle === "closing"
-  );
 }
 
 export function buildBackendSessionIdIndex(
@@ -2099,13 +2093,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
     options: { persist?: boolean } = {}
   ): Promise<boolean> => {
     let updated: ChatSession | null = null;
+    let activityNeedsPersistence = false;
     set((state) => {
       const session = state.sessions[sessionId];
       if (!session) return state;
       const next = updater(session);
       if (next === session) return state;
 
-      const normalized =
+      const normalizedBase =
         next.messages !== session.messages
           ? {
               ...next,
@@ -2116,6 +2111,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
               ),
             }
           : next;
+      const normalized = {
+        ...normalizedBase,
+        activityStatus: localChatActivityStatus(normalizedBase),
+      };
+      activityNeedsPersistence =
+        (session.activityStatus ?? localChatActivityStatus(session)) !==
+          normalized.activityStatus ||
+        session.lifecycle !== normalized.lifecycle;
       updated = normalized;
 
       const messagesChanged = normalized.messages !== session.messages;
@@ -2144,15 +2147,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
       };
     });
     const updatedSession = updated as ChatSession | null;
-    if (updatedSession && options.persist !== false) {
+    if (
+      updatedSession &&
+      (options.persist !== false || activityNeedsPersistence)
+    ) {
       const persistence = persistLocalChatSession(updatedSession);
 
-      set((state) => ({
-        localSessionSummaries: upsertLocalSessionSummary(
-          state.localSessionSummaries,
-          updatedSession
-        ),
-      }));
+      if (options.persist !== false) {
+        set((state) => ({
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            updatedSession
+          ),
+        }));
+      }
       return persistence;
     }
     return Promise.resolve(true);
@@ -2503,6 +2511,63 @@ export const useChatStore = create<ChatStore>((set, get) => {
           localSessionSummaries: localSessionSummariesFromSessions(sessions),
           sessions: nextSessions,
           spawnOutlineSignatures,
+        };
+      });
+    },
+
+    refreshLocalSessionIndex: async (isCurrent) => {
+      const before = { ...get().sessions };
+      const persistedBefore = allPersistedLocalChatSessions();
+      const loaded = await refreshLocalChatSessionIndex(isCurrent);
+      if (!isCurrent() || loaded === null) {
+        return;
+      }
+
+      set((state) => {
+        const sessions = { ...state.sessions };
+
+        // Remove acknowledged remote deletions unless the local session changed.
+        for (const id of Object.keys(persistedBefore)) {
+          if (
+            !loaded[id] &&
+            sessions[id] === before[id] &&
+            !sessions[id]?.backendSessionId &&
+            !sessions[id]?.discussion
+          ) {
+            delete sessions[id];
+          }
+        }
+
+        // Refresh metadata without replacing live runtime or transcript state.
+        for (const [id, remote] of Object.entries(loaded)) {
+          const existing = sessions[id];
+          if (existing && existing !== before[id]) {
+            continue;
+          }
+
+          sessions[id] = existing
+            ? {
+                ...existing,
+                ...remote,
+                messages: existing.messages,
+                backendSessionId: existing.backendSessionId,
+                lifecycle: existing.lifecycle,
+                lifecycleError: existing.lifecycleError,
+                streamingAssistant: existing.streamingAssistant,
+                // Catalog bindings omit runtime draft and steering details.
+                // Keep them only while this is still the same execution.
+                gate:
+                  existing.gate &&
+                  existing.gate.execution_id === remote.gate?.execution_id
+                    ? existing.gate
+                    : remote.gate,
+              }
+            : remote;
+        }
+
+        return {
+          sessions,
+          localSessionSummaries: localSessionSummariesFromSessions(loaded),
         };
       });
     },

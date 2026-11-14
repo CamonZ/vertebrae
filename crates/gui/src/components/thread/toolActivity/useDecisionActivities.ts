@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { activityNames } from "./classification";
 import { commands } from "../../../bindings";
+import { useChatStore } from "../../../stores/chatStore";
 import type { ActivityAnalysis } from "./types";
 
 /** Only actual syntax-separated, unresolved invocations enter inference. */
@@ -60,7 +61,14 @@ export function useDecisionActivities(
   sessionId: string | null,
   enabled: boolean
 ): ActivityAnalysis[] {
-  const key = JSON.stringify({ sessionId, sources: decisionSources(rows) });
+  const projectPath = useChatStore((state) =>
+    sessionId ? (state.sessions[sessionId]?.projectPath ?? null) : null
+  );
+  const key = JSON.stringify({
+    sessionId,
+    projectPath,
+    sources: decisionSources(rows),
+  });
   const [state, setState] = useState<{
     key: string;
     decisions: Record<string, string[]>;
@@ -72,7 +80,7 @@ export function useDecisionActivities(
     if (!sources.length) return;
     let alive = true;
     void commands
-      .classifyToolOperations(sources)
+      .classifyToolOperations(sources, projectPath, sessionId)
       .then((result) => {
         if (
           alive &&
@@ -92,6 +100,6 @@ export function useDecisionActivities(
     return () => {
       alive = false;
     };
-  }, [key, enabled, sessionId]);
+  }, [key, enabled, sessionId, projectPath]);
   return state?.key === key ? applyDecisions(rows, state.decisions) : rows;
 }
