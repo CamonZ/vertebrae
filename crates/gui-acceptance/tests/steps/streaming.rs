@@ -26,6 +26,50 @@ struct Usage {
     output: u64,
 }
 
+#[given("the streaming step transitions to a finish step")]
+pub async fn streaming_step_transitions_to_finish(world: &mut GuiWorld) {
+    let workflow_id = world
+        .workflow_id
+        .as_ref()
+        .expect("no workflow ID stored")
+        .clone();
+    let step_id = world.step_id.as_ref().expect("no step ID stored").clone();
+
+    world
+        .run_vtb(&[
+            "step",
+            "add",
+            "streaming-finish",
+            "--workflow",
+            &workflow_id,
+            "--step-type",
+            "finish",
+            "--order",
+            "1",
+            "--harness",
+            "claude",
+        ])
+        .await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb step add finish failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+
+    let finish_id = world.extract_step_id_from_output().expect("finish step ID");
+    world.track_step(finish_id.clone());
+    world.step_id = Some(step_id.clone());
+
+    world
+        .run_vtb(&["step", "update", &step_id, "--transition-to", &finish_id])
+        .await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb step update transition failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+}
+
 #[given(expr = "the step runs on the {string} harness")]
 pub async fn step_runs_on_harness(world: &mut GuiWorld, harness: String) {
     match harness.as_str() {

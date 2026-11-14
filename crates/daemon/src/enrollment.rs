@@ -11,16 +11,20 @@ const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024;
 #[derive(Clone, PartialEq, Eq)]
 pub struct EnrollmentResult {
     pub daemon_id: String,
-    pub reconnect_token: String,
-    pub expires_at: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub refresh_token_expires_at: String,
+    pub access_token_expires_at: String,
 }
 
 impl std::fmt::Debug for EnrollmentResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EnrollmentResult")
             .field("daemon_id", &self.daemon_id)
-            .field("reconnect_token", &"<redacted>")
-            .field("expires_at", &self.expires_at)
+            .field("access_token", &"<redacted>")
+            .field("refresh_token", &"<redacted>")
+            .field("access_token_expires_at", &"<redacted>")
+            .field("refresh_token_expires_at", &"<redacted>")
             .finish()
     }
 }
@@ -45,11 +49,13 @@ pub enum EnrollmentError {
     MalformedResponse(String),
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct ExchangeResponse {
     daemon_id: String,
-    reconnect_token: String,
-    expires_at: String,
+    access_token: String,
+    refresh_token: String,
+    refresh_token_expires_at: String,
+    access_token_expires_at: String,
 }
 
 pub struct DaemonEnrollmentClient {
@@ -134,18 +140,27 @@ impl DaemonEnrollmentClient {
             body.extend_from_slice(&chunk);
         }
         let response: ExchangeResponse = serde_json::from_slice(&body)
-            .map_err(|error| EnrollmentError::MalformedResponse(error.to_string()))?;
+            .map_err(|_| EnrollmentError::MalformedResponse("invalid token pair JSON".into()))?;
         if response.daemon_id != daemon_id {
             return Err(EnrollmentError::MalformedResponse(
                 "response daemon ID did not match the requested identity".to_string(),
             ));
         }
-        if response.reconnect_token.is_empty() || response.reconnect_token.len() > 512 {
+        if [&response.access_token, &response.refresh_token]
+            .iter()
+            .any(|token| token.is_empty() || token.len() > 512)
+        {
             return Err(EnrollmentError::MalformedResponse(
-                "response reconnect credential was invalid".to_string(),
+                "response token pair was invalid".to_string(),
             ));
         }
-        if chrono::DateTime::parse_from_rfc3339(&response.expires_at).is_err() {
+        if [
+            &response.access_token_expires_at,
+            &response.refresh_token_expires_at,
+        ]
+        .iter()
+        .any(|expiry| chrono::DateTime::parse_from_rfc3339(expiry).is_err())
+        {
             return Err(EnrollmentError::MalformedResponse(
                 "response expiry was not RFC 3339".to_string(),
             ));
@@ -153,8 +168,10 @@ impl DaemonEnrollmentClient {
 
         Ok(EnrollmentResult {
             daemon_id: response.daemon_id,
-            reconnect_token: response.reconnect_token,
-            expires_at: response.expires_at,
+            access_token: response.access_token,
+            refresh_token: response.refresh_token,
+            refresh_token_expires_at: response.refresh_token_expires_at,
+            access_token_expires_at: response.access_token_expires_at,
         })
     }
 }
@@ -224,11 +241,14 @@ mod tests {
     }
 
     #[test]
-    fn response_debug_redacts_reconnect_token() {
+    fn response_debug_redacts_access_token() {
         let response = EnrollmentResult {
             daemon_id: DAEMON_ID.to_string(),
-            reconnect_token: "secret".to_string(),
-            expires_at: "2026-09-07T12:00:00Z".to_string(),
+            access_token: "secret".to_string(),
+            refresh_token: "secret".to_string(),
+            refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30))
+                .to_rfc3339(),
+            access_token_expires_at: "2026-09-07T12:00:00Z".to_string(),
         };
         let debug = format!("{response:?}");
         assert!(!debug.contains("secret"));

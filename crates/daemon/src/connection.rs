@@ -10,7 +10,7 @@ pub(crate) async fn connect_with_identity(
     base_url: &str,
     identity: &DaemonIdentity,
 ) -> Result<PhoenixSocket, crate::phoenix::PhoenixError> {
-    PhoenixSocket::connect_daemon(base_url, &identity.daemon_id, &identity.reconnect_token).await
+    PhoenixSocket::connect_daemon(base_url, &identity.daemon_id, &identity.access_token).await
 }
 
 /// Compute the next backoff delay by doubling `current`, capped at `max`.
@@ -58,8 +58,11 @@ mod tests {
         DaemonIdentity {
             endpoint: endpoint.to_string(),
             daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
-            reconnect_token: "test-reconnect-token".to_string(),
-            expires_at: "2099-01-01T00:00:00Z".to_string(),
+            access_token: "test-reconnect-token".to_string(),
+            refresh_token: "test-reconnect-token".to_string(),
+            refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30))
+                .to_rfc3339(),
+            access_token_expires_at: "2099-01-01T00:00:00Z".to_string(),
         }
     }
 
@@ -144,7 +147,7 @@ mod tests {
             reject_with_body(&listener, "404 Not Found", r#"{"code":"not_found"}"#).await;
         });
         let mut identity = identity(&endpoint);
-        identity.reconnect_token = "retired-secret".to_string();
+        identity.access_token = "retired-secret".to_string();
         let result = tokio::time::timeout(
             Duration::from_secs(3),
             reconnect(

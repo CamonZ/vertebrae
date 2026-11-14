@@ -115,7 +115,7 @@ async fn create_and_register_project(base_url: &str, api_token: &str) -> (String
 }
 
 /// Before-hook: create a unique Sacrum project, register it in config.toml,
-/// navigate the GUI to /setup, select the project, and wait for redirect.
+/// wait for the GUI's initial /setup route, select the project, and wait for redirect.
 ///
 /// `first_run` is `true` for scenarios tagged `@first_run`. For those we
 /// REMOVE the managed symlinks (so the welcome screen appears) and do NOT
@@ -198,14 +198,10 @@ pub async fn before_scenario(
 
     let client = wd.lock().await;
 
-    // Navigate to the project setup page
-    let setup_url = format!("{}/setup", gui_acceptance::tauri_base_url());
-    client
-        .goto(&setup_url)
-        .await
-        .expect("failed to navigate to /setup");
-
-    // Wait for the project list to render (up to 10 seconds)
+    // A fresh app has no selected scenario project and routes to /setup on
+    // its own. Do not interrupt WebKit's initial document load with a second
+    // navigation: cancelling that load can fail the native network process.
+    // Wait for the actual project row instead (up to 10 seconds).
     let project_row = client
         .wait()
         .at_most(std::time::Duration::from_secs(10))
@@ -217,9 +213,17 @@ pub async fn before_scenario(
 
     if project_row.is_err() {
         world.screenshot(&client, "fail-setup-project-row").await;
+        let page = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            client.execute(
+                "return {url: location.href, title: document.title, text: document.body?.innerText.slice(0, 1000)};",
+                vec![],
+            ),
+        )
+        .await;
         panic!(
-            "project row not found on /setup page for slug '{}' — check test-output/ for screenshot",
-            slug
+            "project row not found on /setup page for slug '{}' — page: {page:?}; check test-output/ for screenshot",
+            slug,
         );
     }
 

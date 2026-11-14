@@ -59,8 +59,10 @@ async fn competing_process_does_not_exchange_or_overwrite_identity() {
             ResponseTemplate::new(200)
                 .set_body_json(serde_json::json!({
                     "daemon_id": FIRST_ID,
-                    "reconnect_token": "test-reconnect-token",
-                    "expires_at": "2099-01-01T00:00:00Z",
+                    "access_token": "test-reconnect-token",
+                    "access_token_expires_at": "2099-01-01T00:00:00Z",
+                    "refresh_token": "test-refresh-token",
+                    "refresh_token_expires_at": "2099-01-01T00:00:00Z",
                 }))
                 .set_delay(Duration::from_secs(1)),
         )
@@ -90,7 +92,11 @@ async fn competing_process_does_not_exchange_or_overwrite_identity() {
     assert!(saved.contains(FIRST_ID));
     assert!(!saved.contains(SECOND_ID));
     assert!(!saved.contains("test-bootstrap-token"));
-    assert!(!String::from_utf8_lossy(&first.stdout).contains("test-reconnect-token"));
+    assert!(saved.contains("test-refresh-token"));
+    for token in ["test-reconnect-token", "test-refresh-token"] {
+        assert!(!String::from_utf8_lossy(&first.stdout).contains(token));
+        assert!(!String::from_utf8_lossy(&first.stderr).contains(token));
+    }
     server.verify().await;
 }
 
@@ -101,7 +107,7 @@ async fn corrupt_config_is_reported_without_secret_contents() {
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(
         directory.join("daemon.toml"),
-        "reconnect_token = \"PRIVATE-CREDENTIAL\" trailing\n",
+        "access_token = \"PRIVATE-CREDENTIAL\" trailing\n",
     )
     .unwrap();
     let output = enroll(home.path(), "http://127.0.0.1:1", FIRST_ID)
@@ -156,7 +162,7 @@ fn write_identity(directory: &Path, endpoint: &str, token: &str, expires_at: &st
     std::fs::write(
         directory.join("daemon.toml"),
         format!(
-            "endpoint = \"{endpoint}\"\ndaemon_id = \"{FIRST_ID}\"\nreconnect_token = \"{token}\"\nexpires_at = \"{expires_at}\"\n"
+            "endpoint = \"{endpoint}\"\ndaemon_id = \"{FIRST_ID}\"\naccess_token = \"{token}\"\naccess_token_expires_at = \"{expires_at}\"\nrefresh_token = \"refresh-{token}\"\nrefresh_token_expires_at = \"{expires_at}\"\n"
         ),
     )
     .unwrap();

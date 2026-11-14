@@ -319,9 +319,14 @@ async fn standalone_channel_interruption_reconnects_with_the_same_identity() {
     config.identity = crate::config::DaemonIdentity {
         endpoint,
         daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
-        reconnect_token: "test-reconnect-token".to_string(),
-        expires_at: "2099-01-01T00:00:00Z".to_string(),
+        access_token: "expiring-secret".to_string(),
+        refresh_token: "test-reconnect-token".to_string(),
+        refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339(),
+        access_token_expires_at: "2099-01-01T00:00:00Z".to_string(),
     };
+    let renewer = ScriptedRenewer::new(true);
+    renewer.release.notify_one();
+    config.renewer = renewer;
     let (actor, mut handle) = Actor::spawn(None, DaemonSupervisor, config).await.unwrap();
     tokio::time::timeout(Duration::from_secs(3), rejoined_rx)
         .await
@@ -350,8 +355,11 @@ fn sample_daemon_config() -> DaemonConfig {
         crate::config::DaemonIdentity {
             endpoint: "http://localhost:4000".to_string(),
             daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
-            reconnect_token: "sac_super_secret_token".to_string(),
-            expires_at: "2099-01-01T00:00:00Z".to_string(),
+            access_token: "sac_super_secret_token".to_string(),
+            refresh_token: "sac_super_secret_token".to_string(),
+            refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30))
+                .to_rfc3339(),
+            access_token_expires_at: "2099-01-01T00:00:00Z".to_string(),
         },
         Arc::new(crate::capabilities::DaemonCapabilities {
             harnesses: HashMap::new(),
@@ -374,7 +382,7 @@ fn sample_daemon_config() -> DaemonConfig {
 }
 
 #[test]
-fn daemon_config_debug_redacts_reconnect_token() {
+fn daemon_config_debug_redacts_access_token() {
     let cfg = sample_daemon_config();
     let dbg = format!("{:?}", cfg);
     assert!(
@@ -424,7 +432,7 @@ impl CredentialRenewer for ScriptedRenewer {
         &self,
         current: &crate::config::DaemonIdentity,
     ) -> Result<crate::renewal::RenewedCredential, crate::renewal::RenewalError> {
-        assert_eq!(current.reconnect_token, "expiring-secret");
+        assert_eq!(current.access_token, "expiring-secret");
         self.renewals
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         // Hold the request open so overlapping triggers can be observed.
@@ -433,8 +441,11 @@ impl CredentialRenewer for ScriptedRenewer {
             return Err(crate::renewal::RenewalError::InvalidCredentials);
         }
         Ok(crate::renewal::RenewedCredential {
-            reconnect_token: "renewed-secret".to_string(),
-            expires_at: (Utc::now() + chrono::Duration::days(30)).to_rfc3339(),
+            access_token: "renewed-secret".to_string(),
+            refresh_token: "rotated-refresh-secret".to_string(),
+            refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30))
+                .to_rfc3339(),
+            access_token_expires_at: (Utc::now() + chrono::Duration::days(30)).to_rfc3339(),
         })
     }
 
@@ -470,7 +481,7 @@ fn spawn_phoenix_peer(
                         token = url::Url::parse(&format!("http://peer{}", request.uri()))
                             .unwrap()
                             .query_pairs()
-                            .find(|(key, _)| key == "reconnect_token")
+                            .find(|(key, _)| key == "access_token")
                             .map(|(_, value)| value.into_owned())
                             .unwrap_or_default();
                         Ok(response)
@@ -514,9 +525,11 @@ async fn renewal_config(
     config.identity = crate::config::DaemonIdentity {
         endpoint,
         daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
-        reconnect_token: "expiring-secret".to_string(),
-        // Inside the default 24h lead window.
-        expires_at: (Utc::now() + chrono::Duration::hours(2)).to_rfc3339(),
+        access_token: "expiring-secret".to_string(),
+        refresh_token: "refresh-secret".to_string(),
+        refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30)).to_rfc3339(),
+        // Inside the default five-minute access-token lead window.
+        access_token_expires_at: (Utc::now() + chrono::Duration::minutes(2)).to_rfc3339(),
     };
     config.renewer = renewer;
     (config, tokens)
@@ -557,7 +570,7 @@ async fn due_credential_renews_once_persists_and_reconnects_with_the_successor()
     );
     let persisted = renewer.persisted.lock().unwrap().clone();
     assert_eq!(persisted.len(), 1);
-    assert_eq!(persisted[0].reconnect_token, "renewed-secret");
+    assert_eq!(persisted[0].access_token, "renewed-secret");
 
     // The renewed credential is outside the lead window: no further renewal.
     actor.cast(DaemonMessage::CheckCredential).unwrap();
@@ -601,7 +614,9 @@ async fn rejected_renewal_stops_for_reenrollment_without_reconnecting() {
 async fn expired_credential_fails_startup_without_connecting() {
     let renewer = ScriptedRenewer::new(false);
     let (mut config, mut tokens) = renewal_config(renewer.clone()).await;
-    config.identity.expires_at = (Utc::now() - chrono::Duration::minutes(1)).to_rfc3339();
+    config.identity.access_token_expires_at =
+        (Utc::now() - chrono::Duration::minutes(1)).to_rfc3339();
+    config.identity.refresh_token_expires_at = config.identity.access_token_expires_at.clone();
     let signal = config.reenrollment.clone();
     assert!(Actor::spawn(None, DaemonSupervisor, config).await.is_err());
     assert_eq!(signal.get(), Some(ReenrollmentReason::Expired));
@@ -630,6 +645,10 @@ async fn startup_with_rejected_socket_auth_requires_reenrollment() {
     let mut config = sample_daemon_config();
     config.base_url = endpoint.clone();
     config.identity.endpoint = endpoint;
+    config.identity.access_token = "expiring-secret".into();
+    let renewer = ScriptedRenewer::new(true);
+    renewer.release.notify_one();
+    config.renewer = renewer;
     let signal = config.reenrollment.clone();
     assert!(Actor::spawn(None, DaemonSupervisor, config).await.is_err());
     assert_eq!(signal.get(), Some(ReenrollmentReason::CredentialRejected));
@@ -657,10 +676,10 @@ async fn startup_while_offline_keeps_retrying_with_a_valid_credential() {
 }
 
 #[test]
-fn daemon_config_defaults_always_enable_renewal_with_a_one_day_lead() {
+fn daemon_config_defaults_always_enable_renewal_with_a_five_minute_lead() {
     let config = sample_daemon_config();
     assert_eq!(config.renewal, RenewalPolicy::default());
-    assert_eq!(config.renewal.lead, Duration::from_secs(24 * 60 * 60));
+    assert_eq!(config.renewal.lead, Duration::from_secs(5 * 60));
     assert!(config.renewal.check_interval <= Duration::from_secs(5 * 60));
     assert_eq!(config.reenrollment.get(), None);
 }
@@ -670,11 +689,11 @@ fn enrolled_daemon_toml_without_renewal_settings_is_renewed_automatically() {
     // Exactly the format `vtb-daemon enroll` writes: no renewal keys exist.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("daemon.toml");
-    let expires_at = (Utc::now() + chrono::Duration::hours(3)).to_rfc3339();
+    let access_token_expires_at = (Utc::now() + chrono::Duration::minutes(3)).to_rfc3339();
     std::fs::write(
         &path,
         format!(
-            "endpoint = \"https://sacrum.example.test\"\ndaemon_id = \"33333333-3333-3333-3333-333333333333\"\nreconnect_token = \"enrolled-secret\"\nexpires_at = \"{expires_at}\"\n"
+            "endpoint = \"https://sacrum.example.test\"\ndaemon_id = \"33333333-3333-3333-3333-333333333333\"\naccess_token = \"enrolled-secret\"\nrefresh_token = \"refresh-secret\"\nrefresh_token_expires_at = \"2099-01-01T00:00:00Z\"\naccess_token_expires_at = \"{access_token_expires_at}\"\n"
         ),
     )
     .unwrap();
@@ -687,7 +706,118 @@ fn enrolled_daemon_toml_without_renewal_settings_is_renewed_automatically() {
         )),
     );
     assert_eq!(
-        credential_status(&config.identity.expires_at, Utc::now(), config.renewal.lead),
+        credential_status(
+            &config.identity.access_token_expires_at,
+            Utc::now(),
+            config.renewal.lead
+        ),
         CredentialStatus::RenewalDue
     );
+}
+
+async fn concurrent_refresh_wave(requests: usize, ticks: usize, reject: bool) {
+    use vertebrae_sacrum_client::DaemonCredentialRecovery;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{header, method},
+    };
+
+    let renewer = ScriptedRenewer::new(reject);
+    let (config, mut sockets) = renewal_config(renewer.clone()).await;
+
+    let mut startup = config.clone();
+    startup.identity.access_token_expires_at =
+        (Utc::now() + chrono::Duration::hours(2)).to_rfc3339();
+    let (actor, handle) = Actor::spawn(None, DaemonSupervisor, startup).await.unwrap();
+    assert_eq!(next_token(&mut sockets).await, "expiring-secret");
+
+    let token = SharedBearerToken::new("expiring-secret");
+    let coordinator = Arc::new(CredentialCoordinator {
+        identity: tokio::sync::Mutex::new(config.identity),
+        token: token.clone(),
+        renewer: renewer.clone(),
+        policy: config.renewal,
+        signal: config.reenrollment,
+        actor: actor.clone(),
+    });
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer expiring-secret"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(header("authorization", "Bearer renewed-secret"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"data": {"value": true}})),
+        )
+        .expect(if reject { 0 } else { requests as u64 })
+        .mount(&server)
+        .await;
+
+    let client = GraphqlClient::new_with_daemon_credential(
+        SacrumConfig::new(server.uri(), String::new(), "project".into()),
+        "daemon",
+        token.clone(),
+    )
+    .with_daemon_credential_recovery(coordinator.clone());
+
+    let requests_future = futures::future::join_all((0..requests).map(|_| {
+        client.execute::<bool>("query Value { value }", serde_json::Value::Null, "value")
+    }));
+    let ticks_future = futures::future::join_all((0..ticks).map(|_| coordinator.refresh(None)));
+    let release = async {
+        while renewer.renewals.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        renewer.release.notify_one();
+    };
+
+    let (results, _, ()) = tokio::join!(requests_future, ticks_future, release);
+
+    assert!(results.iter().all(|result| if reject {
+        result.is_err()
+    } else {
+        matches!(result, Ok(true))
+    }));
+    assert_eq!(
+        renewer.renewals.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+
+    if reject {
+        assert!(token.get().is_empty());
+
+        let before = server.received_requests().await.unwrap().len();
+        assert!(
+            client
+                .execute_void("query Value { value }", serde_json::Value::Null)
+                .await
+                .is_err()
+        );
+        assert_eq!(server.received_requests().await.unwrap().len(), before);
+        assert!(coordinator.recover("expiring-secret").await.is_err());
+    } else {
+        assert_eq!(renewer.persisted.lock().unwrap().len(), 1);
+        assert_eq!(token.get(), "renewed-secret");
+    }
+
+    actor.stop(None);
+    handle.await.unwrap();
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::test_runner::Config::with_cases(24))]
+    #[test]
+    fn concurrent_401s_and_timer_ticks_share_one_refresh(requests in 1usize..12, ticks in 1usize..12) {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(concurrent_refresh_wave(requests, ticks, false));
+    }
+}
+
+#[tokio::test]
+async fn rejected_refresh_invalidates_all_existing_http_clients() {
+    concurrent_refresh_wave(4, 4, true).await;
 }
