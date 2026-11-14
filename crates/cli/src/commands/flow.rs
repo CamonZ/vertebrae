@@ -288,6 +288,84 @@ story:
         assert_eq!(result.errors[0].path, "parts[1].change");
     }
 
+    /// A migration in phases: x joins in p1, old retires in p2.
+    const PHASES: &str = "version: 1
+phases: [today, p1, p2]
+parts:
+  - {id: src, kind: source}
+  - {id: old, kind: queue, in: [today, p1]}
+  - {id: x, kind: queue, in: [p1, p2]}
+rails:
+  - {id: so, from: src.out, to: old.in}
+  - {id: sx, from: src.out, to: x.in}
+cards:
+  - {id: c0, token: request, origin: src}
+  - {id: c1, token: request, origin: src}
+story:
+  - caption: through the old queue
+    steps:
+      - {verb: send, part: old, card: c0, via: so}
+  - caption: the new queue beside it
+    phase: p1
+    steps:
+      - {verb: send, part: x, card: c1, via: sx}
+  - caption: the old queue is gone
+    phase: p2
+";
+
+    #[test]
+    fn phases_pass() {
+        let result = validate_flow_source(PHASES).unwrap();
+        assert!(result.valid, "{result:?}");
+    }
+
+    #[test]
+    fn phase_errors_name_the_phase() {
+        let skipped = validate_flow_source(&PHASES.replace("phase: p1", "phase: p2")).unwrap();
+        assert!(!skipped.valid);
+        assert_eq!(skipped.errors[0].path, "story[1].phase");
+        assert!(
+            skipped.errors[0]
+                .line
+                .contains(r#"skips phase "p1"; phases run in order (today → p1 → p2)"#),
+            "{}",
+            skipped.errors[0].line
+        );
+        let never = validate_flow_source(&PHASES.replace("    phase: p2\n", "")).unwrap();
+        assert_eq!(never.errors[0].path, "phases");
+        assert!(
+            never.errors[0].line.contains(r#"phase "p2" never starts"#),
+            "{}",
+            never.errors[0].line
+        );
+        let retired = validate_flow_source(&PHASES.replace(
+            "    phase: p2\n",
+            "    phase: p2\n    steps:\n      - {verb: send, part: old, card: c1, via: so}\n",
+        ))
+        .unwrap();
+        assert!(
+            retired.errors.iter().any(|e| e.path == "story[2].steps[0]"
+                && e.line.contains(r#"does not run in its beat's phase "p2""#)),
+            "{:?}",
+            retired.errors
+        );
+    }
+
+    #[test]
+    fn phases_beside_arrangements_are_rejected() {
+        let result = validate_flow_source(&PHASES.replace(
+            "phases: [today, p1, p2]",
+            "phases: [today, p1, p2]\narrangements: [today, p1]",
+        ))
+        .unwrap();
+        assert!(!result.valid);
+        assert!(
+            result.errors.iter().any(|e| e.path == "phases"),
+            "{:?}",
+            result.errors
+        );
+    }
+
     #[test]
     fn unparseable_text_is_reported_at_the_root() {
         let result = validate_flow_source("parts: [a").unwrap();

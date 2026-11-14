@@ -196,6 +196,12 @@ export type Caption = string | Readonly<Record<string, string>>;
 export interface BeatSpec {
   readonly id?: string;
   readonly caption?: Caption;
+  /**
+   * Phased specs only: the phase this beat starts (the next one in `phases`).
+   * Later beats stay in it until another beat starts the next phase; beats
+   * before the first `phase` are in the first phase.
+   */
+  readonly phase?: string;
   readonly steps?: readonly StepSpec[];
   /** Seconds to hold after the steps (default 0.3; 1.6 for a caption-only beat). */
   readonly hold?: number;
@@ -259,6 +265,12 @@ export interface FlowSpec {
   readonly arrangements?: readonly ArrangementDecl[];
   /** The arrangement marks are computed against (default: the first). */
   readonly baseline?: string;
+  /**
+   * Phases of a migration, in order (today → … → target): named arrangements
+   * the story moves through, each started by a beat's `phase`. Instead of
+   * `arrangements`; each phase is marked against the one before it.
+   */
+  readonly phases?: readonly ArrangementDecl[];
   readonly parts: readonly PartSpec[];
   readonly rails?: readonly RailSpec[];
   readonly regions?: readonly RegionSpec[];

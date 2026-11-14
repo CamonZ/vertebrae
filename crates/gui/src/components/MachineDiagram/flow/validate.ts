@@ -23,6 +23,7 @@ const TOP_FIELDS = [
   "title",
   "arrangements",
   "baseline",
+  "phases",
   "parts",
   "rails",
   "regions",
@@ -69,7 +70,7 @@ const CARD_FIELDS = [
   "origin",
   "attachments",
 ];
-const BEAT_FIELDS = ["id", "caption", "steps", "hold", "attachments"];
+const BEAT_FIELDS = ["id", "caption", "phase", "steps", "hold", "attachments"];
 const STEP_FIELDS = [
   "verb",
   "part",
@@ -239,6 +240,8 @@ class Checker {
 interface Named {
   readonly names: readonly string[];
   readonly baseline: string;
+  /** The names are phases the story moves through (`phases:`). */
+  readonly phased: boolean;
   readonly parts: Map<string, ReadonlySet<string>>;
   readonly rails: Map<string, ReadonlySet<string>>;
 }
@@ -279,17 +282,31 @@ function namedOnly(
     if (raw[k] !== undefined)
       c.err(
         join(p, k),
-        `${k} names arrangements; it needs a top-level arrangements list`
+        `${k} names arrangements; it needs a top-level arrangements (or phases) list`
       );
 }
 
-/** The top-level `arrangements` and `baseline`; undefined for the shorthand. */
+/**
+ * The top-level `arrangements` and `baseline`, or `phases`; undefined for
+ * the shorthand.
+ */
 function checkArrangements(
   c: Checker,
   input: Record<string, unknown>,
   root: string
 ): Named | undefined {
-  if (input.arrangements === undefined) {
+  const phased = input.phases !== undefined;
+  if (phased && input.arrangements !== undefined)
+    c.err(
+      join(root, "phases"),
+      "give either arrangements (the reader picks one) or phases (the story moves through them), not both"
+    );
+  if (phased && input.baseline !== undefined)
+    c.err(
+      join(root, "baseline"),
+      "phases are marked against the phase before them; the first phase has no marks, so there is no baseline to name"
+    );
+  if (input.arrangements === undefined && !phased) {
     if (input.baseline !== undefined)
       c.err(
         join(root, "baseline"),
@@ -297,10 +314,14 @@ function checkArrangements(
       );
     return undefined;
   }
-  const lp = join(root, "arrangements");
-  const list = c.list(input, "arrangements", root);
-  if (Array.isArray(input.arrangements) && list.length === 0)
-    c.err(lp, "needs at least one arrangement");
+  const key = phased ? "phases" : "arrangements";
+  const lp = join(root, key);
+  const list = c.list(input, key, root);
+  if (Array.isArray(input[key]) && list.length === 0)
+    c.err(
+      lp,
+      phased ? "needs at least one phase" : "needs at least one arrangement"
+    );
   const seen = new Map<string, string>();
   list.forEach((raw, i) => {
     const p = join(lp, i);
@@ -316,18 +337,20 @@ function checkArrangements(
     if (typeof name !== "string" || !ID.test(name))
       return c.err(
         np,
-        "expected an arrangement name: a letter, then letters, digits, - or _ (or { name, label })"
+        `expected ${phased ? "a phase" : "an arrangement"} name: a letter, then letters, digits, - or _ (or { name, label })`
       );
     const prev = seen.get(name);
     if (prev !== undefined)
       return c.err(
         np,
-        `duplicate arrangement "${name}" (first declared at ${prev})`
+        `duplicate ${phased ? "phase" : "arrangement"} "${name}" (first declared at ${prev})`
       );
     seen.set(name, np);
   });
   const names = [...seen.keys()];
   let baseline = names[0] ?? "";
+  if (phased)
+    return { names, baseline, phased, parts: new Map(), rails: new Map() };
   const b = c.str(input, "baseline", root);
   if (b !== undefined) {
     if (seen.has(b)) baseline = b;
@@ -340,7 +363,64 @@ function checkArrangements(
         "arrangements"
       );
   }
-  return { names, baseline, parts: new Map(), rails: new Map() };
+  return { names, baseline, phased, parts: new Map(), rails: new Map() };
+}
+
+/**
+ * A beat's `phase`: in a phased spec, the phase after the current one (the
+ * first phase may be named on the first beat). Returns the phase index the
+ * beat is in.
+ */
+function checkBeatPhase(
+  c: Checker,
+  raw: Record<string, unknown>,
+  p: string,
+  b: number,
+  current: number,
+  named: Named | undefined
+): number {
+  if (raw.phase === undefined) return current;
+  const pp = join(p, "phase");
+  if (!named?.phased) {
+    c.err(pp, "phase names a phase; it needs a top-level phases list");
+    return current;
+  }
+  if (typeof raw.phase !== "string" || raw.phase === "") {
+    c.err(pp, "expected a phase name");
+    return current;
+  }
+  const i = named.names.indexOf(raw.phase);
+  if (i < 0) {
+    c.missing(pp, "unknown phase", raw.phase, named.names, "phases");
+    return current;
+  }
+  if (raw.caption === undefined)
+    c.err(
+      join(p, "caption"),
+      `is required: the beat starts phase "${raw.phase}", and the phase strip lands on it`
+    );
+  if (i === 0 && b === 0) return 0;
+  if (b === 0) {
+    c.err(
+      pp,
+      `the story starts in the first phase "${named.names[0]}"; start "${raw.phase}" at a later beat`
+    );
+    return current;
+  }
+  const order = named.names.join(" → ");
+  if (i <= current) {
+    c.err(
+      pp,
+      `phase "${raw.phase}" has already started; phases run in order (${order}), each started by one beat`
+    );
+    return current;
+  }
+  if (i > current + 1)
+    c.err(
+      pp,
+      `skips phase "${named.names[current + 1]}"; phases run in order (${order}), each started by one beat`
+    );
+  return i;
 }
 
 /**
@@ -731,12 +811,20 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
 
   /* story */
   const beatIds = new Map<string, string>();
+  /** Index of the phase the beats being checked are in. */
+  let phase = 0;
   c.list(input, "story", root).forEach((raw, b) => {
     const p = join(join(root, "story"), b);
     if (!isRecord(raw)) return c.err(p, "expected a beat object");
     c.unknownFields(raw, BEAT_FIELDS, p);
     if (raw.id !== undefined) c.id(raw, p, beatIds, "beat");
-    if (raw.caption !== undefined && typeof raw.caption !== "string") {
+    phase = checkBeatPhase(c, raw, p, b, phase, named);
+    if (named?.phased && isRecord(raw.caption))
+      c.err(
+        join(p, "caption"),
+        "expected a string: with phases a beat belongs to one phase, so it has one caption"
+      );
+    else if (raw.caption !== undefined && typeof raw.caption !== "string") {
       if (!isRecord(raw.caption))
         c.err(
           join(p, "caption"),
@@ -785,10 +873,16 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
         partIds,
         rails,
         cards,
-        named
+        named,
+        named?.phased ? named.names[phase] : undefined
       )
     );
   });
+  if (named?.phased && named.names.length > 1 && phase < named.names.length - 1)
+    c.err(
+      join(root, "phases"),
+      `phase "${named.names[phase + 1]}" never starts: give the beat that starts it phase: ${named.names[phase + 1]}`
+    );
 
   if (input.band !== undefined)
     checkBand(c, input.band, join(root, "band"), beatIds, named);
@@ -1030,7 +1124,9 @@ function checkStep(
     { from?: [string, string]; to?: [string, string]; tokens: TokenKind[] }
   >,
   cards: Map<string, TokenKind>,
-  named: Named | undefined
+  named: Named | undefined,
+  /** Phased specs: the phase of the step's beat. */
+  phase?: string
 ) {
   if (!isRecord(raw)) return c.err(p, "expected a step object");
   c.unknownFields(raw, STEP_FIELDS, p);
@@ -1050,7 +1146,13 @@ function checkStep(
     if (rail) presentWithin(c, own, rail, p, `its rail "${raw.via}"`);
     const part =
       typeof raw.part === "string" ? named.parts.get(raw.part) : undefined;
-    if (part) presentSomewhere(c, intersect(own, part, rail), p, "step");
+    const members = part && intersect(own, part, rail);
+    if (members && phase !== undefined && !members.has(phase))
+      c.err(
+        p,
+        `the step does not run in its beat's phase "${phase}": its part, its via rail and its in: list are in ${[...members].join(", ") || "no phase"}`
+      );
+    else if (members) presentSomewhere(c, members, p, "step");
   } else namedOnly(c, raw, ["in"], p);
   const verb = c.str(raw, "verb", p, true);
   const pid = c.str(raw, "part", p, true);

@@ -506,8 +506,8 @@ describe("named arrangement errors name the arrangement", () => {
         parts: [{ id: "p", kind: "source", in: ["A"], arrangement: { A: {} } }],
       })
     ).toEqual([
-      "parts[0].in: in names arrangements; it needs a top-level arrangements list",
-      "parts[0].arrangement: arrangement names arrangements; it needs a top-level arrangements list",
+      "parts[0].in: in names arrangements; it needs a top-level arrangements (or phases) list",
+      "parts[0].arrangement: arrangement names arrangements; it needs a top-level arrangements (or phases) list",
     ]);
   });
 
@@ -648,7 +648,7 @@ describe("drill-downs mix the two modes", () => {
       ],
     };
     expect(errorsOf(namedParent)).toEqual([
-      "parts[0].drill.spec.parts[0].in: in names arrangements; it needs a top-level arrangements list",
+      "parts[0].drill.spec.parts[0].in: in names arrangements; it needs a top-level arrangements (or phases) list",
     ]);
   });
 });

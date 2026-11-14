@@ -15,6 +15,14 @@ for a request becoming its result. `checkpoint` marks the end of the step.
 `caption` is text or one per arrangement by name (`{before: "…", after: "…"}`,
 or `{A: "…", B: "…"}`); an arrangement may be omitted and continues the
 previous caption.
+
+With [phases](phases.md), `phase: <name>` on a beat starts the next
+phase; later beats stay in it, and beats before the first `phase` are in the
+first phase. Phases start in order, each at one beat, and every phase must
+start. A beat that starts a phase needs a caption, and a phased beat's
+caption is plain text (a beat belongs to one phase). Its steps run in its
+phase: a step whose part, `via` rail or `in` list is not in that phase is
+an error.
 `hold` is nonnegative seconds after a beat (default 0.3 with steps, 1.6 for a
 caption-only beat). Timing is illustrative unless measured evidence says
 otherwise. Durations and holds do not make a scenario a recorded trace.

@@ -40,8 +40,9 @@ kind names, ports, props, arguments and attachment fields. Read the
   Load when: animating a mechanism or checking retry/compensation semantics.
 - [Cards](machine-diagrams/cards.md): tokens, identity and payloads.
   Load when: declaring inputs and following results.
-- [Changes](machine-diagrams/changes.md): Before/After, named arrangements (options A, B…) and marks.
-  Load when: inspecting or explaining a PR, or comparing arrangements or design options.
+- [Changes](machine-diagrams/changes.md): Before/After, named arrangements (options A, B…), and marks.
+- [Phases](machine-diagrams/phases.md): a migration whose phases change the diagram as the story advances.
+  Load when: inspecting or explaining a PR, comparing arrangements or design options, or telling a migration in phases.
 - [Band](machine-diagrams/band.md): situation rows and compile-derived meters.
   Load when: summarising behavior across beats.
 - [Evidence](machine-diagrams/evidence.md): attachment choice and honest labels.

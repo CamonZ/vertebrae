@@ -191,6 +191,8 @@ export interface BeatChange {
 
 export interface CompiledBeat extends Beat {
   readonly attachments: readonly AttachmentSpec[];
+  /** Phased flows: the phase the beat is in (the same in every phase's timeline). */
+  readonly phase?: ArrangementName;
   /** Marked steps of the beat (and of uncaptioned beats it continues); none in the baseline. */
   readonly changes: readonly BeatChange[];
 }
@@ -237,6 +239,12 @@ export interface CompiledFlow {
   readonly baseline: ArrangementName;
   /** What the player calls each arrangement, by name. */
   readonly labels: Readonly<Record<ArrangementName, string>>;
+  /**
+   * The arrangements are phases: the story moves through them in order, the
+   * current beat's phase is the one shown, and each is marked against the
+   * phase before it.
+   */
+  readonly phased: boolean;
   readonly cards: Readonly<Record<string, CompiledCard>>;
   readonly attachments: readonly AttachmentSpec[];
 }
@@ -423,9 +431,10 @@ function build(
   return {
     version: spec.version,
     ...(spec.title ? { title: spec.title } : {}),
-    arrangements: withRegions(arranged, spec),
+    arrangements: withRegions(arranged, spec, plan.plan.phased),
     baseline: plan.plan.baseline,
     labels: plan.plan.labels,
+    phased: plan.plan.phased,
     cards,
     attachments: spec.attachments ?? [],
   };
@@ -466,12 +475,23 @@ function arrange(
   errors: FlowSpecError[],
   root: string
 ): DiagramTimeline {
-  const fail = (path: string, message: string) =>
+  const { phased } = plan.plan;
+  /**
+   * Where the beat being compiled runs: its phase in a phased spec, whose
+   * steps every phase's timeline replays so cards are where the story left
+   * them; otherwise `a`. Only that phase reports a step's errors.
+   */
+  let at: ArrangementName = a;
+  const fail = (path: string, message: string) => {
+    if (at !== a) return;
     errors.push({
       path: root + path,
       message:
-        a === "current" ? message : `${message} (in the ${a} arrangement)`,
+        a === "current"
+          ? message
+          : `${message} (in the ${a} ${phased ? "phase" : "arrangement"})`,
     });
+  };
 
   /* parts */
   const runs = new Map<string, PartRun>();
@@ -621,13 +641,14 @@ function arrange(
   let clock = STORY_LEAD;
   (spec.story ?? []).forEach((beat, b) => {
     const bp = `story[${b}]`;
-    const caption = plan.caption(beat.caption, a);
+    at = plan.phaseOf(b) ?? a;
+    const caption = plan.caption(beat.caption, at);
     const beatStart = clock;
     let groupStart = clock;
     let groupEnd = clock;
     let ran = 0;
     const changes: BeatChange[] = (beat.steps ?? []).flatMap((s) => {
-      const change = plan.stepMark(s, a);
+      const change = plan.stepMark(s, at);
       return change === "unchanged"
         ? []
         : [
@@ -641,10 +662,16 @@ function arrange(
     });
     (beat.steps ?? []).forEach((step: StepSpec, k) => {
       const sp = `${bp}.steps[${k}]`;
-      if (!plan.runs(step, a)) return;
+      if (!plan.runs(step, at)) return;
       const run = runs.get(step.part)!;
       const rail = step.via ? rails.get(step.via)! : undefined;
-      if (run.presence !== "live" || (rail && rail.presence !== "live")) return;
+      // A phase's timeline replays other phases' beats on parts it does not
+      // draw; membership in the beat's own phase decides.
+      if (
+        !phased &&
+        (run.presence !== "live" || (rail && rail.presence !== "live"))
+      )
+        return;
       const c = step.card ? cardRuns.get(step.card)! : undefined;
       if (c?.consumed) {
         fail(`${sp}.card`, `card "${c.decl.id}" has already ended`);
@@ -778,6 +805,7 @@ function arrange(
         story: b,
         attachments: beat.attachments ?? [],
         changes,
+        ...(phased ? { phase: at } : {}),
       });
     else if (changes.length > 0 && beats.length > 0) {
       const last = beats[beats.length - 1];
@@ -913,7 +941,8 @@ function arrange(
  */
 function withRegions(
   arranged: readonly DiagramTimeline[],
-  spec: FlowSpec
+  spec: FlowSpec,
+  phased: boolean
 ): DiagramTimeline[] {
   const regions: DiagramRegion[] = (spec.regions ?? []).map((g) => {
     const box = pad(
@@ -970,7 +999,9 @@ function withRegions(
       markers: d.markers,
       windows: new Map(Object.entries(d.beatWindows)),
     })),
-    { ...all, x0: left }
+    { ...all, x0: left },
+    // Every phase's timeline runs the whole story: one count, not one per phase.
+    { footnotePerArrangement: !phased }
   );
   return arranged.map((d, i) => ({
     ...d,

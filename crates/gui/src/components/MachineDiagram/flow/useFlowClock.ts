@@ -44,6 +44,13 @@ export interface FlowClock {
 export interface FlowClockOptions {
   /** Override the prefers-reduced-motion media query. */
   reducedMotion?: boolean;
+  /**
+   * The timeline changes when the story crosses into another phase, not
+   * when the reader picks an arrangement: keep the place in the beat.
+   */
+  phased?: boolean;
+  /** Hold playback where it is (a phase morph is playing); it resumes after. */
+  held?: boolean;
 }
 
 /**
@@ -53,7 +60,8 @@ export interface FlowClockOptions {
  * timeline's period, at the chosen speed;
  * beat steps and jumps pause on a beat's start, wrapping at the ends; a chapter
  * plays just its beat and pauses on the outcome; frame steps pause one frame away. Under reduced motion only beat
- * outcomes are shown. When `tl` changes (another arrangement) the story beat is kept.
+ * outcomes are shown. When `tl` changes (another arrangement) the story beat is kept;
+ * when it changes at a phase boundary (`phased`), the place in the beat is kept.
  */
 export function useFlowClock(
   tl: Timeline,
@@ -65,7 +73,7 @@ export function useFlowClock(
   const [seen, setSeen] = useState(tl);
   let s = stored;
   if (seen !== tl) {
-    s = retarget(seen, tl, stored, reduced);
+    s = retarget(seen, tl, stored, reduced, o.phased ? "phase" : "arrangement");
     setSeen(tl);
     setStored(s);
   }
@@ -74,8 +82,9 @@ export function useFlowClock(
     setStored((cur) => clockStep(tl, cur, a, reduced));
 
   const playing = s.playing;
+  const held = o.held ?? false;
   useEffect(() => {
-    if (!playing || !(tl.period > 0)) return;
+    if (!playing || held || !(tl.period > 0)) return;
     let last: number | null = null;
     let frame = 0;
     const tick = (now: number) => {
@@ -88,7 +97,7 @@ export function useFlowClock(
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [playing, tl, reduced]);
+  }, [playing, held, tl, reduced]);
 
   return {
     t: shownTime(tl, s, reduced),

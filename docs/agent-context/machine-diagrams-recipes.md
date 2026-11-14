@@ -14,5 +14,7 @@ illustrative.
   Load when: writing the before-after example.
 - [Compare several options on one diagram](machine-diagrams/recipes/options.md).
   Load when: weighing design alternatives (option A, option B) against the current machine.
+- [Tell a migration in phases](machine-diagrams/recipes/migration.md).
+  Load when: showing an architecture moving from today to a target through ordered steps.
 - [Add an inline deeper level](machine-diagrams/recipes/drill.md).
   Load when: writing the drill example.

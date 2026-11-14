@@ -1,0 +1,129 @@
+version: 1
+title: "Chat: from a process per question to one session per thread"
+phases:
+  - { name: today, label: "Today · process per question" }
+  - { name: flagged, label: "1 · flagged threads" }
+  - { name: every, label: "2 · every thread" }
+  - { name: target, label: "Target · idle close, resume" }
+parts:
+  - { id: client, kind: client, label: chat pane }
+  - id: router
+    kind: router
+    label: turn router
+    arrangement:
+      flagged: { changeNote: sends flagged threads to their session }
+      every: { changeNote: sends every thread to its session }
+      target: { changeNote: sends every thread to its session }
+  - id: perQuestion
+    kind: session
+    label: per-question process
+    in: [today, flagged]
+    changeNote: "retired: every thread has a session"
+    props: { lifecycle: one-shot, launch: per question }
+  - id: thread
+    kind: session
+    label: thread session
+    in: [flagged, every, target]
+    changeNote: one process kept for the thread
+    props: { lifecycle: persistent, launch: per thread }
+    arrangement:
+      target: { changeNote: "closes when idle, resumes from its id" }
+  - { id: stream, kind: worker, label: answer stream }
+rails:
+  - { id: ask, from: client.request, to: router.in }
+  - { id: spawnEach, from: router.r1, to: perQuestion.turn, label: new process }
+  - { id: toThread, from: router.r2, to: thread.turn, label: thread id }
+  - { id: answerOnce, from: perQuestion.out, to: stream.in }
+  - { id: answerThread, from: thread.out, to: stream.in }
+  - { id: reply, from: stream.out, to: client.result }
+cards:
+  - { id: q1, token: request, label: question 1, origin: client }
+  - { id: q2, token: request, label: question 2, origin: client }
+  - { id: q3, token: request, label: question 3, origin: client }
+  - { id: q4, token: request, label: question 4, origin: client }
+  - { id: q5, token: request, label: question 5, origin: client }
+  - { id: q6, token: request, label: question 6, origin: client }
+story:
+  - id: first
+    caption: Today every question starts its own process.
+    steps:
+      - { verb: send, part: client, card: q1 }
+      - { verb: decide, part: router, card: q1, via: ask, args: { to: r1 } }
+      - { verb: stage, part: perQuestion, card: q1, via: spawnEach }
+      - { verb: finish, part: perQuestion, card: q1 }
+      - { verb: stage, part: stream, card: q1, via: answerOnce }
+      - { verb: finish, part: stream, card: q1 }
+      - { verb: render, part: client, card: q1, via: reply }
+  - id: again
+    caption: A follow-up in the same thread starts another process; the first one is gone.
+    steps:
+      - { verb: send, part: client, card: q2 }
+      - { verb: decide, part: router, card: q2, via: ask, args: { to: r1 } }
+      - { verb: stage, part: perQuestion, card: q2, via: spawnEach }
+      - { verb: finish, part: perQuestion, card: q2 }
+      - { verb: stage, part: stream, card: q2, via: answerOnce }
+      - { verb: finish, part: stream, card: q2 }
+      - { verb: render, part: client, card: q2, via: reply }
+  - id: flag
+    phase: flagged
+    caption: "Phase 1: a flagged thread goes to a session that outlives the question."
+    steps:
+      - { verb: send, part: client, card: q3 }
+      - { verb: decide, part: router, card: q3, via: ask, args: { to: r2 } }
+      - { verb: stage, part: thread, card: q3, via: toThread }
+      - { verb: finish, part: thread, card: q3 }
+      - { verb: stage, part: stream, card: q3, via: answerThread }
+      - { verb: finish, part: stream, card: q3 }
+      - { verb: render, part: client, card: q3, via: reply }
+  - id: followup
+    caption: Its follow-up reuses the live process; nothing spawns.
+    steps:
+      - { verb: send, part: client, card: q4 }
+      - { verb: decide, part: router, card: q4, via: ask, args: { to: r2 } }
+      - { verb: stage, part: thread, card: q4, via: toThread }
+      - { verb: finish, part: thread, card: q4 }
+      - { verb: stage, part: stream, card: q4, via: answerThread }
+      - { verb: finish, part: stream, card: q4 }
+      - { verb: render, part: client, card: q4, via: reply }
+  - id: everyThread
+    phase: every
+    caption: "Phase 2: every thread has its session; the per-question path is retired."
+    steps:
+      - { verb: send, part: client, card: q5 }
+      - { verb: decide, part: router, card: q5, via: ask, args: { to: r2 } }
+      - { verb: stage, part: thread, card: q5, via: toThread }
+      - { verb: finish, part: thread, card: q5 }
+      - { verb: stage, part: stream, card: q5, via: answerThread }
+      - { verb: finish, part: stream, card: q5 }
+      - { verb: render, part: client, card: q5, via: reply }
+  - id: idle
+    phase: target
+    caption: "Target: an idle session closes, keeping its resume id."
+    steps:
+      - { verb: close, part: thread }
+  - id: resume
+    caption: The next question resumes the session from its id.
+    steps:
+      - { verb: send, part: client, card: q6 }
+      - { verb: decide, part: router, card: q6, via: ask, args: { to: r2 } }
+      - { verb: stage, part: thread, card: q6, via: toThread }
+      - { verb: finish, part: thread, card: q6 }
+      - { verb: stage, part: stream, card: q6, via: answerThread }
+      - { verb: finish, part: stream, card: q6 }
+      - { verb: render, part: client, card: q6, via: reply }
+band:
+  heading: PROCESSES FOR ONE THREAD
+  rows:
+    - name: a thread of two questions
+      beats: [again, followup, everyThread, resume]
+      chips:
+        today: [question, new process, closed]
+        flagged: [question, same process]
+        every: [question, same process]
+        target: [question, resumed process]
+  meter: { label: processes started, marker: [spawn, resume] }
+attachments:
+  - kind: note
+    text: Illustrative migration of the chat harness for the phases feature; the phases are a scenario, not a recorded run.
+    status: inferred
+    source: scenario

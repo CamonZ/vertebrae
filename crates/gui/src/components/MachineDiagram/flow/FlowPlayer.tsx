@@ -25,6 +25,7 @@ import {
 import type { ArrangementName } from "./spec";
 import { useArrangementMorph } from "./useArrangementMorph";
 import { useFlowClock, type FlowClock } from "./useFlowClock";
+import { useReducedMotion } from "../useReducedMotion";
 import {
   beatAnnouncement,
   cardLabel,
@@ -50,12 +51,27 @@ export interface FlowPlayerProps {
   suspended?: boolean;
 }
 
-/** The arrangement shown first: the first one marked against the baseline (After, option A). */
+/**
+ * The arrangement shown first: the first one marked against the baseline
+ * (After, option A); for phases the first phase, where the story starts.
+ */
 const firstShown = (flow: CompiledFlow): ArrangementName =>
   (
-    flow.arrangements.find((a) => a.arrangement !== flow.baseline) ??
+    (!flow.phased &&
+      flow.arrangements.find((a) => a.arrangement !== flow.baseline)) ||
     flow.arrangements[0]
   ).arrangement;
+
+/** The phase beat `i` is in (the first beat's before it starts; `fallback` without beats). */
+const phaseAt = (
+  d: DiagramTimeline,
+  i: number,
+  fallback: ArrangementName
+): ArrangementName => d.beats[Math.max(0, i)]?.phase ?? fallback;
+
+/** Index of the first beat of `phase` on `d`, or -1. */
+const firstBeatOf = (d: DiagramTimeline, phase: ArrangementName) =>
+  d.beats.findIndex((b) => b.phase === phase);
 
 const speedLabel = (s: number) => `${s}×`;
 
@@ -80,7 +96,9 @@ const insetsBeside = (width: number): FitInsets => ({
  * beats (a list of chapters, paused by default) float over its right side
  * and can be hidden, and the controls, evidence and inspectors float over
  * its foot. Beat and frame stepping, optional playback at a chosen speed, an
- * arrangement selector (Before/After, or options A, B…) that keeps the beat, hover/focus on a part to inspect its state and
+ * arrangement selector (Before/After, or options A, B…) that keeps the beat
+ * — or, for a migration told in phases, a phase strip, the story itself
+ * moving the diagram from phase to phase —, hover/focus on a part to inspect its state and
  * source refs, and click a card to follow it with a narrated caption. Every
  * control has a keyboard shortcut; beat captions and the followed card are
  * announced through a live region.
@@ -92,14 +110,33 @@ export function FlowPlayer({
   suspended = false,
 }: FlowPlayerProps) {
   const names = flow.arrangements.map((a) => a.arrangement);
+  const phased = flow.phased;
   const [selected, setSelected] = useState<ArrangementName>(() =>
     firstShown(flow)
   );
   const diagram =
     flow.arrangements.find((a) => a.arrangement === selected) ??
     flow.arrangements[0];
-  const clock = useFlowClock(diagram.travel, { reducedMotion });
-  const { morph, start: startMorph } = useArrangementMorph(clock.reducedMotion);
+  const prefersReduced = useReducedMotion();
+  const { morph, start: startMorph } = useArrangementMorph(
+    reducedMotion ?? prefersReduced
+  );
+  // A phase morph plays before the beat's steps: playback holds meanwhile.
+  const clock = useFlowClock(diagram.travel, {
+    reducedMotion,
+    phased,
+    held: phased && morph !== undefined,
+  });
+  // With phases the story picks the arrangement: crossing into a beat of
+  // another phase (playing, stepping, seeking, looping) morphs once to it,
+  // and the clock keeps its place in the beat (see `retarget`).
+  const phase = phased
+    ? phaseAt(diagram, clock.beat, diagram.arrangement)
+    : diagram.arrangement;
+  if (phase !== diagram.arrangement) {
+    startMorph(diagram, clock.t);
+    setSelected(phase);
+  }
   const [hovered, setHovered] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
   const [followed, setFollowed] = useState<string | null>(null);
@@ -134,11 +171,16 @@ export function FlowPlayer({
     [onActivatePart, pinned, followed]
   );
 
-  // Announced once per beat: the caption, and where the followed card ends up.
+  // Announced once per beat: the phase, the caption, and where the followed card ends up.
+  const phaseNote =
+    phased && clock.beat >= 0
+      ? `Phase ${names.indexOf(phase) + 1} of ${names.length}: ${flow.labels[phase] ?? phase}. `
+      : "";
   const announcement =
     clock.beat < 0
       ? ""
-      : beatAnnouncement(
+      : phaseNote +
+        beatAnnouncement(
           diagram,
           clock.beat,
           followed
@@ -158,6 +200,11 @@ export function FlowPlayer({
     if (a === diagram.arrangement) return;
     startMorph(diagram, clock.t);
     setSelected(a);
+  };
+  // A phase is reached through the story: seek to its first beat.
+  const seekPhase = (a: ArrangementName) => {
+    const i = firstBeatOf(diagram, a);
+    if (i >= 0) clock.seek(i);
   };
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
@@ -188,7 +235,9 @@ export function FlowPlayer({
         break;
       case "arrangement":
         if (names.length < 2) return;
-        choose(cycleArrangement(names, diagram.arrangement, cmd.dir));
+        (phased ? seekPhase : choose)(
+          cycleArrangement(names, diagram.arrangement, cmd.dir)
+        );
         break;
       case "beats":
         if (!hasBeats) return;
@@ -220,6 +269,7 @@ export function FlowPlayer({
       className="flex flex-col gap-2 rounded-[var(--radius-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
       data-testid="flow-player"
       data-arrangement={diagram.arrangement}
+      data-phased={phased ? "true" : undefined}
       data-morph={
         morph ? `${morph.from.arrangement}→${diagram.arrangement}` : undefined
       }
@@ -254,6 +304,16 @@ export function FlowPlayer({
                 shown={beatsShown}
                 diagram={diagram}
                 clock={clock}
+                phases={
+                  phased && names.length > 1
+                    ? {
+                        names,
+                        labels: flow.labels,
+                        current: phase,
+                        onSeek: seekPhase,
+                      }
+                    : undefined
+                }
               />
             )}
             <div
@@ -345,7 +405,7 @@ export function FlowPlayer({
               <div className={`${floating} max-w-full p-0.5`}>
                 <Controls
                   clock={clock}
-                  names={names}
+                  names={phased ? [] : names}
                   labels={flow.labels}
                   arrangement={diagram.arrangement}
                   onArrangement={choose}
@@ -378,29 +438,45 @@ export function FlowPlayer({
 
 /* ---------- chapters ---------- */
 
+/** The phases of a phased flow, for the strip over the beats. */
+interface PhaseNav {
+  readonly names: readonly ArrangementName[];
+  readonly labels: Readonly<Record<ArrangementName, string>>;
+  /** The phase the current beat is in. */
+  readonly current: ArrangementName;
+  /** Seek to a phase's first beat. */
+  readonly onSeek: (phase: ArrangementName) => void;
+}
+
 /**
  * The beats list. Hidden rather than unmounted when the reader hides it, so
  * `aria-controls` keeps a target; shown again, it brings the current beat
- * back into view.
+ * back into view. In a phased flow a phase strip heads it and the beats are
+ * grouped under their phase.
  */
 function Chapters({
   id,
   shown,
   diagram,
   clock,
+  phases,
 }: {
   id: string;
   shown: boolean;
   diagram: DiagramTimeline;
   clock: FlowClock;
+  phases?: PhaseNav;
 }) {
   const beats = diagram.beats;
   const list = useRef<HTMLOListElement>(null);
+  const groupId = useId();
 
   // Keep the current beat in view inside the list, without scrolling the page.
   useEffect(() => {
     const ol = list.current;
-    const li = ol?.children[clock.beat] as HTMLElement | undefined;
+    const li = ol?.querySelector<HTMLElement>(
+      `[data-beat-index="${clock.beat}"]`
+    );
     if (!shown || !ol || !li) return;
     const top = li.offsetTop;
     const bottom = top + li.offsetHeight;
@@ -409,91 +485,162 @@ function Chapters({
       ol.scrollTop = bottom - ol.clientHeight;
   }, [clock.beat, shown]);
 
+  const item = (i: number) => {
+    const b = beats[i];
+    // Progress runs from the beat's start to its outcome: a beat just
+    // landed on reads empty, one played out (always, under reduced
+    // motion) reads full.
+    const span = beatOutcome(diagram.travel, i) - b.t;
+    const current = i === clock.beat;
+    const progress = current
+      ? span > 0
+        ? Math.max(0, Math.min(1, (clock.t - b.t) / span))
+        : 1
+      : i < clock.beat
+        ? 1
+        : 0;
+    return (
+      <li key={b.id ?? i} data-beat-index={i}>
+        <button
+          type="button"
+          className={`relative flex w-full items-start gap-2.5 py-1.5 pr-3 pl-3 text-left text-xs leading-snug transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
+            current
+              ? "text-fg"
+              : i < clock.beat
+                ? "text-fg-soft hover:text-fg"
+                : "text-fg-mute hover:text-fg-soft"
+          }`}
+          aria-label={`Beat ${i + 1} of ${beats.length}: ${b.caption}${
+            b.changes.length
+              ? `. Changed steps: ${b.changes.map((c) => `${c.change} ${c.label}`).join("; ")}`
+              : ""
+          }`}
+          aria-current={current ? "step" : undefined}
+          title={current ? undefined : b.caption}
+          onClick={() => clock.playBeat(i)}
+        >
+          <span
+            className="absolute inset-y-0 left-0 w-0.5 origin-top bg-[var(--color-accent)]"
+            style={{ transform: `scaleY(${progress})` }}
+            data-testid="flow-beat-progress"
+            aria-hidden
+          />
+          <span
+            className={`w-4 shrink-0 text-right tabular-nums ${current ? "text-[var(--color-accent)]" : "text-fg-mute"}`}
+          >
+            {i + 1}
+          </span>
+          {b.changes.length > 0 ? (
+            <span className="flex min-w-0 flex-col gap-1">
+              <span className={current ? "min-w-0" : "min-w-0 line-clamp-2"}>
+                {b.caption}
+              </span>
+              <StepMarks changes={b.changes} />
+            </span>
+          ) : (
+            <span className={current ? "min-w-0" : "min-w-0 line-clamp-2"}>
+              {b.caption}
+            </span>
+          )}
+        </button>
+        {current && (
+          <AttachmentPanel
+            attachments={b.attachments}
+            label={`Beat ${i + 1} evidence`}
+          />
+        )}
+      </li>
+    );
+  };
+
+  const indices = beats.map((_, i) => i);
   return (
     <div
       id={id}
       hidden={!shown}
-      className={`${floating} absolute top-4 right-4 flex max-h-[calc(100%-2rem)] w-72 max-w-[45%] py-1.5`}
+      className={`${floating} absolute top-4 right-4 flex max-h-[calc(100%-2rem)] w-72 max-w-[45%] flex-col py-1.5`}
       data-testid="flow-chapters-panel"
     >
+      {phases && <PhaseStrip phases={phases} />}
       <ol
         ref={list}
         className="relative flex min-h-0 flex-1 flex-col overflow-y-auto"
         aria-label="Beats"
         data-testid="flow-chapters"
       >
-        {beats.map((b, i) => {
-          // Progress runs from the beat's start to its outcome: a beat just
-          // landed on reads empty, one played out (always, under reduced
-          // motion) reads full.
-          const span = beatOutcome(diagram.travel, i) - b.t;
-          const current = i === clock.beat;
-          const progress = current
-            ? span > 0
-              ? Math.max(0, Math.min(1, (clock.t - b.t) / span))
-              : 1
-            : i < clock.beat
-              ? 1
-              : 0;
+        {phases
+          ? phases.names.map((name, k) => {
+              const own = indices.filter((i) => beats[i].phase === name);
+              if (own.length === 0) return null;
+              const head = `${groupId}-${k}`;
+              return (
+                <li key={name} data-testid="flow-phase-group" data-phase={name}>
+                  <div
+                    id={head}
+                    className={`px-3 pt-2 pb-0.5 text-[10px] font-medium tracking-[0.12em] uppercase ${
+                      name === phases.current
+                        ? "text-[var(--color-accent)]"
+                        : "text-fg-mute"
+                    }`}
+                  >
+                    {phases.labels[name] ?? name}
+                  </div>
+                  <ol aria-labelledby={head}>{own.map(item)}</ol>
+                </li>
+              );
+            })
+          : indices.map(item)}
+      </ol>
+    </div>
+  );
+}
+
+/**
+ * Where the migration stands: every phase in order, the current one marked;
+ * activating one seeks to its first beat.
+ */
+function PhaseStrip({ phases }: { phases: PhaseNav }) {
+  const at = phases.names.indexOf(phases.current);
+  return (
+    <nav
+      aria-label="Phases"
+      className="border-b border-[var(--color-line)] px-2 pb-1.5"
+      data-testid="flow-phases"
+    >
+      <ol className="flex flex-wrap items-center gap-0.5 text-xs">
+        {phases.names.map((name, k) => {
+          const current = k === at;
+          const label = phases.labels[name] ?? name;
           return (
-            <li key={b.id ?? i}>
+            <li key={name} className="flex items-center gap-0.5">
+              {k > 0 && (
+                <span className="text-fg-mute" aria-hidden>
+                  →
+                </span>
+              )}
               <button
                 type="button"
-                className={`relative flex w-full items-start gap-2.5 py-1.5 pr-3 pl-3 text-left text-xs leading-snug transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
+                className={`rounded-[var(--radius-sm,4px)] px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
                   current
-                    ? "text-fg"
-                    : i < clock.beat
+                    ? "bg-[var(--color-accent-wash)] text-[var(--color-accent)]"
+                    : k < at
                       ? "text-fg-soft hover:text-fg"
                       : "text-fg-mute hover:text-fg-soft"
                 }`}
-                aria-label={`Beat ${i + 1} of ${beats.length}: ${b.caption}${
-                  b.changes.length
-                    ? `. Changed steps: ${b.changes.map((c) => `${c.change} ${c.label}`).join("; ")}`
-                    : ""
-                }`}
                 aria-current={current ? "step" : undefined}
-                title={current ? undefined : b.caption}
-                onClick={() => clock.playBeat(i)}
+                aria-label={`Phase ${k + 1} of ${phases.names.length}: ${label}`}
+                aria-keyshortcuts={current ? undefined : "B Shift+B"}
+                title={`Go to ${label} (B / ⇧B)`}
+                data-phase={name}
+                onClick={() => phases.onSeek(name)}
               >
-                <span
-                  className="absolute inset-y-0 left-0 w-0.5 origin-top bg-[var(--color-accent)]"
-                  style={{ transform: `scaleY(${progress})` }}
-                  data-testid="flow-beat-progress"
-                  aria-hidden
-                />
-                <span
-                  className={`w-4 shrink-0 text-right tabular-nums ${current ? "text-[var(--color-accent)]" : "text-fg-mute"}`}
-                >
-                  {i + 1}
-                </span>
-                {b.changes.length > 0 ? (
-                  <span className="flex min-w-0 flex-col gap-1">
-                    <span
-                      className={current ? "min-w-0" : "min-w-0 line-clamp-2"}
-                    >
-                      {b.caption}
-                    </span>
-                    <StepMarks changes={b.changes} />
-                  </span>
-                ) : (
-                  <span
-                    className={current ? "min-w-0" : "min-w-0 line-clamp-2"}
-                  >
-                    {b.caption}
-                  </span>
-                )}
+                {label}
               </button>
-              {current && (
-                <AttachmentPanel
-                  attachments={b.attachments}
-                  label={`Beat ${i + 1} evidence`}
-                />
-              )}
             </li>
           );
         })}
       </ol>
-    </div>
+    </nav>
   );
 }
 
