@@ -12,6 +12,8 @@ export interface MachineDiagramProps {
   label: string;
   /** Hide all labels (silhouette view). */
   labels?: boolean;
+  /** Flow connections replace the parts' standalone gallery rails. */
+  inFlow?: boolean;
   className?: string;
   children: ReactNode;
 }
@@ -28,12 +30,13 @@ export function MachineDiagram({
   label,
   labels = true,
   className,
+  inFlow = false,
   children,
 }: MachineDiagramProps) {
   const hatchId = `md-hatch-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const ctx = useMemo(
-    () => ({ fade: 1, removed: false, labels, hatchId }),
-    [labels, hatchId]
+    () => ({ fade: 1, removed: false, labels, hatchId, inFlow }),
+    [labels, hatchId, inFlow]
   );
   return (
     <svg
