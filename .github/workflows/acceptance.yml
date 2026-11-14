@@ -4,7 +4,7 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master]
+    branches: [master, epic/a8dbc95c-atlas-machine-flow]
   workflow_dispatch:
 
 concurrency:
