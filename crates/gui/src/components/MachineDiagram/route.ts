@@ -20,16 +20,130 @@ const CORNER_SAMPLES = 8;
 /** Overshoot extrapolation is capped so a runaway spring cannot fly away. */
 const MAX_OVERSHOOT = 160;
 
-export function route(pts: readonly Point[], radius = RAIL_RADIUS): Route {
+/** A hop over another rail on an orthogonal segment of the source polyline. */
+export interface LineJump {
+  readonly segment: number;
+  readonly at: Point;
+}
+
+export interface RouteStyle {
+  readonly jumps?: readonly LineJump[];
+  /** Radius at each source vertex; omitted vertices use the normal rail radius. */
+  readonly cornerRadii?: readonly number[];
+}
+
+export function route(
+  pts: readonly Point[],
+  radius = RAIL_RADIUS,
+  style: RouteStyle = {}
+): Route {
   if (pts.length === 0) throw new Error("route needs at least one point");
+  if (style.cornerRadii) {
+    // Fan-outs can repeat a vertex or split a straight run. Neither should
+    // consume the space a neighboring bus corner needs for its own radius.
+    const kept: number[] = [];
+    for (let i = 0; i < pts.length; i++) {
+      const previous = kept.at(-1);
+      if (
+        previous !== undefined &&
+        Math.hypot(pts[i][0] - pts[previous][0], pts[i][1] - pts[previous][1]) <
+          1e-7
+      )
+        continue;
+      while (kept.length >= 2) {
+        const a = pts[kept[kept.length - 2]];
+        const b = pts[kept[kept.length - 1]];
+        const c = pts[i];
+        const cross =
+          (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+        const dot =
+          (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]);
+        if (Math.abs(cross) >= 1e-7 || dot < 0) break;
+        kept.pop();
+      }
+      kept.push(i);
+    }
+    style = {
+      ...style,
+      cornerRadii: kept.map((i) => style.cornerRadii![i] ?? radius),
+      jumps: style.jumps?.flatMap((jump) => {
+        const segment = kept.findIndex(
+          (original, i) =>
+            i < kept.length - 1 &&
+            original <= jump.segment &&
+            jump.segment < kept[i + 1]
+        );
+        return segment < 0 ? [] : [{ ...jump, segment }];
+      }),
+    };
+    pts = kept.map((i) => pts[i]);
+  }
+  const customRadii = style.cornerRadii?.map((r, i) =>
+    i === 0 || i === pts.length - 1 ? 0 : Math.max(0, r)
+  );
+  if (customRadii)
+    for (let i = 0; i < pts.length - 1; i++) {
+      const available = Math.hypot(
+        pts[i + 1][0] - pts[i][0],
+        pts[i + 1][1] - pts[i][1]
+      );
+      const requested = customRadii[i] + customRadii[i + 1];
+      if (requested > available) {
+        const factor = available / requested;
+        customRadii[i] *= factor;
+        customRadii[i + 1] *= factor;
+      }
+    }
+  const jumps = style.jumps ?? [];
   const out: Point[] = [pts[0]];
+  const straight = (end: Point, segment: number) => {
+    const start = out[out.length - 1];
+    const length = Math.hypot(end[0] - start[0], end[1] - start[1]);
+    if (length === 0) return;
+    const dx = (end[0] - start[0]) / length;
+    const dy = (end[1] - start[1]) / length;
+    const hops = jumps
+      .filter((j) => j.segment === segment)
+      .map((j) => ({
+        at: j.at,
+        distance: (j.at[0] - start[0]) * dx + (j.at[1] - start[1]) * dy,
+      }))
+      .filter((j) => j.distance > 0 && j.distance < length)
+      .sort((a, b) => a.distance - b.distance);
+    for (const [i, hop] of hops.entries()) {
+      const before = i === 0 ? 0 : hops[i - 1].distance;
+      const after = i === hops.length - 1 ? length : hops[i + 1].distance;
+      const r = Math.min(
+        6,
+        (hop.distance - before) / 2,
+        (after - hop.distance) / 2
+      );
+      for (let k = 0; k <= 12; k++) {
+        const angle = (Math.PI * k) / 12;
+        const along = -r * Math.cos(angle);
+        const lift = r * Math.sin(angle);
+        out.push([
+          hop.at[0] + dx * along + (Math.abs(dy) > 0.5 ? lift : 0),
+          hop.at[1] + dy * along - (Math.abs(dx) > 0.5 ? lift : 0),
+        ]);
+      }
+    }
+    out.push(end);
+  };
   for (let i = 1; i < pts.length - 1; i++) {
     const a = pts[i - 1];
     const p = pts[i];
     const b = pts[i + 1];
     const d1 = Math.hypot(p[0] - a[0], p[1] - a[1]) || 1;
     const d2 = Math.hypot(b[0] - p[0], b[1] - p[1]) || 1;
-    const r = Math.min(radius, d1 / 2, d2 / 2);
+    // Leave room for hops near a corner; card motion and drawing use this same path.
+    const nearby = jumps
+      .filter((j) => j.segment === i - 1 || j.segment === i)
+      .map((j) => Math.hypot(j.at[0] - p[0], j.at[1] - p[1]) / 2);
+    const r = Math.max(
+      0,
+      Math.min(customRadii?.[i] ?? Math.min(radius, d1 / 2, d2 / 2), ...nearby)
+    );
     const s: Point = [
       p[0] + ((a[0] - p[0]) * r) / d1,
       p[1] + ((a[1] - p[1]) * r) / d1,
@@ -38,7 +152,8 @@ export function route(pts: readonly Point[], radius = RAIL_RADIUS): Route {
       p[0] + ((b[0] - p[0]) * r) / d2,
       p[1] + ((b[1] - p[1]) * r) / d2,
     ];
-    for (let k = 0; k <= CORNER_SAMPLES; k++) {
+    straight(s, i - 1);
+    for (let k = 1; k <= CORNER_SAMPLES; k++) {
       const u = k / CORNER_SAMPLES;
       const v = 1 - u;
       out.push([
@@ -47,7 +162,7 @@ export function route(pts: readonly Point[], radius = RAIL_RADIUS): Route {
       ]);
     }
   }
-  if (pts.length > 1) out.push(pts[pts.length - 1]);
+  if (pts.length > 1) straight(pts[pts.length - 1], pts.length - 2);
   const cumulative = [0];
   for (let i = 1; i < out.length; i++) {
     cumulative.push(

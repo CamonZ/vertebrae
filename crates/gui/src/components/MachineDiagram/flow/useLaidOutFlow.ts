@@ -4,7 +4,8 @@ import {
   type CompileOptions,
   type CompileResult,
 } from "./compile";
-import { layoutFlow, layoutFrom, needsAutoLayout } from "./layout";
+import { layoutFrom, needsAutoLayout } from "./layout";
+import { layoutFlowOffThread } from "./layoutClient";
 
 export type LaidOutFlowState =
   | { readonly status: "pending" }
@@ -24,8 +25,9 @@ function compileSafely(input: unknown, o: CompileOptions): CompileResult {
 /**
  * Compile a parsed spec and auto-lay out its unplaced parts. Errors and
  * fully hand-placed specs resolve on the first render; otherwise the state is
- * `pending` until ELK has placed the parts, so the picture never jumps from
- * the row fallback to its layout. If layout fails, the row fallback is shown.
+ * `pending` until the layout worker has placed the parts, so the picture never
+ * jumps from the row fallback to its layout. If layout fails, the row
+ * fallback is shown.
  * Keep `input` stable (memoize the parse) or the layout reruns every render.
  */
 export function useLaidOutFlow(
@@ -45,7 +47,7 @@ export function useLaidOutFlow(
   useEffect(() => {
     if (!first.ok || !needs) return;
     let live = true;
-    layoutFlow(first.flow)
+    layoutFlowOffThread(first.flow)
       .then((layout) => {
         const r = compileSafely(input, {
           registry,

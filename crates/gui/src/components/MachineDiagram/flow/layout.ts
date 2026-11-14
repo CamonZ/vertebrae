@@ -12,9 +12,15 @@
  *   straight; other branches drop below it in spec order (crossing
  *   minimization is off, so the spec's order is the vertical order).
  * - Rails that run back against the flow are routed after ELK, as return
- *   rails in lanes along the bottom of the diagram: each leg finds its way
- *   between the parts to its lane and keeps a rail gap from other rails, so
- *   a self-loop draws as a loop beside its part.
+ *   rails in local top/bottom channels. Each leg searches between parts and
+ *   earlier rails. A rail with no clean route falls back to a lane below
+ *   everything; layout never fails on routing.
+ * - Crossings left after that are removed topology-first when the port order
+ *   admits a planar embedding (faceRouter): choose the embedding, then draw
+ *   each rail inside its face. Only crossings that no drawing can avoid
+ *   remain, and they are drawn with jumps.
+ * - Compatible corridors use separate offset bus tracks. Remaining crossings
+ *   carry hops shared by drawing and card motion.
  * - A labelled rail that ELK lifts over its neighbours to reach its label
  *   slot is redrawn as one step between its ports (a fork off a shared port).
  * - Regions are compound nodes with the root's spacing; rail labels are ELK
@@ -23,6 +29,10 @@
  *   the compiler's `railBetween` route. Each drill-down level is laid out
  *   on its own.
  */
+import { compatible, routeByTopology } from "./faceRouter";
+import { groupBundles, offsetBusTracks, type BusCandidate } from "./bus";
+import { planReturnLanes } from "./lanePlanner";
+import { crossingJumps, railCrossings } from "./crossings";
 import type { ElkExtendedEdge, ElkNode } from "elkjs/lib/elk.bundled.js";
 import { elk } from "../../../hooks/useElkLayout";
 import type { Point, PortSide } from "../route";
@@ -46,8 +56,8 @@ import {
   REGION_HEAD,
   REGION_PAD,
   partExtentLocal,
-  railLabelText,
   regionLabels,
+  railLabelText,
   pad,
   textWidth,
   union,
@@ -65,14 +75,14 @@ export const NODE_GAP = 48;
 export const LAYER_GAP = 112;
 /** Margin around the whole diagram. */
 export const DIAGRAM_PAD = 40;
-/** First return lane under everything else, then one lane per return rail. */
+/** Clearance of a return channel from its span. */
 export const LANE_GAP = 40;
 export const LANE_STEP = 56;
 /** How far a return rail leaves its port before turning. */
 export const LANE_STUB = 20;
 const LABEL_PAD_X = 12;
 /** Space between parallel rails (ELK edge-edge spacing). */
-const RAIL_GAP = 20;
+export const RAIL_GAP = 20;
 const LABEL_PAD_Y = 4;
 /** Straightness priority of a part's main rail. */
 const MAIN_RAIL_PRIORITY = "10";
@@ -110,33 +120,17 @@ interface PartNode {
   readonly given: boolean;
 }
 
-/**
- * Rails that run against the flow: DFS from each part in spec order over
- * rails in spec order; a rail into a part still on the stack closes a loop.
+/** Rails reversed by ELK MODEL_ORDER, including self-loops and acyclic backward edges.
+ * Remove these before ELK so our router owns every return, even between regions.
  */
 export function returnRails(
   parts: readonly { id: string }[],
   rails: readonly { id: string; from: string; to: string }[]
 ): Set<string> {
-  const out = new Map<string, { id: string; to: string }[]>();
-  for (const r of rails) {
-    const list = out.get(r.from) ?? [];
-    list.push(r);
-    out.set(r.from, list);
-  }
-  const state = new Map<string, "open" | "done">();
-  const back = new Set<string>();
-  const visit = (id: string) => {
-    state.set(id, "open");
-    for (const r of out.get(id) ?? []) {
-      const s = state.get(r.to);
-      if (s === "open") back.add(r.id);
-      else if (s === undefined) visit(r.to);
-    }
-    state.set(id, "done");
-  };
-  for (const p of parts) if (!state.has(p.id)) visit(p.id);
-  return back;
+  const order = new Map(parts.map((p, i) => [p.id, i]));
+  return new Set(
+    rails.filter((r) => order.get(r.to)! <= order.get(r.from)!).map((r) => r.id)
+  );
 }
 
 /** Whether any part at any level waits for auto-layout. */
@@ -149,12 +143,20 @@ export function needsAutoLayout(flow: CompiledFlow): boolean {
 }
 
 /** Lay out every level of a compiled flow. */
-export async function layoutFlow(flow: CompiledFlow): Promise<FlowLayout> {
-  const level = await layoutLevel(flow.arrangements);
+export interface FlowLayoutOptions {
+  /** Bypass value memoization for independent ELK/replay verification. */
+  readonly cache?: boolean;
+}
+
+export async function layoutFlow(
+  flow: CompiledFlow,
+  options: FlowLayoutOptions = {}
+): Promise<FlowLayout> {
+  const level = await layoutLevel(flow.arrangements, options.cache !== false);
   const drills: Record<string, FlowLayout> = {};
   for (const p of flow.arrangements[0].parts)
     if (p.drill?.kind === "inline")
-      drills[p.id] = await layoutFlow(p.drill.flow);
+      drills[p.id] = await layoutFlow(p.drill.flow, options);
   return Object.keys(drills).length ? { ...level, drills } : level;
 }
 
@@ -181,10 +183,89 @@ export async function compileFlowLaidOut(
   return compileFlow(input, { ...o, layout: layoutFrom(layout) });
 }
 
+/** Text reserved by ELK and the router across the shared arrangement geometry. */
+function longestRailLabel(
+  arrangements: readonly DiagramTimeline[],
+  id: string
+): string | undefined {
+  return arrangements
+    .map((d) => {
+      const rail = d.rails.find((r) => r.id === id);
+      return rail && rail.presence !== "absent"
+        ? railLabelText(rail)
+        : undefined;
+    })
+    .reduce<string | undefined>(
+      (a, b) => (b !== undefined && b.length > (a?.length ?? -1) ? b : a),
+      undefined
+    );
+}
+
+const levelCache = new Map<string, Promise<LevelLayout>>();
+
+/** Forget every memoized level layout (test isolation and hot reload). */
+export function resetLayoutCache(): void {
+  levelCache.clear();
+}
+
+if (import.meta.hot) import.meta.hot.dispose(resetLayoutCache);
+
 async function layoutLevel(
+  arrangements: readonly DiagramTimeline[],
+  useCache: boolean
+): Promise<LevelLayout> {
+  if (!useCache) return computeLevel(arrangements);
+  const first = arrangements[0];
+  // This is a value cache, not a spec/project cache: every input read by the
+  // geometry engine is represented, while bands, captions and card payloads
+  // are intentionally left to the compiler. Drill-downs are cached separately.
+  const key = JSON.stringify([
+    first.parts.map((p) => [
+      p.id,
+      p.scale,
+      p.positioned,
+      p.positioned === "given" ? [p.position.x, p.position.y] : null,
+      Object.entries(p.ports).map(([id, port]) => [
+        id,
+        port.side,
+        ...port.local,
+      ]),
+      union(
+        arrangements.map((d) =>
+          partExtentLocal(d.parts.find((q) => q.id === p.id)!)
+        )
+      ),
+    ]),
+    first.rails.map((r) => [
+      r.id,
+      r.from,
+      r.to,
+      r.conditional,
+      longestRailLabel(arrangements, r.id),
+    ]),
+    first.regions.map((r) => [r.id, r.label, r.parts]),
+  ]);
+  const cached = levelCache.get(key);
+  if (cached) {
+    levelCache.delete(key);
+    levelCache.set(key, cached);
+    return cached;
+  }
+  const pending = computeLevel(arrangements).catch((error: unknown) => {
+    if (levelCache.get(key) === pending) levelCache.delete(key);
+    throw error;
+  });
+  if (levelCache.size >= 64) levelCache.delete(levelCache.keys().next().value!);
+  levelCache.set(key, pending);
+  return pending;
+}
+
+async function computeLevel(
   arrangements: readonly DiagramTimeline[]
 ): Promise<LevelLayout> {
   const first = arrangements[0];
+  // Leg searches are pure; repair passes ask the same questions many times.
+  const leg = memoizedLegs();
   if (first.parts.every((p) => p.positioned === "given"))
     return { positions: {} };
   const nodes = new Map<string, PartNode>(
@@ -209,16 +290,7 @@ async function layoutLevel(
   const forward = rails.filter((r) => !back.has(r.id));
   // A rail's label can differ between arrangements (an added rail only
   // carries its "+" in After); reserve room for the longest one.
-  const labelOf = (id: string) =>
-    arrangements
-      .map((d) => {
-        const r = d.rails.find((q) => q.id === id);
-        return r && r.presence !== "absent" ? railLabelText(r) : undefined;
-      })
-      .reduce<string | undefined>(
-        (a, b) => (b !== undefined && b.length > (a?.length ?? -1) ? b : a),
-        undefined
-      );
+  const labelOf = (id: string) => longestRailLabel(arrangements, id);
 
   const graph = elkGraph(nodes, forward, first, labelOf);
   const laid = await elk.layout(graph);
@@ -316,6 +388,16 @@ async function layoutLevel(
     };
   };
   const extents = [...nodes.keys()].map(extentOf);
+  const regionHeaders = first.regions.flatMap((g) => {
+    const b = pad(union(g.parts.map(extentOf)), REGION_PAD, REGION_HEAD);
+    return regionLabels({
+      ...g,
+      x: b.x0,
+      y: b.y0,
+      width: b.x1 - b.x0,
+      height: b.y1 - b.y0,
+    });
+  });
   for (const r of forward) {
     const route = routes[r.id];
     if (!route) continue;
@@ -366,7 +448,7 @@ async function layoutLevel(
         return text && q.labelAt ? [labelBox(q.labelAt, text)] : [];
       });
       const findPath = (stub: number) =>
-        legToLane(
+        leg(
           [
             bf[0] + OUTWARD[fromSide][0] * stub,
             bf[1] + OUTWARD[fromSide][1] * stub,
@@ -423,42 +505,414 @@ async function layoutLevel(
     accepted.push(r);
   }
 
-  /* return rails along the bottom */
-  const below: Box[] = [
-    ...extents,
-    ...[...abs]
-      .filter(([id]) => id.startsWith("region:"))
-      .map(([id, at]) => {
-        const g = laid.children?.find((c) => c.id === id);
+  /* Return channels are local to each span; try the opposite channel and
+     rip up the two legs together before permitting an explicit jumped crossing. */
+  const returns = rails.filter((r) => back.has(r.id) && !touchesGiven(r));
+  const plans = planReturnLanes(
+    returns.map((r) => {
+      const a = extentOf(r.from.part);
+      const b = extentOf(r.to.part);
+      const end = (endpoint: DiagramRail["from"]) => {
+        const part = nodes.get(endpoint.part)!.part;
+        const port = part.ports[endpoint.port];
+        const axis = port.side === "N" || port.side === "S" ? 0 : 1;
+        const ports = Object.entries(part.ports)
+          .filter(([, p]) => p.side === port.side)
+          .sort(([, p], [, q]) => p.local[axis] - q.local[axis]);
         return {
-          x0: at.x,
-          y0: at.y,
-          x1: at.x + (g?.width ?? 0),
-          y1: at.y + (g?.height ?? 0),
+          part: endpoint.part,
+          port: endpoint.port,
+          side: port.side,
+          order: ports.findIndex(([name]) => name === endpoint.port),
+          count: ports.length,
         };
-      }),
-    ...Object.values(routes).flatMap((r) => [
-      ...r.points.map(([x, y]) => ({ x0: x, y0: y, x1: x, y1: y })),
-      ...(r.labelAt
-        ? [
-            {
-              x0: r.labelAt[0],
-              y0: r.labelAt[1] - (RAIL_LABEL_SIZE * LINE_EM) / 2,
-              x1: r.labelAt[0],
-              y1: r.labelAt[1] + (RAIL_LABEL_SIZE * LINE_EM) / 2,
-            },
-          ]
-        : []),
-    ]),
-  ];
-  let lane = union(below).y1 + LANE_GAP;
+      };
+      return {
+        x0: Math.min(a.x0, b.x0),
+        x1: Math.max(a.x1, b.x1),
+        y0: Math.min(a.y0, b.y0),
+        y1: Math.max(a.y1, b.y1),
+        from: end(r.from),
+        to: end(r.to),
+      };
+    }),
+    LANE_GAP,
+    RAIL_GAP
+  );
   const routedReturns: DiagramRail[] = [];
-  for (const r of rails) {
-    if (!back.has(r.id) || touchesGiven(r)) continue;
+  const sharesReserved = (
+    r: DiagramRail,
+    points: readonly Point[],
+    others: readonly DiagramRail[]
+  ) =>
+    others.some(
+      (q) =>
+        reservedRuns(r, q, routes[q.id].points).some((s) =>
+          segments(points).some((t) => collinear(s, t))
+        ) ||
+        reservedRuns(q, r, points).some((s) =>
+          segments(routes[q.id].points).some((t) => collinear(s, t))
+        )
+    );
+  /* One candidate policy for every return route and bus track, so the checks
+     cannot drift apart: no doubling back, no part crossed (except a rail's
+     own parts at its first and last segment), no reserved stretch shared,
+     and, when strict, no crossing of any other rail. */
+  const reverses = (points: readonly Point[]) =>
+    points.some(
+      (b, i) =>
+        i > 0 &&
+        i < points.length - 1 &&
+        (b[0] - points[i - 1][0]) * (points[i + 1][0] - b[0]) +
+          (b[1] - points[i - 1][1]) * (points[i + 1][1] - b[1]) <
+          -1
+    );
+  const nodeIds = [...nodes.keys()];
+  const throughPart = (
+    r: DiagramRail,
+    points: readonly Point[],
+    includeGiven: boolean
+  ) =>
+    segments(points).some((seg, j) =>
+      nodeIds.some(
+        (id) =>
+          (includeGiven || !nodes.get(id)!.given) &&
+          !(j === 0 && id === r.from.part) &&
+          !(j === points.length - 2 && id === r.to.part) &&
+          crosses(segmentBox(seg), extentOf(id))
+      )
+    );
+  const clearOf = (
+    r: DiagramRail,
+    points: readonly Point[],
+    others: readonly DiagramRail[],
+    strict: boolean
+  ) =>
+    !sharesReserved(r, points, others) &&
+    !(
+      strict &&
+      others.some((q) => railCrossings(points, routes[q.id].points).length > 0)
+    );
+  const validCandidate = (
+    r: DiagramRail,
+    points: readonly Point[],
+    others: readonly DiagramRail[],
+    strict: boolean
+  ) =>
+    !reverses(points) &&
+    !throughPart(r, points, false) &&
+    clearOf(r, points, others, strict);
+  const routeChannel = (
+    r: DiagramRail,
+    others: readonly DiagramRail[],
+    strictOnly = false,
+    switchChannel = false,
+    forceLane = false
+  ): RailRoute | undefined => {
     const fromSide = nodes.get(r.from.part)!.part.ports[r.from.port].side;
     const toSide = nodes.get(r.to.part)!.part.ports[r.to.port].side;
     const bf = borderAt(r.from.part, r.from.port);
     const bt = borderAt(r.to.part, r.to.port);
+    const reserved = others.flatMap((q) =>
+      reservedRuns(r, q, routes[q.id].points)
+    );
+    const verticals = reserved.flatMap((s) => verticalRuns(s));
+    const horizontals = reserved.filter(
+      ([a, b]) => Math.abs(a[1] - b[1]) < SNAP
+    );
+    const obstacles = [
+      ...regionHeaders,
+      ...[...nodes].filter(([, n]) => !n.given).map(([id]) => extentOf(id)),
+      ...others.flatMap((q) => {
+        const text = labelOf(q.id);
+        const at = routes[q.id].labelAt;
+        return text && at ? [labelBox(at, text)] : [];
+      }),
+    ];
+    const occupied = union([
+      ...extents,
+      ...Object.values(routes).flatMap((q) =>
+        q.points.map(([x, y]) => ({ x0: x, x1: x, y0: y, y1: y }))
+      ),
+    ]);
+    const originalPlan = plans[returns.indexOf(r)] ?? {
+      channel: "bottom",
+      lane: union([extentOf(r.from.part), extentOf(r.to.part)]).y1 + LANE_GAP,
+      fromDrop: 0,
+      toDrop: 0,
+    };
+    const plan = switchChannel
+      ? {
+          ...originalPlan,
+          channel: originalPlan.channel === "top" ? "bottom" : "top",
+          lane:
+            originalPlan.channel === "top"
+              ? union([extentOf(r.from.part), extentOf(r.to.part)]).y1 +
+                LANE_GAP
+              : union([extentOf(r.from.part), extentOf(r.to.part)]).y0 -
+                LANE_GAP,
+        }
+      : originalPlan;
+    const bounds = union([extentOf(r.from.part), extentOf(r.to.part)]);
+    const lanes = [
+      plan.lane,
+      plan.channel === "top" ? bounds.y1 + LANE_GAP : bounds.y0 - LANE_GAP,
+      occupied.y1 + LANE_GAP,
+      occupied.y0 - LANE_GAP,
+    ];
+    const finish = (points: readonly Point[]): RailRoute | undefined => {
+      if (!validCandidate(r, points, others, true)) return undefined;
+      const text = labelOf(r.id);
+      const labelAt = text
+        ? labelOnRoute(points, text, [
+            ...obstacles,
+            ...others.flatMap((q) =>
+              segments(routes[q.id].points).map(segmentBox)
+            ),
+          ])
+        : undefined;
+      return text && !labelAt
+        ? undefined
+        : { points, ...(labelAt ? { labelAt } : {}) };
+    };
+    // Opposing horizontal ports have an exact rectangular channel candidate.
+    // Ordered stubs and nested lanes handle parallel/self-return graphs without
+    // a fresh grid search for every leg (including uncached oracle layouts).
+    if (
+      OUTWARD[fromSide][0] !== 0 &&
+      OUTWARD[toSide][0] === -OUTWARD[fromSide][0]
+    ) {
+      const rectangleLanes = [
+        plan.lane,
+        plan.channel === "top"
+          ? occupied.y0 - LANE_GAP
+          : occupied.y1 + LANE_GAP,
+        ...(strictOnly
+          ? []
+          : [
+              plan.channel === "top"
+                ? bounds.y1 + LANE_GAP
+                : bounds.y0 - LANE_GAP,
+            ]),
+      ];
+      for (const lane of rectangleLanes)
+        for (const [fromStub, toStub] of [
+          [
+            LANE_STUB + plan.fromDrop * RAIL_GAP,
+            LANE_STUB + plan.toDrop * RAIL_GAP,
+          ],
+          [LANE_STUB, LANE_STUB],
+        ]) {
+          const exitX = bf[0] + OUTWARD[fromSide][0] * fromStub;
+          const entryX = bt[0] + OUTWARD[toSide][0] * toStub;
+          const candidate = finish(
+            dedupe([
+              portAt(r.from.part, r.from.port),
+              bf,
+              [exitX, bf[1]],
+              [exitX, lane],
+              [entryX, lane],
+              [entryX, bt[1]],
+              bt,
+              portAt(r.to.part, r.to.port),
+            ])
+          );
+          if (candidate) return candidate;
+        }
+    }
+    // A side-to-side hairpin need not visit a horizontal channel. In
+    // particular, same-side loops belong beside their ports, not around all
+    // the other ports and parts between that row and a top/bottom lane.
+    if (!switchChannel && !forceLane)
+      for (const stub of [LANE_STUB, 2, RAIL_GAP * 2]) {
+        const exit: Point = [
+          bf[0] + OUTWARD[fromSide][0] * stub,
+          bf[1] + OUTWARD[fromSide][1] * stub,
+        ];
+        const entry: Point = [
+          bt[0] + OUTWARD[toSide][0] * stub,
+          bt[1] + OUTWARD[toSide][1] * stub,
+        ];
+        if (Math.hypot(exit[0] - entry[0], exit[1] - entry[1]) < SNAP) {
+          const normal = OUTWARD[fromSide];
+          const firstTurn =
+            normal[0] === 0 ? 1 : normal[0] * (plan.channel === "top" ? -1 : 1);
+          for (const sign of [firstTurn, -firstTurn]) {
+            const tangent: Point = [
+              -normal[1] * sign * RAIL_GAP,
+              normal[0] * sign * RAIL_GAP,
+            ];
+            const points = dedupe([
+              portAt(r.from.part, r.from.port),
+              bf,
+              exit,
+              [exit[0] + tangent[0], exit[1] + tangent[1]],
+              [
+                exit[0] + tangent[0] + normal[0] * RAIL_GAP,
+                exit[1] + tangent[1] + normal[1] * RAIL_GAP,
+              ],
+              [exit[0] + normal[0] * RAIL_GAP, exit[1] + normal[1] * RAIL_GAP],
+              bt,
+              portAt(r.to.part, r.to.port),
+            ]);
+            const candidate = finish(points);
+            if (candidate) return candidate;
+          }
+        } else
+          for (const clearance of [RAIL_GAP, 2])
+            for (const reverse of [false, true]) {
+              const path = leg(
+                reverse ? entry : exit,
+                reverse ? toSide : fromSide,
+                occupied.y1 + LANE_GAP,
+                obstacles,
+                verticals,
+                horizontals,
+                {
+                  point: reverse ? exit : entry,
+                  side: reverse ? fromSide : toSide,
+                },
+                true,
+                clearance
+              );
+              if (!path) continue;
+              const candidate = finish(
+                dedupe([
+                  portAt(r.from.part, r.from.port),
+                  bf,
+                  ...(reverse ? [...path].reverse() : path),
+                  bt,
+                  portAt(r.to.part, r.to.port),
+                ])
+              );
+              if (candidate) return candidate;
+            }
+      }
+    let chosen: RailRoute | undefined;
+    for (const [strict, clearance] of [
+      [true, RAIL_GAP],
+      [true, 2],
+      [false, RAIL_GAP],
+      [false, 2],
+    ] as const) {
+      if (strictOnly && !strict) continue;
+      for (const candidate of strictOnly
+        ? lanes.filter((y) =>
+            plan.channel === "top" ? y < bounds.y0 : y > bounds.y1
+          )
+        : lanes) {
+        let lane = candidate;
+        for (let attempt = 0; attempt < extents.length; attempt++) {
+          const block = extents.find(
+            (e) =>
+              e.x0 < bounds.x1 + LANE_STUB &&
+              bounds.x0 - LANE_STUB < e.x1 &&
+              e.y0 - 1 < lane &&
+              lane < e.y1 + 1
+          );
+          if (!block) break;
+          lane =
+            candidate < bounds.y0 ? block.y0 - LANE_GAP : block.y1 + LANE_GAP;
+        }
+        for (const [fromStub, toStub] of [
+          [
+            LANE_STUB + plan.fromDrop * RAIL_GAP,
+            LANE_STUB + plan.toDrop * RAIL_GAP,
+          ],
+          [LANE_STUB, LANE_STUB],
+          [2, 2],
+          [10, 10],
+        ]) {
+          const exit: Point = [
+            bf[0] + OUTWARD[fromSide][0] * fromStub,
+            bf[1] + OUTWARD[fromSide][1] * fromStub,
+          ];
+          const entry: Point = [
+            bt[0] + OUTWARD[toSide][0] * toStub,
+            bt[1] + OUTWARD[toSide][1] * toStub,
+          ];
+          for (const reverse of [false, true]) {
+            const first = reverse ? entry : exit;
+            const second = reverse ? exit : entry;
+            const out = leg(
+              first,
+              reverse ? toSide : fromSide,
+              lane,
+              obstacles,
+              verticals,
+              horizontals,
+              undefined,
+              strict,
+              clearance
+            );
+            if (!out) continue;
+            const own =
+              r.from.part === r.to.part && r.from.port === r.to.port
+                ? out.slice(Math.max(0, portRunEnd(out) - 1))
+                : out;
+            const home = leg(
+              second,
+              reverse ? fromSide : toSide,
+              lane,
+              obstacles,
+              [...verticals, ...verticalRuns(own)],
+              [
+                ...horizontals,
+                ...segments(own).filter(
+                  ([a, b]) => Math.abs(a[1] - b[1]) < SNAP
+                ),
+              ],
+              undefined,
+              strict,
+              clearance
+            );
+            if (!home) continue;
+            const middle = dedupe([...out, ...[...home].reverse()]);
+            const points = dedupe([
+              portAt(r.from.part, r.from.port),
+              bf,
+              ...(reverse ? middle.reverse() : middle),
+              bt,
+              portAt(r.to.part, r.to.port),
+            ]);
+            if (!validCandidate(r, points, others, strict)) continue;
+            const text = labelOf(r.id);
+            const labelObstacles = [
+              ...obstacles,
+              ...others.flatMap((q) =>
+                segments(routes[q.id].points).map(segmentBox)
+              ),
+            ];
+            const below: Point = [
+              (out.at(-1)![0] + home.at(-1)![0]) / 2,
+              lane + RAIL_LABEL_DY,
+            ];
+            const labelAt = text
+              ? !labelObstacles.some((e) => crosses(labelBox(below, text), e))
+                ? below
+                : labelOnRoute(points, text, labelObstacles)
+              : undefined;
+            if (text && !labelAt) continue;
+            chosen = { points, ...(labelAt ? { labelAt } : {}) };
+            break;
+          }
+          if (chosen) break;
+        }
+        if (chosen) break;
+      }
+      if (chosen) break;
+    }
+    return chosen;
+  };
+  /* A degraded but deterministic return: legs to a lane below everything that
+     avoid parts but not rails. Any crossing it makes is drawn with a jump, so
+     one hard rail never discards the placement of the whole level. */
+  const degradedReturn = (r: DiagramRail): RailRoute => {
+    const fromSide = nodes.get(r.from.part)!.part.ports[r.from.port].side;
+    const toSide = nodes.get(r.to.part)!.part.ports[r.to.port].side;
+    const bf = borderAt(r.from.part, r.from.port);
+    const bt = borderAt(r.to.part, r.to.port);
+    const lane = union([...extents, ...regionHeaders]).y1 + LANE_GAP;
     const exit: Point = [
       bf[0] + OUTWARD[fromSide][0] * LANE_STUB,
       bf[1] + OUTWARD[fromSide][1] * LANE_STUB,
@@ -467,78 +921,420 @@ async function layoutLevel(
       bt[0] + OUTWARD[toSide][0] * LANE_STUB,
       bt[1] + OUTWARD[toSide][1] * LANE_STUB,
     ];
-    // Each leg finds its own way between the parts from its stub down to
-    // the lane, keeping clear of rails already drawn — including this rail's
-    // first leg, so a self-loop comes back up beside itself.
-    // A shared port may keep its fork/join stub. Otherwise reserve every
-    // horizontal run too: separate bottom lanes alone do not keep the
-    // intermediate steps of their legs from merging.
-    const reserved = [...accepted, ...routedReturns].flatMap((q) =>
-      reservedRuns(r, q, routes[q.id].points)
-    );
-    const verticals = reserved.flatMap((s) => verticalRuns(s));
-    const horizontals = reserved.filter(
-      ([a, b]) => Math.abs(a[1] - b[1]) < SNAP
-    );
-    const out =
-      legToLane(exit, fromSide, lane, extents, verticals, horizontals) ??
-      fallbackLeg(exit, fromSide, lane, verticals);
-    const homeVerticals = [
-      ...verticals,
-      ...verticalRuns(
-        // A same-port loop can share its first straight run, then fork.
-        r.from.part === r.to.part && r.from.port === r.to.port
-          ? out.slice(Math.max(0, portRunEnd(out) - 1))
-          : out
-      ),
-    ];
-    const home =
-      legToLane(entry, toSide, lane, extents, homeVerticals, horizontals) ??
-      fallbackLeg(entry, toSide, lane, homeVerticals);
-    const [downAt, upAt] = [out[out.length - 1][0], home[home.length - 1][0]];
-    routes[r.id] = {
-      points: dedupe([
-        portAt(r.from.part, r.from.port),
-        bf,
-        ...out,
-        ...[...home].reverse(),
-        bt,
-        portAt(r.to.part, r.to.port),
-      ]),
-      ...(labelOf(r.id)
-        ? {
-            labelAt: [(downAt + upAt) / 2, lane + RAIL_LABEL_DY] as Point,
-          }
-        : {}),
-    };
+    const parts = [...nodes]
+      .filter(([, n]) => !n.given)
+      .map(([id]) => extentOf(id));
+    const out = leg(exit, fromSide, lane, parts, [], []);
+    const home = leg(entry, toSide, lane, parts, [], []);
+    const middle =
+      out && home
+        ? [...out, ...[...home].reverse()]
+        : [exit, [exit[0], lane] as Point, [entry[0], lane] as Point, entry];
+    const points = dedupe([
+      portAt(r.from.part, r.from.port),
+      bf,
+      ...middle,
+      bt,
+      portAt(r.to.part, r.to.port),
+    ]);
+    const text = labelOf(r.id);
+    const labelAt = text
+      ? labelOnRoute(points, text, [...parts, ...regionHeaders])
+      : undefined;
+    return { points, ...(labelAt ? { labelAt } : {}) };
+  };
+  for (const r of returns) {
+    routes[r.id] =
+      routeChannel(r, [...accepted, ...routedReturns]) ?? degradedReturn(r);
     routedReturns.push(r);
-    lane += LANE_STEP;
   }
-
+  // Rip up a conflicting rail and search with every other rail reserved. Try
+  // both ends and short stubs: a previous fork can box in the usual stub.
+  const automatic = rails.filter((r) => routes[r.id] && !touchesGiven(r));
+  const firstMain = new Map<string, string>();
+  for (const r of forward)
+    if (!r.conditional && !firstMain.has(r.from.part))
+      firstMain.set(r.from.part, r.id);
+  const pinned = (r: DiagramRail) =>
+    firstMain.get(r.from.part) === r.id &&
+    routes[r.id].points.every((p) => p[1] === routes[r.id].points[0][1]);
+  const conflicts = (r: DiagramRail, points: readonly Point[]) =>
+    automatic
+      .filter((q) => q !== r)
+      .reduce(
+        (n, q) => n + railCrossings(points, routes[q.id].points).length,
+        0
+      );
+  for (let pass = 0; pass < 3; pass++) {
+    let improved = false;
+    for (const r of [...automatic].reverse()) {
+      const old = routes[r.id];
+      const count = conflicts(r, old.points);
+      if (count === 0 || pinned(r)) continue;
+      const reserved = automatic
+        .filter((q) => q !== r)
+        .flatMap((q) => reservedRuns(r, q, routes[q.id].points));
+      const v = reserved.flatMap((s) => verticalRuns(s));
+      const h = reserved.filter(([a, b]) => Math.abs(a[1] - b[1]) < SNAP);
+      const bf = borderAt(r.from.part, r.from.port);
+      const bt = borderAt(r.to.part, r.to.port);
+      const fs = nodes.get(r.from.part)!.part.ports[r.from.port].side;
+      const ts = nodes.get(r.to.part)!.part.ports[r.to.port].side;
+      const labels = [
+        ...regionHeaders,
+        ...automatic
+          .filter((q) => q !== r)
+          .flatMap((q) => {
+            const text = labelOf(q.id);
+            const at = routes[q.id].labelAt;
+            return text && at ? [labelBox(at, text)] : [];
+          }),
+      ];
+      for (const stub of [LANE_STUB, 2]) {
+        const start: Point = [
+          bf[0] + OUTWARD[fs][0] * stub,
+          bf[1] + OUTWARD[fs][1] * stub,
+        ];
+        const end: Point = [
+          bt[0] + OUTWARD[ts][0] * stub,
+          bt[1] + OUTWARD[ts][1] * stub,
+        ];
+        if (Math.hypot(start[0] - end[0], start[1] - end[1]) < SNAP) continue;
+        for (const reverse of [false, true]) {
+          const path = leg(
+            reverse ? end : start,
+            reverse ? ts : fs,
+            union(extents).y1 + LANE_GAP,
+            [...extents, ...labels],
+            v,
+            h,
+            { point: reverse ? start : end, side: reverse ? fs : ts },
+            true
+          );
+          if (!path) continue;
+          const points = dedupe([
+            portAt(r.from.part, r.from.port),
+            bf,
+            ...(reverse ? path.reverse() : path),
+            bt,
+            portAt(r.to.part, r.to.port),
+          ]);
+          if (conflicts(r, points) >= count) continue;
+          const shares = automatic.some(
+            (q) =>
+              q !== r &&
+              (reservedRuns(r, q, routes[q.id].points).some((s) =>
+                segments(points).some((t) => collinear(s, t))
+              ) ||
+                reservedRuns(q, r, points).some((s) =>
+                  segments(routes[q.id].points).some((t) => collinear(s, t))
+                ))
+          );
+          if (shares) continue;
+          const text = labelOf(r.id);
+          const labelAt = text
+            ? labelOnRoute(points, text, [
+                ...extents,
+                ...labels,
+                ...reserved.map(segmentBox),
+              ])
+            : undefined;
+          if (text && !labelAt) continue;
+          routes[r.id] = { points, ...(labelAt ? { labelAt } : {}) };
+          improved = true;
+          break;
+        }
+        if (routes[r.id] !== old) break;
+      }
+    }
+    if (!improved) break;
+  }
+  // Crossings (or stretches shared off a common port's run) left after local
+  // repair: if the port order admits a planar embedding, choose one and draw
+  // every rail inside its face (faceRouter).
+  const end = (e: DiagramRail["from"]) => ({
+    part: e.part,
+    port: e.port,
+    side: nodes.get(e.part)!.part.ports[e.port].side,
+    at: portAt(e.part, e.port),
+    border: borderAt(e.part, e.port),
+  });
+  const faceRails = rails.map((r) => ({
+    id: r.id,
+    from: end(r.from),
+    to: end(r.to),
+    ...(routes[r.id] ? { route: routes[r.id] } : {}),
+    movable: !touchesGiven(r),
+    label: labelOf(r.id),
+  }));
+  const faceRail = new Map(faceRails.map((r) => [r.id, r]));
+  if (
+    automatic.some((r, i) =>
+      automatic
+        .slice(i + 1)
+        .some(
+          (q) =>
+            !compatible(
+              faceRail.get(r.id)!,
+              routes[r.id].points,
+              faceRail.get(q.id)!,
+              routes[q.id].points
+            )
+        )
+    )
+  ) {
+    const isMain = (r: DiagramRail) => firstMain.get(r.from.part) === r.id;
+    const planar = routeByTopology({
+      diagram: first,
+      rails: faceRails,
+      parts: extents,
+      soft: regionHeaders,
+      preference: [
+        ...forward.filter(isMain),
+        ...forward.filter((r) => !isMain(r)),
+        ...returns,
+      ]
+        .filter((r) => automatic.includes(r))
+        .map((r) => r.id),
+      gap: RAIL_GAP,
+      stub: LANE_STUB,
+      labelBox,
+      placeLabel: labelOnRoute,
+    });
+    if (planar)
+      for (const r of automatic) if (planar[r.id]) routes[r.id] = planar[r.id];
+  }
+  // Route compatible forward and return corridors once at the width of the
+  // whole bus, then fan each offset track back to its own fixed ports.
+  const portOrder = (end: DiagramRail["from"], source: boolean) => {
+    const part = nodes.get(end.part)!.part;
+    const p = part.ports[end.port];
+    const n = OUTWARD[p.side];
+    const tangent: Point = source ? [-n[1], n[0]] : [n[1], -n[0]];
+    const projection = (point: Point) =>
+      point[0] * tangent[0] + point[1] * tangent[1];
+    return Object.entries(part.ports)
+      .filter(([, q]) => q.side === p.side)
+      .sort((a, b) => projection(a[1].local) - projection(b[1].local))
+      .findIndex(([name]) => name === end.port);
+  };
+  const bundled = new Set<DiagramRail>();
+  for (const axis of [0, 1] as const) {
+    const busRails = automatic;
+    const candidates: BusCandidate[] = busRails.map((r) => {
+      const run = segments(routes[r.id].points)
+        .filter(([a, b]) => Math.abs(a[1 - axis] - b[1 - axis]) < SNAP)
+        .sort(
+          (s, t) =>
+            Math.abs(t[1][axis] - t[0][axis]) -
+            Math.abs(s[1][axis] - s[0][axis])
+        )[0];
+      return {
+        from: {
+          part: r.from.part,
+          side: nodes.get(r.from.part)!.part.ports[r.from.port].side,
+          order: portOrder(r.from, true),
+        },
+        to: {
+          part: r.to.part,
+          side: nodes.get(r.to.part)!.part.ports[r.to.port].side,
+          order: portOrder(r.to, false),
+        },
+        direction: run && run[1][axis] < run[0][axis] ? -1 : 1,
+        corridor: run
+          ? [
+              Math.min(run[0][axis], run[1][axis]),
+              Math.max(run[0][axis], run[1][axis]),
+            ]
+          : [0, 0],
+        y: run?.[0][1 - axis] ?? 0,
+      };
+    });
+    for (const indices of groupBundles(candidates)) {
+      const members = indices.map((i) => busRails[i]);
+      if (members.some((r) => bundled.has(r))) continue;
+      const width = (members.length - 1) * RAIL_GAP;
+      const anchor = Math.max(
+        0,
+        members.findIndex((r) => !r.conditional)
+      );
+      const offset = (anchor - (members.length - 1) / 2) * RAIL_GAP;
+      const firstRail = members[anchor];
+      const fromSide = nodes.get(firstRail.from.part)!.part.ports[
+        firstRail.from.port
+      ].side;
+      const toSide = nodes.get(firstRail.to.part)!.part.ports[firstRail.to.port]
+        .side;
+      const fromNormal = OUTWARD[fromSide];
+      const toNormal = OUTWARD[toSide];
+      const bf = borderAt(firstRail.from.part, firstRail.from.port);
+      const bt = borderAt(firstRail.to.part, firstRail.to.port);
+      const start: Point = [
+        bf[0] + fromNormal[0] * (LANE_STUB + width) + fromNormal[1] * offset,
+        bf[1] + fromNormal[1] * (LANE_STUB + width) - fromNormal[0] * offset,
+      ];
+      const end: Point = [
+        bt[0] + toNormal[0] * (LANE_STUB + width) - toNormal[1] * offset,
+        bt[1] + toNormal[1] * (LANE_STUB + width) + toNormal[0] * offset,
+      ];
+      const others = automatic.filter((r) => !members.includes(r));
+      const blocked = [
+        ...extents,
+        ...regionHeaders,
+        ...others.flatMap((r) => {
+          const text = labelOf(r.id);
+          const path = routes[r.id];
+          return [
+            ...segments(path.points).map(segmentBox),
+            ...(text && path.labelAt ? [labelBox(path.labelAt, text)] : []),
+          ];
+        }),
+      ].map((e) => pad(e, width / 2 + RAIL_GAP));
+      const spine = leg(
+        start,
+        fromSide,
+        union(extents).y1 + LANE_GAP + width,
+        blocked,
+        [],
+        [],
+        { point: end, side: toSide },
+        true,
+        RAIL_GAP,
+        true
+      );
+      if (!spine) continue;
+      const tracks = offsetBusTracks(spine, members.length, RAIL_GAP);
+      const proposed = members.map((r, i): RailRoute => {
+        const track = tracks[i];
+        const first = track.points[0];
+        const last = track.points.at(-1)!;
+        const from = portAt(r.from.part, r.from.port);
+        const to = portAt(r.to.part, r.to.port);
+        const leadAt: Point = [
+          first[0] - fromNormal[0] * LANE_STUB,
+          first[1] - fromNormal[1] * LANE_STUB,
+        ];
+        const tailAt: Point = [
+          last[0] - toNormal[0] * LANE_STUB,
+          last[1] - toNormal[1] * LANE_STUB,
+        ];
+        const lead: Point[] = [
+          from,
+          fromNormal[0] ? [leadAt[0], from[1]] : [from[0], leadAt[1]],
+          leadAt,
+        ];
+        const tail: Point[] = [
+          tailAt,
+          toNormal[0] ? [tailAt[0], to[1]] : [to[0], tailAt[1]],
+          to,
+        ];
+        return {
+          points: [...lead, ...track.points, ...tail],
+          cornerRadii: [
+            ...lead.map(() => 2),
+            ...track.cornerRadii,
+            ...tail.map(() => 2),
+          ],
+        };
+      });
+      let valid = proposed.every(
+        (p, i) =>
+          (!pinned(members[i]) ||
+            p.points.every(
+              (point) =>
+                Math.abs(point[1] - routes[members[i].id].points[0][1]) < SNAP
+            )) &&
+          clearOf(members[i], p.points, others, true) &&
+          !throughPart(members[i], p.points, true) &&
+          proposed.every(
+            (q, j) =>
+              i === j ||
+              (railCrossings(p.points, q.points).length === 0 &&
+                !reservedRuns(members[i], members[j], q.points).some((s) =>
+                  segments(p.points).some((t) => collinear(s, t))
+                ))
+          )
+      );
+      if (valid)
+        for (const [i, r] of members.entries()) {
+          const text = labelOf(r.id);
+          if (!text) continue;
+          const obstacles = [
+            ...extents,
+            ...regionHeaders,
+            ...others.flatMap((q) => {
+              const label = labelOf(q.id);
+              const path = routes[q.id];
+              return [
+                ...segments(path.points).map(segmentBox),
+                ...(label && path.labelAt
+                  ? [labelBox(path.labelAt, label)]
+                  : []),
+              ];
+            }),
+            ...proposed.flatMap((q, j) =>
+              j === i
+                ? []
+                : [
+                    ...segments(q.points).map(segmentBox),
+                    ...(q.labelAt && labelOf(members[j].id)
+                      ? [labelBox(q.labelAt, labelOf(members[j].id)!)]
+                      : []),
+                  ]
+            ),
+          ];
+          const labelAt = labelOnRoute(proposed[i].points, text, obstacles);
+          if (!labelAt) {
+            valid = false;
+            break;
+          }
+          proposed[i] = { ...proposed[i], labelAt };
+        }
+      if (!valid) continue;
+      for (const [i, r] of members.entries()) {
+        routes[r.id] = proposed[i];
+        bundled.add(r);
+      }
+    }
+  }
+  // A local lane can sit above a different part. Place its label against all
+  // drawn geometry rather than assuming the space under a global lane is empty.
+  for (const r of automatic) {
+    const text = labelOf(r.id);
+    if (!text) continue;
+    const q = routes[r.id];
+    const obstacles = [
+      ...extents,
+      ...regionHeaders,
+      ...automatic
+        .filter((p) => p !== r)
+        .flatMap((p) => {
+          const path = routes[p.id];
+          const label = labelOf(p.id);
+          return [
+            ...segments(path.points).map(segmentBox),
+            ...(path.labelAt && label ? [labelBox(path.labelAt, label)] : []),
+          ];
+        }),
+    ];
+    if (
+      q.labelAt &&
+      !obstacles.some((b) => crosses(labelBox(q.labelAt!, text), b))
+    )
+      continue;
+    const labelAt = labelOnRoute(q.points, text, obstacles);
+    if (labelAt) routes[r.id] = { ...q, labelAt };
+  }
   /* region names: a rail label ELK (or a lane) put on one moves to a clear
      run of its own rail */
-  const regionNames = first.regions.flatMap((g) => {
-    const box = pad(
-      union(g.parts.filter((p) => nodes.has(p)).map(extentOf)),
-      REGION_PAD,
-      REGION_HEAD
-    );
-    return regionLabels({
-      ...g,
-      x: box.x0,
-      y: box.y0,
-      width: box.x1 - box.x0,
-      height: box.y1 - box.y0,
-    });
-  });
   for (const [id, route] of Object.entries(routes)) {
     const text = labelOf(id);
     if (!text || !route.labelAt) continue;
     const box = labelBox(route.labelAt, text);
-    if (!regionNames.some((n) => crosses(box, n))) continue;
+    if (!regionHeaders.some((n) => crosses(box, n))) continue;
     const labelAt = labelOnRoute(route.points, text, [
       ...extents,
-      ...regionNames,
+      ...regionHeaders,
       ...Object.entries(routes)
         .filter(([other]) => other !== id)
         .flatMap(([other, q]) => {
@@ -551,7 +1347,21 @@ async function layoutLevel(
     ]);
     if (labelAt) routes[id] = { ...route, labelAt };
   }
-  return keptOnCanvas(positions, routes, extents, labelOf);
+  const kept = keptOnCanvas(positions, routes, extents, labelOf);
+  const ids = rails.filter((r) => kept.routes?.[r.id]).map((r) => r.id);
+  const jumps = crossingJumps(ids.map((id) => kept.routes![id].points));
+  return {
+    ...kept,
+    routes: Object.fromEntries(
+      ids.map((id, i) => [
+        id,
+        {
+          ...kept.routes![id],
+          ...(jumps[i].length ? { jumps: jumps[i] } : {}),
+        },
+      ])
+    ),
+  };
 }
 
 /**
@@ -591,6 +1401,7 @@ function keptOnCanvas(
       Object.entries(routes).map(([id, r]) => [
         id,
         {
+          ...r,
           points: r.points.map(move),
           ...(r.labelAt ? { labelAt: move(r.labelAt) } : {}),
         },
@@ -754,38 +1565,6 @@ function collectEdges(
   return out;
 }
 
-/**
- * A return-rail leg for when no way to the lane was found: straight down
- * from its stub. If that drop would run along a reserved vertical (another
- * rail, or this rail's own first leg), leave the stub early instead: drop
- * from its middle for a sideways port, or one rail gap aside for a port on
- * the top or bottom. Crossings stay possible; running along a rail does not.
- */
-function fallbackLeg(
-  stub: Point,
-  side: PortSide,
-  lane: number,
-  verticals: readonly VerticalRun[]
-): Point[] {
-  const blocked = verticals.some(
-    (v) =>
-      Math.abs(v.x - stub[0]) < SNAP &&
-      v.y0 < Math.max(stub[1], lane) - SNAP &&
-      Math.min(stub[1], lane) + SNAP < v.y1
-  );
-  if (!blocked) return [stub, [stub[0], lane]];
-  const [outward] = OUTWARD[side];
-  if (outward !== 0) {
-    const x = stub[0] - (outward * LANE_STUB) / 2;
-    return [
-      [x, stub[1]],
-      [x, lane],
-    ];
-  }
-  const x = stub[0] + RAIL_GAP;
-  return [stub, [x, stub[1]], [x, lane]];
-}
-
 /** Reserve every run except a straight fork/join connected to a common port. */
 function reservedRuns(
   r: DiagramRail,
@@ -833,7 +1612,7 @@ const BEND_COST = 120;
 /**
  * An orthogonal path from a stub to a return lane (or another port's stub)
  * that crosses no part, keeps a rail gap beside verticals, and shares no reserved
- * horizontal stretch. Dijkstra over lines around part edges and reserved
+ * horizontal stretch. A* over lines around part edges and reserved
  * runs, with a cost per bend; undefined when the stub is boxed in.
  */
 function legToLane(
@@ -843,7 +1622,10 @@ function legToLane(
   extents: readonly Box[],
   verticals: readonly VerticalRun[],
   horizontals: readonly Segment[],
-  target?: { point: Point; side: PortSide }
+  target?: { point: Point; side: PortSide },
+  strict = false,
+  clearance = RAIL_GAP,
+  aligned = false
 ): Point[] | undefined {
   // Running along a part's edge counts as touching it.
   const parts = extents.map((e) => pad(e, 1));
@@ -854,9 +1636,23 @@ function legToLane(
   const xs = uniq([
     stub[0],
     ...(target ? [target.point[0]] : []),
-    ...horizontals.flatMap(([a, b]) => [a[0] - RAIL_GAP, b[0] + RAIL_GAP]),
+    ...horizontals.flatMap(([a, b]) => [
+      a[0] - RAIL_GAP,
+      a[0] + RAIL_GAP,
+      b[0] - RAIL_GAP,
+      b[0] + RAIL_GAP,
+      a[0] - clearance,
+      a[0] + clearance,
+      b[0] - clearance,
+      b[0] + clearance,
+    ]),
     ...extents.flatMap((e) => [e.x0 - LANE_STUB, e.x1 + LANE_STUB]),
-    ...verticals.flatMap((v) => [v.x - RAIL_GAP, v.x + RAIL_GAP]),
+    ...verticals.flatMap((v) => [
+      v.x - RAIL_GAP,
+      v.x + RAIL_GAP,
+      v.x - clearance,
+      v.x + clearance,
+    ]),
   ]);
   // A stub can sit between an existing vertical and a part. Let the leg
   // climb around the vertical's end before descending, rather than treating
@@ -865,57 +1661,139 @@ function legToLane(
     stub[1],
     ...(target ? [target.point[1]] : []),
     lane,
-    ...verticals.flatMap((v) => [v.y0 - RAIL_GAP, v.y1 + RAIL_GAP]),
-    ...horizontals.flatMap(([a]) => [a[1] - RAIL_GAP, a[1] + RAIL_GAP]),
+    ...verticals.flatMap((v) => [
+      v.y0 - RAIL_GAP,
+      v.y1 + RAIL_GAP,
+      v.y0 - clearance,
+      v.y1 + clearance,
+    ]),
+    ...horizontals.flatMap(([a]) => [
+      a[1] - RAIL_GAP,
+      a[1] + RAIL_GAP,
+      a[1] - clearance,
+      a[1] + clearance,
+    ]),
     ...extents.flatMap((e) => [e.y0 - LANE_STUB, e.y1 + LANE_STUB]),
-  ]).filter((y) => y <= lane + SNAP);
+  ]);
   const sx = xs.findIndex((x) => Math.abs(x - stub[0]) < 0.01);
   const sy = ys.findIndex((y) => Math.abs(y - stub[1]) < 0.01);
-  const goal = ys.length - 1;
+  const goal = ys.findIndex((y) => Math.abs(y - lane) < 0.01);
   if (sx < 0 || sy < 0) return undefined;
-  const inside = (x: number, y: number) =>
-    parts.some((e) => e.x0 < x && x < e.x1 && e.y0 < y && y < e.y1);
-  const free = (a: Point, b: Point) => {
+  // Every check below is answered from obstacles prefiltered to the grid row
+  // or column a step runs along, and memoized per cell and per step: the
+  // search visits each step up to once per heading, and most obstacles are
+  // nowhere near a given line. The answers are exactly those of a full scan.
+  const W = xs.length;
+  const rowParts: (readonly Box[] | undefined)[] = new Array(ys.length);
+  const colParts: (readonly Box[] | undefined)[] = new Array(W);
+  const partsOnRow = (iy: number) =>
+    (rowParts[iy] ??= parts.filter((e) => e.y0 < ys[iy] && ys[iy] < e.y1));
+  const partsOnCol = (ix: number) =>
+    (colParts[ix] ??= parts.filter((e) => e.x0 < xs[ix] && xs[ix] < e.x1));
+  const rowVerticals: (readonly VerticalRun[] | undefined)[] = new Array(
+    ys.length
+  );
+  const rowHorizontals: (readonly Segment[] | undefined)[] = new Array(
+    ys.length
+  );
+  const colVerticals: (readonly VerticalRun[] | undefined)[] = new Array(W);
+  const colHorizontals: (readonly Segment[] | undefined)[] = new Array(W);
+  // Strict: verticals whose span covers this row; collinear: horizontals on it.
+  const verticalsOnRow = (iy: number) =>
+    (rowVerticals[iy] ??= verticals.filter(
+      (v) => v.y0 - SNAP < ys[iy] && ys[iy] < v.y1 + SNAP
+    ));
+  const horizontalsOnRow = (iy: number) =>
+    (rowHorizontals[iy] ??= horizontals.filter(
+      ([p, q]) => Math.abs(p[1] - q[1]) < SNAP && Math.abs(p[1] - ys[iy]) < SNAP
+    ));
+  // Strict: horizontals whose span covers this column; clearance: verticals near it.
+  const horizontalsOnCol = (ix: number) =>
+    (colHorizontals[ix] ??= horizontals.filter(
+      ([p, q]) =>
+        Math.min(p[0], q[0]) - SNAP < xs[ix] &&
+        xs[ix] < Math.max(p[0], q[0]) + SNAP
+    ));
+  const verticalsOnCol = (ix: number) =>
+    (colVerticals[ix] ??= verticals.filter(
+      (v) => Math.abs(v.x - xs[ix]) < clearance - SNAP
+    ));
+  const insideMemo = new Int8Array(W * ys.length);
+  const inside = (ix: number, iy: number) => {
+    const at = iy * W + ix;
+    if (insideMemo[at] === 0) {
+      const x = xs[ix];
+      insideMemo[at] = partsOnRow(iy).some((e) => e.x0 < x && x < e.x1) ? 1 : 2;
+    }
+    return insideMemo[at] === 1;
+  };
+  const freeMemo = new Int8Array(W * ys.length * 4);
+  const free = (ix: number, iy: number, m: number, nx: number, ny: number) => {
+    const at = (iy * W + ix) * 4 + m;
+    if (freeMemo[at] === 0)
+      freeMemo[at] = step([xs[ix], ys[iy]], [xs[nx], ys[ny]], ix, iy) ? 1 : 2;
+    return freeMemo[at] === 1;
+  };
+  const step = (a: Point, b: Point, ix: number, iy: number) => {
     const box = segmentBox([a, b]);
-    if (parts.some((e) => crosses(box, e))) return false;
-    if (a[1] === b[1]) return !horizontals.some((s) => collinear([a, b], s));
-    return !verticals.some(
-      (v) =>
-        Math.abs(v.x - a[0]) < RAIL_GAP - SNAP &&
-        v.y0 < box.y1 - SNAP &&
-        box.y0 + SNAP < v.y1
+    if (a[1] === b[1]) {
+      if (partsOnRow(iy).some((e) => crosses(box, e))) return false;
+      if (
+        strict &&
+        verticalsOnRow(iy).some(
+          (v) => box.x0 - SNAP < v.x && v.x < box.x1 + SNAP
+        )
+      )
+        return false;
+      return !horizontalsOnRow(iy).some((s) => collinear([a, b], s));
+    }
+    if (partsOnCol(ix).some((e) => crosses(box, e))) return false;
+    if (
+      strict &&
+      horizontalsOnCol(ix).some(
+        ([p]) => box.y0 - SNAP < p[1] && p[1] < box.y1 + SNAP
+      )
+    )
+      return false;
+    return !verticalsOnCol(ix).some(
+      (v) => v.y0 < box.y1 - SNAP && box.y0 + SNAP < v.y1
     );
   };
   // state: (ix, iy, heading), heading 0 at the start, else 1 + index in MOVES
   const key = (ix: number, iy: number, h: number) =>
     (iy * xs.length + ix) * 5 + h;
-  const cost = new Map<number, number>();
-  const from = new Map<number, number>();
+  const states = W * ys.length * 5;
+  const cost = new Float64Array(states).fill(Infinity);
+  const from = new Int32Array(states).fill(-1);
   const heap = new MinHeap();
   const start = key(sx, sy, 0);
-  cost.set(start, 0);
-  heap.push(0, start);
+  // Manhattan distance is an admissible, consistent lower bound: bends add
+  // cost, and a lane has no required x coordinate. This keeps boxed-in
+  // searches local without weakening any obstacle or crossing constraint.
+  const remaining = (ix: number, iy: number) =>
+    Math.abs(ys[iy] - (target?.point[1] ?? lane)) +
+    (target ? Math.abs(xs[ix] - target.point[0]) : 0);
+  cost[start] = 0;
+  heap.push(remaining(sx, sy), start);
   while (heap.size > 0) {
-    const [c, k] = heap.pop();
-    if (c > (cost.get(k) ?? Infinity)) continue;
+    const priority = heap.topPriority();
+    const k = heap.pop();
+    const c = cost[k];
     const h = k % 5;
     const cell = (k - h) / 5;
     const [ix, iy] = [cell % xs.length, Math.floor(cell / xs.length)];
+    if (priority > c + remaining(ix, iy)) continue;
     const arrived = target
       ? Math.abs(xs[ix] - target.point[0]) < 0.01 &&
         Math.abs(ys[iy] - target.point[1]) < 0.01 &&
         h !== 0 &&
         MOVES[h - 1][0] * OUTWARD[target.side][0] +
-          MOVES[h - 1][1] * OUTWARD[target.side][1] <=
-          0
+          MOVES[h - 1][1] * OUTWARD[target.side][1] <
+          (aligned ? 0 : 1)
       : iy === goal;
     if (arrived) {
       const path: Point[] = [];
-      for (
-        let at: number | undefined = k;
-        at !== undefined;
-        at = from.get(at)
-      ) {
+      for (let at = k; at >= 0; at = from[at]) {
         const n = (at - (at % 5)) / 5;
         path.push([xs[n % xs.length], ys[Math.floor(n / xs.length)]]);
       }
@@ -936,11 +1814,12 @@ function legToLane(
       // move doubles back on the one before.
       const [bx, by] = h === 0 ? OUTWARD[side] : MOVES[h - 1];
       if (dx === -bx && dy === -by) continue;
+      if (aligned && h === 0 && (dx !== bx || dy !== by)) continue;
       const [nx, ny] = [ix + dx, iy + dy];
       if (nx < 0 || ny < 0 || nx >= xs.length || ny >= ys.length) continue;
+      if (inside(nx, ny) || !free(ix, iy, m, nx, ny)) continue;
       const a: Point = [xs[ix], ys[iy]];
       const b: Point = [xs[nx], ys[ny]];
-      if (inside(b[0], b[1]) || !free(a, b)) continue;
       const nh = m + 1;
       const nc =
         c +
@@ -948,45 +1827,77 @@ function legToLane(
         Math.abs(b[1] - a[1]) +
         (h !== 0 && h !== nh ? BEND_COST : 0);
       const nk = key(nx, ny, nh);
-      if (nc < (cost.get(nk) ?? Infinity)) {
-        cost.set(nk, nc);
-        from.set(nk, k);
-        heap.push(nc, nk);
+      if (nc < cost[nk]) {
+        cost[nk] = nc;
+        from[nk] = k;
+        heap.push(nc + remaining(nx, ny), nk);
       }
     }
   }
   return undefined;
 }
 
-/** A binary min-heap of (priority, value) pairs. */
+/** A per-layout cache of `legToLane` answers, keyed by every input. */
+function memoizedLegs(): typeof legToLane {
+  const answers = new Map<string, Point[] | undefined>();
+  return (...args) => {
+    const key = JSON.stringify(args);
+    let path = answers.get(key);
+    if (path === undefined && !answers.has(key)) {
+      path = legToLane(...args);
+      answers.set(key, path);
+    }
+    // Callers reverse and splice paths; hand out a fresh array every time.
+    return path && [...path];
+  };
+}
+
+/**
+ * A binary min-heap of (priority, value) pairs in two parallel arrays, so a
+ * push or pop allocates nothing. Same sift order as a tuple heap.
+ */
 class MinHeap {
-  private readonly items: [number, number][] = [];
+  private readonly priorities: number[] = [];
+  private readonly values: number[] = [];
   get size() {
-    return this.items.length;
+    return this.values.length;
+  }
+  topPriority() {
+    return this.priorities[0];
   }
   push(priority: number, value: number) {
-    const a = this.items;
-    a.push([priority, value]);
-    for (let i = a.length - 1; i > 0; ) {
+    const p = this.priorities;
+    const v = this.values;
+    let i = v.length;
+    p.push(priority);
+    v.push(value);
+    while (i > 0) {
       const up = (i - 1) >> 1;
-      if (a[up][0] <= a[i][0]) break;
-      [a[up], a[i]] = [a[i], a[up]];
+      if (p[up] <= p[i]) break;
+      [p[up], p[i]] = [p[i], p[up]];
+      [v[up], v[i]] = [v[i], v[up]];
       i = up;
     }
   }
-  pop(): [number, number] {
-    const a = this.items;
-    const top = a[0];
-    const last = a.pop()!;
-    if (a.length > 0) {
-      a[0] = last;
+  /** Removes the minimum and returns its value. */
+  pop(): number {
+    const p = this.priorities;
+    const v = this.values;
+    const top = v[0];
+    const lastP = p.pop()!;
+    const lastV = v.pop()!;
+    if (v.length > 0) {
+      p[0] = lastP;
+      v[0] = lastV;
       for (let i = 0; ; ) {
-        const [l, r] = [2 * i + 1, 2 * i + 2];
+        const l = 2 * i + 1;
+        const r = l + 1;
         let m = i;
-        if (l < a.length && a[l][0] < a[m][0]) m = l;
-        if (r < a.length && a[r][0] < a[m][0]) m = r;
+        if (l < v.length && p[l] < p[m]) m = l;
+        if (r < v.length && p[r] < p[m]) m = r;
         if (m === i) break;
-        [a[m], a[i]] = [a[i], a[m]];
+        [p[m], p[i]] = [p[i], p[m]];
+        [v[m], v[i]] = [v[i], v[m]];
         i = m;
       }
     }
@@ -1095,16 +2006,38 @@ function labelOnRoute(
   )) {
     const x = (a[0] + b[0]) / 2;
     const y = (a[1] + b[1]) / 2;
+    const positions = (lo: number, hi: number, half: number, axis: 0 | 1) => [
+      (lo + hi) / 2,
+      ...[
+        lo + half + 5,
+        hi - half - 5,
+        ...obstacles.flatMap((e) =>
+          axis === 0
+            ? [e.x0 - half - 5, e.x1 + half + 5]
+            : [e.y0 - half - 5, e.y1 + half + 5]
+        ),
+      ].filter((n) => n >= lo + half && n <= hi - half),
+    ];
     const candidates: Point[] =
       Math.abs(a[1] - b[1]) < SNAP
-        ? [
+        ? positions(
+            Math.min(a[0], b[0]),
+            Math.max(a[0], b[0]),
+            width / 2,
+            0
+          ).flatMap((x): Point[] => [
             [x, y - LABEL_LIFT],
             [x, y + LABEL_LIFT],
-          ]
-        : [
+          ])
+        : positions(
+            Math.min(a[1], b[1]),
+            Math.max(a[1], b[1]),
+            LABEL_H / 2,
+            1
+          ).flatMap((y): Point[] => [
             [x + width / 2 + 5, y],
             [x - width / 2 - 5, y],
-          ];
+          ]);
     for (const at of candidates) {
       const box = labelBox(at, text);
       if (![...obstacles, ...runs.map(segmentBox)].some((e) => crosses(box, e)))

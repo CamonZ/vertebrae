@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "vitest",
+  "checkers": [
+    "typescript"
+  ],
+  "tsconfigFile": "tsconfig.json",
+  "mutate": [
+    "src/components/MachineDiagram/flow/{lanePlanner,bus,crossings}.ts",
+    "src/components/MachineDiagram/flow/layout.ts:1664-1700"
+  ],
+  "reporters": [
+    "clear-text",
+    "json"
+  ],
+  "timeoutMS": 30000,
+  "incremental": false,
+  "concurrency": 4,
+  "maxTestRunnerReuse": 50,
+  "vitest": {
+    "configFile": "vitest.routing-mutation.config.ts"
+  }
+}

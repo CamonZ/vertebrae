@@ -237,6 +237,8 @@ function RailWire({ rail: r }: { rail: DiagramRail }) {
   return (
     <Wire
       points={r.points}
+      jumps={r.jumps}
+      cornerRadii={r.cornerRadii}
       change={r.change === "unchanged" ? "" : r.change}
       label={r.label}
       labelAt={r.labelAt}

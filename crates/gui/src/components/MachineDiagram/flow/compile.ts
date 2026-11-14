@@ -9,6 +9,7 @@
  * The compiler only sequences steps and moves cards along rails; what a
  * verb does inside a part comes from the part registry.
  */
+import type { RouteStyle } from "../route";
 import type { ChangeMark, PartIdentity } from "../accessibility";
 import type { BBox } from "../ChangeMark";
 import type { StateRole } from "../palette";
@@ -145,7 +146,7 @@ export interface DiagramPart {
   readonly drill?: DrillTarget;
 }
 
-export interface DiagramRail {
+export interface DiagramRail extends RouteStyle {
   readonly id: string;
   readonly from: { readonly part: string; readonly port: string };
   readonly to: { readonly part: string; readonly port: string };
@@ -270,7 +271,7 @@ export interface LayoutRail {
 }
 
 /** A rail routed by a layout: points from port to port, and its label centre. */
-export interface RailRoute {
+export interface RailRoute extends RouteStyle {
   readonly points: readonly Point[];
   readonly labelAt?: Point;
 }
@@ -561,6 +562,8 @@ function arrange(
           ]
         : railBetween(portAt(from.part, from.port), portAt(to.part, to.port)),
       ...(r.label ? { label: r.label } : {}),
+      ...(routed?.jumps?.length ? { jumps: routed.jumps } : {}),
+      ...(routed?.cornerRadii ? { cornerRadii: routed.cornerRadii } : {}),
       ...(routed?.labelAt ? { labelAt: routed.labelAt } : {}),
       conditional: r.conditional ?? false,
       change,
@@ -704,7 +707,7 @@ function arrange(
           );
           return;
         }
-        const r = route(rail.points);
+        const r = route(rail.points, undefined, rail);
         const d = railTravel(r.length);
         travel.cards.push(
           tokenCard(stepCard(c), c.role, [[r, t, d]], t, t + d + 0.02, {

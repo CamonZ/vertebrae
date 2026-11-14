@@ -5,6 +5,7 @@
  * auto-layout places them. Reached at `/dev/flows` in dev builds only
  * (router.tsx).
  */
+import { ROUTING_EXAMPLES } from "../components/MachineDiagram/flow/routingExamples";
 import { useMemo, useState } from "react";
 import inlineDiscussions from "../components/MachineDiagram/flow/__fixtures__/inlineDiscussions.flow.yaml?raw";
 import mechanisms from "../components/MachineDiagram/flow/__fixtures__/mechanisms.flow.yaml?raw";
@@ -26,6 +27,9 @@ const SPECS = [
   ["migration in phases", sessionMigration, false],
   ["inline discussions · auto-layout", inlineDiscussions, true],
   ["mechanisms · auto-layout", mechanisms, true],
+  ...ROUTING_EXAMPLES.map(
+    ({ name, spec }) => [name, JSON.stringify(spec), false] as const
+  ),
 ] as const;
 
 /** Drop hand-given positions; frame the inline-discussion session and its tool guard as one process. */
@@ -90,6 +94,7 @@ export function FlowPlayerDevPage() {
           key={name}
           className="max-w-[1100px] rounded-md border border-[var(--color-line)] bg-[var(--color-bg)] p-3"
         >
+          <h2 className="mb-2 font-mono text-sm">{name}</h2>
           <DevFlow
             name={name}
             source={source}
