@@ -1,0 +1,1058 @@
+[
+  {
+    "name": "gen50",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "transaction"
+        },
+        {
+          "id": "p1",
+          "kind": "session"
+        },
+        {
+          "id": "p2",
+          "kind": "rate limiter"
+        },
+        {
+          "id": "p3",
+          "kind": "transform"
+        },
+        {
+          "id": "p4",
+          "kind": "schema"
+        },
+        {
+          "id": "p5",
+          "kind": "splitter"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p1.out",
+          "to": "p0.in"
+        },
+        {
+          "id": "r1",
+          "from": "p3.out",
+          "to": "p5.in"
+        },
+        {
+          "id": "r2",
+          "from": "p1.out",
+          "to": "p1.turn",
+          "label": "ok"
+        },
+        {
+          "id": "r3",
+          "from": "p2.out",
+          "to": "p1.turn"
+        },
+        {
+          "id": "r4",
+          "from": "p5.b2",
+          "to": "p2.in"
+        },
+        {
+          "id": "r5",
+          "from": "p5.b1",
+          "to": "p3.in"
+        },
+        {
+          "id": "r6",
+          "from": "p4.out",
+          "to": "p1.turn"
+        },
+        {
+          "id": "r7",
+          "from": "p1.out",
+          "to": "p5.in"
+        }
+      ]
+    }
+  },
+  {
+    "name": "gen138",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "lock"
+        },
+        {
+          "id": "p1",
+          "kind": "quorum"
+        },
+        {
+          "id": "p2",
+          "kind": "circuit breaker"
+        },
+        {
+          "id": "p3",
+          "kind": "client"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p1.r2",
+          "to": "p1.r3",
+          "label": "ok"
+        },
+        {
+          "id": "r1",
+          "from": "p1.r2",
+          "to": "p1.r1",
+          "label": "ok"
+        },
+        {
+          "id": "r2",
+          "from": "p1.r1",
+          "to": "p1.r2",
+          "label": "retry later"
+        },
+        {
+          "id": "r3",
+          "from": "p2.out",
+          "to": "p1.r1"
+        },
+        {
+          "id": "r4",
+          "from": "p1.r2",
+          "to": "p2.in"
+        },
+        {
+          "id": "r5",
+          "from": "p1.r2",
+          "to": "p0.in"
+        }
+      ]
+    }
+  },
+  {
+    "name": "gen202",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "run end"
+        },
+        {
+          "id": "p1",
+          "kind": "event store"
+        },
+        {
+          "id": "p2",
+          "kind": "router"
+        },
+        {
+          "id": "p3",
+          "kind": "router"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p3.fallback",
+          "to": "p0.in",
+          "label": "retry later"
+        },
+        {
+          "id": "r1",
+          "from": "p3.r1",
+          "to": "p0.in"
+        },
+        {
+          "id": "r2",
+          "from": "p3.r3",
+          "to": "p0.in",
+          "label": "ok"
+        },
+        {
+          "id": "r3",
+          "from": "p2.fallback",
+          "to": "p3.in"
+        },
+        {
+          "id": "r4",
+          "from": "p1.out",
+          "to": "p1.in",
+          "label": "ok"
+        },
+        {
+          "id": "r5",
+          "from": "p2.r2",
+          "to": "p2.in",
+          "label": "retry later"
+        }
+      ]
+    }
+  },
+  {
+    "name": "gen255",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "rate limiter"
+        },
+        {
+          "id": "p1",
+          "kind": "version vector"
+        },
+        {
+          "id": "p2",
+          "kind": "structured step"
+        },
+        {
+          "id": "p3",
+          "kind": "inference step"
+        },
+        {
+          "id": "p4",
+          "kind": "quorum"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p3.tools",
+          "to": "p4.r1"
+        },
+        {
+          "id": "r1",
+          "from": "p0.out",
+          "to": "p4.r1",
+          "label": "retry later"
+        },
+        {
+          "id": "r2",
+          "from": "p3.tools",
+          "to": "p4.r2",
+          "label": "ok"
+        },
+        {
+          "id": "r3",
+          "from": "p4.r2",
+          "to": "p1.in"
+        },
+        {
+          "id": "r4",
+          "from": "p4.r2",
+          "to": "p0.in",
+          "label": "ok"
+        },
+        {
+          "id": "r5",
+          "from": "p4.r3",
+          "to": "p4.r2"
+        }
+      ]
+    }
+  },
+  {
+    "name": "loops that must wrap a neighbour",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "route step"
+        },
+        {
+          "id": "p1",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p2",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p3",
+          "kind": "aggregator"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p0.out1",
+          "to": "p0.in"
+        },
+        {
+          "id": "r1",
+          "from": "p0.out2",
+          "to": "p0.in"
+        },
+        {
+          "id": "r2",
+          "from": "p0.out3",
+          "to": "p0.in"
+        },
+        {
+          "id": "r3",
+          "from": "p0.out3",
+          "to": "p1.in"
+        },
+        {
+          "id": "r4",
+          "from": "p0.out2",
+          "to": "p1.in"
+        },
+        {
+          "id": "r5",
+          "from": "p0.out1",
+          "to": "p2.in"
+        },
+        {
+          "id": "r6",
+          "from": "p0.out2",
+          "to": "p2.in"
+        }
+      ]
+    }
+  },
+  {
+    "name": "kept rail across another port opening",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p1",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p2",
+          "kind": "replication"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p1.out",
+          "to": "p0.in"
+        },
+        {
+          "id": "r1",
+          "from": "p2.f2",
+          "to": "p1.in"
+        },
+        {
+          "id": "r3",
+          "from": "p2.f1",
+          "to": "p0.in"
+        }
+      ]
+    }
+  },
+  {
+    "name": "kept rail hugging a part",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "approval"
+        },
+        {
+          "id": "p1",
+          "kind": "alert"
+        },
+        {
+          "id": "p2",
+          "kind": "client"
+        },
+        {
+          "id": "p3",
+          "kind": "approval"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p0.out",
+          "to": "p1.in"
+        },
+        {
+          "id": "r1",
+          "from": "p0.out",
+          "to": "p3.in"
+        },
+        {
+          "id": "r2",
+          "from": "p2.request",
+          "to": "p3.person"
+        },
+        {
+          "id": "r3",
+          "from": "p3.out",
+          "to": "p0.in"
+        }
+      ]
+    }
+  },
+  {
+    "name": "facing ports on one line",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p1",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p2",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p3",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p4",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p5",
+          "kind": "aggregator"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p0.out",
+          "to": "p0.in"
+        },
+        {
+          "id": "r1",
+          "from": "p0.out",
+          "to": "p2.in"
+        },
+        {
+          "id": "r2",
+          "from": "p0.out",
+          "to": "p4.in"
+        },
+        {
+          "id": "r3",
+          "from": "p1.out",
+          "to": "p2.in",
+          "change": "added"
+        },
+        {
+          "id": "r4",
+          "from": "p1.out",
+          "to": "p5.in"
+        },
+        {
+          "id": "r5",
+          "from": "p4.out",
+          "to": "p0.in"
+        },
+        {
+          "id": "r6",
+          "from": "p5.out",
+          "to": "p4.in"
+        }
+      ]
+    }
+  },
+  {
+    "name": "labelled hairpin beside an unconnected part",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p1",
+          "kind": "decider"
+        },
+        {
+          "id": "p2",
+          "kind": "cache"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p0.out",
+          "to": "p2.fill"
+        },
+        {
+          "id": "r1",
+          "from": "p2.answer",
+          "to": "p2.fill"
+        },
+        {
+          "id": "r2",
+          "from": "p2.answer",
+          "to": "p2.in",
+          "label": "retry later"
+        }
+      ]
+    }
+  },
+  {
+    "name": "labelled same-port loop between loops",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "boundary"
+        },
+        {
+          "id": "p1",
+          "kind": "two-phase commit"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p1.p1",
+          "to": "p1.p3"
+        },
+        {
+          "id": "r1",
+          "from": "p1.p3",
+          "to": "p1.p1",
+          "label": "ok",
+          "change": "added"
+        },
+        {
+          "id": "r2",
+          "from": "p1.p2",
+          "to": "p1.p2",
+          "label": "deny"
+        }
+      ]
+    }
+  },
+  {
+    "name": "fine-grid parallels",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "alert"
+        },
+        {
+          "id": "p1",
+          "kind": "saga"
+        },
+        {
+          "id": "p2",
+          "kind": "guard"
+        },
+        {
+          "id": "p3",
+          "kind": "structured step"
+        },
+        {
+          "id": "p4",
+          "kind": "session"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p2.deny",
+          "to": "p1.in",
+          "label": "retry later"
+        },
+        {
+          "id": "r1",
+          "from": "p0.escalate",
+          "to": "p2.in"
+        },
+        {
+          "id": "r2",
+          "from": "p0.out",
+          "to": "p3.in",
+          "label": "retry later"
+        },
+        {
+          "id": "r3",
+          "from": "p3.out",
+          "to": "p3.in"
+        },
+        {
+          "id": "r4",
+          "from": "p0.out",
+          "to": "p4.turn",
+          "label": "retry later"
+        },
+        {
+          "id": "r5",
+          "from": "p2.deny",
+          "to": "p4.turn",
+          "label": "ok"
+        },
+        {
+          "id": "r6",
+          "from": "p2.deny",
+          "to": "p3.in"
+        },
+        {
+          "id": "r7",
+          "from": "p4.out",
+          "to": "p0.in",
+          "label": "retry later"
+        }
+      ]
+    }
+  },
+  {
+    "name": "rail sealing a port gap",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "document"
+        },
+        {
+          "id": "p1",
+          "kind": "aggregator"
+        },
+        {
+          "id": "p2",
+          "kind": "splitter"
+        },
+        {
+          "id": "p3",
+          "kind": "human gate"
+        },
+        {
+          "id": "p4",
+          "kind": "transform"
+        },
+        {
+          "id": "p5",
+          "kind": "execute step"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p2.b2",
+          "to": "p3.reviewer"
+        },
+        {
+          "id": "r1",
+          "from": "p2.b2",
+          "to": "p4.in"
+        },
+        {
+          "id": "r3",
+          "from": "p4.out",
+          "to": "p2.in"
+        },
+        {
+          "id": "r4",
+          "from": "p4.out",
+          "to": "p3.in",
+          "label": "ok"
+        },
+        {
+          "id": "r6",
+          "from": "p5.out",
+          "to": "p3.reviewer",
+          "label": "retry later"
+        },
+        {
+          "id": "r7",
+          "from": "p2.b1",
+          "to": "p3.in",
+          "label": "ok"
+        }
+      ]
+    }
+  },
+  {
+    "name": "crowded shared ports",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "rate limiter"
+        },
+        {
+          "id": "p1",
+          "kind": "structured step"
+        },
+        {
+          "id": "p2",
+          "kind": "joiner"
+        },
+        {
+          "id": "p3",
+          "kind": "alert"
+        },
+        {
+          "id": "p4",
+          "kind": "rate limiter"
+        },
+        {
+          "id": "p5",
+          "kind": "fencing token"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p5.out",
+          "to": "p2.b",
+          "label": "ok"
+        },
+        {
+          "id": "r1",
+          "from": "p3.out",
+          "to": "p2.b"
+        },
+        {
+          "id": "r2",
+          "from": "p0.out",
+          "to": "p1.in"
+        },
+        {
+          "id": "r3",
+          "from": "p0.out",
+          "to": "p3.in"
+        },
+        {
+          "id": "r4",
+          "from": "p3.escalate",
+          "to": "p0.in",
+          "label": "retry later"
+        },
+        {
+          "id": "r5",
+          "from": "p0.out",
+          "to": "p5.in",
+          "label": "ok"
+        },
+        {
+          "id": "r6",
+          "from": "p0.out",
+          "to": "p0.in",
+          "label": "ok"
+        },
+        {
+          "id": "r7",
+          "from": "p5.out",
+          "to": "p2.a",
+          "label": "retry later"
+        }
+      ]
+    }
+  },
+  {
+    "name": "loop sealing an inset port",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "pool"
+        },
+        {
+          "id": "p1",
+          "kind": "inference step"
+        },
+        {
+          "id": "p2",
+          "kind": "two-phase commit"
+        },
+        {
+          "id": "p3",
+          "kind": "state machine"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p2.p3",
+          "to": "p2.p1"
+        },
+        {
+          "id": "r1",
+          "from": "p2.p3",
+          "to": "p2.p2",
+          "label": "ok"
+        },
+        {
+          "id": "r3",
+          "from": "p2.p3",
+          "to": "p1.tools"
+        },
+        {
+          "id": "r4",
+          "from": "p1.tools",
+          "to": "p2.p1",
+          "label": "retry later"
+        },
+        {
+          "id": "r5",
+          "from": "p1.tools",
+          "to": "p1.tools",
+          "label": "retry later"
+        },
+        {
+          "id": "r6",
+          "from": "p2.p1",
+          "to": "p2.p3",
+          "label": "ok"
+        }
+      ]
+    }
+  },
+  {
+    "name": "same-port self-loops",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "quorum"
+        },
+        {
+          "id": "p1",
+          "kind": "worker"
+        },
+        {
+          "id": "p2",
+          "kind": "circuit breaker"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p0.r1",
+          "to": "p2.in",
+          "label": "ok"
+        },
+        {
+          "id": "r1",
+          "from": "p0.r1",
+          "to": "p0.r1",
+          "label": "ok"
+        },
+        {
+          "id": "r2",
+          "from": "p0.r2",
+          "to": "p1.in",
+          "label": "retry later"
+        },
+        {
+          "id": "r3",
+          "from": "p2.out",
+          "to": "p0.r1"
+        },
+        {
+          "id": "r4",
+          "from": "p0.r3",
+          "to": "p0.r3"
+        }
+      ]
+    }
+  },
+  {
+    "name": "earlier rail taking the inner slot",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "document"
+        },
+        {
+          "id": "p1",
+          "kind": "structured step"
+        },
+        {
+          "id": "p2",
+          "kind": "timeout"
+        },
+        {
+          "id": "p3",
+          "kind": "transform"
+        },
+        {
+          "id": "p4",
+          "kind": "run end"
+        },
+        {
+          "id": "p5",
+          "kind": "router"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p5.r1",
+          "to": "p2.in",
+          "label": "retry later"
+        },
+        {
+          "id": "r1",
+          "from": "p5.fallback",
+          "to": "p4.in"
+        },
+        {
+          "id": "r2",
+          "from": "p2.out",
+          "to": "p4.in"
+        },
+        {
+          "id": "r3",
+          "from": "p5.fallback",
+          "to": "p2.in",
+          "label": "ok"
+        },
+        {
+          "id": "r4",
+          "from": "p1.out",
+          "to": "p0.in",
+          "label": "ok"
+        },
+        {
+          "id": "r5",
+          "from": "p5.r1",
+          "to": "p1.in",
+          "label": "ok"
+        },
+        {
+          "id": "r6",
+          "from": "p5.r3",
+          "to": "p4.in"
+        }
+      ]
+    }
+  },
+  {
+    "name": "near-collinear grid lines",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "circuit breaker"
+        },
+        {
+          "id": "p1",
+          "kind": "alert"
+        },
+        {
+          "id": "p2",
+          "kind": "alert"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p0.out",
+          "to": "p2.in"
+        },
+        {
+          "id": "r1",
+          "from": "p0.out",
+          "to": "p1.in"
+        },
+        {
+          "id": "r2",
+          "from": "p1.escalate",
+          "to": "p0.in"
+        },
+        {
+          "id": "r3",
+          "from": "p1.escalate",
+          "to": "p2.in",
+          "change": "added"
+        },
+        {
+          "id": "r4",
+          "from": "p1.out",
+          "to": "p2.in",
+          "change": "added"
+        }
+      ],
+      "regions": [
+        {
+          "id": "g0",
+          "parts": ["p1"]
+        }
+      ]
+    }
+  },
+  {
+    "name": "loop running along another rail\u2019s port run",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "boundary",
+          "in": ["current"]
+        },
+        {
+          "id": "p1",
+          "kind": "failure detector",
+          "in": ["current"]
+        },
+        {
+          "id": "p2",
+          "kind": "two-phase commit"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p0.out",
+          "to": "p0.in"
+        },
+        {
+          "id": "r1",
+          "from": "p2.p1",
+          "to": "p1.heartbeat"
+        },
+        {
+          "id": "r2",
+          "from": "p2.p1",
+          "to": "p2.p2"
+        },
+        {
+          "id": "r3",
+          "from": "p2.p1",
+          "to": "p2.p1",
+          "label": "retry later"
+        }
+      ],
+      "regions": [
+        {
+          "id": "g0",
+          "parts": ["p2"]
+        }
+      ],
+      "arrangements": ["current", "A", "B"]
+    }
+  }
+]

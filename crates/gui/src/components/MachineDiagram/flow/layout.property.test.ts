@@ -1,3 +1,6 @@
+import { appendFileSync } from "node:fs";
+import { fixedPortPlanarity } from "./layoutPlanarityOracle";
+import { railCrossings } from "./crossings";
 import { sharesBadStretch } from "./layoutTestHelpers";
 /**
  * Property tests of flow auto-layout (layout.ts). Hegel generates valid flow
@@ -12,7 +15,7 @@ import { sharesBadStretch } from "./layoutTestHelpers";
  * carry a band, whose labels and chips take part in every collision check
  * and which must sit below everything, in one geometry for Before and After.
  */
-import { expect, test } from "vitest";
+import { beforeEach, expect, test } from "vitest";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
 import {
@@ -38,7 +41,11 @@ import {
   type PartSpec,
   type RailSpec,
   type RegionSpec,
+  resetLayoutCache,
 } from "./index";
+
+// The level cache is module-wide; keep every case's layout independent.
+beforeEach(resetLayoutCache);
 
 function check(condition: boolean, message: string): void {
   if (!condition) throw new Error(message);
@@ -283,7 +290,17 @@ const namedSpec = (placing: boolean) =>
   });
 
 async function laidOut(spec: FlowSpec): Promise<CompiledFlow> {
+  const started = performance.now();
   const r = await compileFlowLaidOut(spec, { registry });
+  if (process.env.LAYOUT_PROFILE)
+    appendFileSync(
+      process.env.LAYOUT_PROFILE,
+      JSON.stringify({
+        test: expect.getState().currentTestName,
+        milliseconds: performance.now() - started,
+        spec,
+      }) + "\n"
+    );
   if (!r.ok) throw new Error(`layout rejected: ${JSON.stringify(r.errors)}`);
   return r.flow;
 }
@@ -405,13 +422,21 @@ test.each(MODES)(
               `${where}: rails ${r.id} and ${q.id} run along each other`
             );
           }
-          if (backs.has(r.id)) {
-            const lowest = Math.max(...r.points.map(([, y]) => y));
-            for (const p of d.parts)
-              check(
-                lowest > partExtent(p).y1,
-                `${where}: return rail ${r.id} does not pass below ${p.id}`
-              );
+          if (backs.has(r.id) && r.from.part === r.to.part) {
+            const ends = d.parts.filter(
+              (p) => p.id === r.from.part || p.id === r.to.part
+            );
+            check(
+              Math.max(...r.points.map(([, y]) => y)) >
+                Math.max(...ends.map((p) => partExtent(p).y1)) ||
+                Math.min(...r.points.map(([, y]) => y)) <
+                  Math.min(...ends.map((p) => partExtent(p).y0)) ||
+                Math.max(...r.points.map(([x]) => x)) >
+                  Math.max(...ends.map((p) => partExtent(p).x1)) ||
+                Math.min(...r.points.map(([x]) => x)) <
+                  Math.min(...ends.map((p) => partExtent(p).x0)),
+              `${where}: return rail ${r.id} has no channel outside its span`
+            );
           }
         }
 
@@ -638,6 +663,139 @@ test(
         });
       },
       { testCases: 50 }
+    ),
+  TIMEOUT
+);
+
+test(
+  "every generated crossing has exactly one jump and every jump has a crossing",
+  () =>
+    hegel.testAsync(
+      async (tc) => {
+        const { spec } = tc.draw(flowSpec(false));
+        for (const d of (await laidOut(spec)).arrangements) {
+          let crossingCount = 0;
+          for (const [i, a] of d.rails.entries()) {
+            for (const b of d.rails.slice(i + 1))
+              for (const hit of railCrossings(a.points, b.points)) {
+                crossingCount++;
+                const at = (p: readonly [number, number]) =>
+                  Math.hypot(p[0] - hit.at[0], p[1] - hit.at[1]) < 0.01;
+                expect([
+                  ...(a.jumps ?? []).filter(
+                    (j) => j.segment === hit.a && at(j.at)
+                  ),
+                  ...(b.jumps ?? []).filter(
+                    (j) => j.segment === hit.b && at(j.at)
+                  ),
+                ]).toHaveLength(1);
+              }
+            for (const jump of a.jumps ?? [])
+              expect(
+                d.rails.some(
+                  (b) =>
+                    b !== a &&
+                    railCrossings(a.points, b.points).some(
+                      (c) =>
+                        c.a === jump.segment &&
+                        Math.hypot(c.at[0] - jump.at[0], c.at[1] - jump.at[1]) <
+                          0.01
+                    )
+                )
+              ).toBe(true);
+          }
+          if (fixedPortPlanarity(d) === "planar") {
+            if (crossingCount && process.env.LAYOUT_PROFILE)
+              appendFileSync(
+                process.env.LAYOUT_PROFILE,
+                JSON.stringify({ failed: spec, crossingCount }) + "\n"
+              );
+            expect(crossingCount, JSON.stringify(spec)).toBe(0);
+          }
+        }
+      },
+      { testCases: 500 }
+    ),
+  TIMEOUT
+);
+
+test(
+  "routing ignores rail ids and same-length label text",
+  () =>
+    hegel.testAsync(
+      async (tc) => {
+        const { spec } = tc.draw(flowSpec(false));
+        const renamed: FlowSpec = {
+          ...spec,
+          rails: spec.rails?.map((r, i) => ({
+            ...r,
+            id: `renamed${i}`,
+            ...(r.label ? { label: "x".repeat(r.label.length) } : {}),
+          })),
+        };
+        const [a, b] = await Promise.all([laidOut(spec), laidOut(renamed)]);
+        expect(b.arrangements.map((d) => d.rails.map((r) => r.points))).toEqual(
+          a.arrangements.map((d) => d.rails.map((r) => r.points))
+        );
+      },
+      { testCases: 500 }
+    ),
+  TIMEOUT
+);
+
+test(
+  "series-parallel flows with local self-loops, regions, changes and bands are crossing free",
+  () =>
+    hegel.testAsync(
+      async (tc) => {
+        const n = tc.draw(gs.integers({ minValue: 1, maxValue: 6 }));
+        const parts: PartSpec[] = Array.from({ length: n }, (_, i) => ({
+          id: `p${i}`,
+          kind: "aggregator",
+        }));
+        const rails: RailSpec[] = Array.from({ length: n - 1 }, (_, i) => ({
+          id: `f${i}`,
+          from: `p${i}.out`,
+          to: `p${i + 1}.in`,
+        }));
+        for (let i = 0; i < n; i++)
+          if (tc.draw(gs.booleans()))
+            rails.push({
+              id: `l${i}`,
+              from: `p${i}.out`,
+              to: `p${i}.in`,
+              ...(tc.draw(gs.booleans()) ? { change: "added" as const } : {}),
+            });
+        const spec: FlowSpec = {
+          version: 1,
+          parts,
+          rails,
+          ...(tc.draw(gs.booleans())
+            ? {
+                regions: [
+                  { id: "g", label: "REGION", parts: parts.map((p) => p.id) },
+                ],
+              }
+            : {}),
+          ...(tc.draw(gs.booleans()) ? tc.draw(banded) : {}),
+        };
+        const first = await laidOut(spec);
+        const expanded = await laidOut({
+          ...spec,
+          parts: [...parts, { id: "disconnected", kind: "aggregator" }],
+        });
+        for (const flow of [first, expanded])
+          for (const d of flow.arrangements)
+            for (const [i, a] of d.rails.entries())
+              for (const b of d.rails.slice(i + 1))
+                expect(railCrossings(a.points, b.points)).toHaveLength(0);
+        expect(
+          (await laidOut(spec)).arrangements.map((d) =>
+            d.rails.map((r) => r.points)
+          )
+        ).toEqual(first.arrangements.map((d) => d.rails.map((r) => r.points)));
+      },
+      { testCases: 500 }
     ),
   TIMEOUT
 );

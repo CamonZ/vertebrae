@@ -2,9 +2,9 @@ import type { CSSProperties } from "react";
 import { GraphEdge } from "../WorkflowAtlas/GraphEdge";
 import { SvgText, Glyph } from "./SvgText";
 import { usePart } from "./partContext";
-import { route, routePath, type Point } from "./route";
+import { route, routePath, type Point, type RouteStyle } from "./route";
 
-export interface RailProps {
+export interface RailProps extends RouteStyle {
   points: readonly Point[];
   /** Conditional lane (deny, undo, escalate, stop, host call). */
   dashed?: boolean;
@@ -17,7 +17,7 @@ export interface RailProps {
  * the shared GraphEdge path so stroke styling stays class-driven. Rails of a
  * removed or absent part turn dashed (VL-05).
  */
-export function Rail({ points, dashed, dash }: RailProps) {
+export function Rail({ points, dashed, dash, jumps, cornerRadii }: RailProps) {
   const { removed, inFlow } = usePart();
   // All catalogue parts share this boundary; flows draw their own Wire paths.
   if (inFlow) return null;
@@ -27,7 +27,7 @@ export function Rail({ points, dashed, dash }: RailProps) {
   return (
     <g className="md-rail" style={style}>
       <GraphEdge
-        d={routePath(route(points))}
+        d={routePath(route(points, undefined, { jumps, cornerRadii }))}
         kind={isDashed ? "handoff" : "step"}
         solid={!isDashed}
         markerEnd={null}
@@ -38,7 +38,7 @@ export function Rail({ points, dashed, dash }: RailProps) {
 
 export type WireChange = "" | "added" | "removed";
 
-export interface WireProps {
+export interface WireProps extends RouteStyle {
   points: readonly Point[];
   change?: WireChange;
   /** Arrowhead from the shared GraphMarkers (`url(#ge-arrow)`); off by default. */
@@ -63,8 +63,10 @@ export function Wire({
   arrow = false,
   label,
   labelAt,
+  jumps,
+  cornerRadii,
 }: WireProps) {
-  const r = route(points);
+  const r = route(points, undefined, { jumps, cornerRadii });
   const mid = r.points[Math.floor(r.points.length / 2)];
   const [mx, my] =
     r.points.length === 2

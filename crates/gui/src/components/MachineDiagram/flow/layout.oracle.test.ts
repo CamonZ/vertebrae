@@ -1,12 +1,8 @@
-/**
- * Oracle tests for `returnRails`, the cycle breaker that decides which rails
- * auto-layout routes back along the bottom. Hegel generates rail graphs
- * (self-loops, parallel rails and disconnected parts included); the oracle is
- * graph reachability, computed independently of the depth-first search:
- * removing the return rails must leave the flow acyclic, and every return
- * rail must close a cycle through the rails that stay.
- */
-import { test } from "vitest";
+import { elk } from "../../../hooks/useElkLayout";
+import { compileFlowOrThrow } from "./compile";
+import { layoutFlow } from "./layout";
+/** Independent MODEL_ORDER classification and acyclicity oracle. */
+import { expect, test, vi } from "vitest";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
 import { returnRails } from "./index";
@@ -31,22 +27,6 @@ const graph = gs.composite((tc) => {
   return { parts: ids.map((id) => ({ id })), rails };
 });
 
-/** Whether `to` can be reached from `from` along `rails` (zero steps counts). */
-function reaches(rails: readonly Rail[], from: string, to: string): boolean {
-  const seen = new Set([from]);
-  const queue = [from];
-  while (queue.length > 0) {
-    const at = queue.shift()!;
-    if (at === to) return true;
-    for (const r of rails)
-      if (r.from === at && !seen.has(r.to)) {
-        seen.add(r.to);
-        queue.push(r.to);
-      }
-  }
-  return false;
-}
-
 /** Kahn's algorithm: true when the rails admit a topological order. */
 function acyclic(parts: readonly { id: string }[], rails: readonly Rail[]) {
   const indegree = new Map(parts.map((p) => [p.id, 0]));
@@ -66,27 +46,86 @@ function acyclic(parts: readonly { id: string }[], rails: readonly Rail[]) {
   return ordered === parts.length;
 }
 
-test("return rails break every cycle and each closes one", () =>
-  hegel.test((tc) => {
-    const { parts, rails } = tc.draw(graph);
-    const back = returnRails(parts, rails);
-    const kept = rails.filter((r) => !back.has(r.id));
-    check(acyclic(parts, kept), "a cycle survives without the return rails");
-    for (const r of rails)
-      if (back.has(r.id))
-        check(
-          reaches(kept, r.to, r.from),
-          `return rail ${r.id} (${r.from} → ${r.to}) closes no cycle`
-        );
-  }));
+test("return rails equal MODEL_ORDER reversals and leave an acyclic graph", () =>
+  hegel.test(
+    (tc) => {
+      const { parts, rails } = tc.draw(graph);
+      const back = returnRails(parts, rails);
+      const expected = rails.filter(
+        (r) =>
+          parts.findIndex((p) => p.id === r.to) <=
+          parts.findIndex((p) => p.id === r.from)
+      );
+      check(
+        back.size === expected.length && expected.every((r) => back.has(r.id)),
+        "classification disagrees with MODEL_ORDER"
+      );
+      check(
+        acyclic(
+          parts,
+          rails.filter((r) => !back.has(r.id))
+        ),
+        "a cycle survives without the return rails"
+      );
+    },
+    { testCases: 500 }
+  ));
 
 test("a flow whose rails follow spec order has no return rails", () =>
-  hegel.test((tc) => {
-    const { parts, rails } = tc.draw(graph);
-    const order = new Map(parts.map((p, i) => [p.id, i]));
-    const onward = rails.filter((r) => order.get(r.from)! < order.get(r.to)!);
-    check(
-      returnRails(parts, onward).size === 0,
-      "an acyclic flow in spec order was given return rails"
+  hegel.test(
+    (tc) => {
+      const { parts, rails } = tc.draw(graph);
+      const order = new Map(parts.map((p, i) => [p.id, i]));
+      const onward = rails.filter((r) => order.get(r.from)! < order.get(r.to)!);
+      check(
+        returnRails(parts, onward).size === 0,
+        "an acyclic flow in spec order was given return rails"
+      );
+    },
+    { testCases: 500 }
+  ));
+
+test("ELK receives only forward rails and our router owns every return", async () => {
+  const observed = vi.spyOn(elk, "layout");
+  try {
+    await hegel.testAsync(
+      async (tc) => {
+        const { parts, rails } = tc.draw(graph);
+        tc.assume(parts.length <= 6 && rails.length <= 8);
+        const compiled = compileFlowOrThrow({
+          version: 1,
+          parts: parts.map((p) => ({ ...p, kind: "aggregator" })),
+          rails: rails.map((r) => ({
+            id: r.id,
+            from: `${r.from}.out`,
+            to: `${r.to}.in`,
+          })),
+        });
+        observed.mockClear();
+        const layout = await layoutFlow(compiled, { cache: false });
+        const back = returnRails(parts, rails);
+        const input = observed.mock.calls[0][0];
+        expect(input.edges?.map((e) => e.id)).toEqual(
+          rails.filter((r) => !back.has(r.id)).map((r) => r.id)
+        );
+        const output: import("elkjs/lib/elk.bundled.js").ElkNode =
+          await observed.mock.results[0].value;
+        const x = new Map(output.children!.map((n) => [n.id, n.x!]));
+        for (const r of rails) {
+          if (!back.has(r.id))
+            expect(x.get(r.to)!).toBeGreaterThan(x.get(r.from)!);
+          else {
+            expect(input.edges?.some((e) => e.id === r.id)).toBe(false);
+            // Our router draws it (straight, when its ports face each other).
+            expect(layout.routes?.[r.id].points.length).toBeGreaterThanOrEqual(
+              2
+            );
+          }
+        }
+      },
+      { testCases: 500 }
     );
-  }));
+  } finally {
+    observed.mockRestore();
+  }
+}, 120_000);

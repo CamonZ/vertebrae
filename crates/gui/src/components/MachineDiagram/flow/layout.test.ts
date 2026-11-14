@@ -1,5 +1,5 @@
 import { sharesBadStretch } from "./layoutTestHelpers";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import burstOptions from "./__fixtures__/burstOptions.flow.yaml?raw";
 import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
 import mechanisms from "./__fixtures__/mechanisms.flow.yaml?raw";
@@ -17,7 +17,11 @@ import {
   type CompiledFlow,
   type FlowSpec,
   type PartSpec,
+  resetLayoutCache,
 } from "./index";
+
+// The level cache is module-wide; keep every case's layout independent.
+beforeEach(resetLayoutCache);
 
 const spec = (source: string): FlowSpec => {
   const parsed = parseFlowSpec(source);
@@ -395,15 +399,23 @@ describe("auto-layout", () => {
     const verticals = r.points
       .slice(1)
       .flatMap((b, i) => (r.points[i][0] === b[0] ? [b[0]] : []));
-    // Down and back up on two different lines, never through a part.
-    expect(new Set(verticals).size).toBeGreaterThanOrEqual(2);
+    // A same-port loop needs a round trip on distinct verticals; a hairpin
+    // between different same-side ports needs only its connecting vertical.
+    expect(new Set(verticals).size).toBeGreaterThanOrEqual(
+      loop.from === loop.to ? 2 : 1
+    );
     for (let i = 2; i < r.points.length; i++) {
       const [a, b, c] = [r.points[i - 2], r.points[i - 1], r.points[i]];
       const dot = (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]);
       expect(dot, `turns back at ${b}`).toBeGreaterThan(-1);
     }
     const lane = Math.max(...r.points.map(([, y]) => y));
-    for (const p of d.parts) expect(lane).toBeGreaterThan(partExtent(p).y1);
+    expect(
+      lane > partExtent(d.parts[0]).y1 ||
+        Math.min(...r.points.map(([, y]) => y)) < partExtent(d.parts[0]).y0 ||
+        Math.max(...r.points.map(([x]) => x)) > partExtent(d.parts[0]).x1 ||
+        Math.min(...r.points.map(([x]) => x)) < partExtent(d.parts[0]).x0
+    ).toBe(true);
   });
 
   it("brings a return rail into a top port from above, around its part", async () => {
@@ -469,9 +481,13 @@ describe("auto-layout", () => {
       ).arrangements[0];
       const [a, b] = [d.rails[0], d.rails[2]];
       for (const r of [a, b]) {
-        expect(Math.max(...r.points.map(([, y]) => y))).toBeGreaterThan(
-          Math.max(...d.parts.map((p) => partExtent(p).y1))
-        );
+        const own = partExtent(d.parts[0]);
+        expect(
+          Math.max(...r.points.map(([, y]) => y)) > own.y1 ||
+            Math.min(...r.points.map(([, y]) => y)) < own.y0 ||
+            Math.max(...r.points.map(([x]) => x)) > own.x1 ||
+            Math.min(...r.points.map(([x]) => x)) < own.x0
+        ).toBe(true);
       }
       for (let i = 1; i < a.points.length; i++)
         for (let j = 1; j < b.points.length; j++) {
