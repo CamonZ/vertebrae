@@ -10,6 +10,11 @@ const THREE_OPTIONS: &str = include_str!(
     "../../../gui/src/components/MachineDiagram/flow/__fixtures__/burstOptions.flow.yaml"
 );
 
+/// The committed migration reference spec (phases).
+const MIGRATION: &str = include_str!(
+    "../../../gui/src/components/MachineDiagram/flow/__fixtures__/sessionMigration.flow.yaml"
+);
+
 /// Writes `body` to a temporary `.yaml` file and stores its path as `<name>`.
 fn write_spec(world: &mut SmokeWorld, name: String, body: &str) {
     let mut file = tempfile::Builder::new()
@@ -58,5 +63,22 @@ async fn given_three_options_edited(
         "the three-option spec has no {from:?} to replace"
     );
     let body = THREE_OPTIONS.replacen(&from, &to, 1);
+    write_spec(world, name, &body);
+}
+
+#[given(expr = "a flow spec file {word} holding the migration reference spec")]
+async fn given_migration(world: &mut SmokeWorld, name: String) {
+    write_spec(world, name, MIGRATION);
+}
+
+#[given(
+    expr = "a flow spec file {word} holding the migration reference spec with {string} replaced by {string}"
+)]
+async fn given_migration_edited(world: &mut SmokeWorld, name: String, from: String, to: String) {
+    assert!(
+        MIGRATION.contains(&from),
+        "the migration spec has no {from:?} to replace"
+    );
+    let body = MIGRATION.replacen(&from, &to, 1);
     write_spec(world, name, &body);
 }

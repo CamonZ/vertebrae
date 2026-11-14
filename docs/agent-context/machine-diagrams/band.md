@@ -12,7 +12,8 @@ The optional `meter` requires `label` and `marker` (a nonempty string or unique
 nonempty list of strings), with optional `footnote`. It counts compiler markers
 such as `spawn`, `resume`, `close`, `checkpoint`, `arrival`; it is not a freely
 authored counter. The default footnote lists each arrangement's count, e.g.
-`before: 2  ·  after: 1`.
+`before: 2  ·  after: 1`; with phases the meter counts the whole story once
+and has no default footnote.
 The divider and band geometry stay shared while contents differ.
 
 The [Before/After recipe](recipes/before-after.md) includes a band whose meter

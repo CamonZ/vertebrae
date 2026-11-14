@@ -8,7 +8,7 @@ export type PlayerCommand =
   | { readonly kind: "seek"; readonly beat: number }
   | { readonly kind: "speed"; readonly dir: 1 | -1 }
   | { readonly kind: "loop" }
-  /** Next (1) or previous (-1) arrangement; with two, a toggle. */
+  /** Next (1) or previous (-1) arrangement (or phase); with two, a toggle. */
   | { readonly kind: "arrangement"; readonly dir: 1 | -1 }
   | { readonly kind: "beats" }
   | { readonly kind: "clear" }
@@ -32,7 +32,7 @@ export const PLAYER_SHORTCUTS: readonly (readonly [
   ["1 – 9, Home, End", "jump to a beat"],
   ["− / +", "slower / faster"],
   ["L", "loop, or play once and stop at the end"],
-  ["B / ⇧B", "next / previous arrangement"],
+  ["B / ⇧B", "next / previous arrangement, or phase"],
   ["C", "show or hide the beats"],
   ["Tab, Enter", "focus and open a part or follow a card"],
   ["Esc", "stop following, unpin"],

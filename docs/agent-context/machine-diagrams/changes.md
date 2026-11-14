@@ -2,8 +2,9 @@
 
 One spec can show several arrangements of the same machine; the reader
 switches between them in place. Use the Before/After shorthand for one
-change, and named arrangements to compare options (A adds x, y and z; B adds
-only y and z, wired differently). Keep one shared story and cards, never
+change, named arrangements to compare options (A adds x, y and z; B adds
+only y and z, wired differently), and [phases](phases.md) for a migration the story
+moves through (today → … → target). Keep one shared story and cards, never
 unrelated drawings: the difference in outcome is computed.
 
 ## Before/After shorthand
@@ -58,7 +59,9 @@ With motion, the switch morphs between any two on the shared layout for
 draws on, removed parts ghost out, changed parts' brackets flare; band rows
 and the meter cross-fade under a still divider. Reduced motion snaps.
 Explain the result in captions without depending on motion. A
-[drilled-into](drill.md) child keeps its own arrangements. See the
-[change recipe](recipes/before-after.md).
+[drilled-into](drill.md) child keeps its own arrangements.
+
+See the [change recipe](recipes/before-after.md). With phases the story
+picks the arrangement instead: see [phases](phases.md).
 
 [Authoring index](../machine-diagrams.md).

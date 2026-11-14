@@ -45,7 +45,7 @@ const arrangementList = (what: string): JsonSchema => ({
   minItems: 1,
   uniqueItems: true,
   items: id,
-  description: `named arrangements ${what} (default: every one it can be in); needs a top-level arrangements list`,
+  description: `named arrangements (or phases) ${what} (default: every one it can be in); needs a top-level arrangements or phases list`,
 });
 
 export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
@@ -74,17 +74,14 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
         minItems: 1,
         description:
           "named arrangements of the machine (options A, B…), switched in place; absent: Before/After when anything is marked, otherwise one current arrangement",
-        items: {
-          oneOf: [
-            id,
-            {
-              type: "object",
-              required: ["name"],
-              additionalProperties: false,
-              properties: { name: id, label: { type: "string" } },
-            },
-          ],
-        },
+        items: ref("arrangementDecl"),
+      },
+      phases: {
+        type: "array",
+        minItems: 1,
+        description:
+          "phases of a migration in order (today → … → target), instead of arrangements: the story moves through them, each started by a beat's phase, and each is marked against the phase before it",
+        items: ref("arrangementDecl"),
       },
       baseline: {
         ...id,
@@ -99,7 +96,19 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
       band: ref("band"),
       attachments: ref("attachments"),
     },
+    not: { required: ["arrangements", "phases"] },
     $defs: {
+      arrangementDecl: {
+        oneOf: [
+          id,
+          {
+            type: "object",
+            required: ["name"],
+            additionalProperties: false,
+            properties: { name: id, label: { type: "string" } },
+          },
+        ],
+      },
       attachments: { type: "array", items: ref("attachment") },
       attachment: {
         type: "object",
@@ -310,6 +319,11 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
                 additionalProperties: { type: "string" },
               },
             ],
+          },
+          phase: {
+            ...id,
+            description:
+              "phased specs: the phase this beat starts, the next one in phases; later beats stay in it",
           },
           steps: { type: "array", items: ref("step") },
           hold: { type: "number", minimum: 0 },

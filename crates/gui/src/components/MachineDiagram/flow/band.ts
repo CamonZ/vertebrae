@@ -158,7 +158,8 @@ export interface BandInput {
 export function layoutBand(
   spec: BandSpec,
   inputs: readonly BandInput[],
-  content: Box
+  content: Box,
+  o: { readonly footnotePerArrangement?: boolean } = {}
 ): DiagramBand[] {
   const x0 = Math.max(0, content.x0);
   const y = content.y1 + BAND_GAP;
@@ -208,7 +209,7 @@ export function layoutBand(
   const totals = inputs.map((d) => timesOf(d).length);
   const footnote =
     m?.footnote ??
-    (m && inputs.length > 1
+    (m && inputs.length > 1 && (o.footnotePerArrangement ?? true)
       ? inputs.map((d, i) => `${d.arrangement}: ${totals[i]}`).join("  ·  ")
       : undefined);
   const meterW = m ? meterWidth(m.label, Math.max(0, ...totals), footnote) : 0;

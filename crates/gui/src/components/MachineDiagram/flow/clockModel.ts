@@ -209,19 +209,42 @@ export function sameBeat(from: Timeline, to: Timeline, i: number): number {
 }
 
 /**
+ * Why the clock changed timelines: the reader picked another arrangement, or
+ * the story crossed into another phase.
+ */
+export type RetargetCause = "arrangement" | "phase";
+
+/**
  * The clock moved onto another arrangement's timeline: keep the story beat
  * (see `sameBeat`). Paused, it lands on that beat's start, as a seek does;
  * playing, on its outcome, so playback carries on into the next beat (its
  * start under reduced motion, so the beat is held in full). A beat being
  * played on its own stops on the new arrangement's outcome of that beat.
+ *
+ * A phase change is the story itself moving on (playback, a step or seek
+ * crossing into a beat of another phase), so the clock keeps its place in
+ * the beat instead: as far into it as it was (at most its outcome), still
+ * playing, and a beat played on its own plays on to the new outcome.
  */
 export function retarget(
   from: Timeline,
   to: Timeline,
   s: ClockState,
-  reduced: boolean
+  reduced: boolean,
+  cause: RetargetCause = "arrangement"
 ): ClockState {
   const i = shownBeat(from, s, reduced);
+  if (cause === "phase") {
+    if (i < 0) return s;
+    const j = sameBeat(from, to, i);
+    const end = beatOutcome(to, j);
+    const into = Math.max(0, s.raw - beatStart(from, i));
+    return {
+      ...s,
+      raw: Math.min(end, beatStart(to, j) + into),
+      until: s.until === null ? null : end,
+    };
+  }
   if (i < 0 && s.until === null) return { ...s, raw: 0 };
   const j = sameBeat(from, to, Math.max(0, i));
   if (s.until !== null) return rest(s, beatOutcome(to, j));

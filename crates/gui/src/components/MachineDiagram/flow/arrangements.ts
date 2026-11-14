@@ -10,6 +10,11 @@
  * a removed one only Before), and compiles to `[before, after]` with
  * `before` as the baseline; a spec with neither compiles to `[current]`.
  *
+ * Phases (`phases:`) are named arrangements the story moves through in
+ * order: each beat belongs to one phase, and each phase is marked against
+ * the phase before it (what that step of the migration adds, changes or
+ * removes), the first phase drawing no marks.
+ *
  * Everything here assumes a validated spec.
  */
 import type { ChangeMark } from "../accessibility";
@@ -45,6 +50,10 @@ export interface ArrangementPlan {
   readonly labels: Readonly<Record<ArrangementName, string>>;
   /** Named arrangements (presence via `in`) rather than the shorthand. */
   readonly named: boolean;
+  /** Phases: the story, not the reader, picks the arrangement. */
+  readonly phased: boolean;
+  /** Phased: the phase of each story beat, by story index (empty otherwise). */
+  readonly beatPhases: readonly ArrangementName[];
 }
 
 /** A part as one arrangement draws it. */
@@ -72,13 +81,14 @@ export const declName = (d: ArrangementDecl) =>
 
 /** The arrangements of a spec, its baseline and their labels. */
 export function planOf(spec: FlowSpec): ArrangementPlan {
-  if (spec.arrangements) {
-    const names = spec.arrangements.map(declName);
+  const decls = spec.phases ?? spec.arrangements;
+  if (decls) {
+    const names = decls.map(declName);
     return {
       names,
-      baseline: spec.baseline ?? names[0],
+      baseline: spec.phases ? names[0] : (spec.baseline ?? names[0]),
       labels: Object.fromEntries(
-        spec.arrangements.map((d) => [
+        decls.map((d) => [
           declName(d),
           (typeof d === "string" ? undefined : d.label) ??
             SHORTHAND_LABELS[declName(d)] ??
@@ -86,6 +96,8 @@ export function planOf(spec: FlowSpec): ArrangementPlan {
         ])
       ),
       named: true,
+      phased: spec.phases !== undefined,
+      beatPhases: spec.phases ? beatPhases(spec.story ?? [], names) : [],
     };
   }
   const changed =
@@ -107,7 +119,18 @@ export function planOf(spec: FlowSpec): ArrangementPlan {
     baseline: names[0],
     labels: Object.fromEntries(names.map((n) => [n, SHORTHAND_LABELS[n]])),
     named: false,
+    phased: false,
+    beatPhases: [],
   };
+}
+
+/** The phase of each beat: the last one a beat at or before it started (the first phase before any). */
+function beatPhases(
+  story: readonly { readonly phase?: string }[],
+  names: readonly ArrangementName[]
+): ArrangementName[] {
+  let current = names[0];
+  return story.map((b) => (current = b.phase ?? current));
 }
 
 /** The marked entries of a name → mark record. */
@@ -193,6 +216,22 @@ export class Arrangements {
     return new Set([...own].filter((a) => from.has(a) && to.has(a)));
   }
 
+  /**
+   * What `a` is marked against: the previous phase (a first phase against
+   * itself, so unmarked), otherwise the baseline.
+   */
+  against(a: ArrangementName): ArrangementName {
+    const { names, baseline, phased } = this.plan;
+    if (!phased) return baseline;
+    const i = names.indexOf(a);
+    return i > 0 ? names[i - 1] : a;
+  }
+
+  /** Phased: the phase story beat `b` runs in; otherwise undefined. */
+  phaseOf(b: number): ArrangementName | undefined {
+    return this.plan.phased ? this.plan.beatPhases[b] : undefined;
+  }
+
   /** Named: the arrangements a step runs in — its own, where its part and rail are. */
   stepMembers(s: StepSpec): ReadonlySet<string> {
     const part = this.partMembers(s.part);
@@ -203,7 +242,8 @@ export class Arrangements {
   }
 
   part(p: PartSpec, a: ArrangementName): PartReading {
-    const { baseline, named } = this.plan;
+    const { named } = this.plan;
+    const baseline = this.against(a);
     if (!named) {
       const override =
         a === "before" ? p.before : a === "after" ? p.after : undefined;
@@ -242,10 +282,10 @@ export class Arrangements {
     };
   }
 
-  /** Named: whether a part in both `a` and the baseline reads differently. */
+  /** Named: whether a part in both `a` and what it is marked against reads differently. */
   private overridesDiffer(p: PartSpec, a: ArrangementName): boolean {
     const mine = p.arrangement && own(p.arrangement, a);
-    const base = p.arrangement && own(p.arrangement, this.plan.baseline);
+    const base = p.arrangement && own(p.arrangement, this.against(a));
     return (
       mine?.changeNote !== base?.changeNote ||
       JSON.stringify(this.props(p, mine)) !==
@@ -259,7 +299,8 @@ export class Arrangements {
     a: ArrangementName,
     ends: readonly [Presence, Presence]
   ): RailReading {
-    const { baseline, named } = this.plan;
+    const { named } = this.plan;
+    const baseline = this.against(a);
     if (!named) {
       const own = shorthandPresence(r.change, a);
       return {
@@ -283,9 +324,10 @@ export class Arrangements {
     return this.plan.named ? this.stepMembers(s).has(a) : stepRuns(s.change, a);
   }
 
-  /** The mark a step's beat lists in `a`; none in the baseline. */
+  /** The mark a step's beat lists in `a`; none in the baseline (or a first phase). */
   stepMark(s: StepSpec, a: ArrangementName): ChangeMark {
-    const { baseline, named } = this.plan;
+    const { named } = this.plan;
+    const baseline = this.against(a);
     if (a === baseline) return "unchanged";
     return named
       ? markIn(this.stepMembers(s), a, baseline)
