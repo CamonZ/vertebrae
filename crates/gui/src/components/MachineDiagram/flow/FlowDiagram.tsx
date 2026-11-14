@@ -101,6 +101,7 @@ export const FlowDiagram = memo(function FlowDiagram({
         fitInsets={fitInsets}
       >
         <MachineDiagram
+          inFlow
           label={label ?? `flow · ${d.arrangement}`}
           width={d.width}
           height={d.height}

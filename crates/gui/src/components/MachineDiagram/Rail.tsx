@@ -18,7 +18,9 @@ export interface RailProps {
  * removed or absent part turn dashed (VL-05).
  */
 export function Rail({ points, dashed, dash }: RailProps) {
-  const { removed } = usePart();
+  const { removed, inFlow } = usePart();
+  // All catalogue parts share this boundary; flows draw their own Wire paths.
+  if (inFlow) return null;
   const isDashed = dashed || removed;
   const style =
     dash && dashed ? ({ "--md-dash": dash } as CSSProperties) : undefined;

@@ -1,6 +1,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
+import { PartContext } from "../partContext";
 import { MACHINE_PARTS } from "../parts";
 import mechanismSpec from "./__fixtures__/mechanisms.flow.yaml?raw";
 import { compileFlow, compileFlowOrThrow } from "./compile";
@@ -43,7 +44,19 @@ describe("registered flow mechanisms", () => {
       );
 
       const part = container.querySelector('[data-part-id="unit"]')!;
-      const mechanism = svg(FLOW_DRAWINGS[kind](0, d.parts[0]));
+      const mechanism = svg(
+        <PartContext.Provider
+          value={{
+            fade: 1,
+            removed: false,
+            labels: true,
+            hatchId: "h",
+            inFlow: true,
+          }}
+        >
+          {FLOW_DRAWINGS[kind](0, d.parts[0])}
+        </PartContext.Provider>
+      );
       const host = document.createElement("div");
       host.innerHTML = mechanism;
       const elements = [...host.querySelector("svg")!.children];

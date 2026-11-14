@@ -6,6 +6,8 @@ import { createContext, useContext } from "react";
  * whether labels are shown, and the hatch pattern id of the enclosing diagram.
  */
 export interface PartDrawContext {
+  /** Gallery leads are omitted when the flow owns the connections. */
+  readonly inFlow?: boolean;
   readonly fade: number;
   readonly removed: boolean;
   readonly labels: boolean;
