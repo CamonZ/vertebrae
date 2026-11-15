@@ -164,8 +164,9 @@ it("preserves an independent entity/port/label inventory through the real compil
   const markup = renderToStaticMarkup(
     <FlowDiagram diagram={diagram} t={0} reducedMotion />
   );
-  expect(markup).toContain("empty · workflow endpoint");
-  expect(markup).toContain("runtime source step unknown");
+  // Workflow endpoints are small handles named by what leaves through them.
+  expect(markup).toContain(">handoffs<");
+  expect(markup).not.toContain("workflow endpoint");
   expect(markup).toContain("retry · resume · typed");
   expect(markup).not.toMatch(/NaN|evaluating rules|3 children forked/);
 }, 15000);

@@ -5,6 +5,24 @@ import type { FlowPresentation } from "../../MachineDiagram/flow/presentation";
 import type { DiagramInteraction } from "../../MachineDiagram/interaction";
 import type { AtlasMachineFlow } from "./buildMachineFlow";
 
+/** One rail of the current trace, as the connections list names it. */
+export interface AtlasConnection {
+  readonly id: string;
+  readonly direction: "in" | "out";
+  /** The other end: its workflow, and its step when it is one. */
+  readonly workflow: string;
+  readonly step?: string;
+  readonly label?: string;
+  readonly handoff: boolean;
+}
+
+/** What the pointer or focus is on, and every rail entering or leaving it. */
+export interface AtlasTrace {
+  readonly title: string;
+  readonly kind: "workflow" | "step" | "rail";
+  readonly connections: readonly AtlasConnection[];
+}
+
 /**
  * Global inspector identity is authoritative. Pointer/focus live only for this
  * mounted scene; IDs removed by a new scope are ignored immediately. No live
@@ -19,6 +37,7 @@ export function useAtlasPresentation(
   const edge = useEntityPanelStore((s) => s.hoveredEdgeId);
   const [hover, setHover] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null);
+  const [hoverRail, setHoverRail] = useState<string | null>(null);
   const [latestInput, setLatestInput] = useState<"hover" | "focus">("hover");
   const inspect = (channel: "hover" | "focus", id: string | null) => {
     if (channel === "hover") setHover(id);
@@ -63,7 +82,16 @@ export function useAtlasPresentation(
     if (roots.has(g.id)) for (const id of g.parts) traced.add(id);
   }
   const inspectorRails = new Set<string>();
+  // A hovered rail lights itself and both of its ends.
+  const pointedRail = diagram?.rails.some((r) => r.id === hoverRail)
+    ? hoverRail
+    : null;
+  if (pointedRail) inspectorRails.add(pointedRail);
+  const handoffs = new Set<string>();
+  for (const [id, t] of model.transitions)
+    if (t.targetWorkflowId !== t.workflowId) handoffs.add(id);
   for (const rail of diagram?.rails ?? []) {
+    if (pointedRail) break;
     const metadata = model.transitions.get(rail.id);
     // Inspector handoff rows use backend transition IDs. Machine rail IDs are
     // accepted directly, preserving separate identity for parallel decisions.
@@ -88,12 +116,31 @@ export function useAtlasPresentation(
     )
       rails.add(rail.id);
   }
+  // Direction relative to the trace, before neighbours join it.
+  const own = new Set(traced);
+  const flow = new Map<string, "in" | "out">();
+  for (const rail of diagram?.rails ?? []) {
+    if (!rails.has(rail.id) || pointedRail) continue;
+    const from = own.has(rail.from.part);
+    const to = own.has(rail.to.part);
+    if (from !== to) flow.set(rail.id, from ? "out" : "in");
+    // A traced workflow lights what crosses its edge, not its own wiring.
+    else if (
+      !inspectorRails.size &&
+      trace &&
+      diagram?.regions.some((g) => g.id === trace)
+    )
+      rails.delete(rail.id);
+  }
   // Neighbours light without recursively flooding the rest of the graph.
   for (const rail of diagram?.rails ?? [])
     if (rails.has(rail.id)) {
       traced.add(rail.from.part);
       traced.add(rail.to.part);
     }
+  // A region lights when any of its parts does (neighbours at the overview).
+  for (const g of diagram?.regions ?? [])
+    if (g.parts.some((id) => traced.has(id))) traced.add(g.id);
   const activate = (id: string) => {
     const entity = model.selections.get(id);
     const store = useEntityPanelStore.getState();
@@ -123,15 +170,82 @@ export function useAtlasPresentation(
       if (!matches.has(rail.from.part) || !matches.has(rail.to.part))
         dimmed.add(rail.id);
   }
+  const regionName = new Map<string, string>();
+  for (const region of model.spec.regions ?? []) {
+    const entity = model.selections.get(region.id);
+    if (entity?.type === "workflow")
+      regionName.set(entity.workflowId, region.label ?? entity.workflowId);
+  }
+  const partName = new Map(model.spec.parts.map((p) => [p.id, p.label]));
+  const workflowOf = (part: string) => {
+    const entity = model.selections.get(part);
+    return entity ? (regionName.get(entity.workflowId) ?? "") : "";
+  };
+  const stepOf = (part: string) =>
+    model.selections.get(part)?.type === "step"
+      ? partName.get(part)
+      : undefined;
+  // The connections list: what the trace is, and each rail into or out of it.
+  let traceInfo: AtlasTrace | null = null;
+  const railById = new Map((diagram?.rails ?? []).map((r) => [r.id, r]));
+  if (pointedRail) {
+    const r = railById.get(pointedRail)!;
+    traceInfo = {
+      title: r.label ?? "Connection",
+      kind: "rail",
+      connections: [
+        { end: r.from.part, direction: "in" as const },
+        { end: r.to.part, direction: "out" as const },
+      ].map(({ end, direction }) => ({
+        id: `${r.id}:${direction}`,
+        direction,
+        workflow: workflowOf(end),
+        step: stepOf(end),
+        handoff: handoffs.has(r.id),
+      })),
+    };
+  } else if (trace) {
+    const entity = model.selections.get(trace);
+    const connections: AtlasConnection[] = [];
+    for (const [id, direction] of flow) {
+      const r = railById.get(id)!;
+      const end = direction === "out" ? r.to.part : r.from.part;
+      connections.push({
+        id,
+        direction,
+        workflow: workflowOf(end),
+        step: stepOf(end),
+        label: r.label,
+        handoff: handoffs.has(id),
+      });
+    }
+    traceInfo = {
+      title:
+        entity?.type === "step"
+          ? (partName.get(trace) ?? trace)
+          : (regionName.get(entity?.workflowId ?? "") ?? trace),
+      kind: entity?.type === "step" ? "step" : "workflow",
+      connections,
+    };
+  }
   const presentation: FlowPresentation = {
     dimmed,
     counts,
+    testIds: model.testIds,
     selected,
     traced,
     rails,
+    handoffs,
+    flow,
+    onHoverRail: setHoverRail,
     onActivateRegion: activate,
     onHoverRegion: (id) => inspect("hover", id),
     onFocusRegion: (id) => inspect("focus", id),
   };
-  return { interaction, presentation };
+  return {
+    interaction,
+    presentation,
+    trace: traceInfo,
+    tracing: !!trace || !!pointedRail,
+  };
 }

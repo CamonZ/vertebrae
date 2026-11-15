@@ -64,6 +64,7 @@ import {
   type Box,
 } from "./extent";
 import type { Position } from "./spec";
+import { readStoredLayout, writeStoredLayout } from "./layoutStore";
 
 /** A layout for every level of a flow: drill-downs keyed by the part drilled into. */
 export interface FlowLayout extends LevelLayout {
@@ -93,7 +94,7 @@ const ELK_SIDE: Record<PortSide, string> = {
   N: "NORTH",
   S: "SOUTH",
 };
-const OUTWARD: Record<PortSide, Point> = {
+export const OUTWARD: Record<PortSide, Point> = {
   W: [-1, 0],
   E: [1, 0],
   N: [0, -1],
@@ -210,16 +211,15 @@ export function resetLayoutCache(): void {
 
 if (import.meta.hot) import.meta.hot.dispose(resetLayoutCache);
 
-async function layoutLevel(
-  arrangements: readonly DiagramTimeline[],
-  useCache: boolean
-): Promise<LevelLayout> {
-  if (!useCache) return computeLevel(arrangements);
+/**
+ * Identity of one level's geometry input. This is a value key, not a
+ * spec/project key: every input read by the geometry engine is represented,
+ * while bands, captions and card payloads are intentionally left to the
+ * compiler. Drill-downs are keyed separately.
+ */
+export function levelKey(arrangements: readonly DiagramTimeline[]): string {
   const first = arrangements[0];
-  // This is a value cache, not a spec/project cache: every input read by the
-  // geometry engine is represented, while bands, captions and card payloads
-  // are intentionally left to the compiler. Drill-downs are cached separately.
-  const key = JSON.stringify([
+  return JSON.stringify([
     first.parts.map((p) => [
       p.id,
       p.scale,
@@ -245,19 +245,45 @@ async function layoutLevel(
     ]),
     first.regions.map((r) => [r.id, r.label, r.parts, r.liveHeader]),
   ]);
+}
+
+/**
+ * Memoize a level layout by `key`, in memory and in the persistent layout
+ * store, so a layout computed once is reused across requests, worker
+ * restarts and app launches.
+ */
+export function cachedLevel(
+  key: string,
+  compute: () => Promise<LevelLayout>
+): Promise<LevelLayout> {
   const cached = levelCache.get(key);
   if (cached) {
     levelCache.delete(key);
     levelCache.set(key, cached);
     return cached;
   }
-  const pending = computeLevel(arrangements).catch((error: unknown) => {
+  const pending = (async () => {
+    const stored = await readStoredLayout(key);
+    if (stored) return stored;
+    const laid = await compute();
+    writeStoredLayout(key, laid);
+    return laid;
+  })().catch((error: unknown) => {
     if (levelCache.get(key) === pending) levelCache.delete(key);
     throw error;
   });
   if (levelCache.size >= 64) levelCache.delete(levelCache.keys().next().value!);
   levelCache.set(key, pending);
   return pending;
+}
+
+/** Lay out one level, memoized unless `useCache` is false. */
+export function layoutLevel(
+  arrangements: readonly DiagramTimeline[],
+  useCache: boolean
+): Promise<LevelLayout> {
+  if (!useCache) return computeLevel(arrangements);
+  return cachedLevel(levelKey(arrangements), () => computeLevel(arrangements));
 }
 
 async function computeLevel(
@@ -1369,7 +1395,7 @@ async function computeLevel(
  * canvas; move the laid-out parts and routes so everything keeps a stub's
  * margin from the edge.
  */
-function keptOnCanvas(
+export function keptOnCanvas(
   positions: Record<string, Position>,
   routes: Record<string, RailRoute>,
   extents: readonly Box[],
@@ -1566,7 +1592,7 @@ function collectEdges(
 }
 
 /** Reserve every run except a straight fork/join connected to a common port. */
-function reservedRuns(
+export function reservedRuns(
   r: DiagramRail,
   q: DiagramRail,
   points: readonly Point[]
@@ -1615,7 +1641,7 @@ const BEND_COST = 120;
  * horizontal stretch. A* over lines around part edges and reserved
  * runs, with a cost per bend; undefined when the stub is boxed in.
  */
-function legToLane(
+export function legToLane(
   stub: Point,
   side: PortSide,
   lane: number,
@@ -1906,7 +1932,7 @@ class MinHeap {
 }
 
 /** The vertical segments of a route, as x and a y span. */
-function verticalRuns(points: readonly Point[]): VerticalRun[] {
+export function verticalRuns(points: readonly Point[]): VerticalRun[] {
   return points.slice(1).flatMap((b, i) => {
     const a = points[i];
     return Math.abs(a[0] - b[0]) < 0.5 && Math.abs(a[1] - b[1]) > 0.5
@@ -1915,7 +1941,7 @@ function verticalRuns(points: readonly Point[]): VerticalRun[] {
   });
 }
 
-function dedupe(points: readonly Point[]): Point[] {
+export function dedupe(points: readonly Point[]): Point[] {
   const out: Point[] = [];
   for (const p of points) {
     const last = out[out.length - 1];
@@ -1954,7 +1980,7 @@ const SNAP = 0.5;
 
 type Segment = readonly [Point, Point];
 
-const segments = (points: readonly Point[]): Segment[] =>
+export const segments = (points: readonly Point[]): Segment[] =>
   points.slice(1).map((p, i) => [points[i], p] as const);
 
 const segmentBox = ([a, b]: Segment): Box => ({
@@ -1983,40 +2009,52 @@ function collinear([a, b]: Segment, [c, d]: Segment): boolean {
   return false;
 }
 
-const labelBox = ([x, y]: Point, text: string): Box => {
-  const w = textWidth(text, RAIL_LABEL_SIZE) + LABEL_PAD_X;
+export const labelBox = (
+  [x, y]: Point,
+  text: string,
+  size = RAIL_LABEL_SIZE
+): Box => {
+  const w = textWidth(text, size) + LABEL_PAD_X;
+  const h = labelHeight(size);
   return {
     x0: x - w / 2,
-    y0: y - LABEL_H / 2,
+    y0: y - h / 2,
     x1: x + w / 2,
-    y1: y + LABEL_H / 2,
+    y1: y + h / 2,
   };
 };
 
+const labelHeight = (size: number) => size * LINE_EM + LABEL_PAD_Y;
+
 /** Keep a rerouted rail's label beside a clear run, rather than its old ELK run. */
-function labelOnRoute(
+export function labelOnRoute(
   points: readonly Point[],
   text: string,
-  obstacles: readonly Box[]
+  obstacles: readonly Box[],
+  size = RAIL_LABEL_SIZE
 ): Point | undefined {
   const runs = segments(points);
-  const width = textWidth(text, RAIL_LABEL_SIZE) + LABEL_PAD_X;
+  const width = textWidth(text, size) + LABEL_PAD_X;
+  const height = labelHeight(size);
+  const lift = height / 2 + 5;
   for (const [a, b] of [...runs].sort(
     (s, t) => Math.abs(t[1][0] - t[0][0]) - Math.abs(s[1][0] - s[0][0])
   )) {
     const x = (a[0] + b[0]) / 2;
     const y = (a[1] + b[1]) / 2;
+    // Centred, then flush with either end (overhanging the run when the
+    // label is longer than it), then just clear of each obstacle.
     const positions = (lo: number, hi: number, half: number, axis: 0 | 1) => [
       (lo + hi) / 2,
-      ...[
-        lo + half + 5,
-        hi - half - 5,
-        ...obstacles.flatMap((e) =>
+      lo + half + 5,
+      hi - half - 5,
+      ...obstacles
+        .flatMap((e) =>
           axis === 0
             ? [e.x0 - half - 5, e.x1 + half + 5]
             : [e.y0 - half - 5, e.y1 + half + 5]
-        ),
-      ].filter((n) => n >= lo + half && n <= hi - half),
+        )
+        .filter((n) => n >= lo + half && n <= hi - half),
     ];
     const candidates: Point[] =
       Math.abs(a[1] - b[1]) < SNAP
@@ -2026,25 +2064,82 @@ function labelOnRoute(
             width / 2,
             0
           ).flatMap((x): Point[] => [
-            [x, y - LABEL_LIFT],
-            [x, y + LABEL_LIFT],
+            [x, y - lift],
+            [x, y + lift],
           ])
         : positions(
             Math.min(a[1], b[1]),
             Math.max(a[1], b[1]),
-            LABEL_H / 2,
+            height / 2,
             1
           ).flatMap((y): Point[] => [
             [x + width / 2 + 5, y],
             [x - width / 2 - 5, y],
           ]);
     for (const at of candidates) {
-      const box = labelBox(at, text);
+      const box = labelBox(at, text, size);
       if (![...obstacles, ...runs.map(segmentBox)].some((e) => crosses(box, e)))
         return at;
     }
   }
-  return undefined;
+  return clearSpotNear(runs, text, size, obstacles);
+}
+
+/** Farthest a fallback label may sit from its rail. */
+const LABEL_REACH = 160;
+
+/**
+ * Fallback when no spot right beside the route is free: slide along each run
+ * and step away from it past whatever is in the way (up to LABEL_REACH), and
+ * take the free spot nearest the route. Never over a part, label or rail.
+ */
+function clearSpotNear(
+  runs: readonly Segment[],
+  text: string,
+  size: number,
+  obstacles: readonly Box[]
+): Point | undefined {
+  const width = textWidth(text, size) + LABEL_PAD_X;
+  const height = labelHeight(size);
+  const solid = [...obstacles, ...runs.map(segmentBox)];
+  let best: { at: Point; distance: number } | undefined;
+  for (const [a, b] of runs) {
+    const horizontal = Math.abs(a[1] - b[1]) < SNAP;
+    // Along the run (k) and across it (j).
+    const k = horizontal ? 0 : 1;
+    const j = 1 - k;
+    const acrossHalf = horizontal ? height / 2 : width / 2;
+    const lo = Math.min(a[k], b[k]);
+    const hi = Math.max(a[k], b[k]);
+    const line = a[j];
+    const steps = Math.min(40, Math.max(1, Math.ceil((hi - lo) / 16)));
+    const along = Array.from(
+      { length: steps + 1 },
+      (_, i) => lo + ((hi - lo) * i) / steps
+    );
+    const near = solid.filter((e) => {
+      const [e0, e1] = j === 0 ? [e.x0, e.x1] : [e.y0, e.y1];
+      return e1 >= line - LABEL_REACH && e0 <= line + LABEL_REACH;
+    });
+    const across = [
+      line - acrossHalf - 5,
+      line + acrossHalf + 5,
+      ...near.flatMap((e) =>
+        j === 0
+          ? [e.x0 - acrossHalf - 5, e.x1 + acrossHalf + 5]
+          : [e.y0 - acrossHalf - 5, e.y1 + acrossHalf + 5]
+      ),
+    ].filter((c) => Math.abs(c - line) - acrossHalf <= LABEL_REACH);
+    for (const u of along)
+      for (const v of across) {
+        const distance = Math.max(0, Math.abs(v - line) - acrossHalf);
+        if (best && distance >= best.distance) continue;
+        const at: Point = horizontal ? [u, v] : [v, u];
+        const box = labelBox(at, text, size);
+        if (!solid.some((e) => crosses(box, e))) best = { at, distance };
+      }
+  }
+  return best?.at;
 }
 
 /**

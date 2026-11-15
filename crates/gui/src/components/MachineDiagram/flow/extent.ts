@@ -55,6 +55,8 @@ export interface LabelBox extends Box {
 export const RING_PAD = 14;
 /** Rail label size and its offset under the rail (Wire). */
 export const RAIL_LABEL_SIZE = 18;
+/** Labels of rails between regions of a composite layout (workflow handoffs). */
+export const CROSS_LABEL_SIZE = 26;
 export const RAIL_LABEL_DY = 22;
 /** Name drawn above a part cell under full scale (FlowDiagram). */
 export const NAME_SIZE = 20;

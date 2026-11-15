@@ -487,6 +487,61 @@ function uniq(values: number[]): number[] {
 }
 
 /** Draw one rail in its face, entering and leaving its ports in their slots. */
+/**
+ * Whether a drawn segment runs parallel to step `a`-`b`, overlaps it along
+ * the step, and lies at a distance from the step's midpoint line within
+ * [`lo`, `hi`] (`open` excludes `hi`). Segments are indexed once per
+ * orientation and sorted by their line coordinate, so each query scans only
+ * the lines within `reach` (which must be at least every `hi` asked) instead
+ * of every drawn segment.
+ */
+export function parallelProbe(
+  drawn: readonly (readonly [Point, Point])[],
+  reach: number
+): (a: Point, b: Point, lo: number, hi: number, open: boolean) => boolean {
+  type Line = { readonly at: number; readonly s: readonly [Point, Point] };
+  const lines = (k: 0 | 1): Line[] =>
+    drawn
+      .filter(([p, q]) => Math.abs(p[k] - q[k]) < SNAP)
+      .map((s) => ({ at: s[0][k], s }))
+      .sort((x, y) => x.at - y.at);
+  const horizontalLines = lines(1);
+  const verticalLines = lines(0);
+  const window = reach + SNAP;
+  const firstAtOrAbove = (sorted: readonly Line[], v: number) => {
+    let lo = 0;
+    let hi = sorted.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (sorted[mid].at < v) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  };
+  return (a, b, lo, hi, open) => {
+    const horizontal = Math.abs(a[1] - b[1]) < SNAP;
+    const k = horizontal ? 1 : 0;
+    const j = 1 - k;
+    const mk = (a[k] + b[k]) / 2;
+    const sorted = horizontal ? horizontalLines : verticalLines;
+    for (
+      let i = firstAtOrAbove(sorted, mk - window);
+      i < sorted.length && sorted[i].at <= mk + window;
+      i++
+    ) {
+      const [p, q] = sorted[i].s;
+      const d = Math.abs(p[k] - mk);
+      if (d < lo || (open ? d >= hi : d > hi)) continue;
+      if (
+        Math.min(p[j], q[j]) < Math.max(a[j], b[j]) &&
+        Math.min(a[j], b[j]) < Math.max(p[j], q[j])
+      )
+        return true;
+    }
+    return false;
+  };
+}
+
 function realize(
   o: FaceRouting,
   r: FaceRail,
@@ -739,45 +794,19 @@ function realize(
     if (memo[at] < 0) memo[at] = penalty([xs[ix], ys[iy]], [xs[nx], ys[ny]]);
     return memo[at];
   };
+  const beside = parallelProbe(
+    drawnSegments.map(({ s }) => s),
+    Math.max(CLEAR, o.gap)
+  );
   const penalty = (a: Point, b: Point) => {
     const len = Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
     const m: Point = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-    const horizontal = Math.abs(a[1] - b[1]) < SNAP;
     // Beside a drawn rail but closer than CLEAR reads as the same line.
-    const alongside = (lo: number, hi: number) =>
-      drawnSegments.some(({ s: [p, q] }) => {
-        const parallel = horizontal
-          ? Math.abs(p[1] - q[1]) < SNAP
-          : Math.abs(p[0] - q[0]) < SNAP;
-        if (!parallel) return false;
-        const k = horizontal ? 1 : 0;
-        const d = Math.abs(p[k] - m[k]);
-        const j = 1 - k;
-        return (
-          d >= lo &&
-          d < hi &&
-          Math.min(p[j], q[j]) < Math.max(a[j], b[j]) &&
-          Math.min(a[j], b[j]) < Math.max(p[j], q[j])
-        );
-      });
-    if (alongside(0.01, CLEAR)) return Infinity;
+    if (beside(a, b, 0.01, CLEAR, true)) return Infinity;
     let extraCost = 0;
     if (soft.some((box) => strictlyInside(m, box))) extraCost += OVER * len;
     const near =
-      drawnSegments.some(({ s: [p, q] }) => {
-        const parallel = horizontal
-          ? Math.abs(p[1] - q[1]) < SNAP
-          : Math.abs(p[0] - q[0]) < SNAP;
-        if (!parallel) return false;
-        const k = horizontal ? 1 : 0;
-        const d = Math.abs(p[k] - m[k]);
-        if (d < SNAP || d > o.gap - SNAP) return false;
-        const j = 1 - k;
-        return (
-          Math.min(p[j], q[j]) < Math.max(a[j], b[j]) &&
-          Math.min(a[j], b[j]) < Math.max(p[j], q[j])
-        );
-      }) ||
+      beside(a, b, SNAP, o.gap - SNAP, false) ||
       parts.some((box) => {
         const grown = {
           x0: box.x0 - o.stub + SNAP,

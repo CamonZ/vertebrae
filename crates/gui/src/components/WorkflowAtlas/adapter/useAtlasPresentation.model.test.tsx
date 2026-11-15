@@ -97,11 +97,17 @@ it("model oracle: pointer/focus/selection/edge precedence and reset across gener
           for (const region of diagram.regions)
             if (roots.has(region.id))
               for (const id of region.parts) roots.add(id);
+          // A traced workflow lights only the rails crossing its edge.
+          const regionTrace =
+            !!(focus || hover) &&
+            diagram.regions.some((region) => region.id === root);
           const expectedRails = diagram.rails
             .filter((r) =>
               edge
                 ? r.id === edge
-                : roots.has(r.from.part) || roots.has(r.to.part)
+                : regionTrace
+                  ? roots.has(r.from.part) !== roots.has(r.to.part)
+                  : roots.has(r.from.part) || roots.has(r.to.part)
             )
             .map((r) => r.id);
           expect([...hook.result.current.presentation.rails!].sort()).toEqual(
@@ -143,4 +149,78 @@ it("removed hover/focus IDs stay retired on reintroduction; out-of-scope global 
     stepId: "elsewhere",
     workflowId: "other",
   });
+});
+
+it("marks cross-workflow rails as handoffs and lights a hovered rail with both ends", () => {
+  const input = fixture();
+  const model = buildMachineFlow(input.summary, input.configs);
+  const diagram = compileFlowOrThrow(model.spec).arrangements[0];
+  const hook = renderHook(() => useAtlasPresentation(model, diagram));
+  const { handoffs } = hook.result.current.presentation;
+  const cross = diagram.rails.filter((r) => {
+    const t = model.transitions.get(r.id)!;
+    return t.targetWorkflowId !== t.workflowId;
+  });
+  expect(cross.length).toBeGreaterThan(0);
+  expect([...handoffs!].sort()).toEqual(cross.map((r) => r.id).sort());
+  const rail = cross[0];
+  act(() => hook.result.current.presentation.onHoverRail!(rail.id));
+  const lit = hook.result.current.presentation;
+  expect([...lit.rails!]).toEqual([rail.id]);
+  expect(lit.traced!.has(rail.from.part)).toBe(true);
+  expect(lit.traced!.has(rail.to.part)).toBe(true);
+  act(() => hook.result.current.presentation.onHoverRail!(null));
+  expect(hook.result.current.presentation.rails!.size).toBe(0);
+});
+
+it("traces a step's rails by direction and lists their other ends; a workflow lists only what crosses its edge", () => {
+  const input = fixture();
+  const model = buildMachineFlow(input.summary, input.configs);
+  const diagram = compileFlowOrThrow(model.spec).arrangements[0];
+  const hook = renderHook(() => useAtlasPresentation(model, diagram));
+  const choose = machineId("step", "a", "choose");
+  act(() => hook.result.current.interaction.onHoverPart!(choose));
+  const { presentation, trace, tracing } = hook.result.current;
+  expect(tracing).toBe(true);
+  for (const r of diagram.rails) {
+    const from = r.from.part === choose;
+    const to = r.to.part === choose;
+    expect(presentation.flow!.get(r.id)).toBe(
+      from === to ? undefined : from ? "out" : "in"
+    );
+  }
+  expect(trace).toMatchObject({ title: "choose", kind: "step" });
+  const ends = trace!.connections.map((c) => [
+    c.direction,
+    c.step ?? c.workflow,
+  ]);
+  expect(ends).toEqual(
+    expect.arrayContaining([
+      ["in", "script"],
+      ["out", "approve"],
+      ["out", "llm"],
+      // The inter-workflow decision ends at the empty workflow's endpoint.
+      ["out", "empty"],
+    ])
+  );
+  expect(trace!.connections.find((c) => c.step === "llm")?.label).toMatch(
+    /^retry/
+  );
+
+  act(() => {
+    hook.result.current.interaction.onHoverPart!(null);
+    hook.result.current.presentation.onHoverRegion!(machineId("region", "a"));
+  });
+  const workflow = hook.result.current;
+  expect(workflow.trace).toMatchObject({ title: "a", kind: "workflow" });
+  expect(
+    workflow.trace!.connections.every((c) => c.handoff && c.direction === "out")
+  ).toBe(true);
+  expect(new Set(workflow.trace!.connections.map((c) => c.workflow))).toEqual(
+    new Set(["b", "empty"])
+  );
+
+  act(() => hook.result.current.presentation.onHoverRegion!(null));
+  expect(hook.result.current.tracing).toBe(false);
+  expect(hook.result.current.trace).toBeNull();
 });

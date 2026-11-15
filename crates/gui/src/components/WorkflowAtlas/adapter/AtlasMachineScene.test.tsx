@@ -25,12 +25,18 @@ const worker = vi.hoisted(() => {
     onmessage: ((event: unknown) => void) | null = null;
     onerror = null;
     terminate() {}
-    async postMessage(request: { id: number; flow: unknown }) {
+    async postMessage(request: {
+      id: number;
+      flow: unknown;
+      composite?: boolean;
+    }) {
       requests.push(request);
       const { layoutFlow } = await import("../../MachineDiagram/flow/layout");
-      const layout = await layoutFlow(
-        request.flow as Parameters<typeof layoutFlow>[0]
-      );
+      const { layoutFlowComposite } =
+        await import("../../MachineDiagram/flow/composite");
+      const layout = await (
+        request.composite ? layoutFlowComposite : layoutFlow
+      )(request.flow as Parameters<typeof layoutFlow>[0]);
       this.onmessage?.({ data: { id: request.id, layout } });
     }
   }
@@ -141,8 +147,9 @@ it("real scene activates exact entities, traces neighbours and individual parall
   const members = new Set(
     diagram.regions.find((g) => g.id === machineId("region", "a"))!.parts
   );
+  // A traced workflow lights what crosses its edge, not its own wiring.
   const expectedWorkflow = diagram.rails
-    .filter((r) => members.has(r.from.part) || members.has(r.to.part))
+    .filter((r) => members.has(r.from.part) !== members.has(r.to.part))
     .map((r) => r.id)
     .sort();
   fireEvent.mouseEnter(header);
@@ -241,4 +248,77 @@ it("omitting presentation preserves embedded scene defaults", () => {
   expect(view.container.querySelector(".md-live-count")).toBeNull();
   expect(view.container.querySelector(".md-wire [marker-end]")).toBeNull();
   expect(view.container.querySelector("[data-emphasis]")).toBeNull();
+});
+
+it("exposes step-node test ids and task-count titles matching the Map canvas", async () => {
+  const input = fixture();
+  input.summary.workflows[0].workflow_steps[0].pipeline_counts = {
+    epic: 0,
+    ticket: 0,
+    task: 1,
+    active: 1,
+  };
+  function Host() {
+    const model = useAtlasMachineFlow(input.summary, input.configs, "ids");
+    const diagram =
+      model.layout.status === "done" && model.layout.result.ok
+        ? model.layout.result.flow.arrangements[0]
+        : undefined;
+    return diagram ? (
+      <svg>
+        <AtlasMachineScene
+          model={model}
+          diagram={diagram}
+          t={0}
+          reducedMotion
+        />
+      </svg>
+    ) : null;
+  }
+  const view = render(<Host />);
+  const node = await view.findByTestId("step-node-llm");
+  expect(node.getAttribute("data-scene-part")).toBe(
+    machineId("step", "a", "llm")
+  );
+  for (const step of input.summary.workflows[0].workflow_steps)
+    expect(view.getByTestId(`step-node-${step.name}`)).toBeTruthy();
+  const titles = [...view.container.querySelectorAll("title")].map(
+    (t) => t.textContent
+  );
+  expect(titles).toContain("1 task(s)");
+  expect(titles).toContain("1 active");
+});
+
+it("hovering a handoff rail lights it and both of its ends", () => {
+  const input = fixture();
+  const model = buildMachineFlow(input.summary, input.configs);
+  const diagram = compiler.compileFlowOrThrow(model.spec).arrangements[0];
+  const view = render(
+    <AtlasMachineScene model={model} diagram={diagram} t={0} label="graph" />
+  );
+  const rail = diagram.rails.find(
+    (r) => model.transitions.get(r.id)?.kind === "handoff"
+  )!;
+  const group = view.container.querySelector(
+    `[data-rail-id="${rail.id}"]`
+  )!.parentElement!;
+  expect(group.hasAttribute("data-handoff")).toBe(true);
+  fireEvent.pointerOver(group.querySelector(".md-rail-hit")!);
+  expect(
+    view.container
+      .querySelector(`[data-rail-id="${rail.id}"]`)!
+      .getAttribute("data-emphasis")
+  ).toBe("true");
+  for (const end of [rail.from.part, rail.to.part])
+    expect(
+      view.container
+        .querySelector(`[data-scene-part="${end}"]`)
+        ?.hasAttribute("data-traced")
+    ).toBe(true);
+  fireEvent.pointerOut(group.querySelector(".md-rail-hit")!);
+  expect(
+    view.container
+      .querySelector(`[data-rail-id="${rail.id}"]`)!
+      .getAttribute("data-emphasis")
+  ).toBeNull();
 });

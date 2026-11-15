@@ -400,6 +400,53 @@ pub async fn click_when_ready(
     .unwrap_or_else(|error| panic!("{error}"));
 }
 
+/// Click an SVG element with the real pointer, at the middle of its machine
+/// part hit area (or its own box) once it has stopped moving and nothing
+/// covers it. WebDriver's element click does not reach SVG groups in WebKitGTK.
+pub async fn pointer_click_svg_when_ready(client: &Client, css: &str, description: &str) {
+    use fantoccini::actions::{InputSource, MouseActions, PointerAction};
+    let point = std::cell::Cell::new(None);
+    wait_until(description, std::time::Duration::from_secs(5), || async {
+        let at = client
+            .execute(
+                r#"const el = document.querySelector(arguments[0]);
+                if (!el) return null;
+                const hit = el.querySelector('.md-part-hit') ?? el;
+                const r = hit.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) return null;
+                const [x, y] = [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)];
+                return el.contains(document.elementFromPoint(x, y)) ? [x, y] : null;"#,
+                vec![css.into()],
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let now = at
+            .as_array()
+            .map(|xy| (xy[0].as_i64().unwrap_or(0), xy[1].as_i64().unwrap_or(0)));
+        // Settled: the same point on two probes in a row.
+        Ok(now.is_some() && point.replace(now) == now)
+    })
+    .await
+    .unwrap_or_else(|error| panic!("{error}"));
+    let (x, y) = point.get().expect("settled point");
+    let pointer = MouseActions::new("svg-click".into())
+        .then(PointerAction::MoveTo {
+            duration: None,
+            x,
+            y,
+        })
+        .then(PointerAction::Down { button: 0 })
+        .then(PointerAction::Up { button: 0 });
+    client
+        .perform_actions(pointer)
+        .await
+        .unwrap_or_else(|error| panic!("failed to click {description}: {error}"));
+    client
+        .release_actions()
+        .await
+        .unwrap_or_else(|error| panic!("failed to release pointer after {description}: {error}"));
+}
+
 /// Factory options can rerender while a workflow update completes.
 pub async fn select_when_ready(client: &Client, locator: fantoccini::Locator<'_>, value: &str) {
     wait_until(

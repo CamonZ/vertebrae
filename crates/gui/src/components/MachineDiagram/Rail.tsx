@@ -1,5 +1,6 @@
 import type { CSSProperties } from "react";
 import { GraphEdge } from "../WorkflowAtlas/GraphEdge";
+import type { Role } from "./palette";
 import { SvgText, Glyph } from "./SvgText";
 import { usePart } from "./partContext";
 import { route, routePath, type Point, type RouteStyle } from "./route";
@@ -54,6 +55,9 @@ export interface WireProps extends RouteStyle {
    * glyph then leads the label on that line instead of riding the rail.
    */
   labelAt?: readonly [number, number];
+  /** Label font size; a layout must have reserved room at this size. */
+  labelSize?: number;
+  labelRole?: Role;
 }
 
 /**
@@ -73,6 +77,8 @@ export function Wire({
   emphasis,
   directional,
   conditional,
+  labelSize = 18,
+  labelRole = "dim",
 }: WireProps) {
   const r = route(points, undefined, { jumps, cornerRadii });
   const mid = r.points[Math.floor(r.points.length / 2)];
@@ -97,7 +103,13 @@ export function Wire({
         markerEnd={arrow || directional ? undefined : null}
       />
       {labelAt ? (
-        <PlacedLabel at={labelAt} change={change} label={label} />
+        <PlacedLabel
+          at={labelAt}
+          change={change}
+          label={label}
+          size={labelSize}
+          role={labelRole}
+        />
       ) : (
         <>
           {change === "added" && (
@@ -110,8 +122,8 @@ export function Wire({
             <SvgText
               x={mx}
               y={my + 22}
-              runs={[[label, 400, "dim"]]}
-              size={18}
+              runs={[[label, 400, labelRole]]}
+              size={labelSize}
               align="center"
             />
           )}
@@ -126,10 +138,14 @@ function PlacedLabel({
   at: [x, y],
   change,
   label,
+  size,
+  role,
 }: {
   at: readonly [number, number];
   change: WireChange;
   label?: string;
+  size: number;
+  role: Role;
 }) {
   const glyph = change === "added" ? "+" : change === "removed" ? "×" : "";
   if (!glyph && !label) return null;
@@ -147,9 +163,9 @@ function PlacedLabel({
               ] as const,
             ]
           : []),
-        ...(label ? [[label, 400, "dim"] as const] : []),
+        ...(label ? [[label, 400, role] as const] : []),
       ]}
-      size={18}
+      size={size}
       align="center"
     />
   );

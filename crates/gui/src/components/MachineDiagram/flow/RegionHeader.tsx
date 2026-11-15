@@ -3,7 +3,11 @@ import { SvgText } from "../SvgText";
 import type { DiagramRegion } from "./compile";
 import { regionLabelAt, regionCountAt } from "./extent";
 import { textWidth } from "./measure";
-import { countDescription, type FlowPresentation } from "./presentation";
+import {
+  countDescription,
+  countTitles,
+  type FlowPresentation,
+} from "./presentation";
 
 export function LiveCount({
   count,
@@ -17,6 +21,12 @@ export function LiveCount({
   if (!count || (count.total <= 0 && count.running <= 0)) return null;
   return (
     <g className="md-live-count" aria-hidden="true">
+      {/* One titled group per value, like the Map canvas's separate chips. */}
+      {countTitles(count).map((title) => (
+        <g key={title}>
+          <title>{title}</title>
+        </g>
+      ))}
       <SvgText
         x={x}
         y={y}
