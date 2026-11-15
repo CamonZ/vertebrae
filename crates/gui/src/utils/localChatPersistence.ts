@@ -498,6 +498,39 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
   };
 }
 
+function sameIndexEntry(a: ChatSession, b: ChatSession): boolean {
+  return JSON.stringify(toIndexEntry(a)) === JSON.stringify(toIndexEntry(b));
+}
+
+/**
+ * Apply one durably merged catalog entry. Returns the visible session, `null`
+ * for a remote deletion, or `undefined` when the entry must not be applied:
+ * the cache is not hydrated yet (recovery will read it) or a local edit or
+ * deletion of the same chat is still pending (the local intent wins).
+ */
+export function applyRemoteLocalChatSession(
+  sessionId: string,
+  raw: unknown | null
+): ChatSession | null | undefined {
+  if (
+    !sessionIndexHydrated ||
+    pendingChangedIds.has(sessionId) ||
+    pendingDeletedIds.has(sessionId) ||
+    isLocalChatSessionCleared(sessionId)
+  ) {
+    return undefined;
+  }
+  if (raw === null) {
+    if (!sessionIndexCache[sessionId]) return undefined;
+    delete sessionIndexCache[sessionId];
+    return null;
+  }
+  const session = normalizeLocalChatSession(raw);
+  if (!session || session.id !== sessionId) return undefined;
+  sessionIndexCache[sessionId] = session;
+  return session;
+}
+
 function writeSessions(
   sessions: Record<string, ChatSession>
 ): Promise<boolean> {
@@ -856,7 +889,13 @@ export function persistLocalChatSession(
     pendingDeletedIds.add(session.id);
     return writeSessions(sessions);
   }
+  const previous = sessions[session.id];
   sessions[session.id] = serialized;
+  // Usage-only, lifecycle-only and partial-text updates leave the persisted
+  // projection unchanged: refresh the cache without queueing a network write.
+  if (previous && sameIndexEntry(previous, serialized)) {
+    return indexSavePromise ?? Promise.resolve(true);
+  }
   pendingChangedIds.set(session.id, ++nextChangeGeneration);
   const persistence = writeSessions(
     deduplicateDefaultEmptyLocalChatSessions(sessions).sessions

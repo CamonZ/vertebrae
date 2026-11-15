@@ -85,6 +85,50 @@ describe("chatStore", () => {
     expect(useChatStore.getState().sessions[id].gate).toBe(replacement);
   });
 
+  it("applies a CDC entry to metadata without replacing live transcript or runtime state", () => {
+    const id = useChatStore.getState().openSession("Live chat");
+    const live = {
+      ...useChatStore.getState().sessions[id],
+      messages: [{ kind: "user", text: "local transcript" }] as ChatMessage[],
+      backendSessionId: "runtime",
+      lifecycle: "streaming" as const,
+    };
+    useChatStore.setState({ sessions: { [id]: live } });
+    const apply = vi.spyOn(persistence, "applyRemoteLocalChatSession");
+    apply.mockReturnValue({
+      ...live,
+      title: "Remote title",
+      titleStatus: "manual",
+      messages: [],
+      backendSessionId: null,
+      lifecycle: "idle",
+      hasUserMessage: true,
+    });
+
+    useChatStore.getState().applyCatalogEntry(id, { id });
+
+    const session = useChatStore.getState().sessions[id];
+    expect(session.title).toBe("Remote title");
+    expect(session.messages).toBe(live.messages);
+    expect(session.backendSessionId).toBe("runtime");
+    expect(session.lifecycle).toBe("streaming");
+    expect(useChatStore.getState().localSessionSummaries[id]?.title).toBe(
+      "Remote title"
+    );
+
+    // A remote tombstone never removes a chat with a live runtime.
+    apply.mockReturnValue(null);
+    useChatStore.getState().applyCatalogEntry(id, null);
+    expect(useChatStore.getState().sessions[id]).toBeDefined();
+    expect(useChatStore.getState().localSessionSummaries[id]).toBeUndefined();
+
+    // Skipped entries (pending local intent) leave state untouched.
+    apply.mockReturnValue(undefined);
+    const before = useChatStore.getState();
+    useChatStore.getState().applyCatalogEntry(id, { id });
+    expect(useChatStore.getState().sessions).toBe(before.sessions);
+  });
+
   describe("openSession", () => {
     it("creates a new neutral local chat session", () => {
       const id = useChatStore.getState().openSession("My Task");

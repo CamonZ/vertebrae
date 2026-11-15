@@ -8,7 +8,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
-use tauri::{async_runtime::JoinHandle as ActorJoinHandle, Emitter, Runtime};
+use tauri::{async_runtime::JoinHandle as ActorJoinHandle, Emitter, Manager, Runtime};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
@@ -889,6 +889,8 @@ impl SacrumSocket {
             // Sacrum mirrors project broadcasts onto accounts:me. Project stores
             // consume only the selected project channel: forwarding account copies
             // would double-apply deltas and leak other projects into those stores.
+            // The chat catalog is the exception: chats of every configured project
+            // stream concurrently, and revisions make the duplicate copy a no-op.
             if topic == ACCOUNTS_TOPIC
                 && (!account_joined
                     || !matches!(
@@ -897,6 +899,9 @@ impl SacrumSocket {
                             | "daemon_updated"
                             | "daemon_deleted"
                             | "daemon_metrics"
+                            | "chat_catalog_created"
+                            | "chat_catalog_updated"
+                            | "chat_catalog_deleted"
                             | "phx_reply"
                             | "phx_error"
                             | "phx_close"
@@ -914,12 +919,10 @@ impl SacrumSocket {
             }
             match event {
                 "chat_catalog_created" | "chat_catalog_updated" | "chat_catalog_deleted" => {
-                    // Invalidate only: machine-filtered reads remain authoritative.
-                    // Never project catalog metadata into an unrelated installation.
-                    if topic.starts_with("project:") {
-                        app_handle
-                            .emit("chat-catalog-changed", ())
-                            .map_err(|_| "Failed to invalidate chat catalog".to_string())?;
+                    // The account copy names its project in the payload; a project
+                    // channel copy must match its own topic.
+                    if let Some(change) = Self::chat_catalog_change(topic, payload) {
+                        Self::handle_chat_catalog_event(change, app_handle);
                     }
                 }
                 "artifact_created" | "artifact_updated" | "artifact_deleted" => {
@@ -1027,6 +1030,58 @@ impl SacrumSocket {
             change_type,
             notification,
         })
+    }
+
+    /// Typed catalog entry of a project or account channel message. The
+    /// account copy names its project in the payload; a project channel copy
+    /// must match its own topic.
+    fn chat_catalog_change(
+        topic: &str,
+        payload: &serde_json::Value,
+    ) -> Option<crate::commands::chat_catalog::CatalogChange> {
+        let channel_project = match topic.strip_prefix("project:") {
+            Some(id) => Some(id),
+            None if topic == ACCOUNTS_TOPIC => None,
+            None => return None,
+        };
+        match serde_json::from_value::<crate::commands::chat_catalog::CatalogChange>(
+            payload.clone(),
+        ) {
+            Ok(change) if channel_project.is_none_or(|id| id == change.project_id) => Some(change),
+            Ok(_) => None,
+            Err(_) => {
+                // Provider data must never enter diagnostics.
+                log::warn!("[WebSocket] chat_catalog_event_malformed");
+                None
+            }
+        }
+    }
+
+    /// Merge one entry incrementally, for any configured project. Entries for
+    /// another installation or an unconfigured project, and already-applied
+    /// revisions (own-write echoes, the duplicate account/project copy), are
+    /// dropped without reading the catalog.
+    fn handle_chat_catalog_event<R: Runtime>(
+        change: crate::commands::chat_catalog::CatalogChange,
+        app_handle: &tauri::AppHandle<R>,
+    ) {
+        let app_handle = app_handle.clone();
+        tauri::async_runtime::spawn(async move {
+            let Some(state) = app_handle.try_state::<crate::commands::AppState>() else {
+                return;
+            };
+            match crate::commands::chat_catalog::apply_change(&state, change).await {
+                Ok(Some(update)) => {
+                    let _ = app_handle.emit("chat-catalog-entry-changed", update);
+                }
+                Ok(None) => {}
+                // A genuine change that could not be merged locally falls back
+                // to explicit recovery rather than being dropped.
+                Err(_) => {
+                    let _ = app_handle.emit("chat-catalog-changed", ());
+                }
+            }
+        });
     }
 
     fn handle_artifact_event<R: Runtime>(
@@ -1979,6 +2034,39 @@ impl SacrumSocket {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn chat_catalog_entries_of_every_project_route_from_the_account_channel() {
+        let entry = |project: &str| {
+            serde_json::json!({
+                "schema_version": 1,
+                "project_id": project,
+                "installation_id": "machine",
+                "chat_id": "chat",
+                "status": "idle",
+                "revision": 3,
+                "updated_at": "2026-01-01T00:00:00Z",
+                "payload": {"deleted": false}
+            })
+        };
+        let routed = |topic: &str, project: &str| {
+            SacrumSocket::chat_catalog_change(topic, &entry(project))
+                .map(|change| (change.project_id, change.revision))
+        };
+
+        // Chats of several projects stream concurrently through accounts:me.
+        assert_eq!(routed(ACCOUNTS_TOPIC, "a"), Some(("a".into(), 3)));
+        assert_eq!(routed(ACCOUNTS_TOPIC, "b"), Some(("b".into(), 3)));
+        assert_eq!(routed("project:a", "a"), Some(("a".into(), 3)));
+        // A project channel copy cannot speak for another project.
+        assert_eq!(routed("project:a", "b"), None);
+        assert_eq!(routed("other:topic", "a"), None);
+        assert!(SacrumSocket::chat_catalog_change(
+            ACCOUNTS_TOPIC,
+            &serde_json::json!({"project_id": "a"})
+        )
+        .is_none());
+    }
+
     use super::*;
     use std::sync::mpsc;
     use std::time::Duration as StdDuration;

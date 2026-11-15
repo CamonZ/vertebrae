@@ -6,7 +6,16 @@ import {
   useProjectScopeGeneration,
 } from "../stores/projectScopedStores";
 
-/** Recover missed catalog changes after reconnect and coalesce CDC bursts. */
+interface CatalogEntryChanged {
+  sessionId: string;
+  session: unknown | null;
+}
+
+/**
+ * Full recovery runs only on mount, reconnect and an explicit fallback
+ * invalidation. Ordinary CDC entries arrive already merged by the backend and
+ * are applied incrementally, so they never trigger a full catalog read.
+ */
 export function useChatCatalogSync() {
   const generation = useProjectScopeGeneration();
 
@@ -49,6 +58,14 @@ export function useChatCatalogSync() {
           void recover();
         }
       }),
+      listen<CatalogEntryChanged>("chat-catalog-entry-changed", (event) => {
+        if (isCurrent()) {
+          useChatStore
+            .getState()
+            .applyCatalogEntry(event.payload.sessionId, event.payload.session);
+        }
+      }),
+      // Emitted only when a genuine entry could not be merged locally.
       listen("chat-catalog-changed", () => void recover()),
     ];
 

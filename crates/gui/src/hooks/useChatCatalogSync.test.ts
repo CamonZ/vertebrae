@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
+  apply: vi.fn(),
   generation: 1,
-  handlers: new Map<string, (event: { payload: string }) => void>(),
+  handlers: new Map<string, (event: { payload: unknown }) => void>(),
   unlisten: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: (name: string, handler: (event: { payload: string }) => void) => {
+  listen: (name: string, handler: (event: { payload: unknown }) => void) => {
     mocks.handlers.set(name, handler);
     return Promise.resolve(mocks.unlisten);
   },
@@ -17,7 +18,10 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("../stores/chatStore", () => ({
   useChatStore: {
-    getState: () => ({ refreshLocalSessionIndex: mocks.refresh }),
+    getState: () => ({
+      refreshLocalSessionIndex: mocks.refresh,
+      applyCatalogEntry: mocks.apply,
+    }),
   },
 }));
 
@@ -37,7 +41,7 @@ describe("chat catalog recovery", () => {
     mocks.refresh.mockResolvedValue(undefined);
   });
 
-  it("recovers on mount, reconnect and committed catalog change", async () => {
+  it("recovers on mount, reconnect and an explicit fallback invalidation", async () => {
     renderHook(useChatCatalogSync);
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
 
@@ -93,7 +97,7 @@ describe("chat catalog recovery", () => {
 
     unmount();
     expect(newGuard()).toBe(false);
-    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(6));
   });
 
   it("logs only a fixed diagnostic and retries after a transport failure", async () => {
@@ -109,5 +113,37 @@ describe("chat catalog recovery", () => {
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(2));
 
     warning.mockRestore();
+  });
+
+  it("applies CDC entries incrementally without any full recovery", async () => {
+    renderHook(useChatCatalogSync);
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+
+    const session = { id: "chat", label: "Remote" };
+    act(() => {
+      for (let n = 0; n < 50; n++) {
+        mocks.handlers.get("chat-catalog-entry-changed")!({
+          payload: { sessionId: "chat", session },
+        });
+      }
+      mocks.handlers.get("chat-catalog-entry-changed")!({
+        payload: { sessionId: "gone", session: null },
+      });
+    });
+
+    expect(mocks.apply).toHaveBeenCalledTimes(51);
+    expect(mocks.apply).toHaveBeenCalledWith("chat", session);
+    expect(mocks.apply).toHaveBeenLastCalledWith("gone", null);
+    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores CDC entries delivered to a retired project scope", async () => {
+    const { rerender } = renderHook(useChatCatalogSync);
+    const staleHandler = mocks.handlers.get("chat-catalog-entry-changed")!;
+    mocks.generation = 2;
+    rerender();
+
+    act(() => staleHandler({ payload: { sessionId: "chat", session: null } }));
+    expect(mocks.apply).not.toHaveBeenCalled();
   });
 });

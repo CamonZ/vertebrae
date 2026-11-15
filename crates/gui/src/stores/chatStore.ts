@@ -54,6 +54,7 @@ import {
   projectPathMatches,
   hydrateLocalChatSessionIndex,
   refreshLocalChatSessionIndex,
+  applyRemoteLocalChatSession,
   summarizeLocalChatSession,
 } from "../utils/localChatPersistence";
 import {
@@ -705,6 +706,8 @@ interface ChatStoreActions {
   /** Hydrate local chat metadata from the app-managed index file. */
   hydrateLocalSessionIndex: () => Promise<void>;
   refreshLocalSessionIndex: (isCurrent: () => boolean) => Promise<void>;
+  /** Apply one durably merged catalog CDC entry without a full recovery. */
+  applyCatalogEntry: (sessionId: string, session: unknown | null) => void;
   /** Hydrate and focus a persisted local chat session */
   selectPersistedSession: (
     sessionId: string,
@@ -1126,6 +1129,29 @@ function localSessionSummaryFor(
     return null;
   }
   return summarizeLocalChatSession(session);
+}
+
+/** Refresh catalog metadata without replacing live runtime or transcript state. */
+function mergeRemoteSession(
+  existing: ChatSession | undefined,
+  remote: ChatSession
+): ChatSession {
+  if (!existing) return remote;
+  return {
+    ...existing,
+    ...remote,
+    messages: existing.messages,
+    backendSessionId: existing.backendSessionId,
+    lifecycle: existing.lifecycle,
+    lifecycleError: existing.lifecycleError,
+    streamingAssistant: existing.streamingAssistant,
+    // Catalog bindings omit runtime draft and steering details.
+    // Keep them only while this is still the same execution.
+    gate:
+      existing.gate && existing.gate.execution_id === remote.gate?.execution_id
+        ? existing.gate
+        : remote.gate,
+  };
 }
 
 function localSessionSummariesFromSessions(
@@ -2545,29 +2571,45 @@ export const useChatStore = create<ChatStore>((set, get) => {
             continue;
           }
 
-          sessions[id] = existing
-            ? {
-                ...existing,
-                ...remote,
-                messages: existing.messages,
-                backendSessionId: existing.backendSessionId,
-                lifecycle: existing.lifecycle,
-                lifecycleError: existing.lifecycleError,
-                streamingAssistant: existing.streamingAssistant,
-                // Catalog bindings omit runtime draft and steering details.
-                // Keep them only while this is still the same execution.
-                gate:
-                  existing.gate &&
-                  existing.gate.execution_id === remote.gate?.execution_id
-                    ? existing.gate
-                    : remote.gate,
-              }
-            : remote;
+          sessions[id] = mergeRemoteSession(existing, remote);
         }
 
         return {
           sessions,
           localSessionSummaries: localSessionSummariesFromSessions(loaded),
+        };
+      });
+    },
+
+    applyCatalogEntry: (sessionId, raw) => {
+      const remote = applyRemoteLocalChatSession(sessionId, raw);
+      if (remote === undefined) return;
+
+      set((state) => {
+        const existing = state.sessions[sessionId];
+        if (remote === null) {
+          const localSessionSummaries = omitLocalSessionSummary(
+            state.localSessionSummaries,
+            sessionId
+          );
+          if (!existing || existing.backendSessionId || existing.discussion) {
+            return { localSessionSummaries };
+          }
+          const sessions = { ...state.sessions };
+          delete sessions[sessionId];
+          return { sessions, localSessionSummaries };
+        }
+
+        const summary = localSessionSummaryFor(remote);
+        const localSessionSummaries = summary
+          ? { ...state.localSessionSummaries, [sessionId]: summary }
+          : omitLocalSessionSummary(state.localSessionSummaries, sessionId);
+        return {
+          sessions: {
+            ...state.sessions,
+            [sessionId]: mergeRemoteSession(existing, remote),
+          },
+          localSessionSummaries,
         };
       });
     },
