@@ -86,13 +86,13 @@ docker compose run --rm daemon-test-runner
 ```
 
 `crates/daemon-acceptance/tests/features/credential_renewal.feature` (tag
-`@credential_renewal`) covers automatic reconnect-credential renewal with the
-daemon's default configuration. It shortens only the persisted `expires_at`
-in `daemon.toml`, and covers renewal, restart reuse, an expired credential, and
-recovery from owner rotation through `vtb-daemon enroll --replace-existing`. The
-Sacrum image must include the `renewDaemonCredential` mutation (Sacrum PR 253).
-Run only these scenarios with
-`CUCUMBER_FILTER_TAGS=@credential_renewal` set on `daemon-test-runner`.
+`@credential_renewal`) covers automatic access/refresh-token rotation with the daemon's default
+configuration. It shortens persisted `access_token_expires_at` to trigger refresh
+and covers restart reuse, expired refresh tokens, and owner-rotation recovery
+through `vtb-daemon enroll --replace-existing`. The Sacrum image must include
+`POST /api/daemon/refresh` and access-token socket authentication (Sacrum ticket
+9e5e5e4b). Run only this feature with
+`VTB_ACCEPTANCE_FEATURE_GLOB='/app/crates/daemon-acceptance/tests/features/{credential_renewal.feature}' python3 scripts/acceptance.py daemon`.
 
 ### Rhai execute demo
 
@@ -518,7 +518,15 @@ Scenario timing includes setup and cleanup; do not add these nested measurements
 together when computing total wall time.
 
 GUI navigation and project setup wait for the expected route, visible page
-content, and selected project. Setup also creates a temporary task, observes two
+content, and selected project. Each scenario owns its app/WebDriver session.
+Setup waits for the app's initial routing to show its project row instead of
+interrupting the initial document load with another navigation.
+The after-hook closes it after failure diagnostics and before backend cleanup,
+including setup failures. Steps within a scenario share the session, including
+explicit reload and restart checks. This prevents a failed WebKit network process
+from cascading cancelled document loads into later scenarios. Project-row timeouts
+report the current page URL, title and text alongside the failure screenshot.
+Setup also creates a temporary task, observes two
 distinct title updates through the live list, then deletes it and waits for its
 removal. This closes the gap between page rendering and channel subscription;
 the first observation alone could come from the initial fetch. The task remains

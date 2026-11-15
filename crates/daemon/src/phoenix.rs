@@ -138,14 +138,11 @@ impl PhoenixSocket {
     pub async fn connect_daemon(
         base_url: &str,
         daemon_id: &str,
-        reconnect_token: &str,
+        access_token: &str,
     ) -> Result<Self, PhoenixError> {
         let ws_url = socket_url(
             base_url,
-            [
-                ("daemon_id", daemon_id),
-                ("reconnect_token", reconnect_token),
-            ],
+            [("daemon_id", daemon_id), ("access_token", access_token)],
         )?;
         Self::connect_url(ws_url).await
     }
@@ -548,7 +545,7 @@ mod tests {
 
         let daemon = socket_url(
             "http://127.0.0.1:4000",
-            [("daemon_id", "id"), ("reconnect_token", "secret")],
+            [("daemon_id", "id"), ("access_token", "secret")],
         )
         .unwrap();
         let mut safe = daemon.clone();

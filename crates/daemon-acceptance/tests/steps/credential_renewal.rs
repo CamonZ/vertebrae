@@ -1,7 +1,7 @@
-//! Automatic reconnect-credential renewal and re-enrollment recovery.
+//! Automatic access-token renewal and re-enrollment recovery.
 //!
 //! Every scenario runs `vtb-daemon` with its default configuration: renewal
-//! is driven only by the persisted `expires_at`, never by test settings.
+//! is driven only by the persisted `access_token_expires_at`, never by test settings.
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
@@ -14,15 +14,15 @@ use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig, SacrumDaemonService};
 use crate::DaemonWorld;
 
 const REGISTERED: &str = "Standalone daemon identity registered";
-const RENEWING: &str = "Renewing daemon reconnect credential before expiry";
-const RENEWED: &str = "Daemon reconnect credential renewed";
+const RENEWING: &str = "Refreshing daemon access credential before expiry";
+const RENEWED: &str = "Daemon access credential renewed";
 const REENROLLMENT_REQUIRED: &str = "Daemon re-enrollment required";
 const REENROLLED: &str = "Daemon re-enrolled";
 const CONNECTING: &str = "Connecting to Phoenix WebSocket";
 
 #[derive(Debug, Default)]
 pub struct RenewalObservations {
-    /// The reconnect credential written by enrollment.
+    /// The access credential written by enrollment.
     pub enrolled_token: Option<String>,
     /// The credential the daemon persisted after renewing.
     pub renewed_token: Option<String>,
@@ -35,7 +35,8 @@ pub struct RenewalObservations {
 }
 
 struct PersistedCredential {
-    reconnect_token: String,
+    access_token: String,
+    refresh_token: String,
     expires_at: DateTime<Utc>,
 }
 
@@ -50,22 +51,23 @@ fn read_credential(world: &DaemonWorld) -> PersistedCredential {
             .unwrap_or_else(|| panic!("daemon.toml has no {key}"))
     };
     PersistedCredential {
-        reconnect_token: value("reconnect_token"),
-        expires_at: DateTime::parse_from_rfc3339(&value("expires_at"))
+        access_token: value("access_token"),
+        refresh_token: value("refresh_token"),
+        expires_at: DateTime::parse_from_rfc3339(&value("access_token_expires_at"))
             .expect("daemon.toml expiry is RFC 3339")
             .with_timezone(&Utc),
     }
 }
 
-/// Rewrite only `expires_at`, leaving the enrolled credential untouched.
-fn rewrite_expiry(world: &DaemonWorld, expires_at: DateTime<Utc>) {
+/// Rewrite only `access_token_expires_at`, leaving the enrolled credential untouched.
+fn rewrite_expiry(world: &DaemonWorld, field: &str, expires_at: DateTime<Utc>) {
     let path = world.daemon_toml_path();
     let text = std::fs::read_to_string(&path).expect("read daemon.toml");
     let rewritten: Vec<String> = text
         .lines()
         .map(|line| {
-            if line.starts_with("expires_at = ") {
-                format!("expires_at = \"{}\"", expires_at.to_rfc3339())
+            if line.starts_with(&format!("{field} = ")) {
+                format!("{field} = \"{}\"", expires_at.to_rfc3339())
             } else {
                 line.to_string()
             }
@@ -129,19 +131,31 @@ pub async fn enrolled_daemon_not_running(world: &mut DaemonWorld) {
     world
         .enroll_standalone_daemon(&daemon_id, &bootstrap, &[(&project_id, "/app")])
         .await;
-    let enrolled = read_credential(world).reconnect_token;
+    world
+        .renewal
+        .secrets
+        .push(read_credential(world).refresh_token);
+    let enrolled = read_credential(world).access_token;
     world.renewal.secrets.extend([bootstrap, enrolled.clone()]);
     world.renewal.enrolled_token = Some(enrolled);
 }
 
-#[given(expr = "the persisted daemon credential expires in {int} hours")]
-pub async fn credential_expires_in(world: &mut DaemonWorld, hours: i64) {
-    rewrite_expiry(world, Utc::now() + chrono::Duration::hours(hours));
+#[given(expr = "the persisted access token expires in {int} minutes")]
+pub async fn credential_expires_in(world: &mut DaemonWorld, minutes: i64) {
+    rewrite_expiry(
+        world,
+        "access_token_expires_at",
+        Utc::now() + chrono::Duration::minutes(minutes),
+    );
 }
 
-#[given(expr = "the persisted daemon credential expired {int} hours ago")]
+#[given(expr = "the persisted refresh token expired {int} hours ago")]
 pub async fn credential_expired_ago(world: &mut DaemonWorld, hours: i64) {
-    rewrite_expiry(world, Utc::now() - chrono::Duration::hours(hours));
+    rewrite_expiry(
+        world,
+        "refresh_token_expires_at",
+        Utc::now() - chrono::Duration::hours(hours),
+    );
 }
 
 #[when("I start the enrolled daemon")]
@@ -224,31 +238,33 @@ pub async fn reenroll_with_rotated_bootstrap(world: &mut DaemonWorld) {
         "re-enrollment failed: stderr={}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let reenrolled = read_credential(world).reconnect_token;
+    world
+        .renewal
+        .secrets
+        .push(read_credential(world).refresh_token);
+    let reenrolled = read_credential(world).access_token;
     world.renewal.secrets.push(reenrolled);
 }
 
-#[then("the daemon renews its reconnect credential")]
+#[then("the daemon renews its access credential")]
 pub async fn daemon_renews(world: &mut DaemonWorld) {
     wait_for_log(world, RENEWED, 1).await;
     // Renewal reconnects the socket with the successor and registers again.
     wait_for_log(world, REGISTERED, 2).await;
     let persisted = read_credential(world);
+    world.renewal.secrets.push(persisted.refresh_token.clone());
     let enrolled = world.renewal.enrolled_token.clone().expect("enrolled");
     assert_ne!(
-        persisted.reconnect_token, enrolled,
-        "daemon.toml holds a different reconnect credential"
+        persisted.access_token, enrolled,
+        "daemon.toml holds a different access credential"
     );
     let lifetime = persisted.expires_at - Utc::now();
     assert!(
-        lifetime > chrono::Duration::days(29) && lifetime <= chrono::Duration::days(30),
-        "renewed credential expires about 30 days out, got {lifetime}"
+        lifetime > chrono::Duration::minutes(59) && lifetime <= chrono::Duration::hours(1),
+        "renewed credential expires about one hour out, got {lifetime}"
     );
-    world
-        .renewal
-        .secrets
-        .push(persisted.reconnect_token.clone());
-    world.renewal.renewed_token = Some(persisted.reconnect_token);
+    world.renewal.secrets.push(persisted.access_token.clone());
+    world.renewal.renewed_token = Some(persisted.access_token);
 }
 
 #[then("the daemon is online")]
@@ -256,7 +272,7 @@ pub async fn daemon_is_online(world: &mut DaemonWorld) {
     world.wait_for_daemon_online(&daemon_id(world)).await;
 }
 
-#[then("the enrolled reconnect credential is rejected")]
+#[then("the enrolled access credential is rejected")]
 pub async fn enrolled_credential_rejected(world: &mut DaemonWorld) {
     let enrolled = world.renewal.enrolled_token.clone().expect("enrolled");
     let client = GraphqlClient::new_with_daemon_id(
@@ -288,7 +304,7 @@ pub async fn reconnects_without_renewing(world: &mut DaemonWorld) {
     let log = world.daemon_log();
     assert!(!log.contains(RENEWING), "restart renewed again:\n{log}");
     assert_eq!(
-        Some(read_credential(world).reconnect_token),
+        Some(read_credential(world).access_token),
         world.renewal.renewed_token,
         "daemon.toml still holds the renewed credential"
     );
@@ -351,4 +367,28 @@ pub async fn output_has_no_credentials(world: &mut DaemonWorld) {
             "daemon output contains a credential"
         );
     }
+}
+
+#[given(expr = "the persisted access token expired {int} hours ago")]
+pub async fn access_expired_ago(world: &mut DaemonWorld, hours: i64) {
+    rewrite_expiry(
+        world,
+        "access_token_expires_at",
+        Utc::now() - chrono::Duration::hours(hours),
+    );
+}
+
+#[then("the daemon refreshes before its first socket connection")]
+pub async fn refreshes_before_connecting(world: &mut DaemonWorld) {
+    let log = wait_for_log(world, REGISTERED, 1).await;
+    assert!(log.find(RENEWED).expect("refreshed") < log.find(CONNECTING).expect("connected"));
+    let persisted = read_credential(world);
+    assert_ne!(
+        Some(&persisted.access_token),
+        world.renewal.enrolled_token.as_ref()
+    );
+    world
+        .renewal
+        .secrets
+        .extend([persisted.access_token, persisted.refresh_token]);
 }

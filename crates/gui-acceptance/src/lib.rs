@@ -32,9 +32,10 @@ pub fn tauri_base_url() -> String {
     std::env::var("TAURI_BASE_URL").unwrap_or_else(|_| "http://tauri.localhost".to_string())
 }
 
-/// Global WebDriver session, shared until explicitly closed.
+/// Scenario-owned WebDriver session, shared by its steps until explicitly closed.
 ///
-/// Persists across all scenarios so we avoid reopening the browser.
+/// The after-hook closes it after diagnostics, even for setup failures, so a
+/// failed WebKit network process cannot contaminate the next scenario.
 /// The `Mutex` ensures only one scenario drives the session at a time
 /// (Cucumber concurrency is set to 1 anyway, but the Mutex makes it safe).
 static WEBDRIVER: Mutex<Option<Arc<Mutex<Client>>>> = Mutex::const_new(None);

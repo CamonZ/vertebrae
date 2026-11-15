@@ -157,8 +157,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let shutdown = wait_for_shutdown_signal();
     tokio::pin!(shutdown);
     loop {
-        let reason = if credential_status(&identity.expires_at, chrono::Utc::now(), RENEWAL_LEAD)
-            == CredentialStatus::Expired
+        let reason = if credential_status(
+            &identity.refresh_token_expires_at,
+            chrono::Utc::now(),
+            RENEWAL_LEAD,
+        ) == CredentialStatus::Expired
         {
             // An expired credential cannot be renewed: do not attempt a connection.
             ReenrollmentReason::Expired
@@ -171,9 +174,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             let signal = daemon_config.reenrollment.clone();
             match run_supervisor(daemon_config, &projects, &signal, &mut shutdown).await? {
                 SupervisorExit::Shutdown => return Ok(()),
-                SupervisorExit::Stopped => signal
-                    .get()
-                    .ok_or("DaemonSupervisor stopped unexpectedly; see daemon diagnostics")?,
+                SupervisorExit::Stopped => {
+                    if let Some(rejected) = signal.rejected_identity() {
+                        identity = rejected;
+                    }
+                    signal
+                        .get()
+                        .ok_or("DaemonSupervisor stopped unexpectedly; see daemon diagnostics")?
+                }
             }
         };
         if reason == ReenrollmentReason::IdentityRetired {
@@ -300,9 +308,12 @@ async fn wait_for_reenrollment(
 
 fn is_reenrolled(rejected: &DaemonIdentity, candidate: &DaemonIdentity) -> bool {
     candidate.daemon_id == rejected.daemon_id
-        && candidate.reconnect_token != rejected.reconnect_token
-        && credential_status(&candidate.expires_at, chrono::Utc::now(), RENEWAL_LEAD)
-            != CredentialStatus::Expired
+        && candidate.access_token != rejected.access_token
+        && credential_status(
+            &candidate.refresh_token_expires_at,
+            chrono::Utc::now(),
+            RENEWAL_LEAD,
+        ) != CredentialStatus::Expired
 }
 
 async fn enroll(args: EnrollArgs) -> Result<(), Box<dyn std::error::Error>> {
@@ -332,8 +343,10 @@ async fn enroll(args: EnrollArgs) -> Result<(), Box<dyn std::error::Error>> {
     let identity = DaemonIdentity {
         endpoint: args.endpoint,
         daemon_id: result.daemon_id,
-        reconnect_token: result.reconnect_token,
-        expires_at: result.expires_at,
+        access_token: result.access_token,
+        refresh_token: result.refresh_token,
+        refresh_token_expires_at: result.refresh_token_expires_at,
+        access_token_expires_at: result.access_token_expires_at,
     };
     storage.save(&identity)?;
     println!(
@@ -426,12 +439,17 @@ mod tests {
         .unwrap();
     }
 
-    fn identity(token: &str, expires_at: chrono::DateTime<chrono::Utc>) -> DaemonIdentity {
+    fn identity(
+        token: &str,
+        access_token_expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> DaemonIdentity {
         DaemonIdentity {
             endpoint: "http://127.0.0.1:4000".to_string(),
             daemon_id: "33333333-3333-3333-3333-333333333333".to_string(),
-            reconnect_token: token.to_string(),
-            expires_at: expires_at.to_rfc3339(),
+            access_token: token.to_string(),
+            refresh_token: token.to_string(),
+            refresh_token_expires_at: access_token_expires_at.to_rfc3339(),
+            access_token_expires_at: access_token_expires_at.to_rfc3339(),
         }
     }
 
@@ -451,6 +469,23 @@ mod tests {
             ..fresh
         };
         assert!(!is_reenrolled(&rejected, &other));
+    }
+
+    #[test]
+    fn rejected_refreshed_pair_is_not_mistaken_for_a_new_enrollment() {
+        let now = chrono::Utc::now();
+        let original = identity("original-access", now + chrono::Duration::days(30));
+        let refreshed = identity("refreshed-access", now + chrono::Duration::days(30));
+        let signal = ReenrollmentSignal::default();
+        signal.set_with_identity(ReenrollmentReason::CredentialRejected, &refreshed);
+        let rejected = signal.rejected_identity().unwrap();
+        assert_ne!(original.access_token, rejected.access_token);
+        assert!(!is_reenrolled(&rejected, &refreshed));
+        assert!(is_reenrolled(
+            &rejected,
+            &identity("reenrolled-access", now + chrono::Duration::days(30))
+        ));
+        assert!(!format!("{signal:?}").contains("refreshed-access"));
     }
 
     #[tokio::test]

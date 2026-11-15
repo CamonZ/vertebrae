@@ -218,7 +218,7 @@ stale cached provider; correcting the file allows the next request to recover.
 Remote and local account-authenticated clients use exactly the same
 `[sacrum].url` and `[sacrum].token` fields. The CLI, GUI, and `sacrum-client`
 remain transparent consumers of those fields. An enrolled standalone daemon
-uses its protected `daemon.toml` endpoint and reconnect credential instead.
+uses its protected `daemon.toml` endpoint and access/refresh token pair instead.
 
 ## Standalone daemon enrollment
 
@@ -235,10 +235,10 @@ The input must be a pipe or redirected file; terminal input is rejected to avoid
 echoing the secret. Protect any input file with owner-only permissions.
 
 The command calls `/api/daemon/exchange`, then stores the server-issued stable
-ID and reconnect credential in the protected sibling file
+ID, access token, refresh token and both expiries in the protected sibling file
 `daemon.toml` (0600 on Unix), beside the shared configuration. On macOS this
 is `~/Library/Application Support/vertebrae/daemon.toml`; on Linux it is normally
-`~/.config/vertebrae/daemon.toml`. The credential is never
+`~/.config/vertebrae/daemon.toml`. Neither token is ever
 printed. Re-enrollment for the same identity requires `--replace-existing`;
 an attempt to replace a different configured identity is rejected. A corrupt
 or partial file is reported without its contents and is never replaced automatically.
@@ -248,50 +248,55 @@ enrollment fails before consuming its bootstrap credential. The persistent
 the operating system releases the lock when the enrollment process exits.
 
 On restart, `vtb-daemon` authenticates the Phoenix socket with the stored
-`daemon_id` and `reconnect_token`, then joins `daemon:<daemon_id>`. Network
+`daemon_id` and `access_token`, then joins `daemon:<daemon_id>`. Network
 disconnects and channel interruptions retry indefinitely with capped exponential
 backoff and jitter. Each WebSocket connection attempt has a 15-second timeout.
 A duplicate registration retries because a previous connection can take time to
 disappear from the backend. Startup while Sacrum is unreachable retries the same
 way instead of exiting. A machine-readable `not_found`, `deregistered`, or equivalent
 terminal response means the standalone identity was retired while offline: the
-daemon atomically removes `reconnect_token` from `daemon.toml`, writes a retired
+daemon atomically removes both tokens from `daemon.toml`, writes a retired
 marker, preserves `daemon.lock`, and stops without entering another retry loop.
 Transient and ambiguous responses do not clear credentials and remain retryable.
 On restart, a retired marker fails before startup, so the daemon cannot silently
 fall back to `[sacrum].token`. Re-enrollment with
-`--replace-existing` clears the marker and writes a fresh reconnect credential.
+`--replace-existing` clears the marker and writes a fresh token pair.
 Unexpected supervisor termination exits the executable with a failure status so the
 existing service manager can restart it. Restart always reuses the saved identity;
 it does not repeat the bootstrap exchange.
 
 ### Automatic credential renewal
 
-Reconnect credentials last 30 days. Every enrolled daemon renews its credential
-automatically; there is no setting to enable or disable this, and existing
-`daemon.toml` files need no changes. At startup, after every reconnect, and every
-five minutes of wall-clock time, the daemon compares the persisted `expires_at`
-with the current time. When less than 24 hours remain it calls the
-`renewDaemonCredential` GraphQL mutation with `Authorization: Bearer
-<reconnect_token>` and `X-Daemon-ID`. Only one renewal runs at a time.
+Access tokens last one hour and refresh tokens last 30 days. Every enrolled daemon
+refreshes automatically within five minutes of access-token expiry, checking once
+per minute and on reconnect. GraphQL requests send `Authorization: Bearer
+<access_token>` and `X-Daemon-ID`; socket connections send `access_token`.
+Refresh tokens are used only in the JSON body of `POST /api/daemon/refresh`,
+alongside `daemon_id`. A GraphQL HTTP 401 refreshes and retries the request once.
+Timer, reconnect and HTTP recovery share one refresh coordinator, so failures
+for the same access token produce one refresh request.
 
-The successor credential and expiry are written to `daemon.toml` with the same
-lock and atomic replacement as enrollment (owner-only temporary file, fsync,
-rename). The daemon then reconnects its socket with the successor and switches
-its GraphQL reporting to it. Sacrum retires the previous credential when the
-successor is first used. If the response is lost or the write fails, the previous
-`daemon.toml` stays intact and usable, and the daemon retries renewal with the
-previous credential. Sacrum then replaces the unused successor. Network errors,
-timeouts, and `unavailable` responses retry with capped, jittered backoff until
-the credential expires. A renewal never overwrites a `daemon.toml` that was
-re-enrolled in the meantime.
+The response fields `access_token`, `access_token_expires_at`, `refresh_token`
+and `refresh_token_expires_at` are written together to `daemon.toml` with the
+same lock and atomic replacement as enrollment (owner-only temporary file,
+fsync, rename). Only then does the daemon publish the access token to existing
+GraphQL clients and reconnect its socket. Refresh immediately revokes previous
+access tokens. Sacrum retires the predecessor refresh token when its successor
+pair is first used. A lost response or failed write can therefore be retried
+with the persisted predecessor, replacing the unused successor. Transient
+failures retry with capped, jittered backoff until refresh-token expiry.
+A renewal never overwrites a config re-enrolled in the meantime.
+
+This is a coordinated backend/daemon cutover. Legacy `reconnect_token` configs
+cannot authenticate with the new backend and require explicit re-enrollment
+with a fresh bootstrap token and `--replace-existing`.
 
 ### Re-enrollment required
 
-An expired credential cannot be renewed. When the persisted credential has
-already expired at startup, the daemon makes no connection attempt. When renewal
-or socket authentication returns `invalid_credentials` (for example after an owner
-rotation), the daemon stops connecting. In both cases it logs one
+An expired access token can be refreshed before connecting. An expired refresh
+token requires re-enrollment without a connection attempt. When refresh returns
+`invalid_credentials` (for example after an owner rotation), the daemon clears
+its shared access token and stops credentialed requests and socket connections. In both cases it logs one
 `Daemon re-enrollment required` message with the daemon ID and the recovery
 command, and keeps running without contacting Sacrum. It does not exit into a
 service-manager restart loop. The GUI marks such a daemon in the Daemons

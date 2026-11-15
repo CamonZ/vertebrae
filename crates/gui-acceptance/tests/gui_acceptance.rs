@@ -618,9 +618,23 @@ async fn main() {
                     let _ = std::fs::rename(&src, &dst);
                 }
 
+                if !colima
+                    && !podman
+                    && let Some(world) = world.as_deref()
+                {
+                    steps::gate_chat::reset_default_local_chat_provider(world).await;
+                    steps::gate_chat::reset_gate_steering_thresholds(world).await;
+                }
+
+                // Own one app/WebKit network process per scenario. A cancelled
+                // document load can poison a reused session and fail unrelated
+                // scenarios before they reach their first step. Close after
+                // diagnostics and before deleting the app's backend fixtures,
+                // including when setup failed before a world was returned.
+                gui_acceptance::close_webdriver().await;
+
                 if let Some(world) = world {
                     if colima {
-                        gui_acceptance::close_webdriver().await;
                         world.scenario_timing.take();
                         return;
                     }
@@ -630,8 +644,6 @@ async fn main() {
                         world.scenario_timing.take();
                         return;
                     }
-                    steps::gate_chat::reset_default_local_chat_provider(world).await;
-                    steps::gate_chat::reset_gate_steering_thresholds(world).await;
                     // Stop the daemon first so it can't hold DB locks while we
                     // delete the workflows/tasks underneath it.
                     world.stop_daemon().await;

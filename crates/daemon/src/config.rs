@@ -24,6 +24,10 @@ pub enum ConfigError {
     Missing(String),
     #[error("Standalone daemon identity is retired; re-enrollment is required")]
     Retired,
+    #[error(
+        "Legacy daemon credentials require re-enrollment; run vtb-daemon enroll --replace-existing with a fresh bootstrap token"
+    )]
+    LegacyCredentials,
     #[error("Daemon is already enrolled as {daemon_id}; use explicit credential re-enrollment")]
     AlreadyEnrolled { daemon_id: String },
     #[error("Cannot replace enrolled daemon {existing_id} with a different identity")]
@@ -38,8 +42,10 @@ pub enum ConfigError {
 pub struct DaemonIdentity {
     pub endpoint: String,
     pub daemon_id: String,
-    pub reconnect_token: String,
-    pub expires_at: String,
+    pub access_token: String,
+    pub refresh_token: String,
+    pub refresh_token_expires_at: String,
+    pub access_token_expires_at: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -47,9 +53,15 @@ struct PersistedDaemonIdentity {
     endpoint: String,
     daemon_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    reconnect_token: Option<String>,
+    access_token: Option<String>,
+    #[serde(default, rename = "reconnect_token", skip_serializing)]
+    legacy_reconnect: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    expires_at: Option<String>,
+    refresh_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refresh_token_expires_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    access_token_expires_at: Option<String>,
     #[serde(default, skip_serializing_if = "is_false")]
     retired: bool,
 }
@@ -63,6 +75,7 @@ struct RetiredDaemonIdentity {
 #[derive(Debug)]
 enum PersistedDaemonState {
     Active(DaemonIdentity),
+    Legacy(RetiredDaemonIdentity),
     Retired(RetiredDaemonIdentity),
 }
 
@@ -73,30 +86,57 @@ fn is_false(value: &bool) -> bool {
 impl PersistedDaemonIdentity {
     fn into_state(self) -> Result<PersistedDaemonState, ConfigError> {
         if self.retired {
-            if self.reconnect_token.is_some() || self.expires_at.is_some() {
+            let has_credentials = self.access_token.is_some()
+                || self.access_token_expires_at.is_some()
+                || self.refresh_token.is_some()
+                || self.refresh_token_expires_at.is_some()
+                || self.legacy_reconnect.is_some();
+
+            if has_credentials {
                 return Err(ConfigError::LoadFailed(
                     "retired daemon config must not contain active credentials".to_string(),
                 ));
             }
+
             return Ok(PersistedDaemonState::Retired(RetiredDaemonIdentity {
                 endpoint: self.endpoint,
                 daemon_id: self.daemon_id,
             }));
         }
 
-        let reconnect_token = self.reconnect_token.ok_or_else(|| {
+        if self.legacy_reconnect.is_some() {
+            return Ok(PersistedDaemonState::Legacy(RetiredDaemonIdentity {
+                endpoint: self.endpoint,
+                daemon_id: self.daemon_id,
+            }));
+        }
+
+        let access_token = self.access_token.ok_or_else(|| {
             ConfigError::LoadFailed(
-                "active daemon config is missing its reconnect credential".to_string(),
+                "active daemon config is missing its access token; re-enrollment is required"
+                    .to_string(),
             )
         })?;
-        let expires_at = self.expires_at.ok_or_else(|| {
+        let access_token_expires_at = self.access_token_expires_at.ok_or_else(|| {
             ConfigError::LoadFailed("active daemon config is missing its expiry".to_string())
         })?;
+
+        let refresh_token = self.refresh_token.ok_or_else(|| {
+            ConfigError::LoadFailed(
+                "legacy or incomplete daemon credentials; re-enrollment is required".into(),
+            )
+        })?;
+        let refresh_token_expires_at = self.refresh_token_expires_at.ok_or_else(|| {
+            ConfigError::LoadFailed("missing refresh expiry; re-enrollment is required".into())
+        })?;
+
         Ok(PersistedDaemonState::Active(DaemonIdentity {
             endpoint: self.endpoint,
             daemon_id: self.daemon_id,
-            reconnect_token,
-            expires_at,
+            access_token,
+            refresh_token,
+            refresh_token_expires_at,
+            access_token_expires_at,
         }))
     }
 }
@@ -106,8 +146,11 @@ impl From<&DaemonIdentity> for PersistedDaemonIdentity {
         Self {
             endpoint: value.endpoint.clone(),
             daemon_id: value.daemon_id.clone(),
-            reconnect_token: Some(value.reconnect_token.clone()),
-            expires_at: Some(value.expires_at.clone()),
+            access_token: Some(value.access_token.clone()),
+            legacy_reconnect: None,
+            refresh_token: Some(value.refresh_token.clone()),
+            refresh_token_expires_at: Some(value.refresh_token_expires_at.clone()),
+            access_token_expires_at: Some(value.access_token_expires_at.clone()),
             retired: false,
         }
     }
@@ -118,8 +161,10 @@ impl fmt::Debug for DaemonIdentity {
         f.debug_struct("DaemonIdentity")
             .field("endpoint", &self.endpoint)
             .field("daemon_id", &self.daemon_id)
-            .field("reconnect_token", &"<redacted>")
-            .field("expires_at", &self.expires_at)
+            .field("access_token", &"<redacted>")
+            .field("refresh_token", &"<redacted>")
+            .field("access_token_expires_at", &"<redacted>")
+            .field("refresh_token_expires_at", &"<redacted>")
             .finish()
     }
 }
@@ -185,6 +230,7 @@ fn load_daemon_identity_at(path: &Path) -> Result<Option<DaemonIdentity>, Config
     match load_daemon_state_at(path)? {
         Some(PersistedDaemonState::Active(identity)) => Ok(Some(identity)),
         Some(PersistedDaemonState::Retired(_)) => Err(ConfigError::Retired),
+        Some(PersistedDaemonState::Legacy(_)) => Err(ConfigError::LegacyCredentials),
         None => Ok(None),
     }
 }
@@ -209,7 +255,9 @@ fn load_daemon_state_at(path: &Path) -> Result<Option<PersistedDaemonState>, Con
         .into_state()?;
     let endpoint = match &state {
         PersistedDaemonState::Active(identity) => &identity.endpoint,
-        PersistedDaemonState::Retired(identity) => &identity.endpoint,
+        PersistedDaemonState::Retired(identity) | PersistedDaemonState::Legacy(identity) => {
+            &identity.endpoint
+        }
     };
     let endpoint = url::Url::parse(endpoint)
         .map_err(|error| ConfigError::LoadFailed(format!("invalid daemon endpoint: {error}")))?;
@@ -284,7 +332,8 @@ impl DaemonEnrollmentStorage {
         if let Some(existing) = load_daemon_state_at(path)? {
             let existing_id = match existing {
                 PersistedDaemonState::Active(identity) => identity.daemon_id,
-                PersistedDaemonState::Retired(identity) => identity.daemon_id,
+                PersistedDaemonState::Retired(identity)
+                | PersistedDaemonState::Legacy(identity) => identity.daemon_id,
             };
             if !replace_existing {
                 return Err(ConfigError::AlreadyEnrolled {
@@ -313,7 +362,9 @@ impl DaemonEnrollmentStorage {
         })?;
         let (endpoint, daemon_id) = match existing {
             PersistedDaemonState::Active(identity) => (identity.endpoint, identity.daemon_id),
-            PersistedDaemonState::Retired(identity) => (identity.endpoint, identity.daemon_id),
+            PersistedDaemonState::Retired(identity) | PersistedDaemonState::Legacy(identity) => {
+                (identity.endpoint, identity.daemon_id)
+            }
         };
         if daemon_id != self.daemon_id {
             return Err(ConfigError::IdentityMismatch {
@@ -409,8 +460,11 @@ fn write_retired_daemon_identity(
         &PersistedDaemonIdentity {
             endpoint: endpoint.to_string(),
             daemon_id: daemon_id.to_string(),
-            reconnect_token: None,
-            expires_at: None,
+            access_token: None,
+            legacy_reconnect: None,
+            refresh_token: None,
+            refresh_token_expires_at: None,
+            access_token_expires_at: None,
             retired: true,
         },
         true,
@@ -544,9 +598,38 @@ mod tests {
         DaemonIdentity {
             endpoint: "https://sacrum.example.com/base".to_string(),
             daemon_id: id.to_string(),
-            reconnect_token: token.to_string(),
-            expires_at: "2026-09-07T12:00:00Z".to_string(),
+            access_token: token.to_string(),
+            refresh_token: token.to_string(),
+            refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30))
+                .to_rfc3339(),
+            access_token_expires_at: "2026-09-07T12:00:00Z".to_string(),
         }
+    }
+
+    #[test]
+    fn legacy_credentials_are_rejected_but_explicit_reenrollment_can_replace_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("daemon.toml");
+        std::fs::write(&path, "endpoint = \"https://sacrum.example.test\"\ndaemon_id = \"daemon-1\"\nreconnect_token = \"old-secret\"\nexpires_at = \"2099-01-01T00:00:00Z\"\n").unwrap();
+        assert!(matches!(
+            load_daemon_identity_at(&path),
+            Err(ConfigError::LegacyCredentials)
+        ));
+        assert!(matches!(
+            DaemonEnrollmentStorage::begin_at(&path, "daemon-1", false),
+            Err(ConfigError::AlreadyEnrolled { .. })
+        ));
+        let next = identity("daemon-1", "new-secret");
+        DaemonEnrollmentStorage::begin_at(&path, "daemon-1", true)
+            .unwrap()
+            .save(&next)
+            .unwrap();
+        assert_eq!(load_daemon_identity_at(&path).unwrap(), Some(next));
+        assert!(
+            !std::fs::read_to_string(path)
+                .unwrap()
+                .contains("old-secret")
+        );
     }
 
     #[test]
@@ -568,7 +651,7 @@ mod tests {
     }
 
     #[test]
-    fn identity_debug_redacts_reconnect_token() {
+    fn identity_debug_redacts_access_token() {
         let identity = identity("daemon-1", "do-not-log");
         let debug = format!("{identity:?}");
         assert!(!debug.contains("do-not-log"));
@@ -638,7 +721,7 @@ mod tests {
             load_daemon_identity_at(&path)
                 .unwrap()
                 .unwrap()
-                .reconnect_token,
+                .access_token,
             "second-secret"
         );
     }
@@ -682,7 +765,7 @@ mod tests {
 
         let retired = std::fs::read_to_string(&path).unwrap();
         assert!(retired.contains("retired = true"));
-        assert!(!retired.contains("reconnect_token"));
+        assert!(!retired.contains("access_token"));
         assert!(matches!(
             load_daemon_identity_at(&path),
             Err(ConfigError::Retired)
@@ -694,7 +777,7 @@ mod tests {
         assert_eq!(load_daemon_identity_at(&path).unwrap(), Some(replacement));
         let reenrolled = std::fs::read_to_string(&path).unwrap();
         assert!(!reenrolled.contains("retired = true"));
-        assert!(reenrolled.contains("reconnect_token"));
+        assert!(reenrolled.contains("access_token"));
         assert!(lock_path.exists());
     }
 
@@ -703,8 +786,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("daemon.toml");
         for content in [
-            "reconnect_token = \"PRIVATE-CREDENTIAL\" trailing",
-            "reconnect_token = [\"PRIVATE-CREDENTIAL\"]",
+            "access_token = \"PRIVATE-CREDENTIAL\" trailing",
+            "access_token = [\"PRIVATE-CREDENTIAL\"]",
         ] {
             std::fs::write(&path, content).unwrap();
             let error = load_daemon_identity_at(&path).unwrap_err();
@@ -771,8 +854,11 @@ mod tests {
         let original = identity("daemon-1", "original-secret");
         save_daemon_identity_at(&path, &original, false).unwrap();
         let renewed = DaemonIdentity {
-            reconnect_token: "renewed-secret".to_string(),
-            expires_at: "2026-10-07T12:00:00Z".to_string(),
+            access_token: "renewed-secret".to_string(),
+            refresh_token: "renewed-secret".to_string(),
+            refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30))
+                .to_rfc3339(),
+            access_token_expires_at: "2026-10-07T12:00:00Z".to_string(),
             ..original.clone()
         };
         persist_renewed_credential_at(&path, &original, &renewed).unwrap();
@@ -791,7 +877,10 @@ mod tests {
 
         // A stale renewal must not overwrite a newer enrollment.
         let stale = DaemonIdentity {
-            reconnect_token: "stale-secret".to_string(),
+            access_token: "stale-secret".to_string(),
+            refresh_token: "stale-secret".to_string(),
+            refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30))
+                .to_rfc3339(),
             ..original.clone()
         };
         assert!(matches!(
@@ -808,7 +897,10 @@ mod tests {
         let original = identity("daemon-1", "original-secret");
         save_daemon_identity_at(&path, &original, false).unwrap();
         let renewed = DaemonIdentity {
-            reconnect_token: "renewed-secret".to_string(),
+            access_token: "renewed-secret".to_string(),
+            refresh_token: "renewed-secret".to_string(),
+            refresh_token_expires_at: (chrono::Utc::now() + chrono::Duration::days(30))
+                .to_rfc3339(),
             ..original.clone()
         };
         // An in-progress enrollment holds the lock: renewal fails before writing.

@@ -1,17 +1,17 @@
 @credential_renewal
 Feature: Automatic daemon credential renewal
-  An enrolled daemon renews its reconnect credential through
-  renewDaemonCredential once less than 24 hours of lifetime remain, with its
+  An enrolled daemon refreshes its access and refresh token pair through
+  POST /api/daemon/refresh within five minutes of access expiry, with its
   default configuration and no renewal settings. Credentials it cannot renew
   put it in a re-enrollment-required state instead of a restart loop.
 
   Scenario: A credential inside the renewal window is renewed and keeps working
     Given an enrolled standalone daemon that is not running
-    And the persisted daemon credential expires in 2 hours
+    And the persisted access token expires in 2 minutes
     When I start the enrolled daemon
-    Then the daemon renews its reconnect credential
+    Then the daemon renews its access credential
     And the daemon is online
-    And the enrolled reconnect credential is rejected
+    And the enrolled access credential is rejected
     Given a workflow with one inference step
     And a task assigned to the workflow
     When the mock is scripted to succeed with full metrics
@@ -22,16 +22,16 @@ Feature: Automatic daemon credential renewal
 
   Scenario: A restarted daemon uses the renewed credential without renewing again
     Given an enrolled standalone daemon that is not running
-    And the persisted daemon credential expires in 2 hours
+    And the persisted access token expires in 2 minutes
     When I start the enrolled daemon
-    Then the daemon renews its reconnect credential
+    Then the daemon renews its access credential
     When I restart the daemon
     Then the daemon reconnects with the renewed credential without renewing again
     And the daemon output contains no credential plaintext
 
-  Scenario: An expired credential requires re-enrollment without connecting
+  Scenario: An expired refresh token requires re-enrollment without connecting
     Given an enrolled standalone daemon that is not running
-    And the persisted daemon credential expired 2 hours ago
+    And the persisted refresh token expired 2 hours ago
     When I start the enrolled daemon without waiting for registration
     Then the daemon reports that re-enrollment is required
     And the daemon makes no socket connection attempts
@@ -47,4 +47,13 @@ Feature: Automatic daemon credential renewal
     And the daemon keeps running without restarting
     When I re-enroll the daemon with the rotated bootstrap credential
     Then the daemon resumes with the re-enrolled credential
+    And the daemon output contains no credential plaintext
+
+  Scenario: Expired access is refreshed before connecting without re-enrollment
+    Given an enrolled standalone daemon that is not running
+    And the persisted access token expired 2 hours ago
+    When I start the enrolled daemon
+    Then the daemon refreshes before its first socket connection
+    And the daemon is online
+    And the enrolled access credential is rejected
     And the daemon output contains no credential plaintext

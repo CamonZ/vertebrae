@@ -54,14 +54,22 @@ pub struct GraphqlClient {
     connection_identity: String,
     /// Replaces the constructor's bearer token on every request when set.
     shared_token: Option<SharedBearerToken>,
+    recovery: Option<std::sync::Arc<dyn DaemonCredentialRecovery>>,
 }
 
 /// A bearer credential that can be replaced while clients holding it stay alive.
 ///
-/// The daemon renews its reconnect credential in place; every clone observes
+/// The daemon renews its access credential in place; every clone observes
 /// the replacement on its next request. `Debug` never shows the value.
 #[derive(Clone)]
 pub struct SharedBearerToken(std::sync::Arc<std::sync::RwLock<String>>);
+
+/// Daemon-owned, single-flight recovery. Implementations persist before publishing
+/// credentials and coalesce failures for the same rejected access token.
+#[async_trait::async_trait]
+pub trait DaemonCredentialRecovery: Send + Sync {
+    async fn recover(&self, rejected_access_token: &str) -> SacrumClientResult<()>;
+}
 
 impl SharedBearerToken {
     pub fn new(token: impl Into<String>) -> Self {
@@ -99,10 +107,10 @@ impl GraphqlClient {
         Self::new_with_daemon_id(config, None)
     }
 
-    /// Create a client authenticated with a daemon reconnect credential.
+    /// Create a client authenticated with a daemon access credential.
     ///
     /// Sacrum requires the daemon identity header when the bearer token is a
-    /// reconnect credential rather than an account API token.
+    /// daemon access credential rather than an account API token.
     pub fn new_with_daemon_id(config: SacrumConfig, daemon_id: Option<&str>) -> Self {
         use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 
@@ -131,10 +139,11 @@ impl GraphqlClient {
             project_id: config.project_id,
             connection_identity,
             shared_token: None,
+            recovery: None,
         }
     }
 
-    /// Create a daemon client whose reconnect credential can be renewed in place.
+    /// Create a daemon client whose access credential can be renewed in place.
     ///
     /// `config.api_token` is ignored for authorization; each request reads the
     /// current value of `token`.
@@ -146,6 +155,14 @@ impl GraphqlClient {
         let mut client = Self::new_with_daemon_id(config, Some(daemon_id));
         client.shared_token = Some(token);
         client
+    }
+
+    pub fn with_daemon_credential_recovery(
+        mut self,
+        recovery: std::sync::Arc<dyn DaemonCredentialRecovery>,
+    ) -> Self {
+        self.recovery = Some(recovery);
+        self
     }
 
     /// Get the project ID this client is configured for
@@ -175,12 +192,30 @@ impl GraphqlClient {
         let start = std::time::Instant::now();
         log::info!("[GQL] {} {}", op, context);
 
-        let mut request = self.client.post(&self.endpoint).json(&request_body);
-        if let Some(token) = &self.shared_token {
-            // Request headers take precedence over the client's default headers.
-            request = request.bearer_auth(token.get());
-        }
-        let response = request.send().await?;
+        let mut retried = false;
+        let response = loop {
+            let mut request = self.client.post(&self.endpoint).json(&request_body);
+            let sent_token = self.shared_token.as_ref().map(SharedBearerToken::get);
+            if let Some(token) = &sent_token {
+                if token.is_empty() {
+                    return Err(SacrumClientError::ApiError {
+                        status: 401,
+                        message: "daemon re-enrollment required".into(),
+                    });
+                }
+                request = request.bearer_auth(token);
+            }
+            let response = request.send().await?;
+            if response.status() == reqwest::StatusCode::UNAUTHORIZED
+                && !retried
+                && let (Some(recovery), Some(token)) = (&self.recovery, &sent_token)
+            {
+                recovery.recover(token).await?;
+                retried = true;
+                continue;
+            }
+            break response;
+        };
         let status = response.status();
 
         if !status.is_success() {
@@ -762,5 +797,48 @@ mod tests {
             ("first-secret", "second-secret")
         );
         assert!(!format!("{token:?}").contains("secret"));
+    }
+    #[tokio::test]
+    async fn daemon_401_retries_only_once_even_if_new_access_is_rejected() {
+        use wiremock::{Mock, MockServer, ResponseTemplate, matchers::header};
+        struct Recovery {
+            token: SharedBearerToken,
+            calls: std::sync::atomic::AtomicUsize,
+        }
+        #[async_trait::async_trait]
+        impl DaemonCredentialRecovery for Recovery {
+            async fn recover(&self, rejected: &str) -> SacrumClientResult<()> {
+                assert_eq!(rejected, "old-access");
+                self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                self.token.set("new-access");
+                Ok(())
+            }
+        }
+        let server = MockServer::start().await;
+        for access in ["old-access", "new-access"] {
+            Mock::given(header("authorization", format!("Bearer {access}").as_str()))
+                .respond_with(ResponseTemplate::new(401))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        let token = SharedBearerToken::new("old-access");
+        let recovery = std::sync::Arc::new(Recovery {
+            token: token.clone(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let client = GraphqlClient::new_with_daemon_credential(
+            SacrumConfig::new(server.uri(), String::new(), "project".into()),
+            "daemon",
+            token,
+        )
+        .with_daemon_credential_recovery(recovery.clone());
+        assert!(matches!(
+            client
+                .execute_void("query Value { value }", Value::Null)
+                .await,
+            Err(SacrumClientError::ApiError { status: 401, .. })
+        ));
+        assert_eq!(recovery.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 }

@@ -16,6 +16,7 @@ Feature: Run panes stream assistant text and report usage
     And I create a step "Claude Streaming Step" in the workflow "Claude Streaming Workflow" via the CLI
     And the step runs on the "claude" harness
     And the "claude" mock streams "stream-alpha", "stream-beta" and "stream-gamma" reporting 120 input, 300 cached and 45 output tokens
+    And the streaming step transitions to a finish step
     And the GUI is on the pipeline view
     And I select factory "No Factory"
     When I create a task with:
@@ -25,9 +26,9 @@ Feature: Run panes stream assistant text and report usage
     And I open the created task's run in the chat
     Then the only assistant message should read "stream-alpha" within 30 seconds
     And the GUI should not show "stream-beta" within 1 seconds
-    And the only assistant message should read "stream-alpha stream-beta stream-gamma" within 30 seconds
     When I wait up to 30 seconds for the task to have a completed execution
-    Then the element with test id "run-pane-tokens-raw" should read "120 raw" within 15 seconds
+    Then the conversation should show "stream-alpha stream-beta stream-gamma" exactly once within 15 seconds
+    And the element with test id "run-pane-tokens-raw" should read "120 raw" within 15 seconds
     And the element with test id "run-pane-tokens-cache" should read "300 cache" within 15 seconds
     And the element with test id "run-pane-tokens-output" should read "45 out" within 15 seconds
     And Sacrum stores the assistant text "stream-alpha stream-beta stream-gamma" once and no text deltas
@@ -42,6 +43,7 @@ Feature: Run panes stream assistant text and report usage
     And I create a step "Codex Streaming Step" in the workflow "Codex Streaming Workflow" via the CLI
     And the step runs on the "codex" harness
     And the "codex" mock streams "stream-alpha", "stream-beta" and "stream-gamma" reporting 220 input, 160 cached and 35 output tokens
+    And the streaming step transitions to a finish step
     And the GUI is on the pipeline view
     And I select factory "No Factory"
     When I create a task with:
@@ -51,9 +53,9 @@ Feature: Run panes stream assistant text and report usage
     And I open the created task's run in the chat
     Then the only assistant message should read "stream-alpha" within 30 seconds
     And the GUI should not show "stream-beta" within 1 seconds
-    And the only assistant message should read "stream-alpha stream-beta stream-gamma" within 30 seconds
     When I wait up to 30 seconds for the task to have a completed execution
-    Then the element with test id "run-pane-tokens-raw" should read "220 raw" within 15 seconds
+    Then the conversation should show "stream-alpha stream-beta stream-gamma" exactly once within 15 seconds
+    And the element with test id "run-pane-tokens-raw" should read "220 raw" within 15 seconds
     And the element with test id "run-pane-tokens-cache" should read "160 cache" within 15 seconds
     And the element with test id "run-pane-tokens-output" should read "35 out" within 15 seconds
     And Sacrum stores the assistant text "stream-alpha stream-beta stream-gamma" once and no text deltas
