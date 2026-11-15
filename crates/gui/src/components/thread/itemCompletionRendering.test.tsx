@@ -6,7 +6,7 @@ import type { AgentMessage } from "./types";
 const rich = vi.hoisted(() => vi.fn());
 vi.mock("../shared/MarkdownContent", () => ({
   MarkdownContent: ({text}: {text: string}) => { rich(text); return <div data-testid="rich">{text}</div>; },
-  BoundedTextContent: () => null,
+  PlainTextContent: () => null,
 }));
 
 const message: AgentMessage = {type: "agent", evt: "item", at: "", rel: "", prose: ""};

@@ -135,9 +135,7 @@ function buildChatRenderItems(
   assistantLabel: string,
   gate: LocalChatGateBinding | null | undefined,
   expandedToolIds: ReadonlySet<string>,
-  onToggleTool: (toolId: string) => void,
-  fullContentToolIds: ReadonlySet<string>,
-  onToggleFullContent: (toolId: string) => void
+  onToggleTool: (toolId: string) => void
 ): ChatRenderItem[] {
   const items: ChatRenderItem[] = [];
   let segment: ChatMessage[] = [];
@@ -151,8 +149,6 @@ function buildChatRenderItems(
       gate: gate ?? null,
       expanded: expandedToolIds,
       onToggleTool,
-      fullContent: fullContentToolIds,
-      onToggleFullContent,
     });
 
     const liveSlots = new Map<
@@ -312,19 +308,8 @@ export function ChatTranscript({
   const [expandedToolIds, setExpandedToolIds] = useState<ReadonlySet<string>>(
     () => new Set()
   );
-  const [fullContentToolIds, setFullContentToolIds] = useState<
-    ReadonlySet<string>
-  >(() => new Set());
   const toggleTool = useCallback((toolId: string) => {
     setExpandedToolIds((current) => {
-      const next = new Set(current);
-      if (next.has(toolId)) next.delete(toolId);
-      else next.add(toolId);
-      return next;
-    });
-  }, []);
-  const toggleFullContent = useCallback((toolId: string) => {
-    setFullContentToolIds((current) => {
       const next = new Set(current);
       if (next.has(toolId)) next.delete(toolId);
       else next.add(toolId);
@@ -339,20 +324,9 @@ export function ChatTranscript({
         assistantLabel,
         gate,
         expandedToolIds,
-        toggleTool,
-        fullContentToolIds,
-        toggleFullContent
+        toggleTool
       ),
-    [
-      sessionId,
-      assistantLabel,
-      gate,
-      expandedToolIds,
-      fullContentToolIds,
-      messages,
-      toggleFullContent,
-      toggleTool,
-    ]
+    [sessionId, assistantLabel, gate, expandedToolIds, messages, toggleTool]
   );
   const streamingTail = useMemo(() => {
     if (!streamingAssistant) return null;

@@ -56,6 +56,12 @@ vi.mock("./CodeSnippet", () => ({
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 
+function expectNoLengthControls() {
+  expect(
+    screen.queryByRole("button", { name: /Show (full content|more|less)/ })
+  ).toBeNull();
+}
+
 describe("MarkdownContent", () => {
   beforeEach(() => {
     useEntityPanelStore.getState().reset();
@@ -469,43 +475,55 @@ describe("MarkdownContent", () => {
       }
     });
 
-    it("defers parsing and highlighting very large content until requested", () => {
-      const source = `\`\`\`typescript\n${"const value = 1;\n".repeat(800)}\`\`\``;
+    it("renders very large code blocks in full without a length control", () => {
+      const source = `\`\`\`typescript\n${"const value = 1;\n".repeat(800)}const tail = 2;\n\`\`\``;
       const { container } = render(<MarkdownContent text={source} />);
 
-      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
-      expect(container.querySelector("code")).toBeNull();
-
-      fireEvent.click(
-        screen.getByRole("button", { name: /Show full content/ })
-      );
-
       expect(container.querySelector("code")?.textContent).toContain(
-        "const value = 1;"
+        "const tail = 2;"
       );
-      expect(screen.getByRole("button", { name: "Show less" })).toHaveAttribute(
-        "aria-expanded",
-        "true"
-      );
-
-      fireEvent.click(screen.getByRole("button", { name: "Show less" }));
-      expect(container.querySelector("code")).toBeNull();
-      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
+      expectNoLengthControls();
     });
 
-    it("restores syntax highlighting and actionable links for full large markdown", () => {
+    it("renders markdown beyond the former character threshold in full", () => {
+      const tail = "FINAL-MARKDOWN-PARAGRAPH";
+      const source = `# Heading\n\n${"**word** ".repeat(2_000)}\n\n${tail}`;
+      render(<MarkdownContent text={source} />);
+
+      expect(
+        screen.getByRole("heading", { name: "Heading" })
+      ).toBeInTheDocument();
+      expect(screen.getByText(tail)).toBeInTheDocument();
+      expectNoLengthControls();
+    });
+
+    it("renders plain text beyond the former line threshold in full", () => {
+      const lines = Array.from({ length: 400 }, (_, i) => `plain line ${i}`);
+      render(<MarkdownContent text={lines.join("\n\n")} />);
+
+      expect(screen.getByText("plain line 0")).toBeInTheDocument();
+      expect(screen.getByText("plain line 399")).toBeInTheDocument();
+      expectNoLengthControls();
+    });
+
+    it("keeps complete content while streaming across the former thresholds", () => {
+      let text = "";
+      const { rerender } = render(<MarkdownContent text={text} />);
+      for (let chunk = 0; chunk < 300; chunk++) {
+        text += `streamed line ${chunk}\n\n`;
+        rerender(<MarkdownContent text={text} />);
+      }
+
+      expect(screen.getByText("streamed line 0")).toBeInTheDocument();
+      expect(screen.getByText("streamed line 299")).toBeInTheDocument();
+      expectNoLengthControls();
+    });
+
+    it("renders syntax highlighting and actionable links for large markdown immediately", () => {
       const prefix = "preview line\n".repeat(250);
       const source = `${prefix}\n\`src/main.rs:42\`\n\n[docs](https://example.com/docs)\n\n\`\`\`rust\nfn recovered() {}\n\`\`\``;
       const { container } = render(
         <MarkdownContent projectPath="/repo" text={source} />
-      );
-
-      expect(screen.queryByTestId("local-file-reference-link")).toBeNull();
-      expect(screen.queryByTestId("external-url-link")).toBeNull();
-      expect(container.querySelector("code")).toBeNull();
-
-      fireEvent.click(
-        screen.getByRole("button", { name: /Show full content/ })
       );
 
       expect(screen.getByTestId("local-file-reference-link")).toHaveAttribute(
@@ -639,16 +657,9 @@ describe("MarkdownContent", () => {
       expect(signal.aborted).toBe(true);
     });
 
-    it("does not process a large diagram before expansion and renders its full source", async () => {
+    it("renders a large diagram from its full source immediately", async () => {
       const diagram = `graph TD\n${"  A --> B\n".repeat(250)}  TAIL --> END`;
       render(<MarkdownContent text={`\`\`\`mermaid\n${diagram}\n\`\`\``} />);
-
-      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
-      expect(requestMermaidSvgMock).not.toHaveBeenCalled();
-
-      fireEvent.click(
-        screen.getByRole("button", { name: /Show full content/ })
-      );
 
       expect(await screen.findByTitle("Mermaid diagram")).toBeInTheDocument();
       expect(requestMermaidSvgMock).toHaveBeenCalledWith(
@@ -680,11 +691,6 @@ describe("MarkdownContent", () => {
       const diagram = `graph TD\n${"  A -- B\n".repeat(250)}  BROKEN TAIL`;
       const { container } = render(
         <MarkdownContent text={`\`\`\`mermaid\n${diagram}\n\`\`\``} />
-      );
-
-      expect(requestMermaidSvgMock).not.toHaveBeenCalled();
-      fireEvent.click(
-        screen.getByRole("button", { name: /Show full content/ })
       );
 
       expect(
@@ -732,17 +738,9 @@ describe("MarkdownContent", () => {
       expect(graphvizMock.dot).not.toHaveBeenCalled();
     });
 
-    it("defers rendering large DOT content until expansion", async () => {
+    it("renders large DOT content immediately", async () => {
       const source = `digraph {\n${"  a -> b;\n".repeat(250)}}`;
       render(<MarkdownContent text={`\`\`\`dot\n${source}\n\`\`\``} />);
-
-      expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
-      expect(loadGraphvizMock).not.toHaveBeenCalled();
-      expect(graphvizMock.dot).not.toHaveBeenCalled();
-
-      fireEvent.click(
-        screen.getByRole("button", { name: /Show full content/ })
-      );
 
       expect(await screen.findByTitle("DOT diagram")).toBeInTheDocument();
       expect(graphvizMock.dot).toHaveBeenCalledWith(source);

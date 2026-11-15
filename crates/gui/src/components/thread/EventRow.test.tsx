@@ -97,28 +97,23 @@ describe("ToolRow", () => {
     expect(screen.queryByText("expensive body")).not.toBeInTheDocument();
   });
 
-  it("bounds a large expanded tool result and retains access to all output", () => {
+  it("renders a large expanded tool result in full without a length control", () => {
     const tail = "+LAST-DIFF-LINE";
     const body = `${" context\n-old\n+new\n".repeat(400)}${tail}`;
     render(<ToolRow name="Read" status="done" body={body} />);
 
-    expect(screen.getByTestId("bounded-content-preview")).toBeInTheDocument();
-    expect(screen.queryByText(tail)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Show full content/ }));
-
     expect(screen.getByText((text) => text.endsWith(tail))).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Show (full content|more|less)/ })
+    ).not.toBeInTheDocument();
   });
 
-  it("pretty-prints a complete large JSON result after expansion", () => {
+  it("pretty-prints a complete large JSON result immediately", () => {
     const body = JSON.stringify({
       rows: Array.from({ length: 900 }, (_, index) => ({ index })),
       tail: "PRESERVED-JSON-TAIL",
     });
     render(<ToolRow name="Query" status="done" body={body} />);
-
-    expect(screen.queryByText(/PRESERVED-JSON-TAIL/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Show full content/ }));
 
     expect(
       screen.getByText((text) => text.includes('"tail": "PRESERVED-JSON-TAIL"'))
