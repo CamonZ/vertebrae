@@ -75,6 +75,14 @@ describe("embedded flow validator bundle", () => {
             { id: "target", kind: "execute step", props: { topology: true } },
           ],
           rails: [{ id: "handoff", from: "origin.out", to: "target.in" }],
+          regions: [
+            {
+              id: "workflow",
+              parts: ["origin", "target"],
+              label: "Workflow",
+              liveHeader: true,
+            },
+          ],
         })
       )
     ).toEqual({

@@ -54,3 +54,41 @@ shared drawing boundaries. Hook tests observe the real shared client and verify
 request stability/invalidation; metamorphic tests protect decision identity and
 adversarial backend-ID encoding. jsdom exercises the client's documented
 non-browser fallback; it does not claim native webview/worker smoke coverage.
+
+`AtlasMachineScene` adds the optional live presentation boundary to `FlowScene`.
+Pass the current adapter result and its compiled arrangement; the host continues
+to own the shared layout hook and viewport. `useAtlasPresentation` is also
+available for hosts that need to pass `interaction` and `presentation` directly
+to `FlowDiagram`. Neither bridge starts a layout or owns a camera. This ticket
+keeps the existing Atlas view available; changing its scoped graph host is a
+separate integration responsibility.
+
+The global entity panel store owns inspector selection and inspector edge hover.
+Scene hover and keyboard focus are local, with the most recently entered channel
+taking precedence. A mouse click may focus a part; later pointer entries still
+replace that trace. Leaving a pointer target restores focus/selection tracing; removed
+IDs are retired on the next render and do not resurrect on reintroduction.
+Out-of-scope selections remain owned by the global inspector but decorate no
+entities in this scene. Region selection includes its members; part traces
+include incident rails and immediate neighbours only. Inspector edge emphasis
+supersedes the trace and accepts individual machine rail IDs, backend handoff IDs
+and the shipped inspector's `X_`, `B_` and `L_` edge IDs. Legacy inspector rows
+that aggregate several decisions emphasize that set; individual machine IDs
+still address one parallel rail.
+
+Atlas adapter parts are neutral, unchanged, have no change notes and compile at
+scale 1 in every arrangement. The title-gap count slot is restricted to neutral
+full-scale parts without change notes; other flows keep their note/name slot
+and still expose counts in the accessible name. Tests enforce this Atlas
+invariant. Region `liveHeader: true` reserves both label lines structurally in
+`regionLabels`; its name/count anchors are shared with the renderer and the
+layout cache keys include the option. Omitted options retain embedded geometry.
+
+Workflow totals appear in headers and step totals below the part title, using
+only the adapter's observed parked/active values. There is no execution-state
+projection onto the neutral mechanisms. Headers have their own click/Enter/Space
+activation and visible focus target. Counts and emphasis are static under both
+motion preferences. Dashed conditional rails and arrow direction are opt-in
+presentation; original embedded wires keep their defaults. Emphasis changes only
+CSS on the existing wire path, retaining route points, jumps, corner radii,
+labels and endpoint identity. No second rail or catalogue lead is drawn.

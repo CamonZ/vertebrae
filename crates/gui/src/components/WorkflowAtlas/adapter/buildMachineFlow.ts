@@ -332,6 +332,7 @@ export function buildMachineFlow(
     regions.push({
       id: machineId("region", wf.id),
       label: wf.name,
+      liveHeader: true,
       parts: members,
     });
   }

@@ -39,6 +39,10 @@ export function Rail({ points, dashed, dash, jumps, cornerRadii }: RailProps) {
 export type WireChange = "" | "added" | "removed";
 
 export interface WireProps extends RouteStyle {
+  id?: string;
+  emphasis?: boolean;
+  directional?: boolean;
+  conditional?: boolean;
   points: readonly Point[];
   change?: WireChange;
   /** Arrowhead from the shared GraphMarkers (`url(#ge-arrow)`); off by default. */
@@ -65,6 +69,10 @@ export function Wire({
   labelAt,
   jumps,
   cornerRadii,
+  id,
+  emphasis,
+  directional,
+  conditional,
 }: WireProps) {
   const r = route(points, undefined, { jumps, cornerRadii });
   const mid = r.points[Math.floor(r.points.length / 2)];
@@ -79,12 +87,14 @@ export function Wire({
     <g
       className={`md-wire${change ? " " + change : ""}`}
       data-change={change || "none"}
+      data-rail-id={id}
+      data-emphasis={emphasis ? "true" : undefined}
     >
       <GraphEdge
         d={routePath(r)}
-        kind="step"
-        solid
-        markerEnd={arrow ? undefined : null}
+        kind={conditional ? "handoff" : "step"}
+        solid={!conditional}
+        markerEnd={arrow || directional ? undefined : null}
       />
       {labelAt ? (
         <PlacedLabel at={labelAt} change={change} label={label} />

@@ -142,6 +142,8 @@ export interface RailSpec {
  * as one compound node; with hand-given positions it frames them as placed.
  */
 export interface RegionSpec {
+  /** Reserve the two-line live header before layout; counts remain presentation-only. */
+  readonly liveHeader?: boolean;
   readonly id: string;
   /** Region name drawn in the corner, e.g. SACRUM PROCESS. */
   readonly label?: string;
