@@ -3,11 +3,19 @@
 `buildMachineFlow(scopedSummary, routeConfigs, scopeKey)` is a pure, additive
 adapter. The caller scopes the summary using the existing Atlas scope logic and
 supplies only already loaded configs. `useAtlasMachineFlow` stabilizes its spec
-and uses the shipped `useLaidOutFlow` compiler/worker/cache lifecycle. The scoped Atlas Graph consumes this API through `ScopedMachineGraph` behind
-the internal `WorkflowAtlas.internalMachineGraph` opt-in (or
-`VITE_ATLAS_MACHINE_GRAPH=1` in a development build). Production defaults,
-Map/factory navigation and Board retain the existing renderer. The selected
-project generation and literal factory identity retire the scene on scope changes.
+and uses the shipped `useLaidOutFlow` compiler/worker/cache lifecycle. Scoped
+Graph and zoom-expanded factory overview both consume this API and the complete
+`AtlasMachineScene` by default. Map retains `layoutCondensed` phase columns;
+Board and Run Console retain their hosts. Set `VITE_ATLAS_MACHINE_GRAPH=0` at
+build time (or pass `WorkflowAtlas.internalMachineGraph={false}` in a host) to
+restore the legacy Graph and overview for rollback until the cleanup ticket.
+Overview uses a uniform 0.32 projection from catalogue units into Atlas units;
+compiled part positions, rail identities, points, jumps and corner radii stay
+unchanged. Expanded factory-name buttons open their factory scope; shared
+workflow/step controls continue opening global inspectors. Collapsed detailed scenes and
+factory-entry buttons are inert. Map overview supplies no detailed topology to
+the shared hook, so searches there start no worker requests and pending Graph
+results are retired. Searches and scoped Graph cameras are retained per project/factory; project generation retires old scenes.
 Pending topology hides prior geometry; worker errors show the shared row fallback
 with an explicit warning and Retry layout action. A retry remounts the shared
 hook; the adapter does not introduce another worker or layout client.
@@ -100,3 +108,13 @@ motion preferences. Dashed conditional rails and arrow direction are opt-in
 presentation; original embedded wires keep their defaults. Emphasis changes only
 CSS on the existing wire path, retaining route points, jumps, corner radii,
 labels and endpoint identity. No second rail or catalogue lead is drawn.
+
+## Layout
+
+The Graph lays out each workflow region on its own and then composes the
+factory (`MachineDiagram/flow/composite.ts`): workflow layouts are memoized
+and persisted in IndexedDB (`layoutStore.ts`), so a workflow edit relays out
+only that workflow plus the handoffs between regions. `useAtlasLayoutWarmup`
+precomputes every factory's Graph at background priority after the pipeline
+summary and route configs load; the visible Graph always jumps the queue.
+Persisted layouts are keyed by build, so a new build recomputes them once.

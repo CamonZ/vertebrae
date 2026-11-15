@@ -189,6 +189,8 @@ export function WfBox({
     >
       {/* graph face */}
       <div
+        inert={view !== "graph"}
+        aria-hidden={view !== "graph"}
         className={"uv-face uv-face-graph" + (view === "graph" ? "" : " hide")}
       >
         <div className="ag-wf-hd">
@@ -222,7 +224,11 @@ export function WfBox({
       </div>
 
       {/* map face */}
-      <div className={"uv-face uv-face-map" + (view === "map" ? "" : " hide")}>
+      <div
+        inert={view !== "map"}
+        aria-hidden={view !== "map"}
+        className={"uv-face uv-face-map" + (view === "map" ? "" : " hide")}
+      >
         <div className="al-card-hd">
           <button type="button" className="al-name" onClick={selectFromName}>
             {w.name}

@@ -1,5 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PipelineSummary } from "../../bindings";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import type { JsonValue, PipelineSummary } from "../../bindings";
 import {
   NO_FACTORY_SCOPE,
   type FactoryFilterValue,
@@ -34,7 +41,14 @@ import { FactoryIndex } from "./FactoryIndex";
 import { roundedPath, routeFromSourcePort } from "./layout/geometry";
 import { ZoomWidget } from "./ZoomWidget";
 
+import { useAtlasMachineFlow } from "./adapter/useAtlasMachineFlow";
+import { AtlasMachineScene } from "./adapter/AtlasMachineScene";
+import type { DiagramTimeline } from "../MachineDiagram/flow/compile";
+
 export const FACTORY_EXPAND_SCALE = 1.6;
+// Shared parts use a 640×400 logical catalogue frame. Project that scene into
+// Atlas world units without changing any compiled positions or route metadata.
+const MACHINE_WORLD_SCALE = 0.32;
 
 /**
  * Factory markers are drawn in screen space so they stay legible at any zoom.
@@ -51,9 +65,15 @@ type HighlightState = "" | "lit" | "dim";
 
 const FULL_OPTS = { headH: 118 } as const;
 const COND_OPTS = { boxW: 264, boxH: 140 } as const;
+// A disabled overview has no detailed topology. Switching to this stable empty
+// input retires the shared hook's pending result without starting another worker.
+const EMPTY_MACHINE_SUMMARY: PipelineSummary = { workflows: [] };
 
 interface FactoryOverviewProps {
   summary: PipelineSummary;
+  machineGraph?: boolean;
+  scope?: string;
+  routeConfigs?: ReadonlyMap<string, JsonValue | null>;
   query: string;
   view: WfBoxView;
   /** The factory the user last opened; marked and focused in the index. */
@@ -112,13 +132,71 @@ function stepShape(
  * Graph or Map layout remains the world, while factories switch between a
  * dashed grouping region and an opaque summary node at the zoom threshold.
  */
-export function FactoryOverview({
+export function FactoryOverview(props: FactoryOverviewProps) {
+  const [attempt, setAttempt] = useState(0);
+  return props.machineGraph ? (
+    <SharedFactoryOverview
+      key={attempt}
+      {...props}
+      retry={() => setAttempt((n) => n + 1)}
+    />
+  ) : (
+    <FactoryOverviewCanvas {...props} />
+  );
+}
+
+function SharedFactoryOverview(
+  props: FactoryOverviewProps & { retry: () => void }
+) {
+  const summary = useMemo(() => {
+    const query = props.query.trim().toLowerCase();
+    if (!query) return props.summary;
+    const ids = new Set(
+      buildFactoryOverviewGroups(props.summary)
+        .filter((group) => group.name.toLowerCase().includes(query))
+        .flatMap((group) => group.workflowIds)
+    );
+    return {
+      ...props.summary,
+      workflows: props.summary.workflows.filter((w) => ids.has(w.id)),
+    };
+  }, [props.summary, props.query]);
+  const model = useAtlasMachineFlow(
+    props.view === "graph" ? summary : EMPTY_MACHINE_SUMMARY,
+    props.routeConfigs,
+    props.scope
+  );
+  const state = model.layout;
+  const diagram =
+    state.status === "done" && state.result.ok
+      ? state.result.flow.arrangements[0]
+      : null;
+  return (
+    <FactoryOverviewCanvas
+      {...props}
+      shared={
+        props.view === "graph"
+          ? { model, diagram, retry: props.retry }
+          : undefined
+      }
+    />
+  );
+}
+
+type SharedOverview = {
+  model: ReturnType<typeof useAtlasMachineFlow>;
+  diagram: DiagramTimeline | null;
+  retry: () => void;
+};
+
+function FactoryOverviewCanvas({
   summary,
   query,
   view,
   recentFactory = null,
   onSelect,
-}: FactoryOverviewProps) {
+  shared,
+}: FactoryOverviewProps & { shared?: SharedOverview }) {
   const normalizedQuery = query.trim().toLowerCase();
   const allGroups = useMemo(
     () => buildFactoryOverviewGroups(summary),
@@ -202,15 +280,37 @@ export function FactoryOverview({
   const cond = useMemo(() => layoutCondensed(model, COND_OPTS), [model]);
   // The condensed geometry is a useful temporary world while ELK resolves in
   // Graph mode. It also means opaque factory summaries appear immediately.
-  const workflowView: WfBoxView = view === "graph" && full ? "graph" : "map";
+  const workflowView: WfBoxView =
+    view === "graph" && (shared?.diagram || full) ? "graph" : "map";
   const activeWidth =
-    workflowView === "graph" ? (full?.width ?? 0) : cond.width;
+    workflowView === "graph"
+      ? shared?.diagram
+        ? shared.diagram.width * MACHINE_WORLD_SCALE
+        : (full?.width ?? 0)
+      : cond.width;
   const activeHeight =
-    workflowView === "graph" ? (full?.height ?? 0) : cond.height;
-  const activeRects = useMemo(
-    () => (workflowView === "graph" ? graphRects(full) : mapRects(cond)),
-    [cond, full, workflowView]
-  );
+    workflowView === "graph"
+      ? shared?.diagram
+        ? shared.diagram.height * MACHINE_WORLD_SCALE
+        : (full?.height ?? 0)
+      : cond.height;
+  const activeRects = useMemo(() => {
+    if (shared?.diagram) {
+      const rects = new Map<string, Rect>();
+      for (const region of shared.diagram.regions) {
+        const selection = shared.model.selections.get(region.id);
+        if (selection?.type === "workflow")
+          rects.set(selection.workflowId, {
+            x: region.x * MACHINE_WORLD_SCALE,
+            y: region.y * MACHINE_WORLD_SCALE,
+            w: region.width * MACHINE_WORLD_SCALE,
+            h: region.height * MACHINE_WORLD_SCALE,
+          });
+      }
+      return rects;
+    }
+    return workflowView === "graph" ? graphRects(full) : mapRects(cond);
+  }, [cond, full, workflowView, shared]);
   const layout = useMemo(
     () =>
       activeWidth > 0 && activeHeight > 0
@@ -242,10 +342,24 @@ export function FactoryOverview({
   }, [layout]);
 
   const stageRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const hidden = expanded
+      ? ".factory-overview-factories"
+      : ".factory-overview-workflows, .factory-overview-regions";
+    const active = document.activeElement;
+    if (
+      active &&
+      [...(stageRef.current?.querySelectorAll(hidden) ?? [])].some((layer) =>
+        layer.contains(active)
+      )
+    )
+      stageRef.current?.focus({ preventScroll: true });
+  }, [expanded]);
   const pz = usePanZoom(
     stageRef,
     { w: layout?.width ?? 0, h: layout?.height ?? 0 },
     {
+      enabled: groups.length > 0 && !!layout,
       min: 0.12,
       max: 2.4,
       pad: MARKER_FIT_PAD,
@@ -328,7 +442,7 @@ export function FactoryOverview({
   // low-zoom factory view uses the synchronous Map geometry as an immediate
   // fallback, so the overview does not pay for a second hidden layout.
   useEffect(() => {
-    if (!expanded || full) return;
+    if (shared || view !== "graph" || !expanded || full) return;
     let cancelled = false;
     setLayoutError(null);
     layoutFull(model, FULL_OPTS)
@@ -345,15 +459,16 @@ export function FactoryOverview({
     return () => {
       cancelled = true;
     };
-  }, [expanded, full, model]);
+  }, [expanded, full, model, shared, view]);
 
   // If ELK replaces the temporary Map geometry before the user takes over the
   // camera, reframe once around the actual Graph world. Manual pan/zoom is
   // preserved.
   const { fit, userControlled } = pz;
+  const sharedDiagram = shared?.diagram;
   useEffect(() => {
-    if (full && !userControlled) fit();
-  }, [fit, full, userControlled]);
+    if ((full || sharedDiagram) && !userControlled) fit();
+  }, [fit, full, sharedDiagram, userControlled]);
 
   const shapes = useMemo(() => stepShape(model), [model]);
   const stepCounts = useMemo(
@@ -368,12 +483,33 @@ export function FactoryOverview({
   );
   const intra = full?.workflows.flatMap((workflow) => workflow.intra) ?? [];
 
+  const sharedState = shared?.model.layout;
   if (layoutError) {
     return <div className="factory-overview-empty">{layoutError}</div>;
   }
 
   return (
     <div className="factory-overview" data-testid="factory-overview">
+      {sharedState?.status === "pending" && (
+        <div role="status" className="uv-loading">
+          Laying out factories…
+        </div>
+      )}
+      {sharedState?.status === "done" && !sharedState.result.ok && (
+        <div role="alert" className="uv-empty">
+          Unable to compile workflow graph:{" "}
+          {sharedState.result.errors.map((e) => e.message).join("; ")}
+        </div>
+      )}
+      {sharedState?.status === "done" && sharedState.fallbackError && (
+        <div role="alert" className="uv-machine-warning">
+          Automatic layout failed. Showing a simplified layout.{" "}
+          {sharedState.fallbackError}{" "}
+          <button data-no-pan onClick={shared?.retry}>
+            Retry layout
+          </button>
+        </div>
+      )}
       <FactoryIndex
         groups={groups}
         totalCount={allGroups.length}
@@ -390,6 +526,7 @@ export function FactoryOverview({
             className="factory-overview-stage"
             data-testid="factory-overview-stage"
             ref={stageRef}
+            tabIndex={-1}
           >
             <div
               className="factory-overview-scaler"
@@ -437,7 +574,7 @@ export function FactoryOverview({
                     </div>
                   )}
 
-                  {workflowView === "map" && (
+                  {!shared && workflowView === "map" && (
                     <svg
                       className={
                         "factory-overview-workflow-edges al-edges" +
@@ -503,6 +640,7 @@ export function FactoryOverview({
                     })}
 
                   <div
+                    inert={!expanded}
                     className={
                       "factory-overview-workflows" +
                       (expanded ? " is-expanded" : " is-collapsed")
@@ -527,26 +665,44 @@ export function FactoryOverview({
                       </div>
                     )}
 
-                    {model.workflows.map((workflow) => {
-                      const rect = activeRects.get(workflow.id);
-                      if (!rect) return null;
-                      return (
-                        <WfBox
-                          key={workflow.id}
-                          workflow={workflow}
-                          rect={rect}
-                          shape={shapes.get(workflow.id) ?? []}
-                          stepCount={workflow.stepIds.length}
-                          view={workflowView}
-                          onTitlePort={reportWorkflowTitlePort}
-                          onSelect={() =>
-                            onSelect(workflowScope(workflow.factoryName))
-                          }
+                    {shared?.diagram && (
+                      <div
+                        className="uv-machine-scene"
+                        style={{
+                          transform: `scale(${MACHINE_WORLD_SCALE})`,
+                          transformOrigin: "0 0",
+                        }}
+                      >
+                        <AtlasMachineScene
+                          model={shared.model}
+                          diagram={shared.diagram}
+                          t={0}
+                          label="Factory overview workflow graph"
                         />
-                      );
-                    })}
+                      </div>
+                    )}
+                    {!shared &&
+                      model.workflows.map((workflow) => {
+                        const rect = activeRects.get(workflow.id);
+                        if (!rect) return null;
+                        return (
+                          <WfBox
+                            key={workflow.id}
+                            workflow={workflow}
+                            rect={rect}
+                            shape={shapes.get(workflow.id) ?? []}
+                            stepCount={workflow.stepIds.length}
+                            view={workflowView}
+                            onTitlePort={reportWorkflowTitlePort}
+                            onSelect={() =>
+                              onSelect(workflowScope(workflow.factoryName))
+                            }
+                          />
+                        );
+                      })}
 
-                    {workflowView === "map" &&
+                    {!shared &&
+                      workflowView === "map" &&
                       cond.edges.map((edge) => {
                         if (!edge.labelPos || edge.labels.length === 0)
                           return null;
@@ -568,6 +724,7 @@ export function FactoryOverview({
                     (expanded ? " is-visible" : " is-hidden")
                   }
                   aria-hidden={!expanded}
+                  inert={!expanded}
                 >
                   {layout.regions.map((region) => (
                     <div
@@ -584,9 +741,21 @@ export function FactoryOverview({
                         height: region.rect.h,
                       }}
                     >
-                      <span className="factory-overview-region-name">
-                        {region.name}
-                      </span>
+                      {shared ? (
+                        <button
+                          type="button"
+                          className="factory-overview-region-name factory-overview-region-enter"
+                          aria-label={`Open factory ${region.name}`}
+                          data-no-pan
+                          onClick={() => onSelect(region.scope)}
+                        >
+                          {region.name} ↗
+                        </button>
+                      ) : (
+                        <span className="factory-overview-region-name">
+                          {region.name}
+                        </span>
+                      )}
                       <span className="factory-overview-region-meta">
                         {region.workflowCount} workflow
                         {region.workflowCount === 1 ? "" : "s"}
@@ -624,6 +793,7 @@ export function FactoryOverview({
                 (expanded ? " is-hidden" : " is-visible")
               }
               aria-hidden={expanded}
+              inert={expanded}
             >
               {markers.map(({ factory, key, rect }) => (
                 <WfBox

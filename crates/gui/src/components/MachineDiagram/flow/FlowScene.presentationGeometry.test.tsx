@@ -94,6 +94,11 @@ it("Atlas count-bearing parts are unchanged full-scale neutral pictures without 
   const compiled = compileFlowOrThrow(model.spec);
   for (const diagram of compiled.arrangements)
     for (const p of diagram.parts) {
+      // Workflow endpoints are small handles; their counts belong to the region.
+      if (model.selections.get(p.id)?.type === "workflow") {
+        expect(p.scale).toBe(0.5);
+        continue;
+      }
       expect(p.scale).toBe(1);
       expect(p.neutral).toBe(true);
       expect(p.change).toBe("unchanged");

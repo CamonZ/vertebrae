@@ -20,7 +20,8 @@ import { SvgText } from "../SvgText";
 import type { DiagramPart, DiagramRail, DiagramTimeline } from "./compile";
 import { useFlowDrawings } from "./drawings";
 import { DrillMark } from "./DrillMark";
-import { nameLabelLocal, regionLabelAt } from "./extent";
+import { CROSS_LABEL_SIZE, nameLabelLocal, regionLabelAt } from "./extent";
+import { route, routePath } from "../route";
 import { FlowBand } from "./FlowBand";
 import {
   morphEase,
@@ -281,8 +282,30 @@ function RailWire({
   rail: DiagramRail;
   presentation?: FlowPresentation;
 }) {
+  const handoff = presentation?.handoffs?.has(r.id);
+  const hover = presentation?.onHoverRail;
   return (
-    <g data-search-dim={presentation?.dimmed?.has(r.id) || undefined}>
+    <g
+      data-rail={r.id}
+      data-search-dim={presentation?.dimmed?.has(r.id) || undefined}
+      data-handoff={handoff || undefined}
+      data-traced={presentation?.rails?.has(r.id) || undefined}
+      data-flow={presentation?.flow?.get(r.id)}
+    >
+      {hover && (
+        <path
+          className="md-rail-hit"
+          d={routePath(route(r.points, undefined, { jumps: r.jumps }))}
+          fill="none"
+          stroke="transparent"
+          strokeWidth={14}
+          // Screen pixels, so the target stays grabbable when zoomed out.
+          vectorEffect="non-scaling-stroke"
+          pointerEvents="stroke"
+          onPointerEnter={() => hover(r.id)}
+          onPointerLeave={() => hover(null)}
+        />
+      )}
       <Wire
         id={r.id}
         emphasis={presentation?.rails?.has(r.id)}
@@ -294,6 +317,9 @@ function RailWire({
         change={r.change === "unchanged" ? "" : r.change}
         label={r.label}
         labelAt={r.labelAt}
+        {...(handoff
+          ? { labelSize: CROSS_LABEL_SIZE, labelRole: "ink" as const }
+          : {})}
       />
     </g>
   );
@@ -333,6 +359,7 @@ function PartView({
   return (
     <g
       data-scene-part={p.id}
+      data-testid={leaving ? undefined : presentation?.testIds?.get(p.id)}
       data-search-dim={presentation?.dimmed?.has(p.id) || undefined}
       data-traced={presentation?.traced?.has(p.id) || undefined}
       data-selected={presentation?.selected?.has(p.id) || undefined}

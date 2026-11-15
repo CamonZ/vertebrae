@@ -25,6 +25,8 @@ export interface PanZoomContent {
 }
 
 export interface UsePanZoomOptions {
+  /** Restores a manually controlled camera when its view is remounted. */
+  initialTransform?: PanZoomTransform;
   /** Whether this camera should capture pointer and resize events (default true). */
   enabled?: boolean;
   /** Minimum scale (default 0.15). */
@@ -127,17 +129,19 @@ export function usePanZoom(
   const fitBoundsRef = useRef(opts.fitBounds ?? null);
   fitBoundsRef.current = opts.fitBounds ?? null;
 
-  const [t, setT] = useState<PanZoomTransform>({
-    s: opts.scale ?? 1,
-    x: 0,
-    y: 0,
-  });
+  const [t, setT] = useState<PanZoomTransform>(
+    opts.initialTransform ?? {
+      s: opts.scale ?? 1,
+      x: 0,
+      y: 0,
+    }
+  );
   const tref = useRef(t);
   tref.current = t;
   const contentRef = useRef(content);
   contentRef.current = content;
   // Becomes true once the user pans/zooms — stops auto-fit.
-  const moved = useRef(false);
+  const moved = useRef(!!opts.initialTransform);
 
   // Listeners: pointer drag + non-passive wheel.
   useEffect(() => {

@@ -9,6 +9,8 @@ const guiRoot = fileURLToPath(new URL(".", import.meta.url));
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // Persisted flow layouts are only reused by the build that computed them.
+  define: { __FLOW_LAYOUT_BUILD__: JSON.stringify(String(Date.now())) },
   // Vite options tailored for Tauri development
   clearScreen: false,
   server: {

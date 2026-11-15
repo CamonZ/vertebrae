@@ -309,7 +309,10 @@ async fn gui_should_show_element_with_title_within(
     let element = client
         .wait()
         .at_most(std::time::Duration::from_secs(timeout))
-        .for_element(Locator::XPath(&format!("//*[@title='{}']", title)))
+        // HTML elements carry a title attribute; SVG scenes use a <title> child.
+        .for_element(Locator::XPath(&format!(
+            "//*[@title='{title}'] | //*[local-name()='title' and normalize-space()='{title}']"
+        )))
         .await;
 
     if element.is_err() {
@@ -1087,10 +1090,34 @@ async fn click_element_with_test_id(world: &mut GuiWorld, test_id: String) {
             )
         });
 
+    let element_json = serde_json::to_value(&element).expect("serialize element");
+    let css = format!("[data-testid=\"{}\"]", test_id);
+    let is_svg = client
+        .execute(
+            "return arguments[0] instanceof SVGElement;",
+            vec![element_json.clone()],
+        )
+        .await
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if is_svg {
+        // Machine-diagram parts live in a clipped stage: never scroll it.
+        gui_acceptance::pointer_click_svg_when_ready(
+            &client,
+            &css,
+            &format!("element with test id '{test_id}'"),
+        )
+        .await;
+        world
+            .screenshot(&client, &format!("after-click-testid-{test_id}"))
+            .await;
+        return;
+    }
+
     // Scroll the element into the viewport before clicking. Targets inside
     // scrollable panels (TaskDetailPanel, react-flow canvas) are otherwise
     // reported as found but get intercepted on click when off-screen.
-    let element_json = serde_json::to_value(&element).expect("serialize element");
     let _ = client
         .execute(
             "arguments[0].scrollIntoView({block: 'center', inline: 'center'});",

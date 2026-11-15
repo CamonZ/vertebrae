@@ -20,6 +20,8 @@ export function useAtlasMachineFlow(
     () => (JSON.parse(structuralKey) as { spec: FlowSpec }).spec,
     [structuralKey]
   );
-  const layout = useLaidOutFlow(spec, { registry });
+  // One region per workflow: each workflow is laid out (and cached) on its
+  // own, so a workflow edit relays out only that workflow and the handoffs.
+  const layout = useLaidOutFlow(spec, { registry, composite: true });
   return { ...adapted, spec, layout };
 }

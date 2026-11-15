@@ -49,6 +49,8 @@ export interface AtlasMachineFlow {
   readonly selections: ReadonlyMap<string, AtlasSelection>;
   readonly transitions: ReadonlyMap<string, MachineTransition>;
   readonly counts: ReadonlyMap<string, { total: number; running: number }>;
+  /** `step-node-<name>` hooks, matching the Map canvas step nodes. */
+  readonly testIds: ReadonlyMap<string, string>;
   readonly diagnostics: readonly string[];
 }
 
@@ -82,6 +84,7 @@ export function buildMachineFlow(
   const selections = new Map<string, AtlasSelection>();
   const transitions = new Map<string, MachineTransition>();
   const counts = new Map<string, { total: number; running: number }>();
+  const testIds = new Map<string, string>();
   const diagnostics: string[] = [];
   const workflows = new Map(summary.workflows.map((wf) => [wf.id, wf]));
   const endpoint = (wf: string) => machineId("workflow", wf);
@@ -137,11 +140,18 @@ export function buildMachineFlow(
       workflowId: wf.id,
     });
     counts.set(id, { total: wf.total, running: wf.running });
+    // A small handle docked on the workflow's edge: the region names the
+    // workflow, so the handle only says what leaves through it.
+    const handsOff =
+      workflows
+        .get(wf.id)
+        ?.transitions.some((t) => workflows.has(t.to_workflow_id)) ?? false;
     parts.push({
       id,
       kind: "topology endpoint",
-      label: `${wf.name} · workflow endpoint`,
+      label: handsOff ? "handoffs" : "no handoffs",
       job: "Logical workflow handoff endpoint; runtime source step unknown",
+      scale: 0.5,
     });
     const members = [id];
     const steps = model.steps.filter((step) => step.workflowId === wf.id);
@@ -154,6 +164,7 @@ export function buildMachineFlow(
       };
       selections.set(partId, selection);
       counts.set(partId, { total: step.total, running: step.running });
+      testIds.set(partId, `step-node-${step.name}`);
       members.push(partId);
       const next = steps[index + 1];
       const sessionLabels = transitionSessionLabels(
@@ -368,6 +379,7 @@ export function buildMachineFlow(
     selections,
     transitions,
     counts,
+    testIds,
     diagnostics,
   };
 }

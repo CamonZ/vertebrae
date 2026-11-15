@@ -304,7 +304,7 @@ afterEach(() => {
 function renderAtlasWithEntityHost() {
   return render(
     <>
-      <WorkflowAtlas />
+      <WorkflowAtlas internalMachineGraph={false} />
       <GlobalEntityPanelHost />
     </>
   );
@@ -368,7 +368,7 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     expect(
       await screen.findByText(/no factories configured/i)
     ).toBeInTheDocument();
@@ -383,7 +383,7 @@ describe("WorkflowAtlas", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
 
     expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
     expect(
@@ -458,7 +458,7 @@ describe("WorkflowAtlas", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
 
     const stage = await screen.findByTestId("factory-overview-stage");
     expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument();
@@ -515,7 +515,7 @@ describe("WorkflowAtlas", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
 
     expect(
       await screen.findByRole("heading", { name: "Workflow Factories" })
@@ -572,7 +572,7 @@ describe("WorkflowAtlas", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
 
     fireEvent.click(screen.getByTestId("factory-node-No Factory"));
 
@@ -603,7 +603,7 @@ describe("WorkflowAtlas", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
 
     fireEvent.click(screen.getByTestId("factory-node-Factory A"));
 
@@ -630,7 +630,7 @@ describe("WorkflowAtlas", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
 
     // workflow boxes — query the graph face (both faces are mounted for the
     // P6 morph; the map face is just hidden in graph view)
@@ -702,7 +702,7 @@ describe("WorkflowAtlas", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    const { rerender } = render(<WorkflowAtlas />);
+    const { rerender } = render(<WorkflowAtlas internalMachineGraph={false} />);
     await waitFor(() =>
       expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
@@ -722,7 +722,7 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
-    rerender(<WorkflowAtlas />);
+    rerender(<WorkflowAtlas internalMachineGraph={false} />);
 
     await waitFor(() => expect(layoutFullMock).toHaveBeenCalledTimes(1));
   });
@@ -736,7 +736,7 @@ describe("WorkflowAtlas", () => {
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
     useFactoryFilterStore.getState().reset();
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     await waitFor(() =>
       expect(
         document.querySelectorAll("[data-testid^='factory-node-']")
@@ -782,7 +782,7 @@ describe("WorkflowAtlas — MAP view", () => {
     });
     // graph layout never resolves here — the map view doesn't need it
     layoutFullMock.mockReturnValue(new Promise(() => {}));
-    const utils = render(<WorkflowAtlas />);
+    const utils = render(<WorkflowAtlas internalMachineGraph={false} />);
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     // condensed cards render synchronously once the map is active
     await waitFor(() =>
@@ -858,7 +858,7 @@ describe("WorkflowAtlas — BOARD view", () => {
 
   it("offers Board only while a factory is selected", async () => {
     useFactoryFilterStore.getState().reset();
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
 
     expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
     expect(
@@ -871,7 +871,7 @@ describe("WorkflowAtlas — BOARD view", () => {
   });
 
   it("renders the selected factory's board in place of the canvas", async () => {
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
 
     fireEvent.click(screen.getByRole("radio", { name: "Board" }));
 
@@ -889,7 +889,7 @@ describe("WorkflowAtlas — BOARD view", () => {
   });
 
   it("follows the Atlas factory filter", async () => {
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     fireEvent.click(screen.getByRole("radio", { name: "Board" }));
 
     act(() => useFactoryFilterStore.getState().setFactoryName("Factory B"));
@@ -900,7 +900,7 @@ describe("WorkflowAtlas — BOARD view", () => {
   });
 
   it("returns to the factory overview when the factory is cleared", async () => {
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     fireEvent.click(screen.getByRole("radio", { name: "Board" }));
 
     act(() => useFactoryFilterStore.getState().setFactoryName(null));
@@ -914,7 +914,7 @@ describe("WorkflowAtlas — BOARD view", () => {
   });
 
   it("goes back to the topology canvas when leaving Board", async () => {
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     fireEvent.click(screen.getByRole("radio", { name: "Board" }));
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
 
@@ -945,7 +945,7 @@ describe("WorkflowAtlas — morph (P6)", () => {
       // both layouts resolve so a real box exists in either view
       layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-      render(<WorkflowAtlas />);
+      render(<WorkflowAtlas internalMachineGraph={false} />);
       // let the async ELK stub settle
       await act(async () => {
         await Promise.resolve();
@@ -978,7 +978,7 @@ describe("WorkflowAtlas — morph (P6)", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     await waitFor(() =>
       expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
@@ -1013,7 +1013,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     await waitFor(() =>
       expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
     );
@@ -1046,7 +1046,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     });
     layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     await waitFor(() =>
       expect(document.querySelector(".ag-step")).toBeInTheDocument()
     );
@@ -1114,7 +1114,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     layoutFullMock.mockImplementation(async (model) =>
       stubLayoutWithIntra(model)
     );
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     await waitFor(() =>
       expect(document.querySelector(".gedge.k-loop")).toBeInTheDocument()
     );
@@ -1355,7 +1355,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
       return base;
     });
 
-    render(<WorkflowAtlas />);
+    render(<WorkflowAtlas internalMachineGraph={false} />);
     await waitFor(() =>
       expect(
         document.querySelector(".ag-edges .gedge.k-handoff")
@@ -1378,7 +1378,7 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
   });
 });
 
-it("keeps the opt-in scoped to Graph and returns through Map, Board and the factory overview", async () => {
+it("keeps shared rendering in Graph and returns through Map, Board and the factory overview", async () => {
   mockSummary.mockReturnValue({
     summary: FIXTURE,
     isLoading: false,

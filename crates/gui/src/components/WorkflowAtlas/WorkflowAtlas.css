@@ -406,6 +406,21 @@
   left: 18px;
   color: var(--fg);
 }
+.factory-overview-region-enter {
+  pointer-events: auto;
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.factory-overview-region-enter:hover,
+.factory-overview-region-enter:focus-visible {
+  color: var(--accent);
+  outline: 1px solid var(--accent);
+  outline-offset: 4px;
+}
 .factory-overview-region-meta {
   right: 18px;
   color: var(--fg-faint);
@@ -1584,7 +1599,14 @@
   .uv-wf,
   .uv-scaler.morphing,
   .uv-face,
-  .uv-layer {
+  .uv-layer,
+  .factory-overview-workflows,
+  .factory-overview-workflow-edges,
+  .factory-overview-map-columns,
+  .factory-overview-regions,
+  .factory-overview-factories,
+  .factory-overview-route-labels,
+  .factory-overview-factory-edges {
     transition: none !important;
   }
 }
@@ -2259,4 +2281,101 @@
 }
 .uv-machine-scene [data-search-dim] {
   opacity: 0.24;
+}
+/* Handoffs between workflows are the factory's main story: solid and heavy,
+   with accent on hover (the rail and both of its ends light up). */
+.uv-machine-scene [data-handoff] .md-wire .gedge {
+  stroke: var(--md-ink);
+  stroke-width: 3;
+  stroke-opacity: 0.8;
+}
+.uv-machine-scene [data-handoff] .md-wire[data-emphasis="true"] .gedge {
+  stroke: var(--color-accent);
+  stroke-width: 5;
+  stroke-opacity: 1;
+}
+.uv-machine-scene .md-rail-hit {
+  cursor: default;
+}
+
+/* Hover focus: the traced element, its rails and their other ends stay;
+   everything else steps back so the lit lines can be followed. */
+.uv-machine-layer[data-tracing] [data-scene-part]:not([data-traced]),
+.uv-machine-layer[data-tracing] [data-rail]:not([data-traced]) {
+  opacity: 0.1;
+}
+.uv-machine-layer[data-tracing] .md-region:not([data-traced]) {
+  opacity: 0.3;
+}
+/* Direction of a traced rail: work arriving (info) or leaving (accent).
+   The connections list uses the same two colours. */
+.uv-machine-scene [data-rail][data-flow="in"] .md-wire .gedge {
+  stroke: var(--color-info);
+}
+.uv-machine-scene [data-rail][data-flow="out"] .md-wire .gedge {
+  stroke: var(--color-accent);
+}
+
+/* Connections of the hovered element, in words. */
+.uv-connections-host {
+  position: absolute;
+  z-index: 4;
+  top: 12px;
+  right: 12px;
+  pointer-events: none;
+}
+.uv-connections {
+  width: 320px;
+  max-height: calc(100vh - 240px);
+  overflow: hidden;
+  padding: 12px 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-bg-1);
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-fg);
+}
+.uv-connections-title {
+  margin: 0 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.uv-connections h4 {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--color-fg-mute);
+}
+.uv-connections ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.uv-connections li {
+  display: flex;
+  flex-direction: column;
+  padding: 3px 0 3px 10px;
+  border-left: 3px solid var(--color-accent);
+  margin-bottom: 4px;
+}
+.uv-connections [data-direction="in"] li {
+  border-left-color: var(--color-info);
+}
+.uv-connections-end {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.uv-connections-where,
+.uv-connections-label,
+.uv-connections-more,
+.uv-connections-empty {
+  font-weight: 400;
+  color: var(--color-fg-mute);
+}
+.uv-connections-more,
+.uv-connections-empty {
+  margin: 4px 0 0;
 }

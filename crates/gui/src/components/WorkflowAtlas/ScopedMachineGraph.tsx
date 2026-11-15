@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { JsonValue, PipelineSummary } from "../../bindings";
 import { useAtlasMachineFlow } from "./adapter/useAtlasMachineFlow";
 import { AtlasMachineScene } from "./adapter/AtlasMachineScene";
-import { usePanZoom } from "./hooks/usePanZoom";
+import { usePanZoom, type PanZoomTransform } from "./hooks/usePanZoom";
 import { ZoomWidget } from "./ZoomWidget";
 
 interface Props {
@@ -10,9 +10,10 @@ interface Props {
   routeConfigs: ReadonlyMap<string, JsonValue | null>;
   scope: string;
   query: string;
+  cameraSnapshot?: { current: PanZoomTransform | null };
 }
 
-/** Mounted only for the internal scoped Graph rollout. Map and Board retain their hosts. */
+/** Shared scoped Graph host. Map and Board retain their existing hosts. */
 export function ScopedMachineGraph(props: Props) {
   const [attempt, setAttempt] = useState(0);
   return (
@@ -30,6 +31,7 @@ function MachineGraph({
   scope,
   query,
   retry,
+  cameraSnapshot,
 }: Props & { retry: () => void }) {
   const model = useAtlasMachineFlow(summary, routeConfigs, scope);
   const state = model.layout;
@@ -38,17 +40,30 @@ function MachineGraph({
       ? state.result.flow.arrangements[0]
       : null;
   const canvas = useRef<HTMLDivElement>(null);
+  const [panelHost, setPanelHost] = useState<HTMLDivElement | null>(null);
   const camera = usePanZoom(
     canvas,
     { w: diagram?.width ?? 0, h: diagram?.height ?? 0 },
-    { min: 0.04, max: 2.4 }
+    {
+      min: 0.04,
+      max: 2.4,
+      initialTransform: cameraSnapshot?.current ?? undefined,
+    }
   );
   const fit = camera.fit;
+  useEffect(() => {
+    // Automatic fits remain automatic after remounts. In particular, exiting
+    // while layout is pending must not persist the initial identity transform.
+    if (cameraSnapshot)
+      cameraSnapshot.current = camera.userControlled
+        ? { s: camera.scale, x: camera.x, y: camera.y }
+        : null;
+  }, [cameraSnapshot, camera.scale, camera.x, camera.y, camera.userControlled]);
   // Geometry identity changes only after a structural edit. Presentation updates
   // retain both the compiled arrangement and the user's camera transform.
   useEffect(() => {
-    if (diagram) fit();
-  }, [diagram, fit]);
+    if (diagram && !camera.userControlled) fit();
+  }, [diagram, fit, camera.userControlled]);
   return (
     <div className="uv-machine-canvas" ref={canvas}>
       {state.status === "pending" && (
@@ -80,6 +95,7 @@ function MachineGraph({
               t={0}
               label="Factory workflow graph"
               query={query}
+              panelHost={panelHost}
             />
           </div>
           <ZoomWidget
@@ -89,6 +105,7 @@ function MachineGraph({
           />
         </>
       )}
+      <div className="uv-connections-host" ref={setPanelHost} data-no-pan />
     </div>
   );
 }

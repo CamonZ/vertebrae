@@ -2,9 +2,10 @@
    Workflow Atlas — the canonical workflow-topology surface
    (P4 GRAPH + P5 MAP + P6 MORPH + P7 HOVER-TRACE).
 
-   Internal scoped Graph opt-in: ScopedMachineGraph uses the shared adapter,
-   useLaidOutFlow worker/cache and AtlasMachineScene. Legacy navigation and
-   rendering remain the production default until navigation parity ships.
+   Graph uses the shared adapter, useLaidOutFlow worker/cache and
+   AtlasMachineScene in both scoped and overview hosts. Map retains its
+   phase-column layout. VITE_ATLAS_MACHINE_GRAPH=0 retains the legacy Graph
+   rollback path; the layoutFull/morph notes below describe that path.
 
    Pipeline data → adapter → two layouts → a custom DOM+SVG canvas inside a
    pan/zoom world:
@@ -61,6 +62,8 @@ import {
   useState,
 } from "react";
 import { ScopedMachineGraph } from "./ScopedMachineGraph";
+import { useAtlasLayoutWarmup } from "./adapter/useAtlasLayoutWarmup";
+import type { PanZoomTransform } from "./hooks/usePanZoom";
 import { useProjectScopeGeneration } from "../../stores/projectScopedStores";
 import { SearchInput } from "../molecules/SearchInput";
 import {
@@ -152,11 +155,11 @@ export function layoutKey(model: AtlasModel): string {
 }
 
 export function WorkflowAtlas({
-  internalMachineGraph = import.meta.env.DEV &&
-    import.meta.env.VITE_ATLAS_MACHINE_GRAPH === "1",
+  internalMachineGraph = import.meta.env.VITE_ATLAS_MACHINE_GRAPH !== "0",
 }: { internalMachineGraph?: boolean } = {}) {
   const projectGeneration = useProjectScopeGeneration();
   const { summary, isLoading, error } = usePipelineSummary();
+  useAtlasLayoutWarmup(summary, internalMachineGraph);
 
   const [view, setView] = useState<AtlasView>("graph");
   const factoryFilter = useFactoryFilterStore((state) => state.factoryName);
@@ -164,14 +167,24 @@ export function WorkflowAtlas({
     (state) => state.setFactoryName
   );
   const lastFactory = useFactoryFilterStore((state) => state.lastFactoryName);
-  const [query, setQuery] = useState("");
-  // Moving between the factory overview and a factory changes what the search
-  // box searches (factories vs. workflows), so a stale query is dropped.
+  const scopeKey = JSON.stringify([projectGeneration, factoryFilter]);
+  const cameras = useMemo(
+    () => new Map<string, { current: PanZoomTransform | null }>(),
+    [projectGeneration]
+  );
+  const graphCamera = useMemo(() => {
+    const saved = cameras.get(scopeKey) ?? { current: null };
+    cameras.set(scopeKey, saved);
+    return saved;
+  }, [cameras, scopeKey]);
+  // Factory search and workflow search have separate meanings. Restore each
+  // scope's query on return instead of applying one scope's text to another.
+  const [queries, setQueries] = useState<Record<string, string>>({});
+  const query = queries[scopeKey] ?? "";
+  const setQuery = (text: string) =>
+    setQueries((current) => ({ ...current, [scopeKey]: text }));
   const changeScope = useCallback(
-    (scope: FactoryFilterValue) => {
-      setQuery("");
-      setFactoryFilter(scope);
-    },
+    (scope: FactoryFilterValue) => setFactoryFilter(scope),
     [setFactoryFilter]
   );
   const [hover, setHover] = useState<string | null>(null);
@@ -232,7 +245,7 @@ export function WorkflowAtlas({
       ),
     [scopedSummary]
   );
-  const routeSteps = useSteps(routeStepIds, !showFactoryOverview);
+  const routeSteps = useSteps(routeStepIds);
   const routeConfigsKey = JSON.stringify(
     routeSteps.map((step) =>
       step?.step_type === "route"
@@ -259,19 +272,33 @@ export function WorkflowAtlas({
   // A selection from another factory should not remain open beside a scoped
   // canvas. The global host owns the panel, so close through the shared store.
   useEffect(() => {
-    if (showFactoryOverview && entitySelection?.type !== "task") {
+    if (
+      showFactoryOverview &&
+      !internalMachineGraph &&
+      entitySelection?.type !== "task"
+    ) {
       if (entitySelection) useEntityPanelStore.getState().close();
       return;
     }
-    if (!model || !entitySelection || entitySelection.type === "task") return;
+    if (!entitySelection || entitySelection.type === "task") return;
+    const workflows = showFactoryOverview
+      ? summary?.workflows
+      : model?.workflows;
+    if (!workflows) return;
     const workflowId = entitySelection.workflowId;
     if (
       workflowId &&
-      !model.workflows.some((workflow) => workflow.id === workflowId)
+      !workflows.some((workflow) => workflow.id === workflowId)
     ) {
       useEntityPanelStore.getState().close();
     }
-  }, [entitySelection, model, showFactoryOverview]);
+  }, [
+    entitySelection,
+    model,
+    showFactoryOverview,
+    internalMachineGraph,
+    summary,
+  ]);
 
   const sel = useMemo<AtlasSelection | null>(() => {
     if (!model || !entitySelection || entitySelection.type === "task") {
@@ -348,7 +375,7 @@ export function WorkflowAtlas({
 
   useEffect(() => {
     const currentModel = modelRef.current;
-    if (machineGraph || !currentModel || key === "") {
+    if (internalMachineGraph || !currentModel || key === "") {
       setFull(null);
       return;
     }
@@ -366,7 +393,7 @@ export function WorkflowAtlas({
     return () => {
       cancelled = true;
     };
-  }, [key, machineGraph]);
+  }, [key, internalMachineGraph]);
 
   // Condensed map layout — pure + synchronous, memoised on the same key (the
   // model identity is stable for a given key, so this never thrashes on counts).
@@ -406,7 +433,12 @@ export function WorkflowAtlas({
       firstView.current = false;
       return;
     }
-    if (view === "board") return;
+    setMorphing(false);
+    if (machineGraph || showFactoryOverview || view === "board") return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      pzRef.current.fit();
+      return;
+    }
     if (from === "board") {
       const tFit = setTimeout(() => pzRef.current.fit(), MORPH_FIT_DELAY);
       return () => clearTimeout(tFit);
@@ -418,7 +450,13 @@ export function WorkflowAtlas({
       clearTimeout(tFit);
       clearTimeout(tEnd);
     };
-  }, [view]);
+  }, [
+    view,
+    machineGraph,
+    showFactoryOverview,
+    projectGeneration,
+    factoryFilter,
+  ]);
 
   // Flatten intra (forward + loop) edges with their owning workflow id.
   const intra = useMemo(
@@ -785,6 +823,10 @@ export function WorkflowAtlas({
           !layoutError &&
           summary && (
             <FactoryOverview
+              key={projectGeneration}
+              machineGraph={internalMachineGraph}
+              routeConfigs={routeConfigs}
+              scope={JSON.stringify([projectGeneration, null])}
               summary={summary}
               query={query}
               view={canvasView}
@@ -796,6 +838,7 @@ export function WorkflowAtlas({
         {machineGraph && scopedSummary && !isLoading && !error && !empty && (
           <ScopedMachineGraph
             key={JSON.stringify([projectGeneration, factoryFilter])}
+            cameraSnapshot={graphCamera}
             summary={scopedSummary}
             routeConfigs={routeConfigs}
             scope={JSON.stringify([projectGeneration, factoryFilter])}
@@ -941,6 +984,8 @@ export function WorkflowAtlas({
                   className={
                     "uv-layer uv-steplayer" + (showGraphChrome ? "" : " hide")
                   }
+                  inert={!showGraphChrome}
+                  aria-hidden={!showGraphChrome}
                 >
                   {full.workflows.map((w) => {
                     return w.steps.map((s) => {
