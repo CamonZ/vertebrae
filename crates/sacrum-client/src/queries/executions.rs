@@ -118,8 +118,8 @@ pub const TASK_RUNS: &str = r#"
 
 /// Page through a project's run history, most recently updated first.
 ///
-/// The run fields are the TaskRunFields set without `max_concurrency`, which
-/// Sacrum resolves per run; history rows never read it.
+/// History uses TaskRunHistoryRun: it omits `user_id` and `max_concurrency`
+/// from TaskRunFields. Do not spread the full TaskRun fragment here.
 pub const TASK_RUN_HISTORY: &str = r#"
     query ProjectRunHistory(
         $project_id: Uuid4!
@@ -144,7 +144,6 @@ pub const TASK_RUN_HISTORY: &str = r#"
                     id
                     task_id
                     project_id
-                    user_id
                     status
                     started_at
                     ended_at

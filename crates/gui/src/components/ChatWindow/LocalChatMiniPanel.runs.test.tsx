@@ -20,6 +20,10 @@ const mocks = vi.hoisted(() => ({
   hasMore: false,
   loadingMore: false,
   loadMore: vi.fn(),
+  isError: false,
+  isLoading: false,
+  isFetching: false,
+  retry: vi.fn(),
 }));
 
 vi.mock("../../hooks/useLocalChatCompletedSessions", () => ({
@@ -39,6 +43,10 @@ vi.mock("../../hooks/useHistoryRuns", () => ({
       hasMore: mocks.hasMore,
       loadingMore: mocks.loadingMore,
       loadMore: mocks.loadMore,
+      isError: mocks.isError,
+      isLoading: mocks.isLoading,
+      isFetching: mocks.isFetching,
+      retry: mocks.retry,
     };
   },
 }));
@@ -116,6 +124,10 @@ describe("LocalChatMiniPanel run rows", () => {
     mocks.hasMore = false;
     mocks.loadingMore = false;
     mocks.loadMore = vi.fn();
+    mocks.isError = false;
+    mocks.isLoading = false;
+    mocks.isFetching = false;
+    mocks.retry = vi.fn();
     mocks.tasksById = new Map([
       [
         "ticket-1",
@@ -218,5 +230,44 @@ describe("LocalChatMiniPanel run rows", () => {
     renderPanel();
 
     expect(screen.getByText(/No active chats/)).toBeInTheDocument();
+  });
+
+  it("shows a history failure with retry instead of an empty-success message", () => {
+    mocks.rows = [];
+    mocks.isError = true;
+    renderPanel();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Could not load run history."
+    );
+    expect(screen.queryByTestId("local-chat-history-empty")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry run history" }));
+    expect(mocks.retry).toHaveBeenCalledOnce();
+  });
+
+  it("keeps loaded runs visible during a failed refresh and disables duplicate retries", () => {
+    mocks.isError = true;
+    mocks.isFetching = true;
+    renderPanel({ activeRunId: "run-12345678" });
+
+    expect(
+      screen.getByRole("button", { name: "Retry run history" })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", {
+        name: "Load run Delivery run run-1234 into active pane",
+      })
+    ).toBeInTheDocument();
+  });
+
+  it("announces loading without claiming history is empty", () => {
+    mocks.rows = [];
+    mocks.isLoading = true;
+    renderPanel();
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Loading run history…"
+    );
+    expect(screen.queryByTestId("local-chat-history-empty")).toBeNull();
   });
 });

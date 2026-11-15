@@ -12,6 +12,7 @@ import {
 } from "../query/taskRunHistoryQueries";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { normalizeLocalChatSessionQuery } from "../utils/localChatSessionGroups";
+import { isActiveRunStatus } from "../utils/runState";
 import type { LocalChatRunRow } from "../utils/localChatSessionGroups";
 import { useTasks } from "./useTasks";
 
@@ -48,6 +49,10 @@ interface UseHistoryRunsOptions {
 
 export interface HistoryRuns {
   rows: LocalChatRunRow[];
+  isLoading: boolean;
+  isFetching: boolean;
+  isError: boolean;
+  retry: () => void;
   /** Matching runs hidden by the completed filter. */
   hiddenCompletedCount: number;
   /** Current-project task metadata for grouping run tasks. */
@@ -110,20 +115,28 @@ export function useHistoryRuns({
     HISTORY_SEARCH_DEBOUNCE_MS
   );
 
-  const { data, hasNextPage, isFetchingNextPage, fetchNextPage } =
-    useInfiniteQuery(
-      {
-        ...taskRunHistoryQueryOptions(generation, showCompleted, search),
-        enabled,
-        // Keep the previous filter's rows while the next one loads, within one
-        // project only.
-        placeholderData: (
-          previous: TaskRunHistoryData | undefined,
-          previousQuery
-        ) => (previousQuery?.queryKey[1] === generation ? previous : undefined),
-      },
-      queryClient
-    );
+  const {
+    data,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    isLoading,
+    isFetching,
+    isError,
+    refetch,
+  } = useInfiniteQuery(
+    {
+      ...taskRunHistoryQueryOptions(generation, showCompleted, search),
+      enabled,
+      // Keep the previous filter's rows while the next one loads, within one
+      // project only.
+      placeholderData: (
+        previous: TaskRunHistoryData | undefined,
+        previousQuery
+      ) => (previousQuery?.queryKey[1] === generation ? previous : undefined),
+    },
+    queryClient
+  );
 
   const liveTasksById = useMemo(
     () => new Map(tasks.map((task) => [task.id, task])),
@@ -135,38 +148,66 @@ export function useHistoryRuns({
   return useMemo(() => {
     const rows: LocalChatRunRow[] = [];
     const tasksById = new Map(liveTasksById);
-    const seen = new Set<string>();
+    const runsById = new Map<string, { run: TaskRun; task: Task }>();
     const hiddenCompletedCount = pages?.[0]?.hidden_completed_count ?? 0;
+
+    const remember = (run: TaskRun, task: Task) => {
+      const previous = runsById.get(run.id);
+      // Overlapping pages and the task-list projection may know the same run.
+      // A stale active projection must never resurrect a newer terminal run.
+      if (
+        previous &&
+        Date.parse(runActivityAt(previous.run)) >=
+          Date.parse(runActivityAt(run))
+      )
+        return;
+      runsById.set(run.id, { run, task });
+    };
 
     for (const page of pages ?? []) {
       for (const { task_run: run, task: pageTask } of page.entries) {
-        if (seen.has(run.id)) continue;
-        seen.add(run.id);
-
         const live = liveTasksById.get(pageTask.id);
-        if (live?.archived) continue;
         if (!tasksById.has(pageTask.id))
           tasksById.set(pageTask.id, taskFromHistory(pageTask));
-
-        const task = live ?? taskFromHistory(pageTask);
-        // The live task wins: completion and titles change between fetches.
-        if (!runMatchesQuery(run, task, searchQuery)) continue;
-        const completed = !!task.completed_at || isCompletedRun(run);
-        if (completed && !showCompleted) continue;
-
-        rows.push({
-          id: run.id,
-          taskId: task.id,
-          run,
-          label: task.workflow_name ? `${task.workflow_name} run` : "Run",
-          updatedAt: runActivityAt(run),
-          completed,
-        });
+        remember(run, live ?? taskFromHistory(pageTask));
       }
+    }
+
+    // History is paginated by last update, so even the latest active run of
+    // an open entity can be outside its loaded pages. The existing task-list
+    // projection supplies those runs without per-task requests or pretending
+    // that its active-only snapshots represent complete run history.
+    if (enabled)
+      for (const task of liveTasksById.values()) {
+        const active = task.run_controls?.active_run;
+        if (active && isActiveRunStatus(active.status)) remember(active, task);
+      }
+
+    for (const { run, task } of runsById.values()) {
+      if (task.archived) continue;
+      // The live task wins: completion and titles change between fetches.
+      if (!runMatchesQuery(run, task, searchQuery)) continue;
+      const completed = !!task.completed_at || isCompletedRun(run);
+      if (completed && !showCompleted) continue;
+
+      rows.push({
+        id: run.id,
+        taskId: task.id,
+        run,
+        label: task.workflow_name ? `${task.workflow_name} run` : "Run",
+        updatedAt: runActivityAt(run),
+        completed,
+      });
     }
 
     return {
       rows,
+      isLoading: enabled && isLoading,
+      isFetching: enabled && isFetching,
+      isError: enabled && isError,
+      retry: () => {
+        if (enabled && !isFetching) void refetch();
+      },
       hiddenCompletedCount,
       tasksById,
       hasMore: enabled && hasNextPage,
@@ -180,6 +221,10 @@ export function useHistoryRuns({
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
+    isLoading,
+    isFetching,
+    isError,
+    refetch,
     liveTasksById,
     pages,
     searchQuery,
