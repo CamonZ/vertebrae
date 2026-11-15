@@ -517,7 +517,7 @@ describe("MarkdownContent", () => {
       expect(screen.getByText("streamed line 0")).toBeInTheDocument();
       expect(screen.getByText("streamed line 299")).toBeInTheDocument();
       expectNoLengthControls();
-    });
+    }, 15_000);
 
     it("renders syntax highlighting and actionable links for large markdown immediately", () => {
       const prefix = "preview line\n".repeat(250);

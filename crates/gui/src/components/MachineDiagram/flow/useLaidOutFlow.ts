@@ -9,7 +9,11 @@ import { layoutFlowOffThread } from "./layoutClient";
 
 export type LaidOutFlowState =
   | { readonly status: "pending" }
-  | { readonly status: "done"; readonly result: CompileResult };
+  | {
+      readonly status: "done";
+      readonly result: CompileResult;
+      readonly fallbackError?: string;
+    };
 
 function compileSafely(input: unknown, o: CompileOptions): CompileResult {
   try {
@@ -43,10 +47,12 @@ export function useLaidOutFlow(
   const [laid, setLaid] = useState<{
     readonly from: CompileResult;
     readonly result: CompileResult;
+    readonly fallbackError?: string;
   } | null>(null);
   useEffect(() => {
     if (!first.ok || !needs) return;
     let live = true;
+    let fallbackError: string | undefined;
     layoutFlowOffThread(first.flow)
       .then((layout) => {
         const r = compileSafely(input, {
@@ -56,17 +62,23 @@ export function useLaidOutFlow(
         return r.ok ? r : first;
       })
       .catch((e: unknown) => {
+        fallbackError = e instanceof Error ? e.message : String(e);
         console.warn("flow auto-layout failed; using the row layout", e);
         return first;
       })
       .then((result) => {
-        if (live) setLaid({ from: first, result });
+        if (live) setLaid({ from: first, result, fallbackError });
       });
     return () => {
       live = false;
     };
   }, [first, needs, input, registry]);
   if (!needs) return { status: "done", result: first };
-  if (laid?.from === first) return { status: "done", result: laid.result };
+  if (laid?.from === first)
+    return {
+      status: "done",
+      result: laid.result,
+      ...(laid.fallbackError ? { fallbackError: laid.fallbackError } : {}),
+    };
   return { status: "pending" };
 }

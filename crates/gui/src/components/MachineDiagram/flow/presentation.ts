@@ -1,5 +1,7 @@
 /** Live scene data. Deliberately outside the compiler and layout-worker input. */
 export interface FlowPresentation {
+  /** Host search decoration, outside geometric compilation. */
+  readonly dimmed?: ReadonlySet<string>;
   /** Visible part counts require neutral full-scale parts without change notes;
    * region counts require a structurally reserved liveHeader. Accessible names
    * retain counts even when another label owns the visual slot. */

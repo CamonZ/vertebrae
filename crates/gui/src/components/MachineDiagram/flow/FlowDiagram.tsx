@@ -141,6 +141,7 @@ export const FlowScene = memo(function FlowScene({
             key={g.id}
             className="md-region"
             data-region-id={g.id}
+            data-search-dim={presentation?.dimmed?.has(g.id) || undefined}
             data-traced={presentation?.traced?.has(g.id) || undefined}
           >
             <rect
@@ -281,18 +282,20 @@ function RailWire({
   presentation?: FlowPresentation;
 }) {
   return (
-    <Wire
-      id={r.id}
-      emphasis={presentation?.rails?.has(r.id)}
-      directional={presentation ? true : undefined}
-      conditional={presentation ? r.conditional : undefined}
-      points={r.points}
-      jumps={r.jumps}
-      cornerRadii={r.cornerRadii}
-      change={r.change === "unchanged" ? "" : r.change}
-      label={r.label}
-      labelAt={r.labelAt}
-    />
+    <g data-search-dim={presentation?.dimmed?.has(r.id) || undefined}>
+      <Wire
+        id={r.id}
+        emphasis={presentation?.rails?.has(r.id)}
+        directional={presentation ? true : undefined}
+        conditional={presentation ? r.conditional : undefined}
+        points={r.points}
+        jumps={r.jumps}
+        cornerRadii={r.cornerRadii}
+        change={r.change === "unchanged" ? "" : r.change}
+        label={r.label}
+        labelAt={r.labelAt}
+      />
+    </g>
   );
 }
 
@@ -330,6 +333,7 @@ function PartView({
   return (
     <g
       data-scene-part={p.id}
+      data-search-dim={presentation?.dimmed?.has(p.id) || undefined}
       data-traced={presentation?.traced?.has(p.id) || undefined}
       data-selected={presentation?.selected?.has(p.id) || undefined}
     >

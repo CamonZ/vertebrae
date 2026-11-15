@@ -1377,3 +1377,36 @@ describe("WorkflowAtlas — hover-trace (P7)", () => {
     expect(cls).not.toContain("back");
   });
 });
+
+it("keeps the opt-in scoped to Graph and returns through Map, Board and the factory overview", async () => {
+  mockSummary.mockReturnValue({
+    summary: FIXTURE,
+    isLoading: false,
+    error: null,
+  });
+  layoutFullMock.mockImplementation(async (model) => stubLayout(model));
+  const view = render(<WorkflowAtlas internalMachineGraph />);
+  expect(
+    await screen.findByLabelText("Factory workflow graph")
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+  expect(
+    screen.queryByLabelText("Factory workflow graph")
+  ).not.toBeInTheDocument();
+  await waitFor(() =>
+    expect(view.container.querySelector(".uv-board")).not.toBeNull()
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Board" }));
+  expect(screen.getByTestId("kanban-board-stub")).toHaveTextContent(
+    "Factory A"
+  );
+  fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
+  expect(
+    await screen.findByLabelText("Factory workflow graph")
+  ).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Factories" }));
+  expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
+  expect(
+    screen.queryByLabelText("Factory workflow graph")
+  ).not.toBeInTheDocument();
+});

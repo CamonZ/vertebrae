@@ -2,6 +2,10 @@
    Workflow Atlas — the canonical workflow-topology surface
    (P4 GRAPH + P5 MAP + P6 MORPH + P7 HOVER-TRACE).
 
+   Internal scoped Graph opt-in: ScopedMachineGraph uses the shared adapter,
+   useLaidOutFlow worker/cache and AtlasMachineScene. Legacy navigation and
+   rendering remain the production default until navigation parity ships.
+
    Pipeline data → adapter → two layouts → a custom DOM+SVG canvas inside a
    pan/zoom world:
 
@@ -56,6 +60,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { ScopedMachineGraph } from "./ScopedMachineGraph";
+import { useProjectScopeGeneration } from "../../stores/projectScopedStores";
 import { SearchInput } from "../molecules/SearchInput";
 import {
   SegmentedControl,
@@ -145,7 +151,11 @@ export function layoutKey(model: AtlasModel): string {
   return `${wfs}#${steps}#${edges}#${forwardLabels}`;
 }
 
-export function WorkflowAtlas() {
+export function WorkflowAtlas({
+  internalMachineGraph = import.meta.env.DEV &&
+    import.meta.env.VITE_ATLAS_MACHINE_GRAPH === "1",
+}: { internalMachineGraph?: boolean } = {}) {
+  const projectGeneration = useProjectScopeGeneration();
   const { summary, isLoading, error } = usePipelineSummary();
 
   const [view, setView] = useState<AtlasView>("graph");
@@ -281,6 +291,8 @@ export function WorkflowAtlas() {
   };
 
   const isGraph = view === "graph";
+  const machineGraph =
+    internalMachineGraph && isGraph && factoryFilter !== null;
 
   const key = useMemo(() => (model ? layoutKey(model) : ""), [model]);
 
@@ -336,7 +348,7 @@ export function WorkflowAtlas() {
 
   useEffect(() => {
     const currentModel = modelRef.current;
-    if (!currentModel || key === "") {
+    if (machineGraph || !currentModel || key === "") {
       setFull(null);
       return;
     }
@@ -354,7 +366,7 @@ export function WorkflowAtlas() {
     return () => {
       cancelled = true;
     };
-  }, [key]);
+  }, [key, machineGraph]);
 
   // Condensed map layout — pure + synchronous, memoised on the same key (the
   // model identity is stable for a given key, so this never thrashes on counts).
@@ -375,7 +387,7 @@ export function WorkflowAtlas() {
   const pz = usePanZoom(canvasRef, dims, {
     min: 0.12,
     max: 2.4,
-    enabled: !showFactoryOverview && !isBoard,
+    enabled: !showFactoryOverview && !isBoard && !machineGraph,
   });
   const pzRef = useRef(pz);
   pzRef.current = pz;
@@ -749,7 +761,8 @@ export function WorkflowAtlas() {
       </header>
 
       <div className="uv-canvas" ref={canvasRef}>
-        {(isLoading || (!ready && !empty && !error && !layoutError)) && (
+        {(isLoading ||
+          (!machineGraph && !ready && !empty && !error && !layoutError)) && (
           <div className="uv-loading">
             <div className="sp" />
             {isBoard
@@ -758,7 +771,7 @@ export function WorkflowAtlas() {
           </div>
         )}
 
-        {(error || layoutError) && (
+        {(error || (!machineGraph && layoutError)) && (
           <div className="uv-empty">{error ?? layoutError}</div>
         )}
 
@@ -780,13 +793,23 @@ export function WorkflowAtlas() {
             />
           )}
 
+        {machineGraph && scopedSummary && !isLoading && !error && !empty && (
+          <ScopedMachineGraph
+            key={JSON.stringify([projectGeneration, factoryFilter])}
+            summary={scopedSummary}
+            routeConfigs={routeConfigs}
+            scope={JSON.stringify([projectGeneration, factoryFilter])}
+            query={query}
+          />
+        )}
+
         {isBoard && factoryFilter !== null && (
           <div className="uv-kanban" data-no-pan>
             <KanbanBoard factoryName={factoryFilter} />
           </div>
         )}
 
-        {!showFactoryOverview && !isBoard && ready && (
+        {!machineGraph && !showFactoryOverview && !isBoard && ready && (
           <div
             className={"uv-scaler" + (morphing ? " morphing" : "")}
             style={{ transform: pz.transform }}
@@ -1034,7 +1057,7 @@ export function WorkflowAtlas() {
           </div>
         )}
 
-        {!showFactoryOverview && !isBoard && ready && (
+        {!machineGraph && !showFactoryOverview && !isBoard && ready && (
           <ZoomWidget
             onZoomIn={pz.zoomIn}
             onZoomOut={pz.zoomOut}
@@ -1048,7 +1071,7 @@ export function WorkflowAtlas() {
         <RunConsole summary={scopedSummary} factoryName={factoryFilter} />
       </div>
 
-      {!showFactoryOverview && !isBoard && <KindLegend />}
+      {!machineGraph && !showFactoryOverview && !isBoard && <KindLegend />}
 
       {/* The global entity host renders the one workflow/step inspector. */}
     </main>
