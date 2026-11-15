@@ -10,6 +10,7 @@ export * from "./compile";
 export * from "./extent";
 export * from "./band";
 export * from "./layout";
+export { portFacing, turnCell, turnRoute } from "./turn";
 export * from "./jsonSchema";
 export * from "./parse";
 export * from "./registryContext";

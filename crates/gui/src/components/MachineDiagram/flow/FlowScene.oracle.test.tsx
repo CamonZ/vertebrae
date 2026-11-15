@@ -1,3 +1,4 @@
+import { drawnLeads } from "./railTestHelpers";
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { pointAt, route, routePath } from "../route";
@@ -70,7 +71,7 @@ for (const name of ["Parallel bus tracks", "Fixed-port K3,3"]) {
             p.getAttribute("d")
           )
         ).toEqual(paths);
-        expect(view.container.querySelectorAll(".md-rail")).toHaveLength(0);
+        expect(drawnLeads(view.container)).toEqual([]);
         const frames = stateAt(diagram.travel, t, {
           reducedMotion: false,
           smear: true,

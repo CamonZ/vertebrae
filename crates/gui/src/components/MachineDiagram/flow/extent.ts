@@ -14,7 +14,20 @@ import type {
 } from "./compile";
 import type { Point } from "../route";
 import { placedLabels } from "../partLabels";
-import { LINE_EM, textBox, type Box } from "./measure";
+import { LINE_EM, textBox, textWidth, type Box } from "./measure";
+import {
+  apply,
+  applyBox,
+  besideAxis,
+  invert,
+  partTurn,
+  tabAnchor,
+  titleAnchors,
+  transposes,
+  turnStatus,
+  turnedLabelGeometry,
+  type FlowDirection,
+} from "../orientation";
 import {
   BAND_CHIP_HEIGHT,
   BAND_FOOTNOTE_SIZE,
@@ -124,13 +137,42 @@ type PartGeometry = Pick<
   | "timeline"
   | "ports"
   | "presence"
+  | "direction"
 >;
 
-/** The frame (bounding box), relative to the cell's top-left. */
-export function frameLocal(p: Pick<DiagramPart, "bb" | "scale">): Box {
-  const [x, y, w, h] = p.bb;
-  return scaled({ x0: x, y0: y, x1: x + w, y1: y + h }, p.scale);
+const directionOf = (p: { readonly direction?: FlowDirection }) =>
+  p.direction ?? "right";
+
+/** A part-space box in the turned part space (unchanged left to right). */
+function turnedBox(p: { readonly direction?: FlowDirection }, b: Box): Box {
+  const dir = directionOf(p);
+  return dir === "right" ? b : applyBox(partTurn(dir), b);
 }
+
+/**
+ * A box relative to the turned cell's top-left, back in the canonical
+ * (left-to-right) cell, where auto-layout works.
+ */
+export function canonicalLocal(
+  p: { readonly direction?: FlowDirection; readonly scale: number },
+  b: Box
+): Box {
+  const dir = directionOf(p);
+  return dir === "right" ? b : applyBox(invert(partTurn(dir, p.scale)), b);
+}
+
+/** The frame (bounding box), relative to the cell's top-left. */
+export function frameLocal(
+  p: Pick<DiagramPart, "bb" | "scale" | "direction">
+): Box {
+  const [x, y, w, h] = p.bb;
+  return scaled(turnedBox(p, { x0: x, y0: y, x1: x + w, y1: y + h }), p.scale);
+}
+
+/** The frame in the canonical cell (auto-layout's frame of reference). */
+export const canonicalFrameLocal = (
+  p: Pick<DiagramPart, "bb" | "scale" | "direction">
+): Box => canonicalLocal(p, frameLocal(p));
 
 /** Every label the part draws, relative to the cell's top-left. */
 export function partLabelsLocal(p: PartGeometry): LabelBox[] {
@@ -140,14 +182,16 @@ export function partLabelsLocal(p: PartGeometry): LabelBox[] {
     out.push({ ...(inPartSpace ? scaled(b, s) : b), kind, owner: p.id, text });
   if (s >= 1) {
     // MachinePart: title, change note and "also" line; status line; tab.
+    const at = titleAnchors(directionOf(p), p.bb);
     const title = `${p.identity.name}  ·  ${p.identity.job}`;
-    if (!p.labels) add("title", title, textBox(24, 36, title, 22));
+    if (!p.labels) add("title", title, textBox(...at.title, title, 22));
     if (p.change === "changed" && p.changeNote)
-      add("note", p.changeNote, textBox(24, 64, p.changeNote, 18));
+      add("note", p.changeNote, textBox(...at.note, p.changeNote, 18));
     if (p.identity.aka) {
       const aka = `also  ${p.identity.aka}`;
-      add("aka", aka, textBox(24, 380, aka, 18));
+      add("aka", aka, textBox(...at.aka, aka, 18));
     }
+    const status = turnStatus(directionOf(p), p.status);
     const texts = new Set(
       p.neutral ? [] : p.timeline.notes.map(([, text]) => text)
     );
@@ -155,12 +199,22 @@ export function partLabelsLocal(p: PartGeometry): LabelBox[] {
       add(
         "status",
         text,
-        textBox(p.status.x, p.status.y, text, 20, p.status.align ?? "center")
+        textBox(status.x, status.y, text, 20, status.align ?? "center")
       );
     if (p.change !== "unchanged") {
       const text = TAB_TEXT[p.change];
-      const tx = p.bb[0] - 8 + 22;
-      const ty = p.bb[1] - 8;
+      const [bx, by] = [p.bb[0], p.bb[1]];
+      const frame = turnedBox(p, {
+        x0: bx,
+        y0: by,
+        x1: bx + p.bb[2],
+        y1: by + p.bb[3],
+      });
+      const width = text.length * 10.8 + 20;
+      const [tx, ty] = tabAnchor(directionOf(p), p.bb, width) ?? [
+        frame.x0 - 8 + 22,
+        frame.y0 - 8,
+      ];
       add("tab", text, {
         x0: tx,
         y0: ty - 14,
@@ -175,7 +229,15 @@ export function partLabelsLocal(p: PartGeometry): LabelBox[] {
     add("name", name, textBox(x, y, name, NAME_SIZE, "center"), false);
   }
   if (p.labels) {
-    for (const l of placedLabels({ ...p, labels: p.labels }))
+    for (const l of besideAxis(
+      directionOf(p),
+      p.scale,
+      placedLabels({
+        ...p,
+        ...turnedLabelGeometry(directionOf(p), p.bb, p.timeline),
+        labels: p.labels,
+      })
+    ))
       if (!l.hover) add("title", l.text, l.box, false);
   }
   return out;
@@ -186,29 +248,44 @@ export function partLabelsLocal(p: PartGeometry): LabelBox[] {
  * relative to the cell's top-left: above the frame and any gate pill on it.
  */
 export function nameLabelLocal(
-  p: Pick<DiagramPart, "bb" | "scale" | "timeline">
+  p: Pick<DiagramPart, "bb" | "scale" | "timeline" | "direction" | "identity">
 ): Point {
-  const top = Math.min(frameLocal(p).y0, ...gatesLocal(p).map((g) => g.y0));
-  return [(p.bb[0] + p.bb[2] / 2) * p.scale, top - NAME_DY];
+  const frame = frameLocal(p);
+  const top = Math.min(frame.y0, ...gatesLocal(p).map((g) => g.y0));
+  if (transposes(directionOf(p))) {
+    // Down and up: a rail meets the top of the frame on the axis, so the
+    // name starts just past it.
+    const [axis] = apply(partTurn(directionOf(p), p.scale), [0, 200 * p.scale]);
+    const w = textWidth(p.identity.name, NAME_SIZE);
+    return [axis + 12 + w / 2, top - NAME_DY];
+  }
+  if (directionOf(p) === "right")
+    return [(p.bb[0] + p.bb[2] / 2) * p.scale, top - NAME_DY];
+  return [(frame.x0 + frame.x1) / 2, top - NAME_DY];
 }
 
 /** Gate pills at their widest, relative to the cell's top-left. */
-export function gatesLocal(p: Pick<DiagramPart, "timeline" | "scale">): Box[] {
+export function gatesLocal(
+  p: Pick<DiagramPart, "timeline" | "scale" | "direction">
+): Box[] {
   return p.timeline.gates.map((g) =>
     scaled(
-      g.orientation === "v"
-        ? {
-            x0: g.x - GATE_HALF_SHORT,
-            y0: g.y - GATE_HALF_LONG,
-            x1: g.x + GATE_HALF_SHORT,
-            y1: g.y + GATE_HALF_LONG,
-          }
-        : {
-            x0: g.x - GATE_HALF_LONG,
-            y0: g.y - GATE_HALF_SHORT,
-            x1: g.x + GATE_HALF_LONG,
-            y1: g.y + GATE_HALF_SHORT,
-          },
+      turnedBox(
+        p,
+        g.orientation === "v"
+          ? {
+              x0: g.x - GATE_HALF_SHORT,
+              y0: g.y - GATE_HALF_LONG,
+              x1: g.x + GATE_HALF_SHORT,
+              y1: g.y + GATE_HALF_LONG,
+            }
+          : {
+              x0: g.x - GATE_HALF_LONG,
+              y0: g.y - GATE_HALF_SHORT,
+              x1: g.x + GATE_HALF_LONG,
+              y1: g.y + GATE_HALF_SHORT,
+            }
+      ),
       p.scale
     )
   );
@@ -220,12 +297,16 @@ export function gatesLocal(p: Pick<DiagramPart, "timeline" | "scale">): Box[] {
  * relative to the cell's top-left.
  */
 export function partExtentLocal(p: PartGeometry): Box {
-  const ports = Object.values(p.ports).map(({ local: [x, y] }) => ({
-    x0: x * p.scale,
-    y0: y * p.scale,
-    x1: x * p.scale,
-    y1: y * p.scale,
-  }));
+  const ports = Object.values(p.ports).map(({ local }) => {
+    const dir = directionOf(p);
+    const [x, y] = dir === "right" ? local : apply(partTurn(dir), local);
+    return {
+      x0: x * p.scale,
+      y0: y * p.scale,
+      x1: x * p.scale,
+      y1: y * p.scale,
+    };
+  });
   return union([
     pad(frameLocal(p), RING_PAD),
     ...gatesLocal(p),
@@ -233,6 +314,10 @@ export function partExtentLocal(p: PartGeometry): Box {
     ...ports,
   ]);
 }
+
+/** The extent in the canonical cell (auto-layout's frame of reference). */
+export const canonicalExtentLocal = (p: PartGeometry): Box =>
+  canonicalLocal(p, partExtentLocal(p));
 
 const atCell = (p: Pick<DiagramPart, "position">, b: Box) =>
   shift(b, p.position.x, p.position.y);

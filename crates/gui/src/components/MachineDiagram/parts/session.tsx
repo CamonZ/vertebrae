@@ -217,6 +217,7 @@ export const sessionMachine: MachinePartDef<SessionExtra> = {
             [120, 245],
             [220, 245],
           ]}
+          lead
           dashed
           dash="4 6"
         />

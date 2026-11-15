@@ -1,3 +1,4 @@
+import { drawnLeads } from "../MachineDiagram/flow/railTestHelpers";
 import {
   act,
   cleanup,
@@ -143,7 +144,8 @@ it("integrates the real scoped graph and preserves routes/camera/compile counts 
   expect(paths(v)).toEqual(
     d.rails.map((r) => routePath(route(r.points, undefined, r)))
   );
-  expect(v.container.querySelectorAll(".md-rail")).toHaveLength(0);
+  // Station mechanisms keep their own tracks; no gallery lead is drawn.
+  expect(drawnLeads(v.container)).toEqual([]);
   const handoff = d.rails.find(
     (r) => r.id === machineId("handoff", "explicit")
   )!;

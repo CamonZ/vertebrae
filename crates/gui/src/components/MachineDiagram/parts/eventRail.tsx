@@ -5,7 +5,7 @@
  * the gallery artifact (vtb://artifact/9c0496e1-80c3-4d92-b5cb-4444737ac20a)
  * line for line.
  */
-import { Burst, Terminal } from "../fixtures";
+import { Burst, PartBox, Terminal } from "../fixtures";
 import { clamp, pop } from "../motion";
 import { roleColor, type CardRole, type StateRole } from "../palette";
 import { RAIL_Y as Y } from "../MachinePart";
@@ -234,6 +234,8 @@ export const eventRailMachine: MachinePartDef<EventRailExtra> = {
   scenarios: [turnStory(false), turnStory(true), resumeStory()],
   draw: (t, { dots, done, fail, resume }) => (
     <>
+      {/* The frame the rail runs in, with the ports on its ends. */}
+      <PartBox x={40} y={170} w={570} h={60} r={14} />
       <Rail
         points={[
           [60, Y],

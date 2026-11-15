@@ -17,6 +17,10 @@ const TAB_TEXT: Record<Exclude<Mark, "unchanged">, string> = {
 /** Monospace advance at 18 px (JetBrains Mono ≈ 0.6 em), for tab width. */
 const CHAR_WIDTH_18 = 10.8;
 
+/** Width of the tab naming `mark`. */
+export const tabWidth = (mark: Exclude<Mark, "unchanged">) =>
+  TAB_TEXT[mark].length * CHAR_WIDTH_18 + 20;
+
 export interface ChangeMarkProps {
   mark: Mark;
   bb: BBox;

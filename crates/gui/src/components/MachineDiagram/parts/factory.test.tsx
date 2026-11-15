@@ -1,3 +1,4 @@
+import { drawnLeads } from "../flow/railTestHelpers";
 /**
  * factory station (catalogue v2.2 "factory"): prop-driven layout for 1–20
  * workflows and 0–6+ inbound and outbound factories, workflow-mark state
@@ -575,8 +576,8 @@ describe("the factory flow kind", () => {
     expect(part).not.toBeNull();
     expect(part.querySelectorAll(".md-workflow-mark")).toHaveLength(2);
     expect(part.querySelector(".md-box")).not.toBeNull();
-    // No standalone gallery rails inside flows.
-    expect(part.querySelectorAll(".md-rail")).toHaveLength(0);
+    // Gallery leads give way to the flow's wires; the mechanism stays.
+    expect(drawnLeads(part)).toEqual([]);
   });
 
   it("the happy path reproduces the gallery's enters-and-finishes scenario at the beat outcomes", () => {

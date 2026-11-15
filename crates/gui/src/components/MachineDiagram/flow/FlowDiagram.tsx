@@ -1,4 +1,5 @@
-import { memo, useState, type ReactNode } from "react";
+import { memo, useMemo, useState, type ReactNode } from "react";
+import { PartContext, usePart } from "../partContext";
 import { countDescription, type FlowPresentation } from "./presentation";
 import { LiveCount, RegionHeader } from "./RegionHeader";
 import { PortMark, StageMark } from "../ChangeMark";
@@ -363,81 +364,93 @@ function PartView({
   leaving?: boolean;
 }) {
   const drawings = useFlowDrawings();
+  const parent = usePart();
+  const ctx = useMemo(
+    () => ({
+      ...parent,
+      leadPorts: Object.values(p.ports).map((port) => port.local),
+      leadFrame: p.bb,
+    }),
+    [parent, p.ports, p.bb]
+  );
   return (
-    <g
-      data-scene-part={p.id}
-      data-testid={leaving ? undefined : presentation?.testIds?.get(p.id)}
-      data-search-dim={presentation?.dimmed?.has(p.id) || undefined}
-      data-traced={presentation?.traced?.has(p.id) || undefined}
-      data-selected={presentation?.selected?.has(p.id) || undefined}
-    >
-      <MachinePart
-        id={leaving ? undefined : p.id}
-        part={p.identity}
-        labelPlacement={p.labels}
-        bb={p.bb}
-        timeline={p.timeline}
-        t={t}
-        view={{ kind: "scenario", name: arrangement }}
-        change={p.change}
-        changeNote={p.changeNote}
-        markMorph={markMorph}
-        status={p.status}
-        neutral={p.neutral}
-        x={p.position.x}
-        y={p.position.y}
-        scale={p.scale}
-        reducedMotion={reducedMotion}
-        accessibleDetail={countDescription(presentation?.counts?.get(p.id))}
-        activationHint={p.drill && !leaving ? DRILL_HINT : undefined}
+    <PartContext.Provider value={ctx}>
+      <g
+        data-scene-part={p.id}
+        data-testid={leaving ? undefined : presentation?.testIds?.get(p.id)}
+        data-search-dim={presentation?.dimmed?.has(p.id) || undefined}
+        data-traced={presentation?.traced?.has(p.id) || undefined}
+        data-selected={presentation?.selected?.has(p.id) || undefined}
       >
-        {(frame) => {
-          const draw = Object.prototype.hasOwnProperty.call(drawings, p.kind)
-            ? drawings[p.kind]
-            : undefined;
-          return (
-            <>
-              {draw ? (
-                draw(frame.t, p)
-              ) : (
-                <PartBox x={p.bb[0]} y={p.bb[1]} w={p.bb[2]} h={p.bb[3]} />
-              )}
-              {/* Atlas uses unchanged, full-scale neutral parts. Other flows
+        <MachinePart
+          id={leaving ? undefined : p.id}
+          part={p.identity}
+          labelPlacement={p.labels}
+          bb={p.bb}
+          timeline={p.timeline}
+          t={t}
+          view={{ kind: "scenario", name: arrangement }}
+          change={p.change}
+          changeNote={p.changeNote}
+          markMorph={markMorph}
+          status={p.status}
+          neutral={p.neutral}
+          x={p.position.x}
+          y={p.position.y}
+          scale={p.scale}
+          direction={p.direction}
+          reducedMotion={reducedMotion}
+          accessibleDetail={countDescription(presentation?.counts?.get(p.id))}
+          activationHint={p.drill && !leaving ? DRILL_HINT : undefined}
+        >
+          {(frame) => {
+            const draw = Object.prototype.hasOwnProperty.call(drawings, p.kind)
+              ? drawings[p.kind]
+              : undefined;
+            return (
+              <>
+                {draw ? (
+                  draw(frame.t, p)
+                ) : (
+                  <PartBox x={p.bb[0]} y={p.bb[1]} w={p.bb[2]} h={p.bb[3]} />
+                )}
+                {/* Atlas uses unchanged, full-scale neutral parts. Other flows
                   keep their change-note/name slot instead of overlaying it. */}
-              {p.neutral && p.scale >= 1 && !p.changeNote && (
-                <LiveCount
-                  count={presentation?.counts?.get(p.id)}
-                  x={24}
-                  y={75}
-                />
-              )}
-              {p.drill && <DrillMark bb={p.bb} scale={p.scale} />}
-              {p.stageMarks.map((s) => (
-                <StageMark
-                  key={s.name}
-                  mark={s.change}
-                  name={s.name}
-                  bb={s.bb}
-                  tag={s.tag}
-                />
-              ))}
-              {Object.entries(p.portChanges).map(([name, mark]) => {
-                const port = p.ports[name];
-                return port ? (
-                  <PortMark
-                    key={name}
-                    mark={mark}
-                    name={name}
-                    x={port.local[0]}
-                    y={port.local[1]}
-                    side={port.side}
+                {p.neutral && p.scale >= 1 && !p.changeNote && (
+                  <LiveCount
+                    count={presentation?.counts?.get(p.id)}
+                    x={24}
+                    y={75}
                   />
-                ) : null;
-              })}
-            </>
-          );
-        }}
-      </MachinePart>
-    </g>
+                )}
+                {p.drill && <DrillMark bb={p.bb} scale={p.scale} />}
+                {p.stageMarks.map((s) => (
+                  <StageMark
+                    key={s.name}
+                    mark={s.change}
+                    name={s.name}
+                    bb={s.bb}
+                    tag={s.tag}
+                  />
+                ))}
+                {Object.entries(p.portChanges).map(([name, mark]) => {
+                  const port = p.ports[name];
+                  return port ? (
+                    <PortMark
+                      key={name}
+                      mark={mark}
+                      name={name}
+                      x={port.local[0]}
+                      y={port.local[1]}
+                      side={port.side}
+                    />
+                  ) : null;
+                })}
+              </>
+            );
+          }}
+        </MachinePart>
+      </g>
+    </PartContext.Provider>
   );
 }

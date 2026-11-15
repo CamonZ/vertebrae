@@ -1,3 +1,4 @@
+import { drawnLeads } from "./railTestHelpers";
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { route, routePath } from "../route";
@@ -71,6 +72,6 @@ it("real nonplanar bus fixture retains jumps, corners, endpoints and separate tr
       )
     ).toEqual([rail.id]);
     expect(JSON.stringify(diagram)).toBe(before);
-    expect(view.container.querySelectorAll(".md-rail")).toHaveLength(0);
+    expect(drawnLeads(view.container)).toEqual([]);
   }
 });

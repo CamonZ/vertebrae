@@ -21,6 +21,14 @@ import {
 } from "../partGeometry";
 import { railBetween, route, type Point, type PortSide } from "../route";
 import {
+  apply,
+  partTurn,
+  turnSide,
+  turnedSize,
+  type FlowDirection,
+} from "../orientation";
+import { arrangeTurned } from "./turn";
+import {
   seal,
   story,
   type Beat,
@@ -103,6 +111,7 @@ export { stepRuns } from "./arrangements";
 
 export interface DiagramPort {
   readonly name: string;
+  /** Part space: the side the drawing puts it on (see `portFacing`). */
   readonly side: PortSide;
   /** Diagram space. */
   readonly x: number;
@@ -123,8 +132,15 @@ export interface DiagramPart {
   readonly identity: PartIdentity;
   readonly footprint: Footprint;
   readonly scale: number;
-  /** Top-left of the part's 640×400 cell in diagram space. */
+  /**
+   * Top-left of the part's cell in diagram space: 640×400, or 400×640 when
+   * the flow runs down or up.
+   */
   readonly position: Position;
+  /** Flow direction the part is drawn turned for; absent: right. */
+  readonly direction?: FlowDirection;
+  /** Turned flows only: top-left of the canonical (left-to-right) cell. */
+  readonly cell?: Position;
   readonly positioned: "given" | "layout";
   readonly bb: BBox;
   readonly status: AnyPartKind["status"];
@@ -210,6 +226,8 @@ export interface DiagramStageMark extends StageDef {
 
 export interface DiagramTimeline {
   readonly arrangement: ArrangementName;
+  /** Flow direction; absent: right. */
+  readonly direction?: FlowDirection;
   readonly period: number;
   readonly width: number;
   readonly height: number;
@@ -236,6 +254,8 @@ export interface DiagramTimeline {
 export interface CompiledFlow {
   readonly version: number;
   readonly title?: string;
+  /** Flow direction; absent: right. */
+  readonly direction?: FlowDirection;
   /**
    * One per arrangement in spec order: the named arrangements, `[before,
    * after]` for a spec with change marks, otherwise `[current]`.
@@ -434,23 +454,44 @@ function build(
       },
     ])
   );
-  const arranged = plan.plan.names.map((a) =>
-    arrange(
-      spec,
-      plan,
-      a,
-      defs,
-      positions,
-      routes,
-      scaleOf,
-      drills,
-      errors,
-      root
-    )
-  );
+  const direction = spec.direction ?? "right";
+  const arrangeAt = (
+    at: ReadonlyMap<string, Position>,
+    rs: Readonly<Record<string, RailRoute>>,
+    errs: FlowSpecError[]
+  ) =>
+    plan.plan.names.map((a) =>
+      arrange(
+        spec,
+        plan,
+        a,
+        defs,
+        at,
+        rs,
+        scaleOf,
+        drills,
+        errs,
+        root,
+        direction,
+        positions
+      )
+    );
+  const arranged =
+    direction === "right"
+      ? arrangeAt(positions, routes, errors)
+      : arrangeTurned({
+          direction,
+          cells: positions,
+          scales: new Map(spec.parts.map((p) => [p.id, scaleOf(p)])),
+          routes,
+          regions: spec.regions ?? [],
+          arrange: (at, rs, measuring) =>
+            arrangeAt(at, rs, measuring ? [] : errors),
+        });
   return {
     version: spec.version,
     ...(spec.title ? { title: spec.title } : {}),
+    ...(direction !== "right" ? { direction } : {}),
     arrangements: withRegions(arranged, spec, plan.plan.phased),
     baseline: plan.plan.baseline,
     labels: plan.plan.labels,
@@ -488,13 +529,17 @@ function arrange(
   plan: Arrangements,
   a: ArrangementName,
   defs: Map<string, AnyPartKind>,
-  positions: Map<string, Position>,
+  positions: ReadonlyMap<string, Position>,
   routes: Readonly<Record<string, RailRoute>>,
   scaleOf: (p: PartSpec) => number,
   drills: Map<string, DrillTarget>,
   errors: FlowSpecError[],
-  root: string
+  root: string,
+  direction: FlowDirection,
+  /** Canonical cells (the same as `positions` left to right). */
+  cells: ReadonlyMap<string, Position>
 ): DiagramTimeline {
+  const turned = direction !== "right";
   const { phased } = plan.plan;
   /**
    * Where the beat being compiled runs: its phase in a phased spec, whose
@@ -537,11 +582,14 @@ function arrange(
     const pd = run.def.ports[port];
     const pos = positions.get(pid)!;
     const s = scaleOf(run.spec);
+    const [lx, ly] = turned
+      ? apply(partTurn(direction), [pd.x, pd.y])
+      : [pd.x, pd.y];
     return {
       name: port,
       side: pd.side,
-      x: pos.x + pd.x * s,
-      y: pos.y + pd.y * s,
+      x: pos.x + lx * s,
+      y: pos.y + ly * s,
       local: [pd.x, pd.y],
       dashed: pd.dashed ?? false,
     };
@@ -551,6 +599,11 @@ function arrange(
   const split = (end: string) => {
     const i = end.lastIndexOf(".");
     return { part: end.slice(0, i), port: end.slice(i + 1) };
+  };
+  /** A rail end as drawn: diagram position and the side it faces. */
+  const facing = (end: { part: string; port: string }) => {
+    const p = portAt(end.part, end.port);
+    return turned ? { ...p, side: turnSide(direction, p.side) } : p;
   };
   const rails = new Map<string, DiagramRail>();
   const railTokens = new Map<string, readonly TokenKind[]>();
@@ -580,7 +633,7 @@ function arrange(
             ...routed.points.slice(1, -1),
             [portAt(to.part, to.port).x, portAt(to.part, to.port).y],
           ]
-        : railBetween(portAt(from.part, from.port), portAt(to.part, to.port)),
+        : railBetween(facing(from), facing(to)),
       ...(r.label ? { label: r.label } : {}),
       ...(routed?.jumps?.length ? { jumps: routed.jumps } : {}),
       ...(routed?.cornerRadii ? { cornerRadii: routed.cornerRadii } : {}),
@@ -892,6 +945,7 @@ function arrange(
       footprint: run.def.footprint,
       scale: s,
       position: positions.get(p.id)!,
+      ...(turned ? { direction, cell: cells.get(p.id)! } : {}),
       positioned: p.position ? "given" : "layout",
       bb: run.def.bb,
       status: run.def.status,
@@ -933,19 +987,24 @@ function arrange(
   ].sort((x, y) => x.t - y.t);
   const counts: Record<string, number> = {};
   for (const m of markers) counts[m.kind] = (counts[m.kind] ?? 0) + 1;
+  const cellSize = (p: DiagramPart) =>
+    turned
+      ? turnedSize(direction, p.scale)
+      : [PART_WIDTH * p.scale, PART_HEIGHT * p.scale];
   const width = Math.max(
     ...parts.map((p) =>
-      Math.max(p.position.x + PART_WIDTH * p.scale, partExtent(p).x1)
+      Math.max(p.position.x + cellSize(p)[0], partExtent(p).x1)
     )
   );
   const height = Math.max(
     ...parts.map((p) =>
-      Math.max(p.position.y + PART_HEIGHT * p.scale, partExtent(p).y1)
+      Math.max(p.position.y + cellSize(p)[1], partExtent(p).y1)
     )
   );
 
   return {
     arrangement: a,
+    ...(turned ? { direction } : {}),
     period,
     width,
     height,
