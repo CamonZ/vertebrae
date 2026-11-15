@@ -8,6 +8,7 @@ import { serviceRegistryMachine } from "../parts/serviceRegistry";
 import { shardRingMachine } from "../parts/shardRing";
 import { twoPhaseCommitMachine } from "../parts/twoPhaseCommit";
 import { versionVectorMachine } from "../parts/versionVector";
+import { workflowMachine } from "../parts/workflow";
 /** Flow-to-catalogue adapters. No gallery scenario or status prose is consulted. */
 import {
   createContext,
@@ -21,6 +22,7 @@ import { MACHINE_PARTS } from "../parts";
 import { TL, type TileSpec } from "../parts/eventTiles";
 import type { StatusNote } from "../timeline";
 import { upcastPlan } from "./parts/upcaster";
+import { workflowExtra, type WorkflowState } from "./parts/workflow";
 import type { CompiledPart, CompiledPartStep } from "./registry";
 
 export type Drawing = (t: number, compiled: CompiledPart) => ReactNode;
@@ -80,6 +82,9 @@ export const FLOW_DRAWINGS = {
   "fencing token": protocolDrawing(fencingTokenMachine.draw),
   "two-phase commit": protocolDrawing(twoPhaseCommitMachine.draw),
   "service registry": protocolDrawing(serviceRegistryMachine.draw),
+  // The station's verbs record its lamp, chip and port timelines as they compile.
+  workflow: (t, p) =>
+    workflowMachine.draw(t, workflowExtra(p.state as WorkflowState)),
 
   source: (t) => MACHINE_PARTS.source.draw(t, null),
   transform: (t, p) => {

@@ -12,6 +12,13 @@ export interface PartScenario<E> {
   readonly timeline: Timeline;
   /** Scenario data the draw function needs beyond the timeline (clamp times, rings, lamps). */
   readonly extra: E;
+  /**
+   * Prop-driven parts (workflow): this scenario's own frame and status
+   * anchor, so change marks and the ghost follow its size. Defaults to the
+   * part's `bb` / `status`.
+   */
+  readonly bb?: BBox;
+  readonly status?: MachinePartDef["status"];
 }
 
 /**

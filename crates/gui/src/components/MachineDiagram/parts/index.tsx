@@ -70,6 +70,7 @@ import { waitChildrenMachine } from "./waitChildren";
 import { humanGateMachine } from "./humanGate";
 import { runEndMachine } from "./runEnd";
 import { taskRunMachine } from "./taskRun";
+import { workflowMachine } from "./workflow";
 import type { MachinePartDef } from "./types";
 
 export type { MachinePartDef, PartScenario } from "./types";
@@ -133,6 +134,7 @@ export {
   humanGateMachine,
   runEndMachine,
   taskRunMachine,
+  workflowMachine,
 };
 
 /** Implemented parts, in catalogue order. */
@@ -196,6 +198,7 @@ export const MACHINE_PARTS = {
   "human gate": humanGateMachine,
   "run end": runEndMachine,
   "task run": taskRunMachine,
+  workflow: workflowMachine,
 } as const;
 
 export type MachinePartName = keyof typeof MACHINE_PARTS;
@@ -271,14 +274,14 @@ export function CatalogPart({
   return (
     <MachinePart
       part={def.part}
-      bb={def.bb}
+      bb={sc.bb ?? def.bb}
       timeline={sc.timeline}
       t={t}
       view={partView}
       pose={pose}
       change={change}
       changeNote={changeNote}
-      status={def.status}
+      status={sc.status ?? def.status}
       labels={labels}
       smear={view.kind === "state" ? false : smear}
       reducedMotion={reducedMotion}

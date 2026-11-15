@@ -22,6 +22,16 @@
   --md-hole: var(--color-bg);
   --md-ghost: var(--color-fg-ghost);
 
+  /* step-type hues (catalogue v2.2): workflow lamp cores only, never state */
+  --md-step-llm: var(--color-step-llm);
+  --md-step-structured: var(--color-step-structured);
+  --md-step-execute: var(--color-fg-soft);
+  --md-step-route: var(--color-step-route);
+  --md-step-human: var(--color-step-human);
+  --md-step-wait: var(--color-step-wait);
+  --md-step-stop: var(--color-step-stop);
+  --md-step-finish: var(--color-step-finish);
+
   font-family: var(--font-mono);
 }
 
