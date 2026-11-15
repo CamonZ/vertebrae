@@ -65,6 +65,25 @@ describe("embedded flow validator bundle", () => {
     ).toBe(true);
   }, 60_000);
 
+  it("accepts shared topology endpoints and their ports without browser or Node globals", () => {
+    expect(
+      validate(
+        JSON.stringify({
+          version: 1,
+          parts: [
+            { id: "origin", kind: "topology endpoint" },
+            { id: "target", kind: "execute step", props: { topology: true } },
+          ],
+          rails: [{ id: "handoff", from: "origin.out", to: "target.in" }],
+        })
+      )
+    ).toEqual({
+      ok: true,
+      format: "json",
+      errors: [],
+    });
+  });
+
   it("runs without browser or Node globals", () => {
     expect(validate("version: 1\nparts: [{id: a, kind: source}]")).toEqual({
       ok: true,

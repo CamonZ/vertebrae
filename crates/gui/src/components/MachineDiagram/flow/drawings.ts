@@ -9,9 +9,14 @@ import { shardRingMachine } from "../parts/shardRing";
 import { twoPhaseCommitMachine } from "../parts/twoPhaseCommit";
 import { versionVectorMachine } from "../parts/versionVector";
 /** Flow-to-catalogue adapters. No gallery scenario or status prose is consulted. */
-import { createContext, useContext, type ReactNode } from "react";
+import {
+  createContext,
+  createElement,
+  useContext,
+  type ReactNode,
+} from "react";
 import type { LampStep } from "../geometry";
-import type { CardRole, StateRole } from "../palette";
+import { roleColor, type CardRole, type StateRole } from "../palette";
 import { MACHINE_PARTS } from "../parts";
 import { TL, type TileSpec } from "../parts/eventTiles";
 import type { StatusNote } from "../timeline";
@@ -52,6 +57,19 @@ const resultRole = (s: CompiledPartStep | undefined): CardRole =>
   s?.verb === "fail" || s?.args.outcome === "error" ? "red" : "green";
 
 export const FLOW_DRAWINGS = {
+  "topology endpoint": () =>
+    createElement(
+      "g",
+      {
+        "data-topology-endpoint": true,
+        fill: roleColor("fill"),
+        stroke: roleColor("edge"),
+        strokeWidth: 2,
+      },
+      createElement("line", { x1: 280, y1: 200, x2: 300, y2: 200 }),
+      createElement("circle", { cx: 320, cy: 200, r: 20 }),
+      createElement("line", { x1: 340, y1: 200, x2: 360, y2: 200 })
+    ),
   replication: protocolDrawing(replicationMachine.draw),
   quorum: protocolDrawing(quorumMachine.draw),
   "leader election": protocolDrawing(leaderElectionMachine.draw),
@@ -1267,7 +1285,7 @@ export const FLOW_DRAWINGS = {
       done,
     });
   },
-} satisfies Record<keyof typeof MACHINE_PARTS, Drawing>;
+} satisfies Record<keyof typeof MACHINE_PARTS | "topology endpoint", Drawing>;
 
 /** GUI extensions provide drawings independently of validation schemas. */
 export const FlowDrawingsContext =
