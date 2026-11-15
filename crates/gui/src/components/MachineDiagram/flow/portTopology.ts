@@ -2,6 +2,10 @@ import type { DiagramTimeline } from "./compile";
 
 export type PortPlanarity = "planar" | "non-planar" | "unknown";
 
+// Reverse incoming ends so parallel rails start nested rather than interleaved.
+// Both searches must start from the same rotation to agree within a budget.
+const defaultDartRank = (dart: number) => (dart % 2 ? -dart : dart);
+
 class Components {
   readonly parent: number[];
   constructor(size: number) {
@@ -59,7 +63,7 @@ function computePortPlanarity(
             ...(r.from.part === p.id && r.from.port === name ? [2 * i] : []),
             ...(r.to.part === p.id && r.to.port === name ? [2 * i + 1] : []),
           ]);
-          ends.sort((a, b) => (a % 2 ? -a : a) - (b % 2 ? -b : b));
+          ends.sort((a, b) => defaultDartRank(a) - defaultDartRank(b));
           return { angle, position, ends };
         })
         .filter((p) => p.ends.length)
@@ -241,9 +245,11 @@ export function portEmbedding(
     const order = preferred.get(key) ?? [];
     const rank = (d: Dart) => {
       const at = order.indexOf(d);
-      return at < 0 ? order.length + d : at;
+      return at < 0 ? order.length : at;
     };
-    darts.sort((a, b) => rank(a) - rank(b));
+    darts.sort(
+      (a, b) => rank(a) - rank(b) || defaultDartRank(a) - defaultDartRank(b)
+    );
   }
   // A permutation keeps every fixed end in its drawn relative order.
   const keeps = (key: string, darts: readonly Dart[]) => {

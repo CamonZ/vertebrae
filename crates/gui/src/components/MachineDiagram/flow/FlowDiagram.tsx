@@ -9,6 +9,7 @@ import { MachineDiagram } from "../MachineDiagram";
 import {
   MachineDiagramViewport,
   type FitInsets,
+  type MachineDiagramViewportProps,
 } from "../MachineDiagramViewport";
 import { MachinePart } from "../MachinePart";
 import { Wire } from "../Rail";
@@ -36,7 +37,7 @@ export const MIN_FLOW_HEIGHT = 320;
 /** Accessible note on a part with a drill-down. */
 export const DRILL_HINT = "Opens a deeper diagram.";
 
-export interface FlowDiagramProps {
+export interface FlowSceneProps {
   diagram: DiagramTimeline;
   t: number;
   /** Accessible name of the picture (defaults to the arrangement). */
@@ -52,11 +53,45 @@ export interface FlowDiagramProps {
    * and take no input.
    */
   morph?: DiagramMorph;
+  /** Optional SVG foreground, in the same coordinates and interaction context. */
+  children?: ReactNode;
+}
+
+export interface FlowDiagramProps extends FlowSceneProps {
+  /** Embedded by default; full-page fills a sized parent without a resize grip. */
+  mode?: MachineDiagramViewportProps["mode"];
+  /** Defer the initial camera fit until asynchronous geometry is available. */
+  ready?: boolean;
   /** See MachineDiagramViewport: a layer for floating panels. Keep stable. */
   overlayRef?: (layer: HTMLElement | null) => void;
   /** See MachineDiagramViewport: room kept clear of floating panels. */
   fitInsets?: (width: number) => FitInsets;
 }
+
+/** Compatible embedded host; full-page consumers use the same complete scene. */
+export const FlowDiagram = memo(function FlowDiagram({
+  mode,
+  ready,
+  overlayRef,
+  fitInsets,
+  ...scene
+}: FlowDiagramProps) {
+  return (
+    <MachineDiagramViewport
+      width={scene.diagram.width}
+      height={scene.diagram.height}
+      fitOnMount
+      mode={mode}
+      ready={ready}
+      resizeLabel="Resize diagram"
+      minHeight={MIN_FLOW_HEIGHT}
+      overlayRef={overlayRef}
+      fitInsets={fitInsets}
+    >
+      <FlowScene {...scene} />
+    </MachineDiagramViewport>
+  );
+});
 
 /**
  * A compiled flow arrangement at time `t`: regions behind everything, a wire per rail, a MachinePart per
@@ -71,16 +106,15 @@ export interface FlowDiagramProps {
  * be followed. Memoized: under reduced motion the clock ticks every frame
  * while `t` stays on a beat outcome, and those frames skip the diagram.
  */
-export const FlowDiagram = memo(function FlowDiagram({
+export const FlowScene = memo(function FlowScene({
   diagram: d,
   t,
   label,
   reducedMotion,
   interaction,
   morph,
-  overlayRef,
-  fitInsets,
-}: FlowDiagramProps) {
+  children,
+}: FlowSceneProps) {
   const e = morph ? morphEase(morph.progress) : undefined;
   const fromPart = new Map(morph?.from.parts.map((p) => [p.id, p]));
   const fromRail = new Map(morph?.from.rails.map((r) => [r.id, r]));
@@ -91,105 +125,96 @@ export const FlowDiagram = memo(function FlowDiagram({
   }));
   return (
     <DiagramInteractionContext.Provider value={interaction ?? null}>
-      <MachineDiagramViewport
+      <MachineDiagram
+        inFlow
+        label={label ?? `flow · ${d.arrangement}`}
         width={d.width}
         height={d.height}
-        fitOnMount
-        resizeLabel="Resize diagram"
-        minHeight={MIN_FLOW_HEIGHT}
-        overlayRef={overlayRef}
-        fitInsets={fitInsets}
       >
-        <MachineDiagram
-          inFlow
-          label={label ?? `flow · ${d.arrangement}`}
-          width={d.width}
-          height={d.height}
-        >
-          {d.regions.map((g) => (
-            <g key={g.id} className="md-region" data-region-id={g.id}>
-              <rect
-                x={g.x}
-                y={g.y}
-                width={g.width}
-                height={g.height}
-                rx={18}
-                fill="none"
+        {d.regions.map((g) => (
+          <g key={g.id} className="md-region" data-region-id={g.id}>
+            <rect
+              x={g.x}
+              y={g.y}
+              width={g.width}
+              height={g.height}
+              rx={18}
+              fill="none"
+            />
+            {g.label && (
+              <SvgText
+                x={regionLabelAt(g)[0]}
+                y={regionLabelAt(g)[1]}
+                runs={[[g.label, 600, "dim"]]}
+                size={18}
               />
-              {g.label && (
-                <SvgText
-                  x={regionLabelAt(g)[0]}
-                  y={regionLabelAt(g)[1]}
-                  runs={[[g.label, 600, "dim"]]}
-                  size={18}
-                />
-              )}
-            </g>
-          ))}
-          {d.rails.map((r) => {
-            const from = fromRail.get(r.id);
-            const l = morphLayers(r, from, e, railDiffers);
-            return (
-              <Layered
-                key={r.id}
-                layers={l}
-                to={() => <RailWire rail={r} />}
-                from={() => <RailWire rail={from!} />}
-              />
-            );
-          })}
-          {parts.map(({ p, from, layers }) => (
+            )}
+          </g>
+        ))}
+        {d.rails.map((r) => {
+          const from = fromRail.get(r.id);
+          const l = morphLayers(r, from, e, railDiffers);
+          return (
             <Layered
-              key={p.id}
-              layers={layers}
-              to={() => (
+              key={r.id}
+              layers={l}
+              to={() => <RailWire rail={r} />}
+              from={() => <RailWire rail={from!} />}
+            />
+          );
+        })}
+        {parts.map(({ p, from, layers }) => (
+          <Layered
+            key={p.id}
+            layers={layers}
+            to={() => (
+              <PartView
+                part={p}
+                t={t}
+                arrangement={d.arrangement}
+                reducedMotion={reducedMotion}
+                markMorph={layers.morphing ? e : undefined}
+              />
+            )}
+            from={() => (
+              // The leaving copy: frozen at the toggle, no id or input.
+              <DiagramInteractionContext.Provider value={null}>
                 <PartView
-                  part={p}
-                  t={t}
-                  arrangement={d.arrangement}
+                  part={from!}
+                  t={morph!.t}
+                  arrangement={morph!.from.arrangement}
                   reducedMotion={reducedMotion}
-                  markMorph={layers.morphing ? e : undefined}
+                  leaving
                 />
-              )}
-              from={() => (
-                // The leaving copy: frozen at the toggle, no id or input.
-                <DiagramInteractionContext.Provider value={null}>
-                  <PartView
-                    part={from!}
-                    t={morph!.t}
-                    arrangement={morph!.from.arrangement}
-                    reducedMotion={reducedMotion}
-                    leaving
-                  />
-                </DiagramInteractionContext.Provider>
-              )}
+              </DiagramInteractionContext.Provider>
+            )}
+          />
+        ))}
+        {parts
+          .filter(({ p }) => p.scale < 1)
+          .map(({ p, from, layers }) => (
+            <Layered
+              key={`name:${p.id}`}
+              layers={layers}
+              to={() => <NameLabel part={p} />}
+              from={() => <NameLabel part={from!} />}
             />
           ))}
-          {parts
-            .filter(({ p }) => p.scale < 1)
-            .map(({ p, from, layers }) => (
-              <Layered
-                key={`name:${p.id}`}
-                layers={layers}
-                to={() => <NameLabel part={p} />}
-                from={() => <NameLabel part={from!} />}
-              />
-            ))}
-          {d.band && (
-            <FlowBand
-              band={d.band}
-              t={t}
-              reducedMotion={reducedMotion}
-              morph={
-                morph?.from.band && e !== undefined && e < 1
-                  ? { from: morph.from.band, t: morph.t, e }
-                  : undefined
-              }
-            />
-          )}
-          <RailCards timeline={d.travel} t={t} reducedMotion={reducedMotion} />
-        </MachineDiagram>
-      </MachineDiagramViewport>
+        {d.band && (
+          <FlowBand
+            band={d.band}
+            t={t}
+            reducedMotion={reducedMotion}
+            morph={
+              morph?.from.band && e !== undefined && e < 1
+                ? { from: morph.from.band, t: morph.t, e }
+                : undefined
+            }
+          />
+        )}
+        <RailCards timeline={d.travel} t={t} reducedMotion={reducedMotion} />
+        {children}
+      </MachineDiagram>
     </DiagramInteractionContext.Provider>
   );
 });
