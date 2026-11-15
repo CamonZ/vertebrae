@@ -9,6 +9,7 @@ import { checkField, checkFields, isRecord, own, withDefaults } from "./fields";
 import { resolvePart, type AnyPartKind, type FlowRegistry } from "./registry";
 import {
   CHANGE_MARKS,
+  FLOW_DIRECTIONS,
   FLOW_SPEC_VERSION,
   TOKEN_KINDS,
   WIRE_CHANGE_MARKS,
@@ -24,6 +25,7 @@ const TOP_FIELDS = [
   "labels",
   "version",
   "title",
+  "direction",
   "arrangements",
   "baseline",
   "phases",
@@ -540,6 +542,17 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
       [String(FLOW_SPEC_VERSION)]
     );
   if (input.title !== undefined) c.str(input, "title", root);
+  if (
+    input.direction !== undefined &&
+    !FLOW_DIRECTIONS.includes(input.direction as never)
+  )
+    c.missing(
+      join(root, "direction"),
+      "unknown direction",
+      String(input.direction),
+      FLOW_DIRECTIONS,
+      "allowed"
+    );
   c.attachments(input, root);
   const named = checkArrangements(c, input, root);
 

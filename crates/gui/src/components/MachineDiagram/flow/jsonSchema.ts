@@ -8,6 +8,7 @@ import { ATTACHMENT_COMMON_FIELDS } from "./attachments";
 import { fieldsJsonSchema, type JsonSchema } from "./fields";
 import type { FlowRegistry } from "./registry";
 import {
+  FLOW_DIRECTIONS,
   CHANGE_MARKS,
   FLOW_SPEC_VERSION,
   TOKEN_KINDS,
@@ -128,6 +129,11 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
       labels: ref("labels"),
       version: { const: FLOW_SPEC_VERSION },
       title: { type: "string" },
+      direction: {
+        enum: [...FLOW_DIRECTIONS],
+        description:
+          "which way cards travel (default right): right, left, down or up; parts and positions are authored left to right and turned with the diagram, text stays upright",
+      },
       arrangements: {
         type: "array",
         minItems: 1,

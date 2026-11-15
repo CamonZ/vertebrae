@@ -1,3 +1,4 @@
+import { drawnLeads } from "../flow/railTestHelpers";
 /**
  * workflow station (catalogue v2.2 "workflow"): prop-driven layout for 1–20
  * steps and any number of outgoing transitions, lamp colours by step type
@@ -575,8 +576,8 @@ describe("the workflow flow kind", () => {
     expect(part.querySelectorAll(".md-step-lamp")).toHaveLength(3);
     expect(part.querySelectorAll(".md-type-mark")).toHaveLength(3);
     expect(part.querySelector(".md-box")).not.toBeNull();
-    // No standalone gallery rails inside flows.
-    expect(part.querySelectorAll(".md-rail")).toHaveLength(0);
+    // Gallery leads give way to the flow's wires; the mechanism stays.
+    expect(drawnLeads(part)).toEqual([]);
   });
 
   it("the happy path reproduces the gallery's completes scenario at the beat outcomes", () => {

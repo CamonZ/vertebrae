@@ -1,7 +1,7 @@
 # Flow spec format (version 1)
 
 The root requires `version: 1` and a nonempty `parts` array. Optional fields
-are `labels`, `title`, `arrangements`, `baseline`, `phases`, `rails`, `regions`,
+are `labels`, `title`, `direction`, `arrangements`, `baseline`, `phases`, `rails`, `regions`,
 `cards`, `story`, `band`, and `attachments`.
 IDs start with an ASCII letter and continue with letters, digits, `_` or `-`;
 keep each list's IDs unique. Kind strings may contain spaces. Unknown fields
@@ -24,6 +24,17 @@ S 0.5, M 0.75, L 1. Every arrangement shares placement, rails and canvas.
 `change`/`before`/`after` are the Before/After shorthand; `in`/`arrangement`
 need named `arrangements` or `phases` ([changes](changes.md)).
 Each deeper level has its own layout.
+
+`direction` sets which way cards travel: `right` (default), `left`, `down`
+or `up`; anything else is an error. Author parts, rails and `position`
+left to right as usual: the whole diagram is turned, so `left` mirrors it and
+`down`/`up` transpose it (cells become 400×640, rails and gates run
+vertically, returns run beside the parts instead of above or below). Text is
+never rotated or mirrored: part titles, status lines, change tabs, rail and
+region labels stay upright and are placed beside the turned shapes. Every
+built-in kind turns; none falls back. Kinds with a meaningful vertical (the
+human gate's reviewer lane, stacked stores) read with their top turned to the
+left in `down` and `up`. A drill-down's spec has its own `direction`.
 
 All built-in kinds have drawings. Extensions register through
 `FlowRegistryContext`; a registered custom kind without a drawing shows a plain

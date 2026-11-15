@@ -24,10 +24,10 @@ import { crossingJumps } from "./crossings";
 import {
   CROSS_LABEL_SIZE,
   REGION_HEAD,
-  frameLocal,
+  canonicalFrameLocal,
   REGION_PAD,
   pad,
-  partExtentLocal,
+  canonicalExtentLocal,
   railLabelText,
   regionLabels,
   union,
@@ -124,7 +124,7 @@ async function layoutComposite(
       p.id,
       union(
         arrangements.map((d) =>
-          partExtentLocal(d.parts.find((q) => q.id === p.id)!)
+          canonicalExtentLocal(d.parts.find((q) => q.id === p.id)!)
         )
       ),
     ])
@@ -177,7 +177,7 @@ async function layoutComposite(
       docked,
       laidOut,
       (id) => localExtent.get(id)!,
-      (id) => frameLocal(partById.get(id)!),
+      (id) => canonicalFrameLocal(partById.get(id)!),
       union([
         ...[...laid].map((id) => extentAt(id, laidOut.positions[id])),
         ...Object.entries(laidOut.routes ?? {}).flatMap(([id, route]) => {
@@ -190,7 +190,10 @@ async function layoutComposite(
       ]),
       anchor === undefined
         ? undefined
-        : shiftBox(frameLocal(partById.get(anchor)!), laidOut.positions[anchor])
+        : shiftBox(
+            canonicalFrameLocal(partById.get(anchor)!),
+            laidOut.positions[anchor]
+          )
     );
     const frame = pad(
       union(region.parts.map((id) => extentAt(id, layout.positions[id]))),

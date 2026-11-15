@@ -1,3 +1,4 @@
+import { drawnLeads } from "../../MachineDiagram/flow/railTestHelpers";
 import {
   act,
   cleanup,
@@ -216,7 +217,8 @@ it("real scene activates exact entities, traces neighbours and individual parall
     expect(compile).toHaveBeenCalledTimes(compileCalls);
     expect(JSON.stringify(diagram)).toBe(geometry);
   }
-  expect(view.container.querySelectorAll(".md-rail")).toHaveLength(0);
+  // Station mechanisms keep their own tracks; no gallery lead is drawn.
+  expect(drawnLeads(view.container)).toEqual([]);
   // Long header fits the geometry reserved by the labelled logical endpoint.
   const region = diagram.regions[0];
   expect(region.width).toBeGreaterThan(

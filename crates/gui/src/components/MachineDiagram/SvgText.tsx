@@ -1,4 +1,12 @@
+import type { ReactElement } from "react";
 import { MIN_TEXT_SIZE, roleColor, type Role } from "./palette";
+import {
+  invert,
+  partTurn,
+  svgMatrix,
+  turnAlign,
+  type FlowDirection,
+} from "./orientation";
 import { usePart } from "./partContext";
 
 export type TextAlign = "left" | "center" | "right";
@@ -29,15 +37,18 @@ export function SvgText({
   opacity = 1,
   letterSpacing,
 }: SvgTextProps) {
-  const { labels } = usePart();
+  const { labels, turn } = usePart();
   if (!labels || opacity <= 0) return null;
-  return (
+  return upright(
+    turn,
+    x,
+    y,
     <text
       x={x}
       y={y}
       fontSize={Math.max(MIN_TEXT_SIZE, size)}
       dominantBaseline="middle"
-      textAnchor={ANCHOR[align]}
+      textAnchor={ANCHOR[(turn && turnAlign(turn, align)) ?? align]}
       opacity={opacity < 1 ? opacity : undefined}
       letterSpacing={letterSpacing}
       xmlSpace="preserve"
@@ -48,6 +59,27 @@ export function SvgText({
         </tspan>
       ))}
     </text>
+  );
+}
+
+/**
+ * Inside a turned drawing, undo the turn's linear part around the text's
+ * anchor: the anchor moves with the mechanism, the text stays upright.
+ */
+function upright(
+  turn: FlowDirection | undefined,
+  x: number,
+  y: number,
+  text: ReactElement
+): ReactElement {
+  if (!turn || turn === "right") return text;
+  const back = { ...invert(partTurn(turn)), e: 0, f: 0 };
+  return (
+    <g
+      transform={`translate(${x} ${y}) ${svgMatrix(back)} translate(${-x} ${-y})`}
+    >
+      {text}
+    </g>
   );
 }
 
@@ -67,7 +99,11 @@ export function Glyph({
   role: Role;
   opacity?: number;
 }) {
-  return (
+  const { turn } = usePart();
+  return upright(
+    turn,
+    x,
+    y,
     <text
       x={x}
       y={y}

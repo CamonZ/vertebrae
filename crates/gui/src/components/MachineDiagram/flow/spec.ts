@@ -7,7 +7,10 @@
  * After arrangements, so the difference in outcome is computed, not drawn.
  */
 import type { ChangeMark } from "../accessibility";
+import type { FlowDirection } from "../orientation";
 import type { CardPayload } from "../timeline";
+
+export { FLOW_DIRECTIONS, type FlowDirection } from "../orientation";
 
 export const FLOW_SPEC_VERSION = 1;
 
@@ -262,6 +265,12 @@ export interface FlowSpec {
   readonly labels?: import("../partLabels").PartLabels;
   readonly version: number;
   readonly title?: string;
+  /**
+   * Which way cards travel (default right). Parts, rails and hand-given
+   * positions are authored left to right and turned with the diagram:
+   * mirrored for `left`, transposed for `down` and `up`. Text stays upright.
+   */
+  readonly direction?: FlowDirection;
   /**
    * Named arrangements of the machine (options A, B…). Absent: Before/After
    * when anything is marked, otherwise one `current` arrangement.

@@ -17,10 +17,21 @@ import { createPortal } from "react-dom";
 import { LabelLayerContext } from "./labelLayer";
 import { placedLabels, type PartLabels } from "./partLabels";
 import { Card } from "./Card";
-import { ChangeMark, RemovedGhost, type BBox } from "./ChangeMark";
+import { ChangeMark, RemovedGhost, tabWidth, type BBox } from "./ChangeMark";
 import { Gate } from "./Gate";
 import { isActivationKey, useDiagramInteraction } from "./interaction";
 import { PartContext, usePart } from "./partContext";
+import {
+  applyRect,
+  besideAxis,
+  partTurn,
+  svgMatrix,
+  tabAnchor,
+  titleAnchors,
+  turnStatus,
+  turnedLabelGeometry,
+  type FlowDirection,
+} from "./orientation";
 import { PART_HEIGHT, PART_WIDTH } from "./partGeometry";
 import { StatusLine } from "./StatusLine";
 import { SvgText, type TextAlign } from "./SvgText";
@@ -85,6 +96,12 @@ export interface MachinePartProps {
   activationHint?: string;
   /** Additional current information included in the accessible name. */
   accessibleDetail?: string;
+  /**
+   * Flow direction the part is turned for (default right: as drawn). The
+   * mechanism, cards and gates turn; the title, status line and change
+   * mark are placed in the turned cell and stay upright.
+   */
+  direction?: FlowDirection;
   /** Draw smear ghosts (still views turn this off). */
   smear?: boolean;
   /** Override the prefers-reduced-motion media query. */
@@ -122,6 +139,7 @@ export function MachinePart({
   activationHint,
   accessibleDetail,
   reducedMotion,
+  direction = "right",
   children,
 }: MachinePartProps) {
   const parent = usePart();
@@ -147,6 +165,25 @@ export function MachinePart({
     }),
     [parent, ghosted, frame.fade, showLabels]
   );
+  const turn = direction === "right" ? undefined : direction;
+  const turnedCtx = useMemo(() => ({ ...ctx, turn }), [ctx, turn]);
+  /** Drawn in part space, turned with the part. */
+  const turned = (node: ReactNode) =>
+    turn ? (
+      <PartContext.Provider value={turnedCtx}>
+        <g transform={svgMatrix(partTurn(turn))}>{node}</g>
+      </PartContext.Provider>
+    ) : (
+      node
+    );
+  const flatBb = turn ? applyRect(partTurn(turn), bb) : bb;
+  const flatStatus = turn ? turnStatus(turn, status) : status;
+  const anchors = titleAnchors(direction, bb);
+  const flatTab =
+    tab ??
+    (change === "unchanged"
+      ? undefined
+      : tabAnchor(direction, bb, tabWidth(change)));
   const label =
     view.kind === "state"
       ? stateLabel(part, view.state, change)
@@ -174,15 +211,18 @@ export function MachinePart({
           aria-hidden
           data-part-labels={id ?? part.name}
         >
-          {placedLabels({
-            identity: part,
-            bb,
+          {besideAxis(
+            direction,
             scale,
-            timeline,
-            labels: labelPlacement,
-            change,
-            changeNote,
-          })
+            placedLabels({
+              identity: part,
+              ...turnedLabelGeometry(direction, bb, timeline),
+              scale,
+              labels: labelPlacement,
+              change,
+              changeNote,
+            })
+          )
             .filter((l) => l.hover === hover && (!hover || hovered || focused))
             .map((l) => (
               <g key={l.key}>
@@ -248,31 +288,39 @@ export function MachinePart({
           interactive && interaction?.activePart === id ? "true" : undefined
         }
       >
-        {(interactive || reveal) && <PartHit bb={bb} />}
-        {children?.(frame)}
+        {turned(
+          <>
+            {(interactive || reveal) && <PartHit bb={bb} />}
+            {children?.(frame)}
+          </>
+        )}
         {!neutral && (
           <StatusLine
             status={frame.status}
-            x={status.x}
-            y={status.y}
-            align={status.align}
+            x={flatStatus.x}
+            y={flatStatus.y}
+            align={flatStatus.align}
           />
         )}
-        {frame.cards.map((c) => (
-          <Card key={c.index} frame={c} />
-        ))}
-        {frame.gates.map((g, i) => (
-          <Gate key={i} frame={g} />
-        ))}
-        {ghosted && (
-          <RemovedGhost bb={bb} width={PART_WIDTH} height={PART_HEIGHT} />
+        {turned(
+          <>
+            {frame.cards.map((c) => (
+              <Card key={c.index} frame={c} />
+            ))}
+            {frame.gates.map((g, i) => (
+              <Gate key={i} frame={g} />
+            ))}
+            {ghosted && (
+              <RemovedGhost bb={bb} width={PART_WIDTH} height={PART_HEIGHT} />
+            )}
+          </>
         )}
         {title && (
           <>
             {!labelPlacement && (
               <SvgText
-                x={24}
-                y={36}
+                x={anchors.title[0]}
+                y={anchors.title[1]}
                 runs={[
                   [part.name, 600, "ink"],
                   [`  ·  ${part.job}`, 400, "dim"],
@@ -282,24 +330,24 @@ export function MachinePart({
             )}
             {change === "changed" && changeNote && (
               <SvgText
-                x={24}
-                y={64}
+                x={anchors.note[0]}
+                y={anchors.note[1]}
                 runs={[[changeNote, 400, "dim"]]}
                 size={18}
               />
             )}
             {part.aka && (
               <SvgText
-                x={24}
-                y={380}
+                x={anchors.aka[0]}
+                y={anchors.aka[1]}
                 runs={[[`also  ${part.aka}`, 400, "dim"]]}
                 size={18}
               />
             )}
           </>
         )}
-        <ChangeMark mark={change} bb={bb} tab={tab} morph={markMorph} />
-        {(interactive || reveal) && <PartRing bb={bb} />}
+        <ChangeMark mark={change} bb={flatBb} tab={flatTab} morph={markMorph} />
+        {(interactive || reveal) && turned(<PartRing bb={bb} />)}
         {labelLines(false)}
         {(hovered || focused) &&
           (layer

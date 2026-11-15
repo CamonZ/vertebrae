@@ -52,6 +52,8 @@ describe("registered flow mechanisms", () => {
             labels: true,
             hatchId: "h",
             inFlow: true,
+            leadPorts: Object.values(d.parts[0].ports).map((q) => q.local),
+            leadFrame: d.parts[0].bb,
           }}
         >
           {FLOW_DRAWINGS[kind](0, d.parts[0])}
