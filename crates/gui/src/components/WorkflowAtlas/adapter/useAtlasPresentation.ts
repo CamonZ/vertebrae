@@ -12,7 +12,8 @@ import type { AtlasMachineFlow } from "./buildMachineFlow";
  */
 export function useAtlasPresentation(
   model: AtlasMachineFlow,
-  diagram?: DiagramTimeline
+  diagram?: DiagramTimeline,
+  query = ""
 ) {
   const selection = useEntityPanelStore((s) => s.selection);
   const edge = useEntityPanelStore((s) => s.hoveredEdgeId);
@@ -106,7 +107,24 @@ export function useAtlasPresentation(
     onFocusPart: (id) => inspect("focus", id),
     activePart: [...selected][0] ?? null,
   };
+  const dimmed = new Set<string>();
+  const q = query.trim().toLocaleLowerCase();
+  if (q && !trace && !inspectorRails.size) {
+    const matches = new Set<string>();
+    for (const region of model.spec.regions ?? []) {
+      if (region.label?.toLocaleLowerCase().includes(q)) {
+        matches.add(region.id);
+        for (const id of region.parts) matches.add(id);
+      }
+    }
+    for (const id of model.selections.keys())
+      if (!matches.has(id)) dimmed.add(id);
+    for (const rail of diagram?.rails ?? [])
+      if (!matches.has(rail.from.part) || !matches.has(rail.to.part))
+        dimmed.add(rail.id);
+  }
   const presentation: FlowPresentation = {
+    dimmed,
     counts,
     selected,
     traced,

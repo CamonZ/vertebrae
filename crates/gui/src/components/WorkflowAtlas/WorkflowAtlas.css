@@ -2236,3 +2236,27 @@
   color: var(--accent);
   background: var(--accent-wash);
 }
+
+/* Internal machine Graph shares the Atlas camera controls and docked console. */
+.uv-machine-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.uv-machine-scene {
+  transform-origin: 0 0;
+}
+.uv-machine-scene .md-root {
+  max-width: none;
+}
+.uv-machine-warning {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  left: 12px;
+  padding: 12px;
+  background: var(--bg);
+}
+.uv-machine-scene [data-search-dim] {
+  opacity: 0.24;
+}

@@ -3,8 +3,14 @@
 `buildMachineFlow(scopedSummary, routeConfigs, scopeKey)` is a pure, additive
 adapter. The caller scopes the summary using the existing Atlas scope logic and
 supplies only already loaded configs. `useAtlasMachineFlow` stabilizes its spec
-and uses the shipped `useLaidOutFlow` compiler/worker/cache lifecycle. The current
-Atlas renderer is unchanged; subsequent scene integration can consume this API.
+and uses the shipped `useLaidOutFlow` compiler/worker/cache lifecycle. The scoped Atlas Graph consumes this API through `ScopedMachineGraph` behind
+the internal `WorkflowAtlas.internalMachineGraph` opt-in (or
+`VITE_ATLAS_MACHINE_GRAPH=1` in a development build). Production defaults,
+Map/factory navigation and Board retain the existing renderer. The selected
+project generation and literal factory identity retire the scene on scope changes.
+Pending topology hides prior geometry; worker errors show the shared row fallback
+with an explicit warning and Retry layout action. A retry remounts the shared
+hook; the adapter does not introduce another worker or layout client.
 
 Each backend step maps to a registered neutral topology part, including separate
 stop and finish forms. Each workflow is a region containing its steps and a
@@ -59,9 +65,11 @@ non-browser fallback; it does not claim native webview/worker smoke coverage.
 Pass the current adapter result and its compiled arrangement; the host continues
 to own the shared layout hook and viewport. `useAtlasPresentation` is also
 available for hosts that need to pass `interaction` and `presentation` directly
-to `FlowDiagram`. Neither bridge starts a layout or owns a camera. This ticket
-keeps the existing Atlas view available; changing its scoped graph host is a
-separate integration responsibility.
+to `FlowDiagram`. Neither bridge starts a layout or owns a camera. The scoped Graph host owns camera fitting and resets it only on geometry
+changes or explicit fit/retry. Counts, selection, inspector hover, focus and
+workflow search decorate the existing scene without compile/layout requests.
+Search dims nonmatching workflow members and rails; an active trace takes
+precedence, preserving inspector and keyboard interaction.
 
 The global entity panel store owns inspector selection and inspector edge hover.
 Scene hover and keyboard focus are local, with the most recently entered channel
