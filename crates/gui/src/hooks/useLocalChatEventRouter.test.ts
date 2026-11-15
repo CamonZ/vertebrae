@@ -12,6 +12,7 @@ import {
 import { useChatStore, type ChatSession } from "../stores/chatStore";
 import translationSequence from "../test/fixtures/localChatTurnTranslation.json";
 import {
+  routeLocalChatSessionInitEvent,
   routeLocalChatSessionUsageEvent,
   routeLocalChatSessionEndEvent,
   routeLocalChatSessionTitleEvent,
@@ -1819,4 +1820,57 @@ it("routes manual compaction usage without a chat turn, including delayed comple
   expect(
     routeLocalChatSessionUsageEvent({ ...usage, backend_session_id: "other" })
   ).toBe(false);
+});
+
+describe("conversation speed tier recovery", () => {
+  it.each(["claude", "codex"] as const)(
+    "recovers %s intent only for its own session without a local choice",
+    (harness) => {
+      resetChatStore({
+        session: makeSession({ backendSessionId: "runtime", harness }),
+        other: makeSession({
+          id: "other",
+          backendSessionId: "other-runtime",
+          selectedSpeedTier: "default",
+        }),
+      });
+      const payload = {
+        backend_session_id: "runtime",
+        harness,
+        provider_resume_id: "provider",
+        model: "model",
+        tools: [],
+        speed_tier_status: {
+          requested: "fast",
+          active: "default",
+          eligible: true,
+          available: false,
+          diagnostic: null,
+        },
+      };
+      expect(routeLocalChatSessionInitEvent(payload)).toBe(true);
+      expect(useChatStore.getState().sessions.session.selectedSpeedTier).toBe(
+        "fast"
+      );
+      expect(useChatStore.getState().sessions.other.selectedSpeedTier).toBe(
+        "default"
+      );
+      useChatStore.getState().setSessionSpeedTier("session", "default");
+      routeLocalChatSessionInitEvent(payload);
+      expect(useChatStore.getState().sessions.session.selectedSpeedTier).toBe(
+        "default"
+      );
+      useChatStore.getState().setSessionSpeedTier("session", null);
+      routeLocalChatSessionInitEvent(payload);
+      expect(
+        useChatStore.getState().sessions.session.selectedSpeedTier
+      ).toBe("fast");
+      expect(
+        routeLocalChatSessionInitEvent({
+          ...payload,
+          backend_session_id: "stale",
+        })
+      ).toBe(false);
+    }
+  );
 });

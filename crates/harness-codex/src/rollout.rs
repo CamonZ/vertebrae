@@ -545,6 +545,31 @@ fn parse_event_msg(
         return Vec::new();
     };
     match string(payload, "type").as_deref() {
+        Some("thread_settings_applied" | "session_configured") => {
+            let owner = payload.get("thread_id").and_then(Value::as_str);
+            if owner.is_some_and(|id| id != state.thread_id.as_str()) {
+                return Vec::new();
+            }
+            let settings = payload.get("thread_settings").unwrap_or(&Value::Null);
+            let settings = settings.as_object().unwrap_or(payload);
+            let tier = crate::speed_tier::service_tier(
+                settings.get("service_tier").and_then(Value::as_str),
+            );
+            let Some(status) = crate::speed_tier::requested_status(tier) else {
+                return Vec::new();
+            };
+            vec![state.draft(
+                timestamp,
+                provider_sequence,
+                HarnessEventPayloadV1::SessionStarted(SessionStarted {
+                    provider: "openai".into(),
+                    model: string(settings, "model"),
+                    provider_resume_id: Some(state.provider_resume_id.clone()),
+                    speed_tier_status: Some(status),
+                    tools: Vec::new(),
+                }),
+            )]
+        }
         Some("item_completed") => {
             completed_item_drafts(payload, timestamp, provider_sequence, state)
         }

@@ -674,6 +674,18 @@ async fn settings_server(
     tokio::task::JoinHandle<()>,
     tokio::sync::mpsc::UnboundedReceiver<(String, Value)>,
 ) {
+    settings_server_with_tier(missing_thread, reject_first, None).await
+}
+
+async fn settings_server_with_tier(
+    missing_thread: bool,
+    reject_first: bool,
+    service_tier: Option<&'static str>,
+) -> (
+    String,
+    tokio::task::JoinHandle<()>,
+    tokio::sync::mpsc::UnboundedReceiver<(String, Value)>,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let (params_tx, params_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -706,7 +718,7 @@ async fn settings_server(
                     "message": "no rollout found for thread id root-thread",
                 }}),
                 "thread/start" | "thread/resume" => {
-                    json!({"id": id, "result": {"thread": {"id": "root-thread"}}})
+                    json!({"id": id, "result": {"thread": {"id": "root-thread"}, "serviceTier": service_tier}})
                 }
                 "thread/fork" => json!({"id": id, "result": {"thread": {"id": "forked-thread"}}}),
                 "turn/start" => json!({"id": id, "result": {"turn": {"id": "provider-turn"}}}),
@@ -1645,4 +1657,76 @@ async fn model_discovery_collects_later_pages_before_excluding_hidden_models() {
     );
     assert!(later.reasoning_efforts.contains("high"));
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn resumed_provider_tier_is_requested_metadata_and_is_retained_for_turns() {
+    use vertebrae_harness_core::SpeedTier;
+    for (wire, selected, expected) in [
+        (Some("priority"), None, Some(SpeedTier::Fast)),
+        (Some("default"), None, Some(SpeedTier::Default)),
+        (
+            Some("priority"),
+            Some(SpeedTier::Default),
+            Some(SpeedTier::Default),
+        ),
+        (Some("future"), None, None),
+        (None, None, None),
+    ] {
+        let (url, server, mut params) = settings_server_with_tier(false, false, wire).await;
+        let events = Arc::new(CapturingSink::default());
+        let session = runtime(url)
+            .start_session(
+                StartSessionRequest {
+                    session_id: SessionId::new("tier-session"),
+                    stream_id: StreamId::new("tier-stream"),
+                    mode: SessionMode::Resume("root-thread".into()),
+                    config: vertebrae_harness_core::RequestConfig {
+                        speed_tier: selected,
+                        ..Default::default()
+                    },
+                },
+                events.clone(),
+                Arc::new(AutomaticControl),
+            )
+            .await
+            .unwrap();
+        let statuses: Vec<_> = events
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| {
+                if let HarnessEventPayloadV1::SessionStarted(start) = &event.payload {
+                    start.speed_tier_status.clone()
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(
+            statuses.first().and_then(|status| status.requested),
+            expected
+        );
+        assert!(statuses.iter().all(|status| status.active.is_none()));
+        let _turn = session
+            .send(SendTurnRequest {
+                turn_id: TurnId::new("turn"),
+                content: "hello".into(),
+                output_schema: None,
+                settings: Default::default(),
+            })
+            .await
+            .unwrap();
+        let outgoing = captured_params(&mut params, "turn/start").await;
+        assert_eq!(
+            outgoing.get("serviceTier").and_then(Value::as_str),
+            expected.map(|tier| match tier {
+                SpeedTier::Default => "default",
+                SpeedTier::Fast => "priority",
+            })
+        );
+        session.close().await.unwrap();
+        server.abort();
+    }
 }

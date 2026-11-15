@@ -1,3 +1,4 @@
+import { recoveredSpeedTier } from "../utils/localChatSpeedTier";
 import { createLocalChatTextBatch } from "../utils/localChatTextBatch";
 import { useEffect } from "react";
 import { events } from "../bindings";
@@ -217,6 +218,12 @@ export function routeLocalChatSessionInitEvent(
     store.setProviderResumeId,
     store.setSessionModel
   );
+
+  const session = useChatStore.getState().sessions[sessionId];
+  const tier = recoveredSpeedTier(payload.speed_tier_status);
+  if (session?.selectedSpeedTier == null && tier !== undefined) {
+    store.setSessionSpeedTier(sessionId, tier);
+  }
 
   return true;
 }

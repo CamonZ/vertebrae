@@ -8,6 +8,7 @@ mod protocol;
 mod replay;
 mod rollout;
 mod runtime;
+mod speed_tier;
 
 pub use config::*;
 pub use launcher::*;
