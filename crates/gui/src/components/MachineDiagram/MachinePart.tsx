@@ -60,6 +60,8 @@ export interface MachinePartProps {
   markMorph?: number;
   /** Status line anchor in part space. */
   status: { x: number; y: number; align?: TextAlign };
+  /** Static structure has no observed execution status to display or announce. */
+  neutral?: boolean;
   /** Placement in the enclosing diagram. */
   x?: number;
   y?: number;
@@ -100,6 +102,7 @@ export function MachinePart({
   tab,
   markMorph,
   status,
+  neutral = false,
   x = 0,
   y = 0,
   scale = 1,
@@ -149,7 +152,7 @@ export function MachinePart({
         role={interactive ? "button" : "img"}
         aria-label={
           interactive
-            ? `${label} Now: ${frame.status.current.text}.${activationHint ? ` ${activationHint}` : ""}`
+            ? `${label}${neutral ? "" : ` Now: ${frame.status.current.text}.`}${activationHint ? ` ${activationHint}` : ""}`
             : label
         }
         data-part={part.name}
@@ -165,12 +168,14 @@ export function MachinePart({
       >
         {interactive && <PartHit bb={bb} />}
         {children?.(frame)}
-        <StatusLine
-          status={frame.status}
-          x={status.x}
-          y={status.y}
-          align={status.align}
-        />
+        {!neutral && (
+          <StatusLine
+            status={frame.status}
+            x={status.x}
+            y={status.y}
+            align={status.align}
+          />
+        )}
         {frame.cards.map((c) => (
           <Card key={c.index} frame={c} />
         ))}

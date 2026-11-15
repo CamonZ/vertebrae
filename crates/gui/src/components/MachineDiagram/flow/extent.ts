@@ -114,6 +114,7 @@ type PartGeometry = Pick<
   | "scale"
   | "bb"
   | "status"
+  | "neutral"
   | "change"
   | "changeNote"
   | "timeline"
@@ -143,7 +144,9 @@ export function partLabelsLocal(p: PartGeometry): LabelBox[] {
       const aka = `also  ${p.identity.aka}`;
       add("aka", aka, textBox(24, 380, aka, 18));
     }
-    const texts = new Set(p.timeline.notes.map(([, text]) => text));
+    const texts = new Set(
+      p.neutral ? [] : p.timeline.notes.map(([, text]) => text)
+    );
     for (const text of texts)
       add(
         "status",

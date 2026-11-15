@@ -161,8 +161,17 @@ export interface PartKindDef<P = Record<string, unknown>, S = unknown> {
     readonly align?: "left" | "center" | "right";
   };
   readonly props?: Fields;
+  /** Static structure has no observed execution status. */
+  readonly neutral?: boolean;
   /** Ports by name; may be empty (trace, snapshot, replay). */
   readonly ports: Readonly<Record<string, PortDef>>;
+  /** Resolve instance geometry after property defaults, before validating endpoints. */
+  resolve?(
+    props: P
+  ): Partial<
+    Pick<PartKindDef<P, S>, "ports" | "bb" | "status" | "gates" | "neutral">
+  >;
+  checkProps?(props: P): readonly { path: string; message: string }[];
   /** Pill gates where rails meet the frame (VL-05). */
   gates?(props: P): readonly GateSpec[];
   /** Named stages or stations inside the frame, in order, for stage change marks. */
@@ -290,4 +299,12 @@ export function tokenCard(
     ...tokenCardOptions(c),
     ...o,
   });
+}
+
+/** Resolve geometry without introducing drawing dependencies into the compiler. */
+export function resolvePart(
+  def: AnyPartKind,
+  props: Record<string, unknown>
+): AnyPartKind {
+  return def.resolve ? { ...def, ...def.resolve(props) } : def;
 }

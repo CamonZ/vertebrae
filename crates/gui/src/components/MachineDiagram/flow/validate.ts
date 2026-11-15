@@ -6,7 +6,7 @@
 import { ATTACHMENT_COMMON_FIELDS } from "./attachments";
 import { join, notFound, type FlowSpecError } from "./errors";
 import { checkField, checkFields, isRecord, own, withDefaults } from "./fields";
-import type { AnyPartKind, FlowRegistry } from "./registry";
+import { resolvePart, type AnyPartKind, type FlowRegistry } from "./registry";
 import {
   CHANGE_MARKS,
   FLOW_SPEC_VERSION,
@@ -540,7 +540,10 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
 
   /* parts */
   const partIds = new Map<string, string>();
-  const parts = new Map<string, { def: AnyPartKind; path: string }>();
+  const parts = new Map<
+    string,
+    { def: AnyPartKind; path: string; variants: AnyPartKind[] }
+  >();
   const partsList = c.list(input, "parts", root, true);
   if (Array.isArray(input.parts) && partsList.length === 0)
     c.err(join(root, "parts"), "needs at least one part");
@@ -572,7 +575,7 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
     c.attachments(raw, p);
     checkDrill(c, raw, p);
     if (kind === undefined) return;
-    const def = c.registry.parts.get(kind);
+    let def = c.registry.parts.get(kind);
     if (!def)
       return c.missing(
         join(p, "kind"),
@@ -582,6 +585,32 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
       );
     const fields = def.props ?? {};
     checkFields(raw.props, fields, join(p, "props"), c.errors);
+    const instanceProps = withDefaults(
+      isRecord(raw.props) ? raw.props : undefined,
+      fields
+    );
+    for (const error of def.checkProps?.(instanceProps) ?? [])
+      c.err(join(join(p, "props"), error.path), error.message);
+    const baseDef = def;
+    const variants: AnyPartKind[] = [];
+    const overrides =
+      named && isRecord(raw.arrangement)
+        ? Object.entries(raw.arrangement)
+        : SIDES.map((side) => [side, raw[side]] as const);
+    for (const [name, override] of overrides) {
+      if (!isRecord(override) || !isRecord(override.props)) continue;
+      const props = resolvedProps(baseDef, instanceProps, override.props);
+      for (const error of baseDef.checkProps?.(props) ?? [])
+        c.err(
+          join(
+            join(join(p, named ? `arrangement.${name}` : name), "props"),
+            error.path
+          ),
+          error.message
+        );
+      variants.push(resolvePart(baseDef, props));
+    }
+    def = resolvePart(def, instanceProps);
     if (named) {
       shorthandOnly(
         c,
@@ -590,10 +619,10 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
         p
       );
       const members = checkIn(c, raw, p, named);
-      checkNamedOverrides(c, raw, def, p, named, members);
+      checkNamedOverrides(c, raw, baseDef, p, named, members);
       if (id !== undefined) {
         named.parts.set(id, members ?? new Set(named.names));
-        parts.set(id, { def, path: p });
+        parts.set(id, { def, path: p, variants });
       }
       return;
     }
@@ -619,13 +648,13 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
     checkInnerMarks(
       c,
       raw,
-      def,
+      baseDef,
       p,
       isRecord(raw.after) && isRecord(raw.after.props)
         ? raw.after.props
         : undefined
     );
-    if (id !== undefined) parts.set(id, { def, path: p });
+    if (id !== undefined) parts.set(id, { def, path: p, variants });
   });
 
   /* rails */
@@ -670,6 +699,18 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
         "ports"
       );
       return undefined;
+    }
+    for (const variant of part.variants) {
+      const resolved = own(variant.ports, port);
+      if (
+        !resolved ||
+        resolved.direction !== pd.direction ||
+        !pd.tokens.every((token) => resolved.tokens.includes(token))
+      )
+        c.err(
+          join(p, key),
+          `port ${pid}.${port} is not compatible in every arrangement; use separate part identities for different port sets`
+        );
     }
     const need = key === "from" ? "out" : "in";
     if (pd.direction !== need && pd.direction !== "both")
@@ -1271,7 +1312,8 @@ function checkInnerMarks(
       c.changeMark(mark, join(kp, name));
     }
   };
-  marks("portChanges", Object.keys(def.ports), "port");
+  const instance = resolvePart(def, resolvedProps(def, base, override));
+  marks("portChanges", Object.keys(instance.ports), "port");
   if (raw.stageChanges === undefined) return;
   if (!def.stages)
     return c.err(join(p, "stageChanges"), `${def.kind} has no stages to mark`);

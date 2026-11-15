@@ -14,6 +14,7 @@ import { PlateLine } from "./draw";
 import type { MachinePartDef, PartScenario } from "./types";
 
 interface RunEndExtra {
+  readonly form?: "combined" | "stop" | "finish";
   /** Stop bar position `[at, 0..1]`: springs to each entry. */
   readonly bar: readonly (readonly [number, number])[];
   /** When the finish terminal fills. */
@@ -188,14 +189,14 @@ export const runEndMachine: MachinePartDef<RunEndExtra> = {
     runEndStory("stopped by user"),
     runEndStory("stop step · next run"),
   ],
-  draw: (t, { bar, done, ring, ringX = 160, lane }) => {
+  draw: (t, { bar, done, ring, ringX = 160, lane, form = "combined" }) => {
     const k = track(bar, t, clamp);
-    return (
+    const body = (
       <>
         <Rail
           points={[
             [24, Y],
-            [546, Y],
+            [form === "finish" ? 270 : 546, Y],
           ]}
         />
         {lane && (
@@ -208,31 +209,50 @@ export const runEndMachine: MachinePartDef<RunEndExtra> = {
             dash="4 6"
           />
         )}
-        <PartBox x={270} y={140} w={120} h={120} r={12} />
-        <SvgText
-          x={330}
-          y={282}
-          runs={[["stop", 400, "dim"]]}
-          size={18}
-          align="center"
-        />
-        <rect
-          x={316}
-          y={150}
-          width={28}
-          height={8}
-          rx={3}
-          fill={roleColor("edge")}
-        />
-        <PlateLine x1={330} y1={158} x2={330} y2={160 + (Y + 18 - 160) * k} />
-        <Terminal x={560} y={Y} t={t} at={done} role="green" />
-        <SvgText
-          x={560}
-          y={236}
-          runs={[["finish", 400, "dim"]]}
-          size={18}
-          align="center"
-        />
+        {form !== "finish" && (
+          <>
+            <PartBox x={270} y={140} w={120} h={120} r={12} />
+            <SvgText
+              x={330}
+              y={282}
+              runs={[["stop", 400, "dim"]]}
+              size={18}
+              align="center"
+            />
+            <rect
+              x={316}
+              y={150}
+              width={28}
+              height={8}
+              rx={3}
+              fill={roleColor("edge")}
+            />
+            <PlateLine
+              x1={330}
+              y1={158}
+              x2={330}
+              y2={160 + (Y + 18 - 160) * k}
+            />
+          </>
+        )}
+        {form !== "stop" && (
+          <>
+            <Terminal
+              x={form === "finish" ? 284 : 560}
+              y={Y}
+              t={t}
+              at={done}
+              role="green"
+            />
+            <SvgText
+              x={form === "finish" ? 284 : 560}
+              y={236}
+              runs={[["finish", 400, "dim"]]}
+              size={18}
+              align="center"
+            />
+          </>
+        )}
         {ring && (
           <Ring
             x={ringX}
@@ -245,6 +265,11 @@ export const runEndMachine: MachinePartDef<RunEndExtra> = {
           />
         )}
       </>
+    );
+    return form === "combined" ? (
+      body
+    ) : (
+      <g aria-label={form === "stop" ? "Stop step" : "Finish step"}>{body}</g>
     );
   },
 };

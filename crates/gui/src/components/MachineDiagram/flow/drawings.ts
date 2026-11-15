@@ -1010,6 +1010,12 @@ export const FLOW_DRAWINGS = {
     });
   },
   "inference step": (t, p) => {
+    if (p.props.topology)
+      return MACHINE_PARTS["inference step"].draw(t, {
+        topology: true,
+        cl: [1e9, 1e9],
+        lights: [],
+      });
     const stage = latest(
       p.steps.filter((s) => s.verb === "stage"),
       t
@@ -1032,6 +1038,12 @@ export const FLOW_DRAWINGS = {
     });
   },
   "structured step": (t, p) => {
+    if (p.props.topology)
+      return MACHINE_PARTS["structured step"].draw(t, {
+        wait: [1e9, 1e9],
+        chk: [],
+        lamps: [[], [], []],
+      });
     const ask = latest(
       p.steps.filter((s) => s.verb === "ask"),
       t
@@ -1060,6 +1072,12 @@ export const FLOW_DRAWINGS = {
     });
   },
   "execute step": (t, p) => {
+    if (p.props.topology)
+      return MACHINE_PARTS["execute step"].draw(t, {
+        topology: true,
+        st: 1e9,
+        crash: null,
+      });
     const run = latest(
       p.steps.filter((s) => s.verb === "transform" || s.verb === "fail"),
       t
@@ -1071,6 +1089,15 @@ export const FLOW_DRAWINGS = {
     });
   },
   "route step": (t, p) => {
+    if (p.props.topology)
+      return MACHINE_PARTS["route step"].draw(t, {
+        topology: {
+          decisions: strings(p.props.decisions) ?? [],
+          defaultDecision: p.props.defaultDecision === true,
+        },
+        tiles: [],
+        arm: [1e9, 0],
+      });
     const turn = latest(
       p.steps.filter((s) => ["route", "decide", "fail"].includes(s.verb)),
       t
@@ -1112,6 +1139,12 @@ export const FLOW_DRAWINGS = {
     });
   },
   "wait children": (t, p) => {
+    if (p.props.topology)
+      return MACHINE_PARTS["wait children"].draw(t, {
+        topology: true,
+        rings: [],
+        chk: [],
+      });
     const steps = cycle(p.steps, t, ["spawn"], ["validate", "fail"]);
     const spawn = steps.find((s) => s.verb === "spawn");
     const from = spawn ? spawn.t + 0.7 : p.timeline.period + 1;
@@ -1135,6 +1168,11 @@ export const FLOW_DRAWINGS = {
     });
   },
   "human gate": (t, p) => {
+    if (p.props.topology)
+      return MACHINE_PARTS["human gate"].draw(t, {
+        topology: true,
+        wait: [1e9, 1e9],
+      });
     const steps = cycle(p.steps, t, ["wait"], ["stop"]);
     const wait = steps.find((s) => s.verb === "wait");
     const end = steps.find(
@@ -1155,6 +1193,17 @@ export const FLOW_DRAWINGS = {
     });
   },
   "run end": (t, p) => {
+    if (
+      p.props.topology &&
+      (p.props.form === "stop" || p.props.form === "finish")
+    )
+      return MACHINE_PARTS["run end"].draw(t, {
+        form: p.props.form,
+        bar: [[0, 0]],
+        done: null,
+        ring: null,
+        lane: null,
+      });
     const bar: [number, number][] = [[0, 0]];
     let ring: [number, number] | null = null;
     let lane = false;

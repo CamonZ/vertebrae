@@ -1,3 +1,4 @@
+import { routeTopology, type RouteTopologyProps } from "../flow/parts/topology";
 /**
  * route step · picks the next step by rules (catalogue "route step"): rule
  * tiles r1, r2, else lit in order, then the arm swings to the chosen
@@ -22,6 +23,7 @@ interface RuleTile {
 }
 
 interface RouteExtra {
+  readonly topology?: RouteTopologyProps;
   readonly tiles: readonly RuleTile[];
   /** The arm swings to out rail `to` (0 top, 1 middle, 2 bottom) at `at`. */
   readonly arm: readonly [at: number, to: 0 | 1 | 2];
@@ -139,7 +141,34 @@ export const routeStepMachine: MachinePartDef<RouteExtra> = {
     routeStory("no rule, no default"),
     routeStory("default taken"),
   ],
-  draw: (t, { tiles, arm, labels = OUT_LABELS }) => {
+  draw: (t, { tiles, arm, labels = OUT_LABELS, topology }) => {
+    if (topology) {
+      const { bb, rows } = routeTopology(topology);
+      return (
+        <g aria-label="Route decisions">
+          <PartBox x={bb[0]} y={bb[1]} w={bb[2]} h={bb[3]} />
+          <PlateLine x1={200} y1={Y} x2={220} y2={Y} w={3} />
+          <circle cx={220} cy={Y} r={8} fill={roleColor("plate")} />
+          {rows.map((row) => (
+            <g key={row.id} data-port={row.id}>
+              <PlateLine
+                x1={row.x - 32}
+                y1={row.y}
+                x2={row.x}
+                y2={row.y}
+                w={3}
+              />
+              <SvgText
+                x={240}
+                y={row.y + 1}
+                runs={[[row.label, 400, "dim"]]}
+                size={18}
+              />
+            </g>
+          ))}
+        </g>
+      );
+    }
     const a = t >= arm[0] ? armAngle(arm[1]) * clamp(t - arm[0]) : 0;
     return (
       <>

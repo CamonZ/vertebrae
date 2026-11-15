@@ -48,6 +48,62 @@ const arrangementList = (what: string): JsonSchema => ({
   description: `named arrangements (or phases) ${what} (default: every one it can be in); needs a top-level arrangements or phases list`,
 });
 
+// JSON Schema forbids an empty enum. A portless part permits no names.
+const portNames = (names: readonly string[]) =>
+  names.length ? { enum: names } : false;
+
+/** Explicit mode tests also work on partial arrangement overrides. */
+const topologyMode = (enabled: boolean): JsonSchema => ({
+  required: ["props"],
+  properties: {
+    props: {
+      required: ["topology"],
+      properties: { topology: { const: enabled } },
+    },
+  },
+});
+
+/** Keep legacy port-name authoring checks; dynamic names remain runtime-checked. */
+function topologyPortChanges(ports: readonly string[]): JsonSchema[] {
+  const legacy = {
+    properties: { portChanges: { propertyNames: portNames(ports) } },
+  };
+  const afterMode = (enabled: boolean): JsonSchema => ({
+    required: ["after"],
+    properties: { after: topologyMode(enabled) },
+  });
+  return [
+    {
+      // Shorthand marks belong to After; its explicit mode overrides the base.
+      if: {
+        anyOf: [
+          afterMode(true),
+          { allOf: [topologyMode(true), { not: afterMode(false) }] },
+        ],
+      },
+      else: legacy,
+    },
+    {
+      // Named overrides inherit the base mode unless they explicitly change it.
+      if: topologyMode(true),
+      then: {
+        properties: {
+          arrangement: {
+            additionalProperties: { if: topologyMode(false), then: legacy },
+          },
+        },
+      },
+      else: {
+        properties: {
+          arrangement: {
+            additionalProperties: { if: topologyMode(true), else: legacy },
+          },
+        },
+      },
+    },
+  ];
+}
+
 export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
   const partKinds = registry.parts.kinds();
   const attachmentKinds = registry.attachments.kinds();
@@ -192,11 +248,16 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           return {
             if: { properties: { kind: { const: k } } },
             then: {
-              description: `${k} · ${def.job}; ports: ${Object.keys(def.ports).join(", ")}; verbs: ${Object.keys(def.verbs).join(", ")}`,
+              description: `${k} · ${def.job}; ${def.resolve ? "instance ports resolve from props; legacy defaults" : "ports"}: ${Object.keys(def.ports).join(", ")}; verbs: ${Object.keys(def.verbs).join(", ")}`,
+              ...(def.resolve && def.props?.topology
+                ? { allOf: topologyPortChanges(Object.keys(def.ports)) }
+                : {}),
               properties: {
                 props,
                 portChanges: {
-                  propertyNames: { enum: Object.keys(def.ports) },
+                  ...(def.resolve
+                    ? {}
+                    : { propertyNames: portNames(Object.keys(def.ports)) }),
                 },
                 ...(def.stages ? {} : { stageChanges: false }),
                 before: { properties: { props: update } },
@@ -206,7 +267,11 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
                     properties: {
                       props: update,
                       portChanges: {
-                        propertyNames: { enum: Object.keys(def.ports) },
+                        ...(def.resolve
+                          ? {}
+                          : {
+                              propertyNames: portNames(Object.keys(def.ports)),
+                            }),
                       },
                       ...(def.stages ? {} : { stageChanges: false }),
                     },
