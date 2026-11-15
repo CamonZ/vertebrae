@@ -36,6 +36,11 @@ artifact in the PR; PR is not an artifact subject type. Emit an ordinary
 Markdown link using the actual ID:
 `[Explanation](vtb://artifact/<actual-returned-id>)`.
 
+A workflow execute step can save a rendered flow with
+`vtb::artifacts::put(subject, name, body, options)` using a flow filename and
+`content_kind: "flow"`, `format: "yaml"`, `presentation: "rendered"`, and
+`extensions: #{ flow_format: "flow-v1" }`; see [artifact writes](../workflows/steps/execute/host-artifact-writes.md).
+
 Rendered flow artifacts play in previews and chat embeds. Saving does not
 start a TaskRun. Missing or malformed artifacts keep their link and display
 their failure instead of inventing a diagram.

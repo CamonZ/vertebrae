@@ -14,9 +14,17 @@ Use this when: a script leaves a record on another task, shares data through the
   creates it. Rerunning the same writes converges on one artifact per name,
   so no existence check is needed. A later read in the same script sees the
   new value.
-- The metadata records the writer: `origin: "rhai"`, `format` (`text` or
-  `json`), and `execution_id`, `task_run_id` and `task_id` under
-  `extensions`. A replacement records the latest writer.
+- Both accept a fourth `options` map: optional strings `filename`,
+  `content_kind`, `format`, `presentation`, and an `extensions` map of JSON
+  values. Omitted fields keep the defaults: `<name>.txt`/`<name>.json`,
+  `content_kind: "artifact"`, `format: "text"`/`"json"`, `presentation: "raw"`.
+- The host owns `origin: "rhai"` and the `execution_id`, `task_run_id` and
+  `task_id` extensions. Supplying `origin` or these reserved extension keys
+  is `invalid`. A replacement records the latest writer and replaces the
+  filename, body and metadata while retaining the artifact ID.
+- Unknown options, non-string or blank string fields, filenames containing
+  `/` or `\`, non-map extensions, and values JSON cannot hold are `invalid`
+  before any backend request.
 - `vtb::artifacts::delete(subject, name)` deletes the named artifact; see
   [deleting](host-deletes.md). Deleting a task leaves its artifacts in place.
 
@@ -44,6 +52,25 @@ let info = vtb::artifacts::put_json(task.id, "progress", progress);
 
 Running it again replaces the same `progress` artifact. Read it with
 `vtb artifact lookup --subject-type task --subject-id <task-id> progress`.
+
+## Example: save a rendered flow
+
+```rhai
+let flow = `version: 1
+parts:
+  - { id: artifacts, kind: store, label: Named artifacts }
+story:
+  - caption: Inspect the stored artifacts
+    steps: [{ part: artifacts, verb: snapshot }]
+`;
+vtb::artifacts::put(task.id, "pr-flow", flow, #{
+    filename: "pr-flow.flow.yaml", content_kind: "flow", format: "yaml",
+    presentation: "rendered", extensions: #{ flow_format: "flow-v1" }
+})
+```
+
+Use `put_json` with `format: "json"` for a JSON flow value. See
+[flow authoring](../../../machine-diagrams.md) for the full body contract.
 
 ## Related
 [Reading tasks and artifacts](host-reads.md) · [Context bindings and output](input-output.md) ·

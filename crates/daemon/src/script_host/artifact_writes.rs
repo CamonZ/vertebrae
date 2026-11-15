@@ -16,12 +16,14 @@ use vertebrae_core::models::{
 
 use super::artifacts::{NAMESPACE, address, artifact_info, named_artifact};
 use super::task_writes::require_task;
-use super::{read, set_host_fn2, set_host_fn3, string_argument};
+use super::{map_argument, read, set_host_fn2, set_host_fn3, set_host_fn4, string_argument};
 use crate::script_worker::{HostContext, HostError, HostErrorKind, rhai_to_json};
 
 pub(super) fn register(module: &mut Module, host: &HostContext) {
     set_host_fn3(module, host, NAMESPACE, "put", put);
     set_host_fn3(module, host, NAMESPACE, "put_json", put_json);
+    set_host_fn4(module, host, NAMESPACE, "put", put_with_options);
+    set_host_fn4(module, host, NAMESPACE, "put_json", put_json_with_options);
     set_host_fn2(module, host, NAMESPACE, "delete", delete);
 }
 
@@ -53,9 +55,20 @@ fn put(
     name: Dynamic,
     body: Dynamic,
 ) -> Result<Dynamic, HostError> {
+    put_with_options(host, subject, name, body, rhai::Map::new().into())
+}
+
+fn put_with_options(
+    host: &HostContext,
+    subject: Dynamic,
+    name: Dynamic,
+    body: Dynamic,
+    options: Dynamic,
+) -> Result<Dynamic, HostError> {
     let address = address(host, subject, name)?;
     let body = string_argument(body, "Artifact body")?;
-    upsert(host, address, body, Format::Text)
+    let options = WriteOptions::parse(options, Format::Text)?;
+    upsert(host, address, body, Format::Text, options)
 }
 
 /// Serialization need not keep the script's key order or number formatting.
@@ -65,10 +78,80 @@ fn put_json(
     name: Dynamic,
     value: Dynamic,
 ) -> Result<Dynamic, HostError> {
+    put_json_with_options(host, subject, name, value, rhai::Map::new().into())
+}
+
+fn put_json_with_options(
+    host: &HostContext,
+    subject: Dynamic,
+    name: Dynamic,
+    value: Dynamic,
+    options: Dynamic,
+) -> Result<Dynamic, HostError> {
     let address = address(host, subject, name)?;
     let value = rhai_to_json(&value)
         .map_err(|error| HostError::invalid(format!("Artifact value {error}")))?;
-    upsert(host, address, value.to_string(), Format::Json)
+    let options = WriteOptions::parse(options, Format::Json)?;
+    upsert(host, address, value.to_string(), Format::Json, options)
+}
+
+struct WriteOptions {
+    filename: Option<String>,
+    metadata: ArtifactLinkMetadata,
+}
+
+impl WriteOptions {
+    /// Validate all script-controlled fields before resolving provenance or
+    /// looking up the subject. Even a refused write must make no requests.
+    fn parse(options: Dynamic, format: Format) -> Result<Self, HostError> {
+        let mut parsed = Self {
+            filename: None,
+            metadata: ArtifactLinkMetadata::new("artifact", format.name(), "rhai", "raw"),
+        };
+        for (key, value) in map_argument(options, "Artifact options")? {
+            match key.as_str() {
+                "filename" | "content_kind" | "format" | "presentation" => {
+                    let text = string_argument(value, &key)?;
+                    if text.trim().is_empty() {
+                        return Err(HostError::invalid(format!("{key} must not be blank")));
+                    }
+                    match key.as_str() {
+                        "filename" => {
+                            if text.contains(['/', '\\']) {
+                                return Err(HostError::invalid(
+                                    "filename must not contain a path separator",
+                                ));
+                            }
+                            parsed.filename = Some(text);
+                        }
+                        "content_kind" => parsed.metadata.content_kind = text,
+                        "format" => parsed.metadata.format = text,
+                        "presentation" => parsed.metadata.presentation = text,
+                        _ => unreachable!(),
+                    }
+                }
+                "extensions" => {
+                    for (key, value) in map_argument(value, "Artifact extensions")? {
+                        if matches!(key.as_str(), "execution_id" | "task_run_id" | "task_id") {
+                            return Err(HostError::invalid(format!(
+                                "Reserved artifact extension {key:?}"
+                            )));
+                        }
+                        let value = rhai_to_json(&value).map_err(|error| {
+                            HostError::invalid(format!("Artifact extension {key:?} {error}"))
+                        })?;
+                        parsed.metadata = parsed.metadata.with_extension(key.to_string(), value);
+                    }
+                }
+                other => {
+                    return Err(HostError::invalid(format!(
+                        "Unknown artifact option {other:?}"
+                    )));
+                }
+            }
+        }
+        Ok(parsed)
+    }
 }
 
 fn upsert(
@@ -76,6 +159,7 @@ fn upsert(
     address: GetArtifactByLogicalNameInput,
     body: String,
     format: Format,
+    options: WriteOptions,
 ) -> Result<Dynamic, HostError> {
     // Sacrum reads a blank body as a missing one and rejects it; refuse it
     // before any request.
@@ -85,8 +169,10 @@ fn upsert(
     if address.subject_type == "task" {
         require_task(host, &address.subject_id, ServiceError::task_not_found)?;
     }
-    let metadata = provenance(host, format)?;
-    let filename = format!("{}.{}", address.logical_name, format.extension());
+    let metadata = provenance(host, options.metadata)?;
+    let filename = options
+        .filename
+        .unwrap_or_else(|| format!("{}.{}", address.logical_name, format.extension()));
     let existing = read(host, |services, _| {
         named_artifact(services, address.clone())
     })?;
@@ -149,7 +235,10 @@ fn subject_label(address: &GetArtifactByLogicalNameInput) -> String {
 
 /// The version-1 envelope for a script write. The TaskRun is read once per
 /// attempt: Sacrum's dispatch carries only the execution and task IDs.
-fn provenance(host: &HostContext, format: Format) -> Result<ArtifactLinkMetadata, HostError> {
+fn provenance(
+    host: &HostContext,
+    metadata: ArtifactLinkMetadata,
+) -> Result<ArtifactLinkMetadata, HostError> {
     let task_run_id = match host.task_run_id().get() {
         Some(task_run_id) => task_run_id.clone(),
         None => {
@@ -161,15 +250,13 @@ fn provenance(host: &HostContext, format: Format) -> Result<ArtifactLinkMetadata
             host.task_run_id().get_or_init(|| task_run_id).clone()
         }
     };
-    Ok(
-        ArtifactLinkMetadata::new("artifact", format.name(), "rhai", "raw")
-            .with_extension("execution_id", host.execution_id().into())
-            .with_extension(
-                "task_run_id",
-                task_run_id.map_or(Value::Null, Value::String),
-            )
-            .with_extension("task_id", host.task_id().into()),
-    )
+    Ok(metadata
+        .with_extension("execution_id", host.execution_id().into())
+        .with_extension(
+            "task_run_id",
+            task_run_id.map_or(Value::Null, Value::String),
+        )
+        .with_extension("task_id", host.task_id().into()))
 }
 
 #[cfg(test)]
@@ -446,6 +533,235 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rendered_options_create_and_replace_the_same_artifact() {
+        let server = test_support::sacrum(sacrum()).await;
+        let output = run(&server, r#"
+            let first = vtb::artifacts::put(task.id, "flow", "version: 1", #{
+                filename: "diagram.flow.yaml", content_kind: "flow", format: "yaml",
+                presentation: "rendered", extensions: #{ flow_format: "flow-v1", head_sha: "abc" }
+            });
+            let second = vtb::artifacts::put_json(task.id, "flow", #{ version: 1 }, #{
+                filename: "diagram.flow.json", content_kind: "flow", presentation: "rendered",
+                extensions: #{ flow_format: "flow-v1", nested: [(), #{ ok: true }], head_sha: "def" }
+            });
+            #{ first: first, second: second, body: vtb::artifacts::read_json(task.id, "flow") }
+        "#).await;
+        assert_eq!(output["first"]["id"], output["second"]["id"]);
+        assert_eq!(output["body"], json!({"version": 1}));
+        for (round, format, filename, sha) in [
+            ("first", "yaml", "diagram.flow.yaml", "abc"),
+            ("second", "json", "diagram.flow.json", "def"),
+        ] {
+            let mut expected = provenance(format);
+            expected["content_kind"] = json!("flow");
+            expected["presentation"] = json!("rendered");
+            expected["extensions"]["flow_format"] = json!("flow-v1");
+            expected["extensions"]["head_sha"] = json!(sha);
+            if round == "second" {
+                expected["extensions"]["nested"] = json!([null, {"ok": true}]);
+            }
+            assert_eq!(output[round]["filename"], filename);
+            assert_eq!(output[round]["metadata"], expected);
+            let operation = if round == "first" {
+                "mutation CreateArtifact("
+            } else {
+                "mutation UpdateArtifact("
+            };
+            let requests = sacrum_requests(&server, operation).await;
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0]["filename"], filename);
+            assert_eq!(
+                serde_json::from_str::<Value>(requests[0]["metadata"].as_str().unwrap()).unwrap(),
+                expected
+            );
+            if round == "second" {
+                assert_eq!(requests[0]["id"], output["first"]["id"]);
+                assert_eq!(requests[0]["body"], r#"{"version":1}"#);
+            } else {
+                assert_eq!(requests[0]["body"], "version: 1");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn documented_flow_example_runs_without_a_command_host_call() {
+        let doc = include_str!(
+            "../../../../docs/agent-context/workflows/steps/execute/host-artifact-writes.md"
+        );
+        let script = doc
+            .split("```rhai")
+            .nth(2)
+            .unwrap()
+            .split("```")
+            .next()
+            .unwrap();
+        let server = test_support::sacrum(sacrum()).await;
+        let info = run(&server, script).await;
+        assert_eq!(info["filename"], "pr-flow.flow.yaml");
+        assert_eq!(info["metadata"]["content_kind"], "flow");
+        assert_eq!(info["metadata"]["presentation"], "rendered");
+        assert_eq!(info["metadata"]["extensions"]["flow_format"], "flow-v1");
+    }
+
+    #[tokio::test]
+    async fn empty_options_and_three_arguments_have_identical_wire_requests() {
+        let mut traces = Vec::new();
+        for options in ["", ", #{}"] {
+            let server = test_support::sacrum(sacrum()).await;
+            run(
+                &server,
+                &format!(
+                    r#"
+                vtb::artifacts::put(task.id, "notes", "first"{options});
+                vtb::artifacts::put(task.id, "notes", "second"{options});
+                vtb::artifacts::put_json("project", "value", #{{ n: 1 }}{options});
+                vtb::artifacts::put_json("project", "value", (){options})
+            "#
+                ),
+            )
+            .await;
+            traces.push(
+                server
+                    .received_requests()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|request| serde_json::from_slice::<Value>(&request.body).unwrap())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        assert_eq!(
+            traces[0], traces[1],
+            "including read order and provenance lookup"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_options_make_no_sacrum_requests_for_either_overload() {
+        let server = test_support::sacrum(sacrum()).await;
+        for options in [
+            "()",
+            "42",
+            "[]",
+            r##"#{ typo: "x" }"##,
+            r##"#{ origin: "forged" }"##,
+            r##"#{ version: 1 }"##,
+            r##"#{ filename: "" }"##,
+            r##"#{ filename: " \n\t" }"##,
+            r##"#{ filename: "dir/file" }"##,
+            r##"#{ filename: "dir\\file" }"##,
+            r##"#{ extensions: () }"##,
+            r##"#{ extensions: [] }"##,
+            r##"#{ extensions: "x" }"##,
+            r##"#{ extensions: #{ execution_id: "forged" } }"##,
+            r##"#{ extensions: #{ task_run_id: () } }"##,
+            r##"#{ extensions: #{ task_id: "forged" } }"##,
+            r##"#{ extensions: #{ nested: [#{ bad: || 1 }] } }"##,
+            r##"#{ extensions: #{ bad: 1.0 / 0.0 } }"##,
+            r##"#{ extensions: #{ bad: 'c' } }"##,
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(
+            ["filename", "content_kind", "format", "presentation"]
+                .into_iter()
+                .flat_map(|key| {
+                    ["42", "()", "[]", "#{}", "true", r#"" \n\t""#]
+                        .map(|value| format!("#{{ {key}: {value} }}"))
+                }),
+        ) {
+            for (function, body) in [("put", r#""body""#), ("put_json", "#{ n: 1 }")] {
+                let call =
+                    format!("vtb::artifacts::{function}(task.id, \"notes\", {body}, {options})");
+                let caught = run(&server, &format!(
+                    "let caught = (); try {{ {call}; }} catch (error) {{ caught = error; }} caught"
+                )).await;
+                assert_eq!(caught["kind"], "invalid", "{call}: {caught}");
+                assert_eq!(caught["function"], format!("vtb::artifacts::{function}"));
+            }
+        }
+        assert!(server.received_requests().await.unwrap().is_empty());
+    }
+
+    proptest::proptest! {
+        #![proptest_config(proptest::test_runner::Config::with_cases(32))]
+
+        // Independent lexical oracle over arbitrary Unicode, including blank
+        // strings and either platform's path separator. No service is involved.
+        #[test]
+        fn filename_validation_matches_the_contract(filename in ".{0,80}") {
+            let options = rhai::Map::from_iter([("filename".into(), filename.clone().into())]);
+            let result = super::WriteOptions::parse(options.into(), super::Format::Text);
+            let valid = !filename.chars().all(char::is_whitespace)
+                && !filename.chars().any(|c| c == '/' || c == '\\');
+            proptest::prop_assert_eq!(result.is_ok(), valid);
+            if let Ok(parsed) = result {
+                proptest::prop_assert_eq!(parsed.filename, Some(filename));
+            }
+        }
+
+        // Model: each logical name owns one stable ID; the last write replaces
+        // body, filename and metadata completely. Compare each observed step
+        // and its create/update request against the model, across both arities
+        // and serializers. All effects stay in a disposable Wiremock server.
+        #[test]
+        fn generated_write_sequences_match_last_write_wins_model(
+            actions in proptest::collection::vec((0u8..3, proptest::bool::ANY, 0u8..32, "[a-z]{1,16}"), 1..9)
+        ) {
+            tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {
+                let server = test_support::sacrum(sacrum()).await;
+                let mut model = std::collections::HashMap::new();
+                for (step, (name, json_body, mask, body)) in actions.into_iter().enumerate() {
+                    let name = format!("name-{name}");
+                    let format = if json_body { "json" } else { "text" };
+                    let mut metadata = provenance(format);
+                    let mut filename = format!("{name}.{}", if json_body { "json" } else { "txt" });
+                    let mut fields = Vec::new();
+                    for (bit, key, value) in [
+                        (1, "filename", "custom.flow.yaml"), (2, "content_kind", "flow"),
+                        (4, "format", "yaml"), (8, "presentation", "rendered"),
+                    ] {
+                        if mask & bit != 0 {
+                            fields.push(format!("{key}: {value:?}"));
+                            if key == "filename" { filename = value.into(); }
+                            else { metadata[key] = json!(value); }
+                        }
+                    }
+                    if mask & 16 != 0 {
+                        fields.push("extensions: #{ flow_format: \"flow-v1\", head: [1, (), true] }".into());
+                        metadata["extensions"]["flow_format"] = json!("flow-v1");
+                        metadata["extensions"]["head"] = json!([1, null, true]);
+                    }
+                    let options = if mask == 0 { String::new() } else { format!(", #{{ {} }}", fields.join(", ")) };
+                    let function = if json_body { "put_json" } else { "put" };
+                    let stored_body = if json_body { serde_json::to_string(&body).unwrap() } else { body.clone() };
+                    let output = run(&server, &format!(r#"
+                        let info = vtb::artifacts::{function}(task.id, "{name}", "{body}"{options});
+                        #{{ info: info, body: vtb::artifacts::read(task.id, "{name}") }}
+                    "#)).await;
+                    assert_eq!(output["body"], stored_body);
+                    assert_eq!(output["info"]["filename"], filename);
+                    assert_eq!(output["info"]["metadata"], metadata);
+                    let id = output["info"]["id"].clone();
+                    let previous = model.insert(name, id.clone());
+                    let operation = if let Some(previous) = previous {
+                        assert_eq!(id, previous);
+                        "mutation UpdateArtifact("
+                    } else { "mutation CreateArtifact(" };
+                    let requests = sacrum_requests(&server, operation).await;
+                    assert_eq!(requests.len(), if operation.contains("Create") { model.len() } else { step + 1 - model.len() });
+                    let request = requests.last().unwrap();
+                    if operation.contains("Update") { assert_eq!(request["id"], id); }
+                    assert_eq!(request["filename"], filename);
+                    assert_eq!(request["body"], stored_body);
+                    assert_eq!(serde_json::from_str::<Value>(request["metadata"].as_str().unwrap()).unwrap(), metadata);
+                }
+                assert_eq!(sacrum_requests(&server, "mutation CreateArtifact(").await.len(), model.len());
+            });
+        }
+    }
+
+    #[tokio::test]
     async fn a_rerun_after_a_failed_script_converges_on_one_artifact_per_name() {
         let server = test_support::sacrum(sacrum()).await;
         let failing = format!(
@@ -487,8 +803,12 @@ mod tests {
             vtb::artifacts::put_json(task.id, "null", ());
             let caught = [];
             for bad in [|| 1, 1.0 / 0.0, [1, 'c'], #{ inner: #{ f: || 2 } }] {
-                try { vtb::artifacts::put_json(task.id, "bad", bad); }
-                catch (error) { caught.push(error); }
+                for options in [false, true] {
+                    try {
+                        if options { vtb::artifacts::put_json(task.id, "bad", bad, #{}); }
+                        else { vtb::artifacts::put_json(task.id, "bad", bad); }
+                    } catch (error) { caught.push(error); }
+                }
             }
             #{
                 value: vtb::artifacts::read_json(task.id, "value"),
@@ -509,11 +829,15 @@ mod tests {
         assert_eq!(output["exact"], true);
         assert_eq!(output["null_body"], "null");
         let caught = output["caught"].as_array().unwrap();
-        assert_eq!(caught.len(), 4);
+        assert_eq!(caught.len(), 8);
         for (error, detail) in caught.iter().zip([
             "type 'Fn' is not JSON",
+            "type 'Fn' is not JSON",
+            "contains a non-finite JSON number",
             "contains a non-finite JSON number",
             "type 'char' is not JSON",
+            "type 'char' is not JSON",
+            "type 'Fn' is not JSON",
             "type 'Fn' is not JSON",
         ]) {
             assert_eq!(error["kind"], "invalid", "{error}");
