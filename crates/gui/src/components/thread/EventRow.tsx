@@ -21,7 +21,7 @@ import { useId, useState, type ReactNode } from "react";
 
 import { IdChip, RunChip } from "../shared/HearthPrimitives";
 import { Card } from "../molecules/Card";
-import { BoundedTextContent, MarkdownContent } from "../shared/MarkdownContent";
+import { MarkdownContent, PlainTextContent } from "../shared/MarkdownContent";
 import {
   ChangeUnavailable,
   PayloadDiffs,
@@ -316,11 +316,7 @@ function ToolCallRow({
           {props.payloadDiffs ? (
             <PayloadDiffs diffs={props.payloadDiffs} />
           ) : typeof props.body === "string" ? (
-            <BoundedTextContent
-              text={props.body}
-              expanded={props.showFullContent}
-              onExpandedChange={props.onToggleFullContent}
-            />
+            <PlainTextContent text={props.body} />
           ) : (
             props.body
           )}

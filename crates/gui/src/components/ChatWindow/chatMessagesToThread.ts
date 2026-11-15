@@ -72,10 +72,6 @@ export interface ChatThreadOptions {
    * unmounts without discovering every new tool id in advance.
    */
   expanded?: ReadonlySet<string>;
-  /** Tool ids whose bounded bodies currently show the complete content. */
-  fullContent?: ReadonlySet<string>;
-  /** Toggle a tool body's bounded full-content rendering. */
-  onToggleFullContent?: (toolId: string) => void;
   /**
    * Whether the chat is awaiting a response. Carried for parity with the caller;
    * not consumed here (the ThinkingIndicator is a sibling of <Thread>).
@@ -153,14 +149,7 @@ export function chatMessagesToThread(
   messages: readonly ChatMessage[],
   opts: ChatThreadOptions
 ): Thread {
-  const {
-    onToggleTool,
-    collapsed,
-    expanded,
-    fullContent,
-    onToggleFullContent,
-    assistantLabel,
-  } = opts;
+  const { onToggleTool, collapsed, expanded, assistantLabel } = opts;
 
   // ── Pass 1: bucket messages into turn drafts ──────────────────────────
   // Correlation state is SESSION-wide, not per turn: a tool_result can land
@@ -375,8 +364,6 @@ export function chatMessagesToThread(
       collapsed,
       expanded,
       onToggleTool,
-      fullContent,
-      onToggleFullContent,
       assistantLabel,
       resultById,
     });
