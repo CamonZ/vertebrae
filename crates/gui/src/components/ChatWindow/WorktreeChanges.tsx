@@ -45,6 +45,7 @@ import { FilesTree } from "./workspace/FilesTree";
 import { STATUS_LETTER } from "./workspace/status";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import type { JumpTarget } from "./workspace/AllChangesView";
+import { routeSource, type FileReveal } from "./workspace/sourceRoute";
 import "./workspaceTabs.css";
 import "./worktreeChanges.css";
 
@@ -54,7 +55,12 @@ const NO_PATHS: readonly string[] = [];
 
 type LoadState =
   | { status: "loading" }
-  | { status: "error"; message: string }
+  | {
+      status: "error";
+      message: string;
+      /** Whether the failed load compared against the working copy. */
+      workingTree: boolean;
+    }
   | {
       status: "ready";
       data: Changes;
@@ -125,21 +131,58 @@ export function WorktreeChanges({
   const [mode, setMode] = useState<SidebarMode>("changes");
   const [activePath, setActivePath] = useState<string | null>(null);
   const [jumpTarget, setJumpTarget] = useState<JumpTarget | null>(null);
-  const appliedSourceJump = useRef<JumpTarget | null>(null);
-  // Publish a new external request in this render, before switching from an
-  // open document can mount the viewport with the previous request.
-  const effectiveJumpTarget =
-    sourceJump && sourceJump !== appliedSourceJump.current
-      ? sourceJump
-      : jumpTarget;
+  // A reference's lines: scrolled to once, highlighted until the first edit
+  // or manual navigation.
+  const [reveal, setReveal] = useState<
+    (FileReveal & { scrolled: boolean }) | null
+  >(null);
+  // An external reference waiting for a working-tree comparison to route on.
+  const [pendingSource, setPendingSource] = useState<JumpTarget | null>(null);
   useEffect(() => {
     if (!sourceJump) return;
-    appliedSourceJump.current = sourceJump;
-    setActivePath(sourceJump.path);
+    // References name the working copy and open beside a collapsed explorer.
+    setFilesOpen(false);
     setHistoricalPath(null);
-    activate(worktreePath, null);
-    setJumpTarget(sourceJump);
-  }, [sourceJump, worktreePath]);
+    setTarget((current) =>
+      current.kind === "working_tree" ? current : { kind: "working_tree" }
+    );
+    setPendingSource(sourceJump);
+  }, [sourceJump]);
+  // Route only on a working-copy result: a ready or failed past-commit load
+  // may still be shown while the working copy loads. A failed working-copy
+  // load still opens the referenced file.
+  const sourceRoute = !pendingSource
+    ? null
+    : state.status === "ready" && state.data.comparison.working_tree
+      ? routeSource(pendingSource, state.data.files, state.parsed)
+      : state.status === "error" && state.workingTree
+        ? routeSource(pendingSource, [], [])
+        : null;
+  // The route is derived during render, but applying it consumes the one-off
+  // request and moves the workspace (active document, jump, reveal), so it is
+  // committed once in an effect rather than re-derived on later renders.
+  useEffect(() => {
+    if (!sourceRoute) return;
+    setPendingSource(null);
+    if (sourceRoute.view === "diff") {
+      setActivePath(sourceRoute.target.path);
+      setReveal(null);
+      activate(worktreePath, null);
+      setJumpTarget(sourceRoute.target);
+    } else {
+      setActivePath(sourceRoute.path);
+      setJumpTarget(null);
+      // An open document keeps its draft; only its view changes.
+      openDocument(worktreePath, sourceRoute.path, "file");
+      setReveal(
+        sourceRoute.reveal && { ...sourceRoute.reveal, scrolled: false }
+      );
+    }
+  }, [sourceRoute, worktreePath]);
+  // Publish a routed diff in this render, before switching from an open
+  // document can mount the viewport with the previous request.
+  const effectiveJumpTarget =
+    sourceRoute?.view === "diff" ? sourceRoute.target : jumpTarget;
   const [treeToken, setTreeToken] = useState(0);
   const [closing, setClosing] = useState<string | null>(null);
   const [closeBusy, setCloseBusy] = useState(false);
@@ -197,6 +240,7 @@ export function WorktreeChanges({
     let pending = false;
     const controller = new AbortController();
 
+    const workingTree = comparisonRequest.target.kind === "working_tree";
     const load = async () => {
       pending = true;
       if (running) return;
@@ -215,7 +259,11 @@ export function WorktreeChanges({
           if (!current) break;
 
           if (result.status === "error") {
-            setState({ status: "error", message: result.error.message });
+            setState({
+              status: "error",
+              message: result.error.message,
+              workingTree,
+            });
           } else {
             const task: Extract<BackgroundTask, { kind: "patch" }> = {
               kind: "patch",
@@ -243,7 +291,8 @@ export function WorktreeChanges({
             setGeneration((value) => value + 1);
           }
         } catch (error) {
-          if (current) setState({ status: "error", message: String(error) });
+          if (current)
+            setState({ status: "error", message: String(error), workingTree });
         }
       }
 
@@ -303,13 +352,16 @@ export function WorktreeChanges({
   );
 
   const nextLocalJump = useRef(0);
+  // Navigating by hand drops a reference's revealed lines.
   const jumpToFile = (path: string) => {
+    setReveal(null);
     setActivePath(path);
     activate(worktreePath, null);
     setJumpTarget({ path, nonce: --nextLocalJump.current });
   };
 
   const open = (path: string, view: "file" | "diff") => {
+    setReveal(null);
     setActivePath(path);
     if (historical) setHistoricalPath(path);
     else openDocument(worktreePath, path, view);
@@ -680,6 +732,7 @@ export function WorktreeChanges({
                   : undefined
               }
               onClick={() => {
+                setReveal(null);
                 activate(worktreePath, null);
                 setHistoricalPath(null);
               }}
@@ -695,6 +748,7 @@ export function WorktreeChanges({
                     aria-current={activeDocument === path ? "page" : undefined}
                     title={path}
                     onClick={() => {
+                      setReveal(null);
                       setActivePath(path);
                       activate(worktreePath, path);
                     }}
@@ -743,6 +797,13 @@ export function WorktreeChanges({
                   : null
               }
               changesGeneration={generation}
+              reveal={reveal?.path === activeDocument ? reveal : null}
+              onRevealed={() =>
+                setReveal(
+                  (current) => current && { ...current, scrolled: true }
+                )
+              }
+              onEdited={() => setReveal(null)}
               diffStyle={diffStyle}
               onSave={save}
               onSaved={refreshAll}

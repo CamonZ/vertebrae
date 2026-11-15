@@ -8,7 +8,12 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { forwardRef, useImperativeHandle, type ReactNode } from "react";
+import {
+  createElement,
+  forwardRef,
+  useImperativeHandle,
+  type ReactNode,
+} from "react";
 import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
@@ -39,6 +44,7 @@ const seen = vi.hoisted(() => ({
     items: Array<{ id: string; type: string }>;
     selectedLines: unknown;
   } | null,
+  file: null as { name: string; selectedLines: unknown } | null,
 }));
 
 // Pierre needs real layout; these stand-ins record props and draw annotations.
@@ -75,6 +81,25 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
             </div>
           ))}
         </div>
+      );
+    },
+    // Rows carry Pierre's line numbers so reveals can find them.
+    File: (props: {
+      file: { name: string; contents: string };
+      selectedLines?: unknown;
+    }) => {
+      seen.file = {
+        name: props.file.name,
+        selectedLines: props.selectedLines ?? null,
+      };
+      return createElement(
+        "diffs-container",
+        { "data-testid": "document-file" },
+        props.file.contents.split("\n").map((text, index) => (
+          <div key={index} data-line={index + 1}>
+            {text}
+          </div>
+        ))
       );
     },
     CodeView: forwardRef(function CodeView(
@@ -331,20 +356,61 @@ const association = {
   recentWorktrees: [],
 };
 
-/** Opens a flow location in the evidence panel, then hands it to Changes. */
-async function openInChanges(location: string) {
-  const scrolled = seen.scroll.mock.calls.length;
+/** Opens a flow location, which goes straight to the Changes panel. */
+async function openReference(location: string) {
   fireEvent.click(screen.getByRole("button", { name: location }));
   const panel = await screen.findByRole("complementary", {
-    name: "Evidence panel",
+    name: "Changes panel",
   });
-  await within(panel).findByTestId("file-diff");
-  await waitFor(() =>
-    expect(seen.scroll.mock.calls.length).toBeGreaterThan(scrolled)
-  );
-  fireEvent.click(
-    within(panel).getByRole("button", { name: "Open in Changes" })
-  );
+  expect(
+    screen.queryByRole("complementary", { name: "Evidence panel" })
+  ).toBeNull();
+  return panel;
+}
+
+const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
+
+/** The `data-line` of every element a reveal scrolled into view. */
+const revealedLines = () =>
+  scrollIntoView.mock.contexts
+    .map((element) => (element as Element).getAttribute?.("data-line"))
+    .filter((line): line is string => line != null)
+    .map(Number);
+
+function flowSession(
+  attachments: unknown[],
+  overrides: Partial<ChatSession> = {}
+) {
+  const spec = {
+    version: 1,
+    parts: [{ id: "client", kind: "client", label: "Client", attachments }],
+    story: [{ caption: "Evidence", steps: [] }],
+  };
+  useChatStore.setState({
+    sessions: {
+      "test-session": createSession({
+        association,
+        messages: [
+          {
+            kind: "assistant",
+            text: "```flow\n" + JSON.stringify(spec) + "\n```",
+            timestamp: "2024-01-01T12:00:00Z",
+          },
+        ],
+        ...overrides,
+      }),
+    },
+    activeSessionId: "test-session",
+    panelOpen: true,
+  });
+}
+
+async function inspectClient() {
+  const player = await screen.findByTestId("flow-player");
+  if (!screen.queryByTestId("flow-part-inspector"))
+    fireEvent.keyDown(player.querySelector("g[data-part-id='client']")!, {
+      key: "Enter",
+    });
 }
 
 const TOOL_ANNOTATIONS = {
@@ -398,6 +464,7 @@ describe("ChatWindow diff review comments", () => {
     seen.items = [];
     seen.fileDiff = null;
     seen.evidence = null;
+    seen.file = null;
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
@@ -406,55 +473,183 @@ describe("ChatWindow diff review comments", () => {
     });
   });
 
-  it("opens a flow evidence ref in the evidence panel, then in Changes", async () => {
-    const spec = {
-      version: 1,
-      parts: [
-        {
-          id: "client",
-          kind: "client",
-          label: "Client",
-          attachments: [{ kind: "ref", path: "f.ts", line: 6, endLine: 8 }],
-        },
-      ],
-      story: [{ caption: "Evidence", steps: [] }],
-    };
-    useChatStore.setState({
-      sessions: {
-        "test-session": createSession({
-          association,
-          messages: [
-            {
-              kind: "assistant",
-              text: "```flow\n" + JSON.stringify(spec) + "\n```",
-              timestamp: "2024-01-01T12:00:00Z",
-            },
-          ],
-        }),
-      },
-      activeSessionId: "test-session",
-      panelOpen: true,
-    });
+  it("opens a changed flow ref directly in Changes with the explorer collapsed", async () => {
+    flowSession([{ kind: "ref", path: "f.ts", line: 6, endLine: 8 }]);
     render(<ChatWindow sessionId="test-session" />);
-    const player = await screen.findByTestId("flow-player");
-    fireEvent.keyDown(player.querySelector("g[data-part-id='client']")!, {
-      key: "Enter",
-    });
-    await openInChanges("f.ts:6–8");
+    await inspectClient();
+    const panel = await openReference("f.ts:6–8");
+    await waitFor(() =>
+      expect(seen.scroll).toHaveBeenCalledExactlyOnceWith({
+        type: "line",
+        id: "f.ts",
+        lineNumber: 6,
+        side: "additions",
+        align: "center",
+      })
+    );
     expect(
-      await screen.findByRole("complementary", { name: "Changes panel" })
-    ).toBeVisible();
-    expect(
-      screen.queryByRole("complementary", { name: "Evidence panel" })
+      within(panel).queryByRole("button", { name: "Open in Changes" })
     ).toBeNull();
+    expect(within(panel).queryByText(/has no diff/)).toBeNull();
+    expect(
+      useDocumentStore.getState().workspaces["/worktree"]?.active ?? null
+    ).toBeNull();
+
+    // The explorer starts collapsed and can still be expanded by hand.
+    const toggle = within(panel).getByRole("button", { name: "Show files" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(panel).queryByRole("navigation", { name: "Changed files" })
+    ).toBeNull();
+    fireEvent.click(toggle);
+    expect(
+      within(panel).getByRole("navigation", { name: "Changed files" })
+    ).toBeVisible();
+
+    // A repeated click reveals the lines again and collapses the explorer.
+    fireEvent.click(screen.getByRole("button", { name: "f.ts:6–8" }));
     await waitFor(() => expect(seen.scroll).toHaveBeenCalledTimes(2));
-    expect(seen.scroll).toHaveBeenCalledWith({
-      type: "line",
-      id: "f.ts",
-      lineNumber: 6,
-      side: "additions",
-      align: "center",
+    expect(
+      within(panel).getByRole("button", { name: "Show files" })
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("opens unchanged code as the full file at the referenced lines", async () => {
+    const priorDocuments = useDocumentStore.getState().workspaces;
+    flowSession([
+      { kind: "ref", path: "g.ts", line: 2, endLine: 3 },
+      // f.ts changes only at new line 6 (old 6 is where X was inserted).
+      { kind: "ref", path: "f.ts", line: 12, endLine: 13 },
+      {
+        kind: "diff",
+        path: "f.ts",
+        patch: ALL,
+        line: 9,
+        endLine: 10,
+        side: "old",
+      },
+      { kind: "ref", path: "f.ts", line: 6, endLine: 8 },
+    ]);
+    const view = render(<ChatWindow sessionId="test-session" />);
+    const active = () =>
+      useDocumentStore.getState().workspaces["/worktree"]?.active ?? null;
+    const documentView = (path: string) =>
+      useDocumentStore.getState().workspaces["/worktree"]?.documents[path]
+        ?.view;
+    try {
+      await inspectClient();
+
+      // An unchanged file: full-file mode, no missing-diff message.
+      let panel = await openReference("g.ts:2–3");
+      await waitFor(() => expect(active()).toBe("g.ts"));
+      expect(await within(panel).findByTestId("document-file")).toBeVisible();
+      expect(seen.file).toEqual({
+        name: "g.ts",
+        selectedLines: { start: 2, end: 3 },
+      });
+      await waitFor(() => expect(revealedLines()).toEqual([2]));
+      expect(within(panel).queryByText(/has no diff/)).toBeNull();
+      expect(seen.scroll).not.toHaveBeenCalled();
+      expect(
+        within(panel).getByRole("button", { name: "Show files" })
+      ).toHaveAttribute("aria-expanded", "false");
+
+      // An unchanged range of a file changed elsewhere: its full file.
+      fireEvent.click(screen.getByRole("button", { name: "f.ts:12–13" }));
+      await waitFor(() => expect(active()).toBe("f.ts"));
+      expect(documentView("f.ts")).toBe("file");
+      await waitFor(() =>
+        expect(seen.file).toEqual({
+          name: "f.ts",
+          selectedLines: { start: 12, end: 13 },
+        })
+      );
+      await waitFor(() => expect(revealedLines()).toEqual([2, 12]));
+      expect(seen.scroll).not.toHaveBeenCalled();
+
+      // Old-side lines are renumbered past the inserted line.
+      fireEvent.click(screen.getByRole("button", { name: "f.ts:9–10" }));
+      await waitFor(() =>
+        expect(seen.file?.selectedLines).toEqual({ start: 10, end: 11 })
+      );
+      await waitFor(() => expect(revealedLines()).toEqual([2, 12, 10]));
+
+      // An unsaved draft survives revisiting it from a reference.
+      act(() =>
+        useDocumentStore.setState((state) => {
+          const workspace = state.workspaces["/worktree"];
+          return {
+            workspaces: {
+              ...state.workspaces,
+              "/worktree": {
+                ...workspace,
+                documents: {
+                  ...workspace.documents,
+                  "g.ts": { ...workspace.documents["g.ts"], draft: "edited" },
+                },
+              },
+            },
+          };
+        })
+      );
+      fireEvent.click(screen.getByRole("button", { name: "g.ts:2–3" }));
+      await waitFor(() => expect(active()).toBe("g.ts"));
+      expect(
+        useDocumentStore.getState().workspaces["/worktree"].documents["g.ts"]
+          .draft
+      ).toBe("edited");
+      expect(screen.getByText("Unsaved")).toBeVisible();
+
+      // A changed range switches back to All Changes at its diff.
+      panel = screen.getByRole("complementary", { name: "Changes panel" });
+      fireEvent.click(screen.getByRole("button", { name: "f.ts:6–8" }));
+      await waitFor(() =>
+        expect(seen.scroll).toHaveBeenCalledExactlyOnceWith({
+          type: "line",
+          id: "f.ts",
+          lineNumber: 6,
+          side: "additions",
+          align: "center",
+        })
+      );
+      expect(active()).toBeNull();
+      expect(within(panel).getByTitle("g.ts")).toHaveTextContent("(unsaved)");
+    } finally {
+      view.unmount();
+      useDocumentStore.setState({ workspaces: priorDocuments });
+    }
+  });
+
+  it("keeps explicit revision evidence read-only in its own worktree", async () => {
+    flowSession([
+      {
+        kind: "diff",
+        path: "f.ts",
+        base: "base-sha",
+        head: "head-sha",
+        line: 4,
+        endLine: 5,
+        side: "old",
+      },
+    ]);
+    render(<ChatWindow sessionId="test-session" />);
+    await inspectClient();
+    fireEvent.click(screen.getByRole("button", { name: "f.ts:4–5" }));
+    const panel = await screen.findByRole("complementary", {
+      name: "Evidence panel",
     });
+    expect(await within(panel).findByText("base-sha → head-sha")).toBeVisible();
+    expect(
+      within(panel).queryByRole("button", { name: "Open in Changes" })
+    ).toBeNull();
+    expect(
+      screen.queryByRole("complementary", { name: "Changes panel" })
+    ).toBeNull();
+    expect(mockedCommands.readWorktreeBaselineFile).toHaveBeenCalledWith(
+      "/worktree",
+      "f.ts",
+      "head-sha"
+    );
   });
 
   it("opens every kind of code evidence in a project chat without a worktree", async () => {
@@ -619,8 +814,9 @@ describe("ChatWindow diff review comments", () => {
                     kind: "diff",
                     path: "f.ts",
                     patch: ALL,
-                    line: 9,
-                    endLine: 10,
+                    // Spans the old-side position where X was inserted.
+                    line: 5,
+                    endLine: 6,
                     side: "old",
                   },
                 ],
@@ -683,18 +879,18 @@ describe("ChatWindow diff review comments", () => {
     try {
       for (const action of actions) {
         if (action === "ref" || action === "diff") {
-          const line = action === "ref" ? 6 : 9;
+          const line = action === "ref" ? 6 : 5;
           openOwner = session;
           request = { session, worktree, line };
-          // The evidence panel scrolls, then Changes scrolls again.
-          expectedScrollCount += 2;
+          // Changes opens directly and scrolls once.
+          expectedScrollCount++;
           const player = await screen.findByTestId("flow-player");
           if (!screen.queryByTestId("flow-part-inspector"))
             fireEvent.keyDown(
               player.querySelector("g[data-part-id='client']")!,
               { key: "Enter" }
             );
-          await openInChanges(action === "ref" ? "f.ts:6–8" : "f.ts:9–10");
+          await openReference(action === "ref" ? "f.ts:6–8" : "f.ts:5–6");
         } else if (action === "toggle") {
           const opening: boolean = openOwner !== session;
           openOwner = opening ? session : null;

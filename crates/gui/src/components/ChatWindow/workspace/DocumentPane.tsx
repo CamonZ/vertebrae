@@ -12,6 +12,7 @@ import {
   useDocumentStore,
   type Body,
 } from "./documentStore";
+import type { FileReveal } from "./sourceRoute";
 
 const DocumentEditor = lazy(() => import("./DocumentEditor"));
 
@@ -26,6 +27,11 @@ export interface DocumentPaneProps {
   onSave(path: string): void;
   onSaved(): void;
   diffStyle?: DiffPreferences["diffStyle"];
+  /** Lines to select, and scroll to unless already `scrolled`, in the file view. */
+  reveal?: (FileReveal & { scrolled: boolean }) | null;
+  onRevealed?(): void;
+  /** Called on every edit of the document. */
+  onEdited?(): void;
 }
 
 function unavailable(body: Body, side: string): string | null {
@@ -52,7 +58,14 @@ export function DocumentPane({
   onSave,
   onSaved,
   diffStyle,
+  reveal,
+  onRevealed,
+  onEdited,
 }: DocumentPaneProps) {
+  const edit = (next: string) => {
+    setDraft(worktreePath, path, next);
+    onEdited?.();
+  };
   const document = useDocumentStore(
     (state) => state.workspaces[worktreePath]?.documents[path]
   );
@@ -108,7 +121,7 @@ export function DocumentPane({
             diffStyle={diffStyle}
             contents={deleted ? null : text}
             baseline={baseline.kind === "text" ? baseline.contents : null}
-            onChange={(next) => setDraft(worktreePath, path, next)}
+            onChange={edit}
           />
         </Suspense>
       );
@@ -121,7 +134,9 @@ export function DocumentPane({
           view="file"
           contents={text}
           baseline={null}
-          onChange={(next) => setDraft(worktreePath, path, next)}
+          reveal={reveal}
+          onRevealed={onRevealed}
+          onChange={edit}
         />
       </Suspense>
     );
