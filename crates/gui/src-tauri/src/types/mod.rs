@@ -1262,6 +1262,69 @@ impl From<vertebrae_core::TaskRun> for TaskRun {
     }
 }
 
+/// Position in a project's run history: the `updated_at` (ISO 8601) and `id`
+/// of the last entry already held.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TaskRunHistoryCursor {
+    pub updated_at: String,
+    pub id: String,
+}
+
+/// Task fields the run-history sidebar labels and groups a run by.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TaskRunHistoryTask {
+    pub id: String,
+    pub title: String,
+    pub level: TaskLevel,
+    pub parent_id: Option<String>,
+    pub workflow_id: Option<String>,
+    pub workflow_name: Option<String>,
+    /// When the task completed (ISO 8601 string)
+    pub completed_at: Option<String>,
+}
+
+/// A history run with its task.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TaskRunHistoryEntry {
+    pub task_run: TaskRun,
+    pub task: TaskRunHistoryTask,
+}
+
+/// A page of the active project's run history, most recently updated first.
+#[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
+pub struct TaskRunHistoryPage {
+    pub entries: Vec<TaskRunHistoryEntry>,
+    /// True when more entries follow the last one returned.
+    pub has_more: bool,
+    /// Matching entries hidden only by the completed filter.
+    pub hidden_completed_count: u32,
+}
+
+impl From<vertebrae_core::TaskRunHistoryPage> for TaskRunHistoryPage {
+    fn from(page: vertebrae_core::TaskRunHistoryPage) -> Self {
+        TaskRunHistoryPage {
+            entries: page
+                .entries
+                .into_iter()
+                .map(|entry| TaskRunHistoryEntry {
+                    task_run: entry.task_run.into(),
+                    task: TaskRunHistoryTask {
+                        id: entry.task.id,
+                        title: entry.task.title,
+                        level: entry.task.level.into(),
+                        parent_id: entry.task.parent_id,
+                        workflow_id: entry.task.workflow_id,
+                        workflow_name: entry.task.workflow_name,
+                        completed_at: entry.task.completed_at.map(|dt| dt.to_rfc3339()),
+                    },
+                })
+                .collect(),
+            has_more: page.has_more,
+            hidden_completed_count: u32::try_from(page.hidden_completed_count).unwrap_or(u32::MAX),
+        }
+    }
+}
+
 /// Server-derived controls for Run/Stop task actions.
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 pub struct TaskRunControls {

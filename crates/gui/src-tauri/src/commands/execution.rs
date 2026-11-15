@@ -137,6 +137,49 @@ pub async fn get_task_runs(
     Ok(runs.into_iter().map(Into::into).collect())
 }
 
+/// Page through the current project's run history in one request.
+///
+/// `limit` defaults to Sacrum's page size. Without `include_completed`, runs
+/// of completed tasks and runs that finished completed or stopped are left
+/// out; `hidden_completed_count` counts only the finished runs of open tasks.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_task_run_history(
+    state: State<'_, AppState>,
+    include_completed: bool,
+    search: Option<String>,
+    after: Option<TaskRunHistoryCursor>,
+    limit: Option<u32>,
+) -> Result<TaskRunHistoryPage, CommandError> {
+    let after = after
+        .map(|cursor| {
+            chrono::DateTime::parse_from_rfc3339(&cursor.updated_at)
+                .map(|updated_at| vertebrae_core::TaskRunHistoryCursor {
+                    updated_at: updated_at.with_timezone(&chrono::Utc),
+                    id: cursor.id,
+                })
+                .map_err(|e| CommandError {
+                    message: format!("Invalid run history cursor: {e}"),
+                })
+        })
+        .transpose()?;
+    let service_guard = state.services.read().await;
+    let service = service_guard
+        .as_ref()
+        .ok_or_else(CommandError::no_project_selected)?;
+
+    let page = service
+        .executions()
+        .task_run_history(vertebrae_core::TaskRunHistoryQuery {
+            after,
+            limit: limit.map(|limit| limit as usize),
+            include_completed,
+            search,
+        })
+        .await?;
+    Ok(page.into())
+}
+
 /// Get the trace for a single TaskRun.
 ///
 /// `root_task_run_id` is a legacy parameter name; Sacrum accepts any TaskRun

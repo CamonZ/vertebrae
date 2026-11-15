@@ -6,6 +6,7 @@ import {
 } from "../stores/projectScopedStores";
 import {
   replaceTaskRunControlsInQueryCache,
+  upsertTaskRunInHistoryCache,
   upsertTaskRunInQueryCache,
 } from "../query";
 
@@ -33,6 +34,7 @@ export function useTaskRunChangeListener(
 
       if (task_run) {
         upsertTaskRunInQueryCache(task_run, projectScopeGeneration);
+        upsertTaskRunInHistoryCache(task_run, projectScopeGeneration);
       }
 
       if (run_controls.kind === "present") {

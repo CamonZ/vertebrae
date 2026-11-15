@@ -17,6 +17,9 @@ const mocks = vi.hoisted(() => ({
   hidden: 0,
   tasksById: new Map<string, Task>(),
   enabled: [] as boolean[],
+  hasMore: false,
+  loadingMore: false,
+  loadMore: vi.fn(),
 }));
 
 vi.mock("../../hooks/useLocalChatCompletedSessions", () => ({
@@ -33,6 +36,9 @@ vi.mock("../../hooks/useHistoryRuns", () => ({
       rows: enabled ? mocks.rows : [],
       hiddenCompletedCount: mocks.hidden,
       tasksById: mocks.tasksById,
+      hasMore: mocks.hasMore,
+      loadingMore: mocks.loadingMore,
+      loadMore: mocks.loadMore,
     };
   },
 }));
@@ -107,6 +113,9 @@ describe("LocalChatMiniPanel run rows", () => {
     mocks.rows = [row("run-12345678", "task-1")];
     mocks.hidden = 0;
     mocks.enabled = [];
+    mocks.hasMore = false;
+    mocks.loadingMore = false;
+    mocks.loadMore = vi.fn();
     mocks.tasksById = new Map([
       [
         "ticket-1",
@@ -158,6 +167,32 @@ describe("LocalChatMiniPanel run rows", () => {
 
     fireEvent.click(steps[1]);
     expect(props.onSelectRunStep).toHaveBeenCalledWith(mocks.rows[0], "exec-2");
+  });
+
+  it("hides the older-runs control once history is fully loaded", () => {
+    renderPanel();
+    expect(
+      screen.queryByTestId("local-chat-history-load-more")
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers older history and disables the control while it loads", () => {
+    mocks.hasMore = true;
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load older runs" }));
+    expect(mocks.loadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows older-history loading progress", () => {
+    mocks.hasMore = true;
+    mocks.loadingMore = true;
+    renderPanel();
+
+    expect(screen.getByTestId("local-chat-history-load-more")).toBeDisabled();
+    expect(
+      screen.getByTestId("local-chat-history-load-more")
+    ).toHaveTextContent("Loading…");
   });
 
   it("counts runs in group totals and shows them without chats", () => {

@@ -7,10 +7,13 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
+use vertebrae_core::execution_service::{
+    ExecutionService, StopRunTarget, TASK_RUN_HISTORY_PAGE_MAX, TaskRunHistoryEntry,
+    TaskRunHistoryPage, TaskRunHistoryQuery, TaskRunHistoryTask,
+};
 use vertebrae_core::models::{
-    ExecutionStatus, HumanInputDraft, SessionLog, StepConfig, StepExecution, StepType, TaskRun,
-    TaskRunStatus, TaskRunTrace,
+    ExecutionStatus, HumanInputDraft, Level, SessionLog, StepConfig, StepExecution, StepType,
+    TaskRun, TaskRunStatus, TaskRunTrace,
 };
 
 use crate::api_types::{
@@ -21,13 +24,48 @@ use crate::queries::executions::{
     ACTIVE_RUN, CREATE_LOG, EXECUTION_FIELDS, GET_EXECUTION, HUMAN_INPUT_DRAFT, LIST_EXECUTIONS,
     LIST_LOGS, ORCHESTRATE_TASK, RUN_WORKFLOW, SESSION_LOG_FIELDS, SET_HUMAN_INPUT_DRAFT,
     STOP_ORCHESTRATOR, STOP_RUN, SUBMIT_HUMAN_INPUT_DRAFT, TASK_RUN, TASK_RUN_FIELDS,
-    TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS, UPDATE_EXECUTION,
+    TASK_RUN_HISTORY, TASK_RUN_TRACE, TASK_RUN_TRACE_FIELDS, TASK_RUNS, UPDATE_EXECUTION,
 };
+use crate::task_service::parse_level;
 
 /// Response shape for mutations that return only an id
 #[derive(Debug, Deserialize)]
 struct IdOnly {
     id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskRunHistoryTaskResponse {
+    id: String,
+    title: String,
+    level: String,
+    #[serde(default)]
+    parent_id: Option<String>,
+    #[serde(default)]
+    workflow_id: Option<String>,
+    #[serde(default)]
+    workflow_name: Option<String>,
+    #[serde(default)]
+    completed_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskRunHistoryEntryResponse {
+    task_run: TaskRunResponse,
+    task: TaskRunHistoryTaskResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskRunHistoryPageResponse {
+    entries: Vec<TaskRunHistoryEntryResponse>,
+    has_more: bool,
+    hidden_completed_count: u64,
+}
+
+fn uuid_arg(id: &str, field: &str) -> ServiceResult<String> {
+    uuid::Uuid::parse_str(id)
+        .map(|_| id.to_owned())
+        .map_err(|e| ServiceError::InvalidInput(format!("invalid {field}: {e}")))
 }
 
 fn json_value_to_string(v: &serde_json::Value) -> String {
@@ -321,6 +359,77 @@ impl ExecutionService for SacrumExecutionService {
             self.client.execute(&query, variables, "task_runs").await?;
 
         Ok(responses.iter().map(Self::response_to_task_run).collect())
+    }
+
+    async fn task_run_history(
+        &self,
+        query: TaskRunHistoryQuery,
+    ) -> ServiceResult<TaskRunHistoryPage> {
+        if let Some(limit) = query.limit
+            && !(1..=TASK_RUN_HISTORY_PAGE_MAX).contains(&limit)
+        {
+            return Err(ServiceError::InvalidInput(format!(
+                "run history page limit must be between 1 and {TASK_RUN_HISTORY_PAGE_MAX}, got {limit}"
+            )));
+        }
+        let mut variables = serde_json::Map::new();
+        variables.insert(
+            "project_id".into(),
+            json!(uuid_arg(self.client.project_id(), "active project id")?),
+        );
+        variables.insert("include_completed".into(), json!(query.include_completed));
+        // Omitted rather than null: Sacrum treats an explicit null cursor
+        // argument as supplied.
+        if let Some(cursor) = query.after {
+            variables.insert(
+                "after_updated_at".into(),
+                json!(
+                    cursor
+                        .updated_at
+                        .to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
+                ),
+            );
+            variables.insert(
+                "after_id".into(),
+                json!(uuid_arg(&cursor.id, "run history cursor id")?),
+            );
+        }
+        if let Some(limit) = query.limit {
+            variables.insert("limit".into(), json!(limit));
+        }
+        if let Some(search) = query.search.filter(|search| !search.trim().is_empty()) {
+            variables.insert("search".into(), json!(search));
+        }
+
+        let page: TaskRunHistoryPageResponse = self
+            .client
+            .execute(
+                TASK_RUN_HISTORY,
+                serde_json::Value::Object(variables),
+                "project_run_history",
+            )
+            .await?;
+
+        Ok(TaskRunHistoryPage {
+            entries: page
+                .entries
+                .iter()
+                .map(|entry| TaskRunHistoryEntry {
+                    task_run: Self::response_to_task_run(&entry.task_run),
+                    task: TaskRunHistoryTask {
+                        id: entry.task.id.clone(),
+                        title: entry.task.title.clone(),
+                        level: parse_level(&entry.task.level).unwrap_or(Level::Task),
+                        parent_id: entry.task.parent_id.clone(),
+                        workflow_id: entry.task.workflow_id.clone(),
+                        workflow_name: entry.task.workflow_name.clone(),
+                        completed_at: parse_datetime(entry.task.completed_at.as_deref()),
+                    },
+                })
+                .collect(),
+            has_more: page.has_more,
+            hidden_completed_count: page.hidden_completed_count,
+        })
     }
 
     async fn task_run(&self, task_run_id: &str) -> ServiceResult<Option<TaskRun>> {
@@ -772,6 +881,131 @@ mod tests {
                 .unwrap()
                 .contains("... on ExecuteStepConfig { version script context output_schema }")
         );
+    }
+
+    #[tokio::test]
+    async fn task_run_history_sends_one_project_page_request() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"project_run_history": {
+                    "has_more": true,
+                    "hidden_completed_count": 4,
+                    "entries": [{
+                        "task_run": {
+                            "id": "run-1", "task_id": "task-1", "project_id": "proj-1",
+                            "status": "executing",
+                            "updated_at": "2026-11-15T06:00:00.123456Z"
+                        },
+                        "task": {
+                            "id": "task-1", "title": "Ship", "level": "ticket",
+                            "parent_id": "epic-1", "workflow_id": "wf-1",
+                            "workflow_name": "Delivery", "completed_at": null
+                        }
+                    }]
+                }}
+            })))
+            .mount(&server)
+            .await;
+        let client = GraphqlClient::new(crate::config::SacrumConfig::new(
+            server.uri(),
+            "test-token".to_string(),
+            "11111111-1111-4111-8111-111111111111".to_string(),
+        ));
+        let service = SacrumExecutionService::new(client);
+        let cursor_at = chrono::DateTime::parse_from_rfc3339("2026-11-15T05:00:00.5Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+
+        let page = service
+            .task_run_history(TaskRunHistoryQuery {
+                after: Some(vertebrae_core::TaskRunHistoryCursor {
+                    updated_at: cursor_at,
+                    id: "22222222-2222-4222-8222-222222222222".to_string(),
+                }),
+                limit: Some(25),
+                include_completed: true,
+                search: Some("ship".to_string()),
+            })
+            .await
+            .unwrap();
+
+        assert!(page.has_more);
+        assert_eq!(page.hidden_completed_count, 4);
+        assert_eq!(page.entries[0].task_run.status, TaskRunStatus::Executing);
+        assert_eq!(page.entries[0].task.level, Level::Ticket);
+        assert_eq!(page.entries[0].task.parent_id.as_deref(), Some("epic-1"));
+        assert_eq!(
+            page.entries[0].task.workflow_name.as_deref(),
+            Some("Delivery")
+        );
+
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 1);
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            body["variables"],
+            json!({
+                "project_id": "11111111-1111-4111-8111-111111111111",
+                "include_completed": true,
+                "after_updated_at": "2026-11-15T05:00:00.500000Z",
+                "after_id": "22222222-2222-4222-8222-222222222222",
+                "limit": 25,
+                "search": "ship"
+            })
+        );
+        // max_concurrency resolves per run in Sacrum; history never asks for it.
+        assert!(!body["query"].as_str().unwrap().contains("max_concurrency"));
+    }
+
+    #[tokio::test]
+    async fn task_run_history_omits_blank_search_and_rejects_bad_limits() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/graphql"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"project_run_history": {
+                    "has_more": false, "hidden_completed_count": 0, "entries": []
+                }}
+            })))
+            .mount(&server)
+            .await;
+        let client = GraphqlClient::new(crate::config::SacrumConfig::new(
+            server.uri(),
+            "test-token".to_string(),
+            "11111111-1111-4111-8111-111111111111".to_string(),
+        ));
+        let service = SacrumExecutionService::new(client);
+
+        service
+            .task_run_history(TaskRunHistoryQuery {
+                search: Some("  ".to_string()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let requests = server.received_requests().await.unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+        assert_eq!(
+            body["variables"],
+            json!({
+                "project_id": "11111111-1111-4111-8111-111111111111",
+                "include_completed": false
+            })
+        );
+
+        for limit in [0, TASK_RUN_HISTORY_PAGE_MAX + 1] {
+            let error = service
+                .task_run_history(TaskRunHistoryQuery {
+                    limit: Some(limit),
+                    ..Default::default()
+                })
+                .await
+                .unwrap_err();
+            assert!(matches!(error, ServiceError::InvalidInput(_)));
+        }
+        assert_eq!(server.received_requests().await.unwrap().len(), 1);
     }
 
     #[tokio::test]

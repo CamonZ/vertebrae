@@ -5,10 +5,66 @@
 
 use crate::error::ServiceResult;
 use crate::models::{
-    ExecutionStatus, HumanInputDraft, SessionLog, StepExecution, TaskRun, TaskRunTrace,
+    ExecutionStatus, HumanInputDraft, Level, SessionLog, StepExecution, TaskRun, TaskRunTrace,
 };
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+/// Largest run-history page Sacrum serves.
+pub const TASK_RUN_HISTORY_PAGE_MAX: usize = 200;
+
+/// Position in a project's run history, ordered by `updated_at` and then
+/// `id`, both descending. A page starts strictly after it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskRunHistoryCursor {
+    pub updated_at: DateTime<Utc>,
+    pub id: String,
+}
+
+/// One run-history request for the active project. `limit` defaults to
+/// Sacrum's 50.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TaskRunHistoryQuery {
+    pub after: Option<TaskRunHistoryCursor>,
+    pub limit: Option<usize>,
+    /// Include runs of completed tasks and runs that finished `completed` or
+    /// `stopped`.
+    pub include_completed: bool,
+    /// Run or task id prefix, or task title substring; case-insensitive.
+    pub search: Option<String>,
+}
+
+/// The task fields needed to label and group a history run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskRunHistoryTask {
+    pub id: String,
+    pub title: String,
+    pub level: Level,
+    pub parent_id: Option<String>,
+    pub workflow_id: Option<String>,
+    pub workflow_name: Option<String>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+/// A history run with its task.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskRunHistoryEntry {
+    pub task_run: TaskRun,
+    pub task: TaskRunHistoryTask,
+}
+
+/// A page of project run history, most recently updated first.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskRunHistoryPage {
+    pub entries: Vec<TaskRunHistoryEntry>,
+    /// True when more entries follow the last one returned.
+    pub has_more: bool,
+    /// Matching entries hidden only by the completed filter; zero when
+    /// completed history is included.
+    pub hidden_completed_count: u64,
+}
 
 /// Event representing an execution mutation for cache invalidation
 #[derive(Debug, Clone)]
@@ -271,6 +327,13 @@ pub trait ExecutionService: Send + Sync {
 
     /// List TaskRuns for a task in backend-defined order.
     async fn task_runs(&self, task_id: &str) -> ServiceResult<Vec<TaskRun>>;
+
+    /// Page through the active project's run history in one request,
+    /// independent of how many tasks the project has.
+    async fn task_run_history(
+        &self,
+        query: TaskRunHistoryQuery,
+    ) -> ServiceResult<TaskRunHistoryPage>;
 
     /// Get one TaskRun by full TaskRun ID.
     async fn task_run(&self, task_run_id: &str) -> ServiceResult<Option<TaskRun>>;

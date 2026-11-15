@@ -116,4 +116,14 @@ export const queryKeys = {
     byTask: (generation: number, taskId: string) =>
       [...queryKeys.taskRuns.all(generation), "byTask", taskId] as const,
   },
+  /** Project-scoped, paginated run history; separate from per-task caches. */
+  taskRunHistory: {
+    all: (generation: number) =>
+      [...queryKeys.project(generation), "taskRunHistory"] as const,
+    list: (generation: number, includeCompleted: boolean, search: string) =>
+      [
+        ...queryKeys.taskRunHistory.all(generation),
+        { includeCompleted, search },
+      ] as const,
+  },
 };

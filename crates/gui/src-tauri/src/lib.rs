@@ -135,6 +135,7 @@ fn create_builder() -> Builder {
             commands::get_execution_logs,
             commands::get_active_run,
             commands::get_task_runs,
+            commands::get_task_run_history,
             commands::get_task_run_trace,
             commands::get_human_input_draft,
             commands::set_human_input_draft,
@@ -492,6 +493,7 @@ mod tests {
         for command in [
             "async getActiveRun(",
             "async getTaskRuns(",
+            "async getTaskRunHistory(",
             "async getTaskRunTrace(",
             "async runWorkflow(",
             "async stopRun(",

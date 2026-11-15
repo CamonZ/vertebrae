@@ -391,6 +391,13 @@ mod tests {
             unused()
         }
 
+        async fn task_run_history(
+            &self,
+            _query: vertebrae_core::TaskRunHistoryQuery,
+        ) -> ServiceResult<vertebrae_core::TaskRunHistoryPage> {
+            unused()
+        }
+
         async fn task_run(&self, _task_run_id: &str) -> ServiceResult<Option<TaskRun>> {
             unused()
         }
