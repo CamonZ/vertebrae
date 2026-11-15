@@ -1,3 +1,4 @@
+import { topologyField, topologyPorts } from "./topology";
 /**
  * run end · stop pauses, finish completes (catalogue "run end"): a stop bar
  * that drops across the rail, and the finish terminal. Frame 120×120,
@@ -51,7 +52,38 @@ export const runEndPart: PartKindDef<Record<string, unknown>, RunEndState> = {
   footprint: "S",
   bb: [270, 140, 120, 120],
   status: { x: 330, y: 318 },
+  props: {
+    topology: topologyField,
+    form: {
+      type: "string",
+      enum: ["combined", "stop", "finish"],
+      default: "combined",
+    },
+  },
   ports,
+  checkProps: (props) => {
+    if (props.topology && props.form === "combined")
+      return [
+        {
+          path: "form",
+          message: "topology requires an explicit stop or finish form",
+        },
+      ];
+    if (!props.topology && props.form !== "combined")
+      return [
+        {
+          path: "form",
+          message: "independent stop/finish forms require topology: true",
+        },
+      ];
+    return [];
+  },
+  resolve: (props) => {
+    if (!props.topology) return {};
+    const resolved = topologyPorts(ports);
+    if (props.form === "finish") delete resolved.out;
+    return { neutral: true, ports: resolved, gates: () => sideGates(resolved) };
+  },
   gates: () => sideGates({ in: ports.in, out: ports.out }),
   init: () => ({ held: null, barDown: false }),
   verbs: {

@@ -1,3 +1,4 @@
+import { topologyField, routeTopology } from "./topology";
 /**
  * route step · picks the next step by rules (catalogue "route step"): rule
  * tiles r1, r2, else lit in order, then the arm swings to the chosen
@@ -50,6 +51,9 @@ const ports = {
 } as const satisfies PartKindDef["ports"];
 
 interface RouteProps {
+  topology?: boolean;
+  decisions?: readonly string[];
+  defaultDecision?: boolean;
   targets: readonly string[];
 }
 
@@ -97,6 +101,13 @@ export const routeStepPart: PartKindDef<RouteProps, Record<string, never>> = {
   bb: [200, 110, 200, 180],
   status: { x: 300, y: 322 },
   props: {
+    topology: topologyField,
+    decisions: {
+      type: "string[]",
+      description:
+        "ordered unique rule names; stable ports use decisionPort(name)",
+    },
+    defaultDecision: { type: "boolean", default: false },
     targets: {
       type: "string[]",
       default: ["review", "docs", "plan"],
@@ -104,6 +115,21 @@ export const routeStepPart: PartKindDef<RouteProps, Record<string, never>> = {
     },
   },
   ports,
+  checkProps: (props) =>
+    props.topology &&
+    Array.isArray(props.decisions) &&
+    new Set(props.decisions).size !== props.decisions.length
+      ? [{ path: "decisions", message: "decision names must be unique" }]
+      : [],
+  resolve: (props) => {
+    if (!props.topology) return {};
+    const geometry = routeTopology(props);
+    return {
+      ...geometry,
+      neutral: true,
+      gates: () => sideGates(geometry.ports),
+    };
+  },
   gates: () => [
     ...sideGates({ in: ports.in }),
     ...Object.values(OUT_Y).map((y) => gateV(400, y)),

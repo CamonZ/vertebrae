@@ -45,6 +45,7 @@ import {
 import { own, withDefaults } from "./fields";
 import {
   HELD,
+  resolvePart,
   TOKEN_SHAPES,
   tokenCard,
   type AnyPartKind,
@@ -126,6 +127,8 @@ export interface DiagramPart {
   readonly positioned: "given" | "layout";
   readonly bb: BBox;
   readonly status: AnyPartKind["status"];
+  /** Hide execution status in static topology, including accessible announcements. */
+  readonly neutral?: boolean;
   /** Mark drawn in this arrangement (the baseline draws everything unchanged). */
   readonly change: ChangeMark;
   readonly changeNote?: string;
@@ -354,8 +357,25 @@ function build(
   const defs = new Map(
     spec.parts.map((p) => [p.id, registry.parts.get(p.kind)!])
   );
-  const scaleOf = (p: PartSpec) =>
-    p.scale ?? FOOTPRINT_SCALE[defs.get(p.id)!.footprint];
+  const plan = new Arrangements(spec, (p, o) =>
+    resolvedProps(defs.get(p.id)!, p.props, o?.props)
+  );
+  // Detail labels are hidden below scale 1. If any arrangement is neutral,
+  // keep the part full-size in every arrangement: labels stay readable and the
+  // shared layout never changes cell size during mode toggles. Pure legacy
+  // flows retain footprint defaults, and explicit scale always wins.
+  const scaleOf = (p: PartSpec) => {
+    if (p.scale !== undefined) return p.scale;
+    const def = defs.get(p.id)!;
+    const neutral = plan.plan.names.some(
+      (a) =>
+        resolvePart(
+          def,
+          resolvedProps(def, p.props, plan.part(p, a).override?.props)
+        ).neutral
+    );
+    return neutral ? 1 : FOOTPRINT_SCALE[def.footprint];
+  };
   const layoutParts: LayoutPart[] = spec.parts.map((p) => ({
     id: p.id,
     kind: p.kind,
@@ -411,9 +431,6 @@ function build(
         attachments: c.attachments ?? [],
       },
     ])
-  );
-  const plan = new Arrangements(spec, (p, o) =>
-    resolvedProps(defs.get(p.id)!, p.props, o?.props)
   );
   const arranged = plan.plan.names.map((a) =>
     arrange(
@@ -497,9 +514,10 @@ function arrange(
   /* parts */
   const runs = new Map<string, PartRun>();
   for (const p of spec.parts) {
-    const def = defs.get(p.id)!;
+    const base = defs.get(p.id)!;
     const reading = plan.part(p, a);
-    const props = resolvedProps(def, p.props, reading.override?.props);
+    const props = resolvedProps(base, p.props, reading.override?.props);
+    const def = resolvePart(base, props);
     runs.set(p.id, {
       spec: p,
       reading,
@@ -872,6 +890,7 @@ function arrange(
       positioned: p.position ? "given" : "layout",
       bb: run.def.bb,
       status: run.def.status,
+      ...(run.def.neutral ? { neutral: true } : {}),
       change,
       ...(changeNote ? { changeNote } : {}),
       portChanges: portChanges as DiagramPart["portChanges"],
@@ -910,10 +929,14 @@ function arrange(
   const counts: Record<string, number> = {};
   for (const m of markers) counts[m.kind] = (counts[m.kind] ?? 0) + 1;
   const width = Math.max(
-    ...parts.map((p) => p.position.x + PART_WIDTH * p.scale)
+    ...parts.map((p) =>
+      Math.max(p.position.x + PART_WIDTH * p.scale, partExtent(p).x1)
+    )
   );
   const height = Math.max(
-    ...parts.map((p) => p.position.y + PART_HEIGHT * p.scale)
+    ...parts.map((p) =>
+      Math.max(p.position.y + PART_HEIGHT * p.scale, partExtent(p).y1)
+    )
   );
 
   return {

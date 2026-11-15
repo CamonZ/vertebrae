@@ -13,6 +13,7 @@ import { HostStub, PlateLine, Wash } from "./draw";
 import type { MachinePartDef, PartScenario } from "./types";
 
 interface ExecuteExtra {
+  readonly topology?: boolean;
   /** When the stamp comes down. */
   readonly st: number;
   /** A script error bursts at this time. */
@@ -170,7 +171,7 @@ export const executeStepMachine: MachinePartDef<ExecuteExtra> = {
     executeStory("script error"),
     executeStory("calls the host"),
   ],
-  draw: (t, { st, crash }) => {
+  draw: (t, { st, crash, topology }) => {
     const k = held(t, st, st + 0.25);
     return (
       <>
@@ -186,9 +187,13 @@ export const executeStepMachine: MachinePartDef<ExecuteExtra> = {
             [616, Y],
           ]}
         />
-        <HostStub x={250} y0={140} y1={96} label="tasks" />
-        <HostStub x={350} y0={140} y1={96} label="artifacts" />
-        <HostStub x={440} y0={140} y1={96} label="cmd" />
+        {!topology && (
+          <>
+            <HostStub x={250} y0={140} y1={96} label="tasks" />
+            <HostStub x={350} y0={140} y1={96} label="artifacts" />
+            <HostStub x={440} y0={140} y1={96} label="cmd" />
+          </>
+        )}
         <PartBox x={200} y={140} w={260} h={120} />
         <rect
           x={306}

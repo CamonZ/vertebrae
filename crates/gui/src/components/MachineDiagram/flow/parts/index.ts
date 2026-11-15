@@ -1,3 +1,4 @@
+import { workflowTopology } from "./topology";
 import { failureDetectorPart } from "./failureDetector";
 import { fencingTokenPart } from "./fencingToken";
 import { gossipPart } from "./gossip";
@@ -116,12 +117,12 @@ export const STARTER_PARTS: readonly AnyPartKind[] = [
   fencingTokenPart,
   twoPhaseCommitPart,
   serviceRegistryPart,
-  inferenceStepPart,
-  structuredStepPart,
-  executeStepPart,
+  workflowTopology(inferenceStepPart),
+  workflowTopology(structuredStepPart),
+  workflowTopology(executeStepPart),
   routeStepPart,
-  waitChildrenPart,
-  humanGatePart,
+  workflowTopology(waitChildrenPart),
+  workflowTopology(humanGatePart),
   runEndPart,
   taskRunPart,
 ];

@@ -312,6 +312,7 @@ function PartView({
       changeNote={p.changeNote}
       markMorph={markMorph}
       status={p.status}
+      neutral={p.neutral}
       x={p.position.x}
       y={p.position.y}
       scale={p.scale}
