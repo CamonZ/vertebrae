@@ -1,4 +1,4 @@
-import { memo, type ReactNode } from "react";
+import { memo, useState, type ReactNode } from "react";
 import { countDescription, type FlowPresentation } from "./presentation";
 import { LiveCount, RegionHeader } from "./RegionHeader";
 import { PortMark, StageMark } from "../ChangeMark";
@@ -13,6 +13,7 @@ import {
   type FitInsets,
   type MachineDiagramViewportProps,
 } from "../MachineDiagramViewport";
+import { LabelLayerContext } from "../labelLayer";
 import { MachinePart } from "../MachinePart";
 import { Wire } from "../Rail";
 import { RailCards } from "../RailCards";
@@ -121,6 +122,7 @@ export const FlowScene = memo(function FlowScene({
   morph,
   children,
 }: FlowSceneProps) {
+  const [labelLayer, setLabelLayer] = useState<SVGGElement | null>(null);
   const e = morph ? morphEase(morph.progress) : undefined;
   const fromPart = new Map(morph?.from.parts.map((p) => [p.id, p]));
   const fromRail = new Map(morph?.from.rails.map((r) => [r.id, r]));
@@ -130,109 +132,114 @@ export const FlowScene = memo(function FlowScene({
     layers: morphLayers(p, fromPart.get(p.id), e, partDiffers),
   }));
   return (
-    <DiagramInteractionContext.Provider value={interaction ?? null}>
-      <MachineDiagram
-        inFlow
-        label={label ?? `flow · ${d.arrangement}`}
-        width={d.width}
-        height={d.height}
-      >
-        {d.regions.map((g) => (
-          <g
-            key={g.id}
-            className="md-region"
-            data-region-id={g.id}
-            data-search-dim={presentation?.dimmed?.has(g.id) || undefined}
-            data-traced={presentation?.traced?.has(g.id) || undefined}
-          >
-            <rect
-              x={g.x}
-              y={g.y}
-              width={g.width}
-              height={g.height}
-              rx={18}
-              fill="none"
-            />
-            {presentation ? (
-              <RegionHeader region={g} presentation={presentation} />
-            ) : (
-              g.label && (
-                <SvgText
-                  x={regionLabelAt(g)[0]}
-                  y={regionLabelAt(g)[1]}
-                  runs={[[g.label, 600, "dim"]]}
-                  size={18}
-                />
-              )
-            )}
-          </g>
-        ))}
-        {d.rails.map((r) => {
-          const from = fromRail.get(r.id);
-          const l = morphLayers(r, from, e, railDiffers);
-          return (
-            <Layered
-              key={r.id}
-              layers={l}
-              to={() => <RailWire rail={r} presentation={presentation} />}
-              from={() => <RailWire rail={from!} />}
-            />
-          );
-        })}
-        {parts.map(({ p, from, layers }) => (
-          <Layered
-            key={p.id}
-            layers={layers}
-            to={() => (
-              <PartView
-                part={p}
-                presentation={presentation}
-                t={t}
-                arrangement={d.arrangement}
-                reducedMotion={reducedMotion}
-                markMorph={layers.morphing ? e : undefined}
+    <LabelLayerContext.Provider value={labelLayer}>
+      <DiagramInteractionContext.Provider value={interaction ?? null}>
+        <MachineDiagram
+          inFlow
+          label={label ?? `flow · ${d.arrangement}`}
+          width={d.width}
+          height={d.height}
+        >
+          {d.regions.map((g) => (
+            <g
+              key={g.id}
+              className="md-region"
+              data-region-id={g.id}
+              data-search-dim={presentation?.dimmed?.has(g.id) || undefined}
+              data-traced={presentation?.traced?.has(g.id) || undefined}
+            >
+              <rect
+                x={g.x}
+                y={g.y}
+                width={g.width}
+                height={g.height}
+                rx={18}
+                fill="none"
               />
-            )}
-            from={() => (
-              // The leaving copy: frozen at the toggle, no id or input.
-              <DiagramInteractionContext.Provider value={null}>
-                <PartView
-                  part={from!}
-                  t={morph!.t}
-                  arrangement={morph!.from.arrangement}
-                  reducedMotion={reducedMotion}
-                  leaving
-                />
-              </DiagramInteractionContext.Provider>
-            )}
-          />
-        ))}
-        {parts
-          .filter(({ p }) => p.scale < 1)
-          .map(({ p, from, layers }) => (
+              {presentation ? (
+                <RegionHeader region={g} presentation={presentation} />
+              ) : (
+                g.label && (
+                  <SvgText
+                    x={regionLabelAt(g)[0]}
+                    y={regionLabelAt(g)[1]}
+                    runs={[[g.label, 600, "dim"]]}
+                    size={18}
+                  />
+                )
+              )}
+            </g>
+          ))}
+          {d.rails.map((r) => {
+            const from = fromRail.get(r.id);
+            const l = morphLayers(r, from, e, railDiffers);
+            return (
+              <Layered
+                key={r.id}
+                layers={l}
+                to={() => <RailWire rail={r} presentation={presentation} />}
+                from={() => <RailWire rail={from!} />}
+              />
+            );
+          })}
+          {parts.map(({ p, from, layers }) => (
             <Layered
-              key={`name:${p.id}`}
+              key={p.id}
               layers={layers}
-              to={() => <NameLabel part={p} />}
-              from={() => <NameLabel part={from!} />}
+              to={() => (
+                <PartView
+                  part={p}
+                  presentation={presentation}
+                  t={t}
+                  arrangement={d.arrangement}
+                  reducedMotion={reducedMotion}
+                  markMorph={layers.morphing ? e : undefined}
+                />
+              )}
+              from={() => (
+                // The leaving copy: frozen at the toggle, no id or input.
+                <DiagramInteractionContext.Provider value={null}>
+                  <PartView
+                    part={from!}
+                    t={morph!.t}
+                    arrangement={morph!.from.arrangement}
+                    reducedMotion={reducedMotion}
+                    leaving
+                  />
+                </DiagramInteractionContext.Provider>
+              )}
             />
           ))}
-        {d.band && (
-          <FlowBand
-            band={d.band}
-            t={t}
-            reducedMotion={reducedMotion}
-            morph={
-              morph?.from.band && e !== undefined && e < 1
-                ? { from: morph.from.band, t: morph.t, e }
-                : undefined
-            }
-          />
-        )}
-        <RailCards timeline={d.travel} t={t} reducedMotion={reducedMotion} />
-        {children}
-      </MachineDiagram>
-    </DiagramInteractionContext.Provider>
+          {parts
+            .filter(({ p }) => p.scale < 1 && !p.labels)
+            .map(({ p, from, layers }) => (
+              <Layered
+                key={`name:${p.id}`}
+                layers={layers}
+                to={() => <NameLabel part={p} />}
+                from={() => <NameLabel part={from!} />}
+              />
+            ))}
+          {d.band && (
+            <FlowBand
+              band={d.band}
+              t={t}
+              reducedMotion={reducedMotion}
+              morph={
+                morph?.from.band && e !== undefined && e < 1
+                  ? { from: morph.from.band, t: morph.t, e }
+                  : undefined
+              }
+            />
+          )}
+          <RailCards timeline={d.travel} t={t} reducedMotion={reducedMotion} />
+          {children}
+          {d.parts.some((p) => p.labels) && (
+            <g ref={setLabelLayer} className="md-label-layer" />
+          )}
+        </MachineDiagram>
+      </DiagramInteractionContext.Provider>
+    </LabelLayerContext.Provider>
   );
 });
 
@@ -367,6 +374,7 @@ function PartView({
       <MachinePart
         id={leaving ? undefined : p.id}
         part={p.identity}
+        labelPlacement={p.labels}
         bb={p.bb}
         timeline={p.timeline}
         t={t}

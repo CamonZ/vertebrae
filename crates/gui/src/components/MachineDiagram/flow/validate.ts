@@ -15,10 +15,13 @@ import {
   type TokenKind,
 } from "./spec";
 
+import { TITLE_PLACEMENTS, SUBTITLE_PLACEMENTS } from "../partLabels";
+
 const ID = /^[A-Za-z][A-Za-z0-9_-]*$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const TOP_FIELDS = [
+  "labels",
   "version",
   "title",
   "arrangements",
@@ -33,6 +36,7 @@ const TOP_FIELDS = [
   "attachments",
 ];
 const PART_FIELDS = [
+  "labels",
   "id",
   "kind",
   "label",
@@ -523,6 +527,7 @@ function check(c: Checker, input: unknown, root: string) {
 
 function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
   c.unknownFields(input, TOP_FIELDS, root);
+  checkLabels(c, input.labels, join(root, "labels"));
   if (input.version === undefined)
     c.err(
       join(root, "version"),
@@ -551,6 +556,7 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
     const p = join(join(root, "parts"), i);
     if (!isRecord(raw)) return c.err(p, "expected a part object");
     c.unknownFields(raw, PART_FIELDS, p);
+    checkLabels(c, raw.labels, join(p, "labels"));
     const id = c.id(raw, p, partIds, "part");
     const kind = c.str(raw, "kind", p, true);
     for (const k of ["label", "job", "changeNote"]) c.str(raw, k, p);
@@ -1343,5 +1349,18 @@ export function resolvedProps(
   return withDefaults(
     { ...(base ?? {}), ...(override ?? {}) },
     def.props ?? {}
+  );
+}
+
+function checkLabels(c: Checker, value: unknown, path: string) {
+  if (value === undefined) return;
+  checkFields(
+    value,
+    {
+      title: { type: "string", enum: TITLE_PLACEMENTS },
+      subtitle: { type: "string", enum: SUBTITLE_PLACEMENTS },
+    },
+    path,
+    c.errors
   );
 }

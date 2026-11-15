@@ -140,7 +140,7 @@
   opacity: 0.8;
   stroke-dasharray: none;
 }
-.md-part[role="button"]:focus-visible .md-part-ring {
+.md-part[tabindex="0"]:focus-visible .md-part-ring {
   opacity: 1;
   stroke-width: 6;
   stroke-dasharray: none;

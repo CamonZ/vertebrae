@@ -1,5 +1,7 @@
 import {
   useMemo,
+  useState,
+  useContext,
   type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
@@ -10,6 +12,10 @@ import {
   type ChangeMark as Mark,
   type PartIdentity,
 } from "./accessibility";
+import { roleColor } from "./palette";
+import { createPortal } from "react-dom";
+import { LabelLayerContext } from "./labelLayer";
+import { placedLabels, type PartLabels } from "./partLabels";
 import { Card } from "./Card";
 import { ChangeMark, RemovedGhost, type BBox } from "./ChangeMark";
 import { Gate } from "./Gate";
@@ -74,6 +80,7 @@ export interface MachinePartProps {
   labels?: boolean;
   /** Draw the name · job title and "also" line. */
   title?: boolean;
+  labelPlacement?: PartLabels;
   /** Appended to an interactive part's accessible name (what activation does). */
   activationHint?: string;
   /** Additional current information included in the accessible name. */
@@ -110,6 +117,7 @@ export function MachinePart({
   scale = 1,
   labels,
   title = true,
+  labelPlacement,
   smear = true,
   activationHint,
   accessibleDetail,
@@ -117,6 +125,9 @@ export function MachinePart({
   children,
 }: MachinePartProps) {
   const parent = usePart();
+  const layer = useContext(LabelLayerContext);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
   const prefersReduced = useReducedMotion();
   const reduced = reducedMotion ?? prefersReduced;
   const effective: DiagramPose = change === "removed" ? "removed" : pose;
@@ -148,6 +159,54 @@ export function MachinePart({
       ? `translate(${x} ${y})${scale !== 1 ? ` scale(${scale})` : ""}`
       : undefined;
 
+  const reveal =
+    labelPlacement?.title === "hover" || labelPlacement?.subtitle === "hover";
+  const handlers =
+    interactive && id !== undefined
+      ? partHandlers(id, interaction!)
+      : undefined;
+  const labelLines = (hover: boolean) =>
+    labelPlacement && title && (labels ?? parent.labels) ? (
+      <PartContext.Provider value={{ ...ctx, labels: true }}>
+        <g
+          transform={`scale(${1 / scale})`}
+          pointerEvents="none"
+          aria-hidden
+          data-part-labels={id ?? part.name}
+        >
+          {placedLabels({
+            identity: part,
+            bb,
+            scale,
+            timeline,
+            labels: labelPlacement,
+            change,
+            changeNote,
+          })
+            .filter((l) => l.hover === hover && (!hover || hovered || focused))
+            .map((l) => (
+              <g key={l.key}>
+                {hover && (
+                  <rect
+                    x={l.box.x0 - 6}
+                    y={l.box.y0 - 3}
+                    width={l.box.x1 - l.box.x0 + 12}
+                    height={l.box.y1 - l.box.y0 + 6}
+                    rx={4}
+                    fill={roleColor("bg")}
+                  />
+                )}
+                <SvgText
+                  x={l.x}
+                  y={l.y}
+                  size={l.size}
+                  runs={[[l.text, l.weight, l.role]]}
+                />
+              </g>
+            ))}
+        </g>
+      </PartContext.Provider>
+    ) : null;
   return (
     <PartContext.Provider value={ctx}>
       <g
@@ -162,14 +221,34 @@ export function MachinePart({
         data-part-id={id}
         data-pose={effective}
         transform={transform}
-        {...(interactive && id !== undefined
-          ? partHandlers(id, interaction!)
+        {...handlers}
+        {...(reveal
+          ? {
+              tabIndex: 0,
+              onMouseEnter: () => {
+                setHovered(true);
+                handlers?.onMouseEnter();
+              },
+              onMouseLeave: () => {
+                setHovered(false);
+                handlers?.onMouseLeave();
+              },
+              onFocus: (e: FocusEvent<SVGGElement>) => {
+                setFocused(true);
+                handlers?.onFocus(e);
+              },
+              onBlur: (e: FocusEvent<SVGGElement>) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node | null))
+                  setFocused(false);
+                handlers?.onBlur(e);
+              },
+            }
           : {})}
         data-active={
           interactive && interaction?.activePart === id ? "true" : undefined
         }
       >
-        {interactive && <PartHit bb={bb} />}
+        {(interactive || reveal) && <PartHit bb={bb} />}
         {children?.(frame)}
         {!neutral && (
           <StatusLine
@@ -190,15 +269,17 @@ export function MachinePart({
         )}
         {title && (
           <>
-            <SvgText
-              x={24}
-              y={36}
-              runs={[
-                [part.name, 600, "ink"],
-                [`  ·  ${part.job}`, 400, "dim"],
-              ]}
-              size={22}
-            />
+            {!labelPlacement && (
+              <SvgText
+                x={24}
+                y={36}
+                runs={[
+                  [part.name, 600, "ink"],
+                  [`  ·  ${part.job}`, 400, "dim"],
+                ]}
+                size={22}
+              />
+            )}
             {change === "changed" && changeNote && (
               <SvgText
                 x={24}
@@ -218,7 +299,15 @@ export function MachinePart({
           </>
         )}
         <ChangeMark mark={change} bb={bb} tab={tab} morph={markMorph} />
-        {interactive && <PartRing bb={bb} />}
+        {(interactive || reveal) && <PartRing bb={bb} />}
+        {labelLines(false)}
+        {(hovered || focused) &&
+          (layer
+            ? createPortal(
+                <g transform={transform}>{labelLines(true)}</g>,
+                layer
+              )
+            : labelLines(true))}
       </g>
     </PartContext.Provider>
   );

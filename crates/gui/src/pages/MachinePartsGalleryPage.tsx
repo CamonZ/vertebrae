@@ -24,6 +24,13 @@ import {
 import { useShellHeader } from "../hooks/useShellHeader";
 import { useUIStore } from "../stores/uiStore";
 
+import {
+  placedLabels,
+  TITLE_PLACEMENTS,
+  SUBTITLE_PLACEMENTS,
+  type PartLabels,
+} from "../components/MachineDiagram/partLabels";
+
 const CHANGE_MARKS: readonly ChangeMark[] = [
   "unchanged",
   "added",
@@ -107,6 +114,7 @@ function useClock(playing: boolean): number {
 }
 
 interface CellProps {
+  labelPlacement?: PartLabels;
   name: string;
   def: MachinePartDef;
   column: Column;
@@ -117,6 +125,7 @@ interface CellProps {
 }
 
 function GalleryCell({
+  labelPlacement,
   name,
   def,
   column,
@@ -134,6 +143,22 @@ function GalleryCell({
     view = { kind: "state", state: column.state };
   }
   const caption = `${columnLabel(column)} · ${MARK_LABEL[mark]}`;
+  const sc = def.scenarios[view.kind === "scenario" ? view.index : 0];
+  const boxes = labelPlacement
+    ? placedLabels({
+        identity: def.part,
+        bb: sc.bb ?? def.bb,
+        timeline: sc.timeline,
+        scale: 1,
+        labels: labelPlacement,
+        change: mark,
+        changeNote: mark === "changed" ? "config edited" : undefined,
+      }).map((l) => l.box)
+    : [];
+  const x0 = Math.min(0, ...boxes.map((b) => b.x0 - 24));
+  const y0 = Math.min(0, ...boxes.map((b) => b.y0 - 24));
+  const width = Math.max(640, ...boxes.map((b) => b.x1 + 24)) - x0;
+  const height = 400 - y0;
   return (
     <figure
       className="flex flex-col gap-1"
@@ -142,10 +167,15 @@ function GalleryCell({
       <MachineDiagram
         label={`${name} · ${caption}`}
         labels={labels}
+        width={width}
+        height={height}
         className="h-auto w-[240px] rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)]"
       >
         <CatalogPart
           def={def}
+          labelPlacement={labelPlacement}
+          x={-x0}
+          y={-y0}
           view={view}
           change={mark}
           changeNote={mark === "changed" ? "config edited" : undefined}
@@ -168,6 +198,7 @@ export function MachinePartsGalleryPage() {
   const [partFilter, setPartFilter] = useState<MachinePartName | "all">("all");
   const [markFilter, setMarkFilter] = useState<ChangeMark | "all">("all");
   const [labels, setLabels] = useState(true);
+  const [labelPlacement, setLabelPlacement] = useState<PartLabels>();
   // Animate by default; reduced-motion users start on the still frames.
   const [playing, setPlaying] = useState(() => !reducedMotion);
   const clock = useClock(playing);
@@ -207,6 +238,50 @@ export function MachinePartsGalleryPage() {
             {m === "all" ? "all" : MARK_LABEL[m]}
           </ToggleChip>
         ))}
+        <label>
+          Title{" "}
+          <select
+            aria-label="Title placement"
+            value={labelPlacement?.title ?? "legacy"}
+            onChange={(e) =>
+              setLabelPlacement(
+                e.target.value === "legacy"
+                  ? undefined
+                  : {
+                      ...labelPlacement,
+                      title: e.target.value as PartLabels["title"],
+                    }
+              )
+            }
+          >
+            <option value="legacy">default</option>
+            {TITLE_PLACEMENTS.map((v) => (
+              <option key={v}>{v}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Subtitle{" "}
+          <select
+            aria-label="Subtitle placement"
+            value={labelPlacement?.subtitle ?? "legacy"}
+            onChange={(e) =>
+              setLabelPlacement(
+                e.target.value === "legacy"
+                  ? undefined
+                  : {
+                      ...labelPlacement,
+                      subtitle: e.target.value as PartLabels["subtitle"],
+                    }
+              )
+            }
+          >
+            <option value="legacy">default</option>
+            {SUBTITLE_PLACEMENTS.map((v) => (
+              <option key={v}>{v}</option>
+            ))}
+          </select>
+        </label>
         <Button
           size="sm"
           className="ml-3"
@@ -262,6 +337,7 @@ export function MachinePartsGalleryPage() {
                       key={columnLabel(column)}
                       name={name}
                       def={def}
+                      labelPlacement={labelPlacement}
                       column={column}
                       mark={mark}
                       labels={labels}

@@ -117,6 +117,7 @@ export type DrillTarget =
   | { readonly kind: "artifact"; readonly artifact: string };
 
 export interface DiagramPart {
+  readonly labels?: import("../partLabels").PartLabels;
   readonly id: string;
   readonly kind: string;
   readonly identity: PartIdentity;
@@ -885,6 +886,9 @@ function arrange(
       id: p.id,
       kind: p.kind,
       identity: { name: p.label ?? p.kind, job: p.job ?? run.def.job },
+      ...(spec.labels || p.labels
+        ? { labels: { ...spec.labels, ...p.labels } }
+        : {}),
       footprint: run.def.footprint,
       scale: s,
       position: positions.get(p.id)!,

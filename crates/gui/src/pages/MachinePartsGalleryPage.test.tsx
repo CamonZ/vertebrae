@@ -10,7 +10,8 @@ import { DEV_MACHINE_PARTS_PATH } from "../devRoutes";
 // Part rendering is covered individually in parts/parts.test.tsx. Keep page
 // interaction tests independent of the size of the production catalogue.
 vi.mock("../components/MachineDiagram/parts", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../components/MachineDiagram/parts")>();
+  const actual =
+    await importOriginal<typeof import("../components/MachineDiagram/parts")>();
   return {
     ...actual,
     MACHINE_PARTS: {
@@ -117,4 +118,51 @@ describe("MachinePartsGalleryPage", () => {
       root?.children?.some((r) => r.path === DEV_MACHINE_PARTS_PATH.slice(1))
     ).toBe(import.meta.env.DEV);
   });
+});
+
+it.each([
+  ["shown", "beside"],
+  ["shown", "below"],
+  ["shown", "hidden"],
+  ["shown", "hover"],
+  ["hidden", "beside"],
+  ["hidden", "below"],
+  ["hidden", "hidden"],
+  ["hidden", "hover"],
+  ["hover", "beside"],
+  ["hover", "below"],
+  ["hover", "hidden"],
+  ["hover", "hover"],
+])("gallery renders title %s and subtitle %s", (title, subtitle) => {
+  render(<MachinePartsGalleryPage />);
+  fireEvent.change(screen.getByRole("combobox", { name: "Title placement" }), {
+    target: { value: title },
+  });
+  fireEvent.change(
+    screen.getByRole("combobox", { name: "Subtitle placement" }),
+    { target: { value: subtitle } }
+  );
+  const cell = cells("source")[0];
+  const header = () =>
+    cell.querySelector("[data-part-labels]")?.textContent ?? "";
+  const def = MACHINE_PARTS.source;
+  expect(header().includes(def.part.name)).toBe(title === "shown");
+  expect(header().includes(def.part.job)).toBe(
+    subtitle === "beside" || subtitle === "below"
+  );
+  if (title === "hover" || subtitle === "hover") {
+    const part = cell.querySelector(".md-part")!;
+    fireEvent.focus(part);
+    const revealed = [...cell.querySelectorAll("[data-part-labels]")]
+      .map((n) => n.textContent)
+      .join("");
+    expect(revealed.includes(def.part.name)).toBe(title !== "hidden");
+    expect(revealed.includes(def.part.job)).toBe(subtitle !== "hidden");
+    fireEvent.blur(part);
+  }
+  fireEvent.change(screen.getByRole("combobox", { name: "Title placement" }), {
+    target: { value: "legacy" },
+  });
+  expect(cell.querySelector("[data-part-labels]")).toBeNull();
+  expect(cell.querySelector(".md-part")?.textContent).toContain(def.part.name);
 });

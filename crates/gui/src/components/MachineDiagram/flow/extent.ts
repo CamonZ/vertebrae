@@ -13,6 +13,7 @@ import type {
   DiagramTimeline,
 } from "./compile";
 import type { Point } from "../route";
+import { placedLabels } from "../partLabels";
 import { LINE_EM, textBox, type Box } from "./measure";
 import {
   BAND_CHIP_HEIGHT,
@@ -111,6 +112,7 @@ const TAB_TEXT = {
 
 type PartGeometry = Pick<
   DiagramPart,
+  | "labels"
   | "id"
   | "identity"
   | "scale"
@@ -139,7 +141,7 @@ export function partLabelsLocal(p: PartGeometry): LabelBox[] {
   if (s >= 1) {
     // MachinePart: title, change note and "also" line; status line; tab.
     const title = `${p.identity.name}  ·  ${p.identity.job}`;
-    add("title", title, textBox(24, 36, title, 22));
+    if (!p.labels) add("title", title, textBox(24, 36, title, 22));
     if (p.change === "changed" && p.changeNote)
       add("note", p.changeNote, textBox(24, 64, p.changeNote, 18));
     if (p.identity.aka) {
@@ -166,11 +168,15 @@ export function partLabelsLocal(p: PartGeometry): LabelBox[] {
         y1: ty + 14,
       });
     }
-  } else {
+  } else if (!p.labels) {
     // FlowDiagram names a part drawn under full scale above its frame.
     const name = p.identity.name;
     const [x, y] = nameLabelLocal(p);
     add("name", name, textBox(x, y, name, NAME_SIZE, "center"), false);
+  }
+  if (p.labels) {
+    for (const l of placedLabels({ ...p, labels: p.labels }))
+      if (!l.hover) add("title", l.text, l.box, false);
   }
   return out;
 }

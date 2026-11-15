@@ -14,6 +14,8 @@ import {
   WIRE_CHANGE_MARKS,
 } from "./spec";
 
+import { TITLE_PLACEMENTS, SUBTITLE_PLACEMENTS } from "../partLabels";
+
 const id = { type: "string", pattern: "^[A-Za-z][A-Za-z0-9_-]*$" };
 const endpoint = {
   type: "string",
@@ -123,6 +125,7 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
     required: ["version", "parts"],
     additionalProperties: false,
     properties: {
+      labels: ref("labels"),
       version: { const: FLOW_SPEC_VERSION },
       title: { type: "string" },
       arrangements: {
@@ -154,6 +157,14 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
     },
     not: { required: ["arrangements", "phases"] },
     $defs: {
+      labels: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          title: { enum: TITLE_PLACEMENTS },
+          subtitle: { enum: SUBTITLE_PLACEMENTS },
+        },
+      },
       arrangementDecl: {
         oneOf: [
           id,
@@ -195,6 +206,7 @@ export function flowSpecJsonSchema(registry: FlowRegistry): JsonSchema {
           kind: { enum: partKinds },
           label: { type: "string" },
           job: { type: "string" },
+          labels: ref("labels"),
           props: { type: "object" },
           change: { enum: CHANGE_MARKS },
           changeNote: { type: "string" },
