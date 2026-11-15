@@ -9,7 +9,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use vertebrae_core::artifact_service::ArtifactService;
 use vertebrae_core::error::{ServiceError, ServiceResult};
-use vertebrae_core::execution_service::{ExecutionService, StopRunTarget};
+use vertebrae_core::execution_service::{
+    ExecutionService, StopRunTarget, TaskRunHistoryEntry, TaskRunHistoryPage, TaskRunHistoryQuery,
+    TaskRunHistoryTask,
+};
 use vertebrae_core::models::*;
 use vertebrae_core::notification_service::{
     validate_notification_message, Notification, NotificationPage, NotificationPageQuery,
@@ -1043,6 +1046,77 @@ impl ExecutionService for MockExecutionService {
             .collect();
         runs.sort_by_key(|run| run.inserted_at);
         Ok(runs)
+    }
+
+    async fn task_run_history(
+        &self,
+        query: TaskRunHistoryQuery,
+    ) -> ServiceResult<TaskRunHistoryPage> {
+        let s = self.state.lock().unwrap();
+        let search = query
+            .search
+            .as_deref()
+            .map(|search| search.trim().to_lowercase())
+            .unwrap_or_default();
+        let finished = |run: &TaskRun| {
+            matches!(
+                run.status,
+                TaskRunStatus::Completed | TaskRunStatus::Stopped
+            )
+        };
+        let mut matching: Vec<(&TaskRun, &Task)> = s
+            .task_runs
+            .values()
+            .filter_map(|run| s.tasks.get(&run.task_id).map(|task| (run, task)))
+            // Sacrum joins each run's task to its workflow.
+            .filter(|(_, task)| task.workflow_id.is_some() && !task.archived)
+            .filter(|(run, task)| {
+                search.is_empty()
+                    || run.id.to_lowercase().starts_with(&search)
+                    || task.id.to_lowercase().starts_with(&search)
+                    || task.title.to_lowercase().contains(&search)
+            })
+            .collect();
+        let hidden_completed_count = if query.include_completed {
+            0
+        } else {
+            matching
+                .iter()
+                .filter(|(run, task)| task.completed_at.is_none() && finished(run))
+                .count() as u64
+        };
+        if !query.include_completed {
+            matching.retain(|(run, task)| task.completed_at.is_none() && !finished(run));
+        }
+        matching.sort_by(|(a, _), (b, _)| (b.updated_at, &b.id).cmp(&(a.updated_at, &a.id)));
+        if let Some(cursor) = &query.after {
+            matching.retain(|(run, _)| {
+                (run.updated_at, &run.id) < (Some(cursor.updated_at), &cursor.id)
+            });
+        }
+        let limit = query.limit.unwrap_or(50);
+        let has_more = matching.len() > limit;
+        let entries = matching
+            .into_iter()
+            .take(limit)
+            .map(|(run, task)| TaskRunHistoryEntry {
+                task_run: run.clone(),
+                task: TaskRunHistoryTask {
+                    id: task.id.clone(),
+                    title: task.title.clone(),
+                    level: task.level.clone(),
+                    parent_id: task.parent_id.clone(),
+                    workflow_id: task.workflow_id.clone(),
+                    workflow_name: task.workflow_name.clone(),
+                    completed_at: task.completed_at,
+                },
+            })
+            .collect();
+        Ok(TaskRunHistoryPage {
+            entries,
+            has_more,
+            hidden_completed_count,
+        })
     }
 
     async fn task_run(&self, task_run_id: &str) -> ServiceResult<Option<TaskRun>> {

@@ -259,6 +259,22 @@ After changing the Rust Tauri types, regenerate bindings with
 `npm run generate:types` and keep `src/bindings.ts` limited to the reviewed
 contract changes.
 
+### Run history in local chat history
+
+The maximized chat sidebar lists the current project's TaskRuns from one
+project-scoped, paginated query (`getTaskRunHistory`, Sacrum's
+`projectRunHistory`), cached under `queryKeys.taskRunHistory` per project
+generation, completed filter and debounced search. The initial load is one
+request whatever the project's task count, and collapsing and expanding chat
+reuses the cached pages (kept 30 minutes after the sidebar unmounts). **Load
+older runs** fetches the next page from the cursor captured with the previous
+page. `task_run_changed` events update, add or (under the completed filter)
+drop cached entries; a run whose task no cache knows reloads that list, and a
+websocket reconnect reloads loaded pages. The live task list overrides page task
+titles, completion and archival between fetches. This cache is separate from
+the per-task `taskRuns.byTask` entries, which task-list hydration seeds with
+only the active run, so those partial snapshots never stand in for history.
+
 ### Completed conversations in local chat history
 
 The maximized chat sidebar hides conversations associated with a ticket or task

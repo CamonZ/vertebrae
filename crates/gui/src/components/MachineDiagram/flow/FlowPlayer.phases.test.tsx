@@ -146,6 +146,7 @@ describe("a phased flow", () => {
     );
   });
 
+  // Hundreds of 16ms act() steps render each frame; CI runners take 3-6s.
   it("playing into a new phase holds on the beat's start while the morph plays", () => {
     vi.useFakeTimers({
       toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"],
@@ -173,7 +174,7 @@ describe("a phased flow", () => {
     for (k = 0; k < 10; k++) act(() => vi.advanceTimersByTime(16));
     expect(shownT()).toBeGreaterThan(held);
     expect(shown()).toBe("flagged");
-  });
+  }, 15_000);
 
   it("under reduced motion a boundary switches the phase without a morph", () => {
     renderPlayer(true);

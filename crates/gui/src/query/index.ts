@@ -6,6 +6,13 @@ export {
   taskRunsQueryOptions,
 } from "./taskRunQueries";
 export {
+  TASK_RUN_HISTORY_PAGE_SIZE,
+  reconcileTaskRunHistory,
+  taskRunHistoryQueryOptions,
+  upsertTaskRunInHistoryCache,
+} from "./taskRunHistoryQueries";
+export type { TaskRunHistoryData } from "./taskRunHistoryQueries";
+export {
   CommandResultError,
   errorMessage,
   unwrapCommand,

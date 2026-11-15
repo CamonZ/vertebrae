@@ -717,6 +717,21 @@ async getTaskRuns(taskId: string) : Promise<Result<TaskRun[], CommandError>> {
 }
 },
 /**
+ * Page through the current project's run history in one request.
+ *
+ * `limit` defaults to Sacrum's page size. Without `include_completed`, runs
+ * of completed tasks and runs that finished completed or stopped are left
+ * out; `hidden_completed_count` counts only the finished runs of open tasks.
+ */
+async getTaskRunHistory(includeCompleted: boolean, search: string | null, after: TaskRunHistoryCursor | null, limit: number | null) : Promise<Result<TaskRunHistoryPage, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_task_run_history", { includeCompleted, search, after, limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Get the trace for a single TaskRun.
  *
  * `root_task_run_id` is a legacy parameter name; Sacrum accepts any TaskRun
@@ -2899,6 +2914,35 @@ export type TaskRunControls = { runnable?: boolean; stoppable?: boolean; disable
  * both a JSON null and a failed deserialization otherwise become `None`.
  */
 export type TaskRunControlsPayload = { kind: "present"; controls: TaskRunControls } | { kind: "deleted" } | { kind: "malformed" }
+/**
+ * Position in a project's run history: the `updated_at` (ISO 8601) and `id`
+ * of the last entry already held.
+ */
+export type TaskRunHistoryCursor = { updated_at: string; id: string }
+/**
+ * A history run with its task.
+ */
+export type TaskRunHistoryEntry = { task_run: TaskRun; task: TaskRunHistoryTask }
+/**
+ * A page of the active project's run history, most recently updated first.
+ */
+export type TaskRunHistoryPage = { entries: TaskRunHistoryEntry[];
+/**
+ * True when more entries follow the last one returned.
+ */
+has_more: boolean;
+/**
+ * Matching entries hidden only by the completed filter.
+ */
+hidden_completed_count: number }
+/**
+ * Task fields the run-history sidebar labels and groups a run by.
+ */
+export type TaskRunHistoryTask = { id: string; title: string; level: TaskLevel; parent_id: string | null; workflow_id: string | null; workflow_name: string | null;
+/**
+ * When the task completed (ISO 8601 string)
+ */
+completed_at: string | null }
 /**
  * Durable lifecycle status for a task workflow run.
  */

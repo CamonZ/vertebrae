@@ -1,16 +1,24 @@
-import { useMemo } from "react";
-import { useQueries } from "@tanstack/react-query";
-import type { Task, TaskRun } from "../bindings";
-import { queryClient, taskRunsQueryOptions } from "../query";
+import { useEffect, useMemo, useState } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import type { Task, TaskRun, TaskRunHistoryTask } from "../bindings";
+import {
+  queryClient,
+  taskRunHistoryQueryOptions,
+  type TaskRunHistoryData,
+} from "../query";
+import {
+  historyRunMatchesQuery,
+  isCompletedRun,
+} from "../query/taskRunHistoryQueries";
 import { useProjectScopeGeneration } from "../stores/projectScopedStores";
 import { normalizeLocalChatSessionQuery } from "../utils/localChatSessionGroups";
 import type { LocalChatRunRow } from "../utils/localChatSessionGroups";
 import { useTasks } from "./useTasks";
 
-/** Terminal runs that finished cleanly count as completed history. */
-export function isCompletedRun(run: Pick<TaskRun, "status">): boolean {
-  return run.status === "completed" || run.status === "stopped";
-}
+export { isCompletedRun };
+
+/** Typing settles before a search reaches the server. */
+export const HISTORY_SEARCH_DEBOUNCE_MS = 200;
 
 export function runActivityAt(run: TaskRun): string {
   return (
@@ -28,17 +36,8 @@ export function runMatchesQuery(
   task: Pick<Task, "title"> | undefined,
   query: string
 ): boolean {
-  const normalized = normalizeLocalChatSessionQuery(query);
-  if (!normalized) return true;
-  return (
-    run.id.toLowerCase().startsWith(normalized) ||
-    run.task_id.toLowerCase().startsWith(normalized) ||
-    (task?.title.toLowerCase().includes(normalized) ?? false)
-  );
+  return historyRunMatchesQuery(run, task, query);
 }
-
-const runData = (results: { data?: TaskRun[] }[]) =>
-  results.map((result) => result.data);
 
 interface UseHistoryRunsOptions {
   /** Runs live in the backend's current project only. */
@@ -53,12 +52,51 @@ export interface HistoryRuns {
   hiddenCompletedCount: number;
   /** Current-project task metadata for grouping run tasks. */
   tasksById: ReadonlyMap<string, Task>;
+  /** More history exists beyond the loaded pages. */
+  hasMore: boolean;
+  loadingMore: boolean;
+  loadMore: () => void;
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    if (Object.is(value, debounced)) return;
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, debounced, delayMs]);
+  return debounced;
+}
+
+/** Page task fields as a Task, for groups whose task the list lacks. */
+function taskFromHistory(task: TaskRunHistoryTask): Task {
+  return {
+    id: task.id,
+    title: task.title,
+    level: task.level,
+    parent_id: task.parent_id,
+    workflow_id: task.workflow_id,
+    workflow_name: task.workflow_name,
+    completed_at: task.completed_at,
+    description: null,
+    priority: null,
+    current_step_id: null,
+    step_name: null,
+    step_type: null,
+    worktree: null,
+    rejection_reason: null,
+    created_at: null,
+    updated_at: null,
+    started_at: null,
+  };
 }
 
 /**
- * Run rows for the chat history panel. v1 lists runs per task with
- * getTaskRuns for the current project's workflow tasks; completed tasks are
- * only queried while completed history is shown.
+ * Run rows for the chat history panel, from one project-scoped, paginated
+ * history query: the initial load is one request whatever the project's task
+ * count. Pages are cached per project and filter, so collapsing and expanding
+ * chat reuses them; realtime TaskRun events keep them current. The live task
+ * list refreshes labels and completion between history fetches.
  */
 export function useHistoryRuns({
   enabled,
@@ -67,49 +105,55 @@ export function useHistoryRuns({
 }: UseHistoryRunsOptions): HistoryRuns {
   const generation = useProjectScopeGeneration();
   const { tasks } = useTasks(undefined, { enabled });
-
-  const candidates = useMemo(
-    () =>
-      enabled
-        ? tasks.filter(
-            (task) =>
-              task.workflow_id &&
-              !task.archived &&
-              (showCompleted || !task.completed_at)
-          )
-        : [],
-    [enabled, showCompleted, tasks]
+  const search = useDebouncedValue(
+    normalizeLocalChatSessionQuery(searchQuery),
+    HISTORY_SEARCH_DEBOUNCE_MS
   );
 
-  const runLists = useQueries(
-    {
-      queries: candidates.map((task) => ({
-        ...taskRunsQueryOptions(generation, task.id),
-        // Task-list hydration seeds only the active run; load full history.
-        refetchOnMount: "always" as const,
-      })),
-      combine: runData,
-    },
-    queryClient
-  );
+  const { data, hasNextPage, isFetchingNextPage, fetchNextPage } =
+    useInfiniteQuery(
+      {
+        ...taskRunHistoryQueryOptions(generation, showCompleted, search),
+        enabled,
+        // Keep the previous filter's rows while the next one loads, within one
+        // project only.
+        placeholderData: (
+          previous: TaskRunHistoryData | undefined,
+          previousQuery
+        ) => (previousQuery?.queryKey[1] === generation ? previous : undefined),
+      },
+      queryClient
+    );
 
-  const tasksById = useMemo(
+  const liveTasksById = useMemo(
     () => new Map(tasks.map((task) => [task.id, task])),
     [tasks]
   );
 
+  const pages = enabled ? data?.pages : undefined;
+
   return useMemo(() => {
     const rows: LocalChatRunRow[] = [];
-    let hiddenCompletedCount = 0;
+    const tasksById = new Map(liveTasksById);
+    const seen = new Set<string>();
+    const hiddenCompletedCount = pages?.[0]?.hidden_completed_count ?? 0;
 
-    candidates.forEach((task, index) => {
-      for (const run of runLists[index] ?? []) {
+    for (const page of pages ?? []) {
+      for (const { task_run: run, task: pageTask } of page.entries) {
+        if (seen.has(run.id)) continue;
+        seen.add(run.id);
+
+        const live = liveTasksById.get(pageTask.id);
+        if (live?.archived) continue;
+        if (!tasksById.has(pageTask.id))
+          tasksById.set(pageTask.id, taskFromHistory(pageTask));
+
+        const task = live ?? taskFromHistory(pageTask);
+        // The live task wins: completion and titles change between fetches.
         if (!runMatchesQuery(run, task, searchQuery)) continue;
         const completed = !!task.completed_at || isCompletedRun(run);
-        if (completed && !showCompleted) {
-          hiddenCompletedCount += 1;
-          continue;
-        }
+        if (completed && !showCompleted) continue;
+
         rows.push({
           id: run.id,
           taskId: task.id,
@@ -119,8 +163,26 @@ export function useHistoryRuns({
           completed,
         });
       }
-    });
+    }
 
-    return { rows, hiddenCompletedCount, tasksById };
-  }, [candidates, runLists, searchQuery, showCompleted, tasksById]);
+    return {
+      rows,
+      hiddenCompletedCount,
+      tasksById,
+      hasMore: enabled && hasNextPage,
+      loadingMore: isFetchingNextPage,
+      loadMore: () => {
+        if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+      },
+    };
+  }, [
+    enabled,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    liveTasksById,
+    pages,
+    searchQuery,
+    showCompleted,
+  ]);
 }

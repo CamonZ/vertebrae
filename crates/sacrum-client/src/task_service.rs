@@ -319,7 +319,7 @@ impl SacrumTaskService {
     }
 }
 
-fn parse_level(s: &str) -> Option<Level> {
+pub(crate) fn parse_level(s: &str) -> Option<Level> {
     match s {
         "epic" => Some(Level::Epic),
         "ticket" => Some(Level::Ticket),

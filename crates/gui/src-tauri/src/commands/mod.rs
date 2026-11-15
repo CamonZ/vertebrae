@@ -14,7 +14,7 @@ use crate::types::{
     InitializeProjectResult, PermissionDecisionBehavior, ResolvePermissionRequestError,
     ResolvePermissionRequestErrorKind, ResolvePermissionRequestInput, SacrumConfigStatus, Section,
     SessionLog, Step, StepExecution, StopRunRequest, Task, TaskFilterOptions, TaskRun,
-    TaskRunTrace, Workflow, WorkflowWithTasks,
+    TaskRunHistoryCursor, TaskRunHistoryPage, TaskRunTrace, Workflow, WorkflowWithTasks,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;

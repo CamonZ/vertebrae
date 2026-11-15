@@ -23,6 +23,7 @@ import { resolveTaskLocation } from "../utils/taskLocation";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { queryClient } from "./queryClient";
 import { queryKeys } from "./queryKeys";
+import { removeTaskFromHistoryCache } from "./taskRunHistoryQueries";
 
 type TaskListKey = ReturnType<typeof queryKeys.tasks.list>;
 type WorkflowDetailKey = ReturnType<typeof queryKeys.workflows.detail>;
@@ -526,6 +527,8 @@ export function removeTaskFromQueryCache(
     queryKeys.tasks.ready(generation),
     (tasks) => tasks?.filter((task) => task.id !== taskId)
   );
+
+  removeTaskFromHistoryCache(taskId, generation);
 }
 
 export function replaceTaskRunControlsInQueryCache(

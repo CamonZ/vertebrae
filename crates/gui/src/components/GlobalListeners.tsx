@@ -13,6 +13,7 @@ import {
   useWorkflowTransitionChangeListener,
 } from "../hooks";
 import { useGateChatSync } from "../hooks/useGateChatSync";
+import { useTaskRunHistoryReconciliation } from "../hooks/useTaskRunHistoryReconciliation";
 import { useLocalChatEventRouter } from "../hooks/useLocalChatEventRouter";
 import { ChatAssociationDrivers } from "./ChatAssociationDrivers";
 import { useChatCatalogSync } from "../hooks/useChatCatalogSync";
@@ -32,6 +33,7 @@ export function GlobalListeners() {
   useDaemonChangeListener();
   useTaskChangeListener();
   useTaskRunChangeListener();
+  useTaskRunHistoryReconciliation();
   useWorkflowChangeListener();
   useStepChangeListener();
   useStepExecutionChangeListener();

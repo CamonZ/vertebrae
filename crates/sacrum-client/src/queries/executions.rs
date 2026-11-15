@@ -116,6 +116,62 @@ pub const TASK_RUNS: &str = r#"
     }
 "#;
 
+/// Page through a project's run history, most recently updated first.
+///
+/// The run fields are the TaskRunFields set without `max_concurrency`, which
+/// Sacrum resolves per run; history rows never read it.
+pub const TASK_RUN_HISTORY: &str = r#"
+    query ProjectRunHistory(
+        $project_id: Uuid4!
+        $after_updated_at: Datetime
+        $after_id: Uuid4
+        $limit: Int
+        $include_completed: Boolean
+        $search: String
+    ) {
+        project_run_history(
+            project_id: $project_id
+            after_updated_at: $after_updated_at
+            after_id: $after_id
+            limit: $limit
+            include_completed: $include_completed
+            search: $search
+        ) {
+            has_more
+            hidden_completed_count
+            entries {
+                task_run {
+                    id
+                    task_id
+                    project_id
+                    user_id
+                    status
+                    started_at
+                    ended_at
+                    stop_requested_at
+                    latest_step_execution_id
+                    outcome_kind
+                    outcome_context
+                    parent_task_run_id
+                    root_task_run_id
+                    triggered_by_step_execution_id
+                    inserted_at
+                    updated_at
+                }
+                task {
+                    id
+                    title
+                    level
+                    parent_id
+                    workflow_id
+                    workflow_name
+                    completed_at
+                }
+            }
+        }
+    }
+"#;
+
 /// Get one TaskRun by ID.
 /// NOTE: Prepend TASK_RUN_FIELDS when sending.
 pub const TASK_RUN: &str = r#"

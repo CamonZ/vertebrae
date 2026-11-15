@@ -57,7 +57,8 @@ pub use artifact_service::ArtifactService;
 pub use error::{HumanInputRejection, ServiceError, ServiceResult};
 pub use execution_service::{
     ExecutionMutationCallback, ExecutionMutationEvent, ExecutionService, StopRunTarget,
-    UpdateExecutionStatusParams,
+    TASK_RUN_HISTORY_PAGE_MAX, TaskRunHistoryCursor, TaskRunHistoryEntry, TaskRunHistoryPage,
+    TaskRunHistoryQuery, TaskRunHistoryTask, UpdateExecutionStatusParams,
 };
 pub use execution_settings::{OutputVerbosity, SpeedTier};
 pub use model_catalog::{

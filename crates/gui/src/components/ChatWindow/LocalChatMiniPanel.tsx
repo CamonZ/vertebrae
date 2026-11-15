@@ -824,6 +824,19 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                   );
                 }}
               />
+              {historyRuns.hasMore && (
+                <div className="hc-mini-history-more">
+                  <button
+                    type="button"
+                    data-mini-history-toggle
+                    data-testid="local-chat-history-load-more"
+                    disabled={historyRuns.loadingMore}
+                    onClick={historyRuns.loadMore}
+                  >
+                    {historyRuns.loadingMore ? "Loading…" : "Load older runs"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
