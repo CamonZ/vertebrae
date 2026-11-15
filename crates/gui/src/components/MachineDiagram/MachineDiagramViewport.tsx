@@ -20,6 +20,10 @@ export interface MachineDiagramViewportProps {
   /** Logical size of the diagram inside (matches MachineDiagram width/height). */
   width: number;
   height: number;
+  /** Full-page fills a sized parent; embedded keeps its fitted/resizable height. */
+  mode?: "embedded" | "full-page";
+  /** Wait for asynchronous geometry before consuming the initial fit. */
+  ready?: boolean;
   /** Wire labels drawn with the shared EdgeLabel chip over the SVG. */
   labels?: readonly DiagramLabel[];
   /**
@@ -81,6 +85,8 @@ export const ZOOM_GUTTER = 62;
 export function MachineDiagramViewport({
   width,
   height,
+  mode = "embedded",
+  ready = true,
   labels = [],
   fitOnMount = false,
   resizeLabel,
@@ -101,24 +107,50 @@ export function MachineDiagramViewport({
   const initialFit = useRef(fitOnMount);
   const [fittedHeight, setFittedHeight] = useState<number | null>(null);
 
-  useLayoutEffect(() => {
-    if (!initialFit.current) return;
-    initialFit.current = false;
+  // The observer reads current geometry without reinstalling on playback or
+  // count updates. After fitting, the user owns the camera, even on resize.
+  const fitInitial = useRef<() => void>(() => {});
+  fitInitial.current = () => {
+    if (!initialFit.current || !ready || width <= 0 || height <= 0) return;
     const canvas = viewport.canvasRef.current;
-    if (!canvas || !canvas.clientWidth) return;
+    if (!canvas?.clientWidth || (mode === "full-page" && !canvas.clientHeight))
+      return;
     const inset = fitInsets(canvas.clientWidth);
     const room = Math.max(1, canvas.clientWidth - ZOOM_GUTTER - inset.right);
-    const fitted = Math.max(MIN_ZOOM, Math.min(1, room / width));
-    setZoom(fitted, true);
-    setFittedHeight(
-      Math.max(minHeight, Math.ceil(height * fitted) + inset.bottom)
+    const fitted = Math.max(
+      MIN_ZOOM,
+      Math.min(
+        1,
+        room / width,
+        mode === "full-page"
+          ? Math.max(1, canvas.clientHeight - inset.bottom) / height
+          : Infinity
+      )
     );
-    // Mount-only: later zoom changes come from the user.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    initialFit.current = false;
+    setZoom(fitted, true);
+    if (mode === "embedded")
+      setFittedHeight(
+        Math.max(minHeight, Math.ceil(height * fitted) + inset.bottom)
+      );
+  };
+
+  useLayoutEffect(() => {
+    fitInitial.current();
+    const canvas = viewport.canvasRef.current;
+    if (!canvas || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => fitInitial.current());
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [viewport.canvasRef]);
+
+  useLayoutEffect(() => {
+    fitInitial.current();
+  }, [ready, width, height, mode]);
 
   function fit() {
     const canvas = viewport.canvasRef.current;
+    if (!ready || width <= 0 || height <= 0) return;
     if (!canvas || !canvas.clientWidth || !canvas.clientHeight) return;
     const inset = fitInsets(canvas.clientWidth);
     const fitted = Math.min(
@@ -137,7 +169,11 @@ export function MachineDiagramViewport({
     <span
       className="md-viewport"
       ref={viewport.containerRef}
-      style={{ display: "block", height: frameHeight }}
+      style={{
+        display: "block",
+        height: mode === "full-page" ? "100%" : frameHeight,
+        width: mode === "full-page" ? "100%" : undefined,
+      }}
       data-dragging={viewport.dragging ? "true" : "false"}
       data-testid="machine-diagram-viewport"
     >
@@ -175,7 +211,7 @@ export function MachineDiagramViewport({
     </span>
   );
 
-  if (!resizeLabel) return frame;
+  if (!resizeLabel || mode === "full-page") return frame;
   return (
     <span className="md-resizable" data-testid="machine-diagram-resizable">
       {frame}

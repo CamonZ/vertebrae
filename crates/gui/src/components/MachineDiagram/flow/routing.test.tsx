@@ -218,3 +218,44 @@ test("bus routing supports north/south and west-facing port groups", async () =>
     expect(railCrossings(a.points, b.points)).toEqual([]);
   }
 });
+
+test("a canonical embedding retry removes a crossing left by the preferred realization", async () => {
+  const result = await compileFlowLaidOut({
+    version: 1,
+    parts: [
+      { id: "p0", kind: "splitter" },
+      { id: "p1", kind: "timeout" },
+      { id: "p2", kind: "retry" },
+      { id: "p3", kind: "human gate" },
+      { id: "p4", kind: "session" },
+    ],
+    rails: [
+      { id: "r0", from: "p0.b1", to: "p1.in" },
+      { id: "r1", from: "p0.b2", to: "p4.turn" },
+      { id: "r2", from: "p2.out", to: "p0.in" },
+      { id: "r3", from: "p3.out", to: "p0.in" },
+      { id: "r4", from: "p0.b1", to: "p0.in" },
+      { id: "r5", from: "p2.out", to: "p3.in" },
+    ],
+    regions: [{ id: "g0", parts: ["p0", "p3", "p4"] }],
+  });
+  if (!result.ok) throw new Error(JSON.stringify(result.errors));
+  for (const d of result.flow.arrangements) {
+    expect(d.rails).toHaveLength(6);
+    for (const [i, rail] of d.rails.entries()) {
+      for (const other of d.rails.slice(i + 1))
+        expect(railCrossings(rail.points, other.points)).toEqual([]);
+      expect(rail.jumps ?? []).toEqual([]);
+      const path = route(rail.points, undefined, rail);
+      expect(
+        renderToStaticMarkup(
+          <Wire
+            points={rail.points}
+            jumps={rail.jumps}
+            cornerRadii={rail.cornerRadii}
+          />
+        )
+      ).toContain(routePath(path));
+    }
+  }
+});

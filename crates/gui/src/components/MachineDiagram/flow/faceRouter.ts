@@ -374,16 +374,23 @@ export function routeByTopology(
 
   // Keep a crossing-free forest of the current routes if that works out;
   // otherwise draw every movable rail afresh.
-  let lastKeep: string | undefined;
-  for (const forest of [true, false]) {
-    const keep = choose(forest);
-    const id = [...keep].join(" ");
-    if (id === lastKeep) continue;
-    lastKeep = id;
-    const embedding = portEmbedding(o.diagram, drawnOrder(keep), preferred);
-    if (!embedding) continue;
-    const routes = drawAll(keep, embedding);
-    if (routes && compatibleAll(routes)) return Object.fromEntries(routes);
+  // A preferred embedding may be planar but leave no room for this bounded
+  // geometric realization. Retry the canonical rotation before keeping jumps.
+  const orders = preferred.size
+    ? [preferred, new Map<string, Dart[]>()]
+    : [preferred];
+  for (const order of orders) {
+    let lastKeep: string | undefined;
+    for (const forest of [true, false]) {
+      const keep = choose(forest);
+      const id = [...keep].join(" ");
+      if (id === lastKeep) continue;
+      lastKeep = id;
+      const embedding = portEmbedding(o.diagram, drawnOrder(keep), order);
+      if (!embedding) continue;
+      const routes = drawAll(keep, embedding);
+      if (routes && compatibleAll(routes)) return Object.fromEntries(routes);
+    }
   }
   return undefined;
 }

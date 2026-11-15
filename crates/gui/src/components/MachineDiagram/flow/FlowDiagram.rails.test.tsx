@@ -36,17 +36,19 @@ test.each(PARTS)(
       cards: [],
       story: [],
     });
-    for (const diagram of flow.arrangements) {
-      const drawn = render(
-        <FlowDiagram diagram={diagram} t={0} reducedMotion />
-      );
-      expect(
-        drawn.container.querySelector("[data-part-id='alone']")
-      ).not.toBeNull();
-      expect(
-        drawn.container.querySelectorAll(".md-rail, .md-wire")
-      ).toHaveLength(0);
-      drawn.unmount();
+    for (const mode of ["embedded", "full-page"] as const) {
+      for (const diagram of flow.arrangements) {
+        const drawn = render(
+          <FlowDiagram diagram={diagram} mode={mode} t={0} reducedMotion />
+        );
+        expect(
+          drawn.container.querySelector("[data-part-id='alone']")
+        ).not.toBeNull();
+        expect(
+          drawn.container.querySelectorAll(".md-rail, .md-wire")
+        ).toHaveLength(0);
+        drawn.unmount();
+      }
     }
     const again = render(
       <MachineDiagram label="gallery">
@@ -69,7 +71,12 @@ test("generated flows draw exactly their compiled rail paths", () =>
       const diagram = tc.draw(gs.sampledFrom(flow.arrangements));
       const t = tc.draw(gs.floats({ minValue: 0, maxValue: diagram.period }));
       const drawn = render(
-        <FlowDiagram diagram={diagram} t={t} reducedMotion />
+        <FlowDiagram
+          diagram={diagram}
+          mode={tc.draw(gs.sampledFrom(["embedded", "full-page"] as const))}
+          t={t}
+          reducedMotion
+        />
       );
       try {
         expect(drawn.container.querySelectorAll(".md-rail")).toHaveLength(0);
@@ -80,7 +87,7 @@ test("generated flows draw exactly their compiled rail paths", () =>
         expect(paths).toEqual(
           diagram.rails
             .filter((rail) => rail.presence !== "absent")
-            .map((rail) => routePath(route(rail.points)))
+            .map((rail) => routePath(route(rail.points, undefined, rail)))
         );
       } finally {
         drawn.unmount();

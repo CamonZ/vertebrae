@@ -12,7 +12,7 @@ on:
       - "scripts/acceptance.py"
       - ".github/workflows/acceptance-images.yml"
   pull_request:
-    branches: [master]
+    branches: [master, epic/a8dbc95c-atlas-machine-flow]
     paths:
       - "docker/*.Dockerfile"
       - "scripts/acceptance.py"

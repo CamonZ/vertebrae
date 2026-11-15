@@ -129,3 +129,116 @@ test(
     ),
   120_000
 );
+
+// The default embedding search used to exhaust 200,000 trials on this planar
+// graph because it tried a different initial rotation from the planarity check.
+const budgetRegression = [
+  ["r1", "in"],
+  ["r2", "in"],
+  ["r2", "in"],
+  ["r2", "in"],
+  ["r1", "r2"],
+  ["r2", "in"],
+  ["r2", "in"],
+];
+
+test.each([
+  { pairs: budgetRegression, budget: 200_000 },
+  // Reindexing changes the enumeration order. The complete search space for
+  // these seven loops is below two million rotations; no budget is increased
+  // in production, and the original regression must use the default budget.
+  { pairs: [...budgetRegression].reverse(), budget: 2_000_000 },
+  {
+    pairs: [...budgetRegression.slice(3), ...budgetRegression.slice(0, 3)],
+    budget: 2_000_000,
+  },
+])(
+  "parallel self-loop regression yields a certified embedding (%#)",
+  ({ pairs, budget }) => {
+    const d = compileFlowOrThrow({
+      version: 1,
+      parts: [{ id: "q", kind: "quorum" }],
+      rails: pairs.map(([from, to], i) => ({
+        id: `r${i}`,
+        from: `q.${from}`,
+        to: `q.${to}`,
+      })),
+    }).arrangements[0];
+    expect(fixedPortPlanarity(d, budget)).toBe("planar");
+    expect(portPlanarity(d, budget)).toBe("planar");
+    const embedding =
+      budget === 200_000
+        ? portEmbedding(d)
+        : portEmbedding(d, new Map(), new Map(), budget);
+    expect(embedding).toBeDefined();
+    // Certify the returned rotation, not merely its existence: a connected
+    // one-vertex planar graph has E+1 face cycles in the dart permutation.
+    const around = clockwisePorts(d.parts[0]).flatMap(
+      (port) => embedding!.get(`q.${port}`) ?? []
+    );
+    expect([...around].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: d.rails.length * 2 }, (_, i) => i)
+    );
+    const next = new Map(
+      around.map((dart, i) => [dart, around[(i + 1) % around.length]])
+    );
+    const seen = new Set<number>();
+    let faces = 0;
+    for (const start of around) {
+      if (seen.has(start)) continue;
+      faces++;
+      for (let dart = start; !seen.has(dart); dart = next.get(dart ^ 1)!)
+        seen.add(dart);
+    }
+    expect(faces).toBe(d.rails.length + 1);
+  },
+  120_000
+);
+
+test("bounded embedding search agrees with the independent rotation oracle", () =>
+  hegel.test(
+    (tc) => {
+      const n = tc.draw(gs.integers({ minValue: 1, maxValue: 4 }));
+      const count = tc.draw(gs.integers({ minValue: 0, maxValue: 7 }));
+      const endpoint = (source: boolean) =>
+        `p${tc.draw(gs.integers({ minValue: 0, maxValue: n - 1 }))}.${tc.draw(gs.sampledFrom(source ? ["r1", "r2", "r3"] : ["in", "r1", "r2", "r3"]))}`;
+      const d = compileFlowOrThrow({
+        version: 1,
+        parts: Array.from({ length: n }, (_, i) => ({
+          id: `p${i}`,
+          kind: "quorum",
+        })),
+        rails: Array.from({ length: count }, (_, i) => ({
+          id: `r${i}`,
+          from: endpoint(true),
+          to: endpoint(false),
+        })),
+      }).arrangements[0];
+      const budget = tc.draw(gs.sampledFrom([1, 2, 10, 100, 1000]));
+      const oracle = fixedPortPlanarity(d, budget);
+      const embedding = portEmbedding(d, new Map(), new Map(), budget);
+      expect(embedding !== undefined).toBe(oracle === "planar");
+    },
+    { testCases: 500 }
+  ));
+
+test("preferred and fixed port orders remain authoritative", () => {
+  const d = compileFlowOrThrow({
+    version: 1,
+    parts: ["a", "b", "c", "d"].map((id) => ({ id, kind: "quorum" })),
+    rails: ["b", "c", "d"].map((id, i) => ({
+      id: `r${i}`,
+      from: "a.r1",
+      to: `${id}.in`,
+    })),
+  }).arrangements[0];
+  const preferred = new Map([["a.r1", [2, 0, 4]]]);
+  expect(portEmbedding(d, new Map(), preferred, 1)?.get("a.r1")).toEqual([
+    2, 0, 4,
+  ]);
+  const constrained = portEmbedding(d, new Map([["a.r1", [4, 0]]]), preferred);
+  expect(constrained?.get("a.r1")?.filter((dart) => dart !== 2)).toEqual([
+    4, 0,
+  ]);
+  expect(portEmbedding(d, new Map(), preferred, 0)).toBeUndefined();
+});
