@@ -211,7 +211,7 @@ describe("validation errors name the spec path", () => {
     const s = base();
     s.parts[1].kind = "wroker";
     expect(errorsOf(s)).toContain(
-      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, execute step, failure detector, fencing token, gossip, guard, human gate, idempotency guard, inference step, joiner, leader election, lock, metric, outbox, pipeline, pool, projection, queue, quorum, rate limiter, reactive cell, replay, replication, retry, route step, router, run end, saga, schema, service registry, session, shard ring, snapshot, source, splitter, state machine, store, structured step, task run, timeout, topology endpoint, trace, transaction, transform, two-phase commit, upcaster, version vector, wait children, worker, workflow'
+      'parts[1].kind: unknown part kind "wroker" (did you mean "worker"?); registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, execute step, factory, failure detector, fencing token, gossip, guard, human gate, idempotency guard, inference step, joiner, leader election, lock, metric, outbox, pipeline, pool, projection, queue, quorum, rate limiter, reactive cell, replay, replication, retry, route step, router, run end, saga, schema, service registry, session, shard ring, snapshot, source, splitter, state machine, store, structured step, task run, timeout, topology endpoint, trace, transaction, transform, two-phase commit, upcaster, version vector, wait children, worker, workflow'
     );
   });
 
@@ -508,7 +508,7 @@ describe("registries: extend without changing the compiler", () => {
     const plain = createFlowRegistry();
     plain.attachments.register(registry.attachments.get("metric snapshot")!);
     expect(errorsOf(s, plain)).toEqual([
-      'parts[1].kind: unknown part kind "test lamp"; registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, execute step, failure detector, fencing token, gossip, guard, human gate, idempotency guard, inference step, joiner, leader election, lock, metric, outbox, pipeline, pool, projection, queue, quorum, rate limiter, reactive cell, replay, replication, retry, route step, router, run end, saga, schema, service registry, session, shard ring, snapshot, source, splitter, state machine, store, structured step, task run, timeout, topology endpoint, trace, transaction, transform, two-phase commit, upcaster, version vector, wait children, worker, workflow',
+      'parts[1].kind: unknown part kind "test lamp"; registered: aggregator, alert, approval, boundary, cache, circuit breaker, client, consumer offset, decider, document, event rail, event store, execute step, factory, failure detector, fencing token, gossip, guard, human gate, idempotency guard, inference step, joiner, leader election, lock, metric, outbox, pipeline, pool, projection, queue, quorum, rate limiter, reactive cell, replay, replication, retry, route step, router, run end, saga, schema, service registry, session, shard ring, snapshot, source, splitter, state machine, store, structured step, task run, timeout, topology endpoint, trace, transaction, transform, two-phase commit, upcaster, version vector, wait children, worker, workflow',
     ]);
     // The generated JSON Schema includes the new kinds.
     const schema = JSON.stringify(flowSpecJsonSchema(registry));
@@ -625,6 +625,7 @@ describe("compiler features", () => {
       "event rail",
       "event store",
       "execute step",
+      "factory",
       "failure detector",
       "fencing token",
       "gossip",

@@ -29,6 +29,13 @@ export type FieldSchema =
       readonly default?: readonly string[];
     })
   | (FieldBase & {
+      readonly type: "integer[]";
+      /** Bounds on each item. */
+      readonly min?: number;
+      readonly max?: number;
+      readonly default?: readonly number[];
+    })
+  | (FieldBase & {
       readonly type: "object";
       readonly fields: Fields;
     })
@@ -94,6 +101,23 @@ export function checkField(
     case "string[]":
       if (!Array.isArray(value) || value.some((x) => typeof x !== "string"))
         errors.push({ path, message: "expected a list of strings" });
+      return;
+    case "integer[]":
+      if (!Array.isArray(value) || value.some((x) => !Number.isInteger(x)))
+        errors.push({ path, message: "expected a list of integers" });
+      else
+        value.forEach((x: number, i) => {
+          if (f.min !== undefined && x < f.min)
+            errors.push({
+              path: `${path}[${i}]`,
+              message: `must be ≥ ${f.min}, got ${x}`,
+            });
+          else if (f.max !== undefined && x > f.max)
+            errors.push({
+              path: `${path}[${i}]`,
+              message: `must be ≤ ${f.max}, got ${x}`,
+            });
+        });
       return;
     case "object":
       checkFields(value, f.fields, path, errors);
@@ -172,6 +196,16 @@ export function fieldJsonSchema(f: FieldSchema): JsonSchema {
       return { type: "boolean", ...d };
     case "string[]":
       return { type: "array", items: { type: "string" }, ...d };
+    case "integer[]":
+      return {
+        type: "array",
+        items: {
+          type: "integer",
+          ...(f.min !== undefined ? { minimum: f.min } : {}),
+          ...(f.max !== undefined ? { maximum: f.max } : {}),
+        },
+        ...d,
+      };
     case "object":
       return { ...fieldsJsonSchema(f.fields), ...d };
     case "json":

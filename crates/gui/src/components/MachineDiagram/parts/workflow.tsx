@@ -244,8 +244,11 @@ export function TypeMark({
   );
 }
 
-/** TaskRuns at the station: one chip per run, right-aligned, 20 px apart. */
-function Chips({
+/**
+ * TaskRuns at a station (workflow or factory): one chip per run,
+ * right-aligned, 20 px apart.
+ */
+export function StationChips({
   chips,
   t,
   x,
@@ -286,6 +289,31 @@ function Chips({
   );
 }
 
+/** A port label 18 px above its rail: dim at rest, ink 600 while its port is lit. */
+export function StationPortLabel({
+  x,
+  y,
+  text,
+  lit,
+  align,
+}: {
+  x: number;
+  y: number;
+  text: string;
+  lit: boolean;
+  align: "left" | "right";
+}) {
+  return (
+    <SvgText
+      x={x}
+      y={y - 18}
+      runs={[[text, lit ? 600 : 400, lit ? "ink" : "dim"]]}
+      size={18}
+      align={align}
+    />
+  );
+}
+
 /** The whole station at `t`: rails, port labels, frame, track, lamps, marks, bursts, chips. */
 export function WorkflowStation({ t, x }: { t: number; x: WorkflowExtra }) {
   const L = x.layout;
@@ -312,19 +340,15 @@ export function WorkflowStation({ t, x }: { t: number; x: WorkflowExtra }) {
                 [EDGE_OUT, o.y],
               ]}
             />
-            <SvgText
+            <StationPortLabel
               x={LABEL_X}
-              y={o.y - 18}
-              runs={[
-                [
-                  lit && o.bundle
-                    ? fitLabel(`→ ${lit.to}`, labelRoom(x1))
-                    : o.label,
-                  lit ? 600 : 400,
-                  lit ? "ink" : "dim",
-                ],
-              ]}
-              size={18}
+              y={o.y}
+              text={
+                lit && o.bundle
+                  ? fitLabel(`→ ${lit.to}`, labelRoom(x1))
+                  : o.label
+              }
+              lit={!!lit}
               align="right"
             />
           </g>
@@ -381,7 +405,7 @@ export function WorkflowStation({ t, x }: { t: number; x: WorkflowExtra }) {
           />
         ) : null;
       })}
-      <Chips chips={x.chips} t={t} x={L.chips.x} y={L.chips.y} />
+      <StationChips chips={x.chips} t={t} x={L.chips.x} y={L.chips.y} />
     </>
   );
 }

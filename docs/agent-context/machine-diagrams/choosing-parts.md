@@ -21,7 +21,8 @@ Distributed mechanisms include `replication`, `quorum`, `leader election`,
 
 Use `task run` for a durable-run overview; choose `inference step`,
 `structured step`, `execute step`, `route step`, `wait children`, `human gate`
-or `run end` when explaining a particular workflow step. These parts illustrate
+or `run end` when explaining a particular workflow step. Use `factory` for one
+station per factory, joined by its cross-factory routes. These parts illustrate
 operations; their verbs do not invoke a provider, script or backend mutation.
 
 [Authoring index](../machine-diagrams.md).

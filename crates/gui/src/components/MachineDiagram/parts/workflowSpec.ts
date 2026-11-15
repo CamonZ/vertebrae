@@ -71,7 +71,7 @@ export const EDGE_IN = 24;
 export const EDGE_OUT = 616;
 
 export interface WorkflowOut {
-  /** Flow port name: `out1` … `out4`. */
+  /** Flow port name: `out1` … `out4` (`in1` … `in4` on a factory's W side). */
   readonly port: string;
   readonly label: string;
   /** Transitions leaving by this port (more than one for the bundle). */
@@ -129,6 +129,42 @@ export function fitLabel(label: string, room: number): string {
   return `${s}…`;
 }
 
+/**
+ * Station ports for `targets` (catalogue "Bundling", shared by the workflow
+ * and factory stations): at most four, port 4 bundling the rest as
+ * `+k more`. One port sits at `ty`; 2–4 are spread from `y0 + 30` to
+ * `y0 + h − 30`. Labels are cut to `room` px.
+ */
+export function bundlePorts(
+  targets: readonly string[],
+  prefix: string,
+  y0: number,
+  h: number,
+  ty: number,
+  room: number
+): WorkflowOut[] {
+  const bundled = targets.length > WORKFLOW_PORT_CAP;
+  const shown = bundled ? WORKFLOW_PORT_CAP : targets.length;
+  const outs: WorkflowOut[] = [];
+  for (let j = 0; j < shown; j++) {
+    const more = bundled && j === shown - 1;
+    outs.push({
+      port: `${prefix}${j + 1}`,
+      label: fitLabel(
+        more ? `+${targets.length - shown + 1} more` : targets[j],
+        room
+      ),
+      targets: more ? targets.slice(j) : [targets[j]],
+      y: shown === 1 ? ty : Math.round(y0 + 30 + (j * (h - 60)) / (shown - 1)),
+      bundle: more,
+    });
+  }
+  return outs;
+}
+
+/** Ports a list of targets draws: at most four. */
+export const shownPorts = (n: number) => Math.min(n, WORKFLOW_PORT_CAP);
+
 /** The catalogue layout rules for `steps` and `transitions`. */
 export function workflowLayout(
   steps: readonly string[],
@@ -137,8 +173,7 @@ export function workflowLayout(
   const n = Math.max(1, steps.length);
   const per = n > 10 ? Math.ceil(n / 2) : n;
   const rows = Math.ceil(n / per);
-  const bundled = transitions.length > WORKFLOW_PORT_CAP;
-  const shown = bundled ? WORKFLOW_PORT_CAP : transitions.length;
+  const shown = shownPorts(transitions.length);
   const s = per <= 4 ? 56 : 36;
   const w = Math.max(228, per * s + 60);
   const x0 = Math.round(320 - w / 2);
@@ -148,22 +183,7 @@ export function workflowLayout(
   const ty = y0 + h - 40;
   const lx = (i: number) => x0 + (w - (per - 1) * s) / 2 + (i % per) * s;
   const ly = (i: number) => 150 + ROW_PITCH * Math.floor(i / per);
-  const room = labelRoom(x1);
-  const outs: WorkflowOut[] = [];
-  for (let j = 0; j < shown; j++) {
-    const more = bundled && j === shown - 1;
-    const targets = more ? transitions.slice(j) : [transitions[j]];
-    outs.push({
-      port: `out${j + 1}`,
-      label: fitLabel(
-        more ? `+${transitions.length - shown + 1} more` : transitions[j],
-        room
-      ),
-      targets,
-      y: shown === 1 ? ty : Math.round(y0 + 30 + (j * (h - 60)) / (shown - 1)),
-      bundle: more,
-    });
-  }
+  const outs = bundlePorts(transitions, "out", y0, h, ty, labelRoom(x1));
   const lamps = steps.map((type, i) => ({ x: lx(i), y: ly(i), type }));
   const half = Math.min(s, 56) / 2 - 2;
   return {

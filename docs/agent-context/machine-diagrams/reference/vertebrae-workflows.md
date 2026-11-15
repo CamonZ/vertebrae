@@ -3,6 +3,7 @@
 Choose a mechanism to read its exact verbs, ports and fields.
 
 - [execute step](parts/execute-step.md).
+- [factory](parts/factory.md).
 - [human gate](parts/human-gate.md).
 - [inference step](parts/inference-step.md).
 - [route step](parts/route-step.md).

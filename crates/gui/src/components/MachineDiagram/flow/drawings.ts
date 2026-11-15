@@ -9,6 +9,7 @@ import { shardRingMachine } from "../parts/shardRing";
 import { twoPhaseCommitMachine } from "../parts/twoPhaseCommit";
 import { versionVectorMachine } from "../parts/versionVector";
 import { workflowMachine } from "../parts/workflow";
+import { factoryMachine } from "../parts/factory";
 /** Flow-to-catalogue adapters. No gallery scenario or status prose is consulted. */
 import {
   createContext,
@@ -23,6 +24,7 @@ import { TL, type TileSpec } from "../parts/eventTiles";
 import type { StatusNote } from "../timeline";
 import { upcastPlan } from "./parts/upcaster";
 import { workflowExtra, type WorkflowState } from "./parts/workflow";
+import { factoryExtra, type FactoryState } from "./parts/factory";
 import type { CompiledPart, CompiledPartStep } from "./registry";
 
 export type Drawing = (t: number, compiled: CompiledPart) => ReactNode;
@@ -85,6 +87,8 @@ export const FLOW_DRAWINGS = {
   // The station's verbs record its lamp, chip and port timelines as they compile.
   workflow: (t, p) =>
     workflowMachine.draw(t, workflowExtra(p.state as WorkflowState)),
+  factory: (t, p) =>
+    factoryMachine.draw(t, factoryExtra(p.state as FactoryState)),
 
   source: (t) => MACHINE_PARTS.source.draw(t, null),
   transform: (t, p) => {
