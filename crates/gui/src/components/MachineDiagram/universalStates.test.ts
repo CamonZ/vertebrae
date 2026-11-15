@@ -39,8 +39,8 @@ const timing = (s: PartStates["scenarios"][number]): ScenarioTiming => ({
 });
 
 describe("statePose against the gallery", () => {
-  it("covers all 59 parts", () => {
-    expect(PARTS).toHaveLength(59);
+  it("covers all 60 parts", () => {
+    expect(PARTS).toHaveLength(60);
   });
 
   it.each(PARTS.map((p) => [p.name, p] as const))("%s", (_, part) => {

@@ -18,7 +18,22 @@ export type SurfaceRole =
   | "plate"
   | "hole"
   | "ghost";
-export type Role = StateRole | SurfaceRole;
+/**
+ * Step-type hues: the one sanctioned exception to VL-03 (catalogue v2.2
+ * "Step-type hues"). A workflow station's lamp core takes its `step_type`'s
+ * app colour (Hearth `--color-step-*`; `execute` has no hue and uses the
+ * neutral `--color-fg-soft`). Identity only: state stays on the rim.
+ */
+export type StepHueRole =
+  | "step-llm"
+  | "step-structured"
+  | "step-execute"
+  | "step-route"
+  | "step-human"
+  | "step-wait"
+  | "step-stop"
+  | "step-finish";
+export type Role = StateRole | SurfaceRole | StepHueRole;
 export type WashRole = "amber" | "green" | "red";
 /**
  * Roles a card, ring or lamp can take: the state roles plus the edge grey
@@ -43,6 +58,17 @@ export const SURFACE_ROLES: readonly SurfaceRole[] = [
   "plate",
   "hole",
   "ghost",
+];
+
+export const STEP_HUE_ROLES: readonly StepHueRole[] = [
+  "step-llm",
+  "step-structured",
+  "step-execute",
+  "step-route",
+  "step-human",
+  "step-wait",
+  "step-stop",
+  "step-finish",
 ];
 
 export function roleColor(role: Role): string {
