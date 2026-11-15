@@ -83,3 +83,24 @@ test("resetting the cache forces a fresh layout of the same geometry", async () 
     observed.mockRestore();
   }
 });
+
+test("live-header reservation has a distinct structural cache identity", async () => {
+  const observed = vi.spyOn(elk, "layout");
+  try {
+    const base = spec("header");
+    const regions = [
+      { id: "region", label: "Workflow", parts: base.parts.map((p) => p.id) },
+    ];
+    await layoutFlow(compileFlowOrThrow({ ...base, regions }));
+    const live = compileFlowOrThrow({
+      ...base,
+      regions: regions.map((r) => ({ ...r, liveHeader: true })),
+    });
+    await layoutFlow(live);
+    expect(observed).toHaveBeenCalledTimes(2);
+    await layoutFlow(live);
+    expect(observed).toHaveBeenCalledTimes(2);
+  } finally {
+    observed.mockRestore();
+  }
+});

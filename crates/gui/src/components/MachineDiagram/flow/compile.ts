@@ -166,6 +166,7 @@ export interface DiagramRail extends RouteStyle {
 
 /** A boundary around parts, drawn as a dashed region (spec `regions`). */
 export interface DiagramRegion {
+  readonly liveHeader?: boolean;
   readonly id: string;
   readonly label?: string;
   readonly parts: readonly string[];
@@ -982,6 +983,7 @@ function withRegions(
     );
     return {
       id: g.id,
+      ...(g.liveHeader ? { liveHeader: true } : {}),
       ...(g.label ? { label: g.label } : {}),
       parts: g.parts,
       x: box.x0,

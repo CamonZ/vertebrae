@@ -243,7 +243,7 @@ async function layoutLevel(
       r.conditional,
       longestRailLabel(arrangements, r.id),
     ]),
-    first.regions.map((r) => [r.id, r.label, r.parts]),
+    first.regions.map((r) => [r.id, r.label, r.parts, r.liveHeader]),
   ]);
   const cached = levelCache.get(key);
   if (cached) {

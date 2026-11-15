@@ -61,7 +61,7 @@ const RAIL_FIELDS = [
   "in",
   "attachments",
 ];
-const REGION_FIELDS = ["id", "label", "parts"];
+const REGION_FIELDS = ["id", "label", "parts", "liveHeader"];
 const CARD_FIELDS = [
   "id",
   "token",
@@ -791,6 +791,13 @@ function checkSpec(c: Checker, input: Record<string, unknown>, root: string) {
     if (id !== undefined && (partIds.has(id) || railIds.has(id)))
       c.err(join(p, "id"), `region id "${id}" is also a part or rail id`);
     c.str(raw, "label", p);
+    if (raw.liveHeader !== undefined)
+      checkField(
+        raw.liveHeader,
+        { type: "boolean" },
+        join(p, "liveHeader"),
+        c.errors
+      );
     const members = c.list(raw, "parts", p, true);
     if (Array.isArray(raw.parts) && members.length === 0)
       c.err(join(p, "parts"), "needs at least one part");

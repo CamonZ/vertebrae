@@ -142,3 +142,44 @@
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
 }
+
+/* Live topology is opt-in; all emphasis decorates the original routed path. */
+.md-wire[data-emphasis="true"] .gedge {
+  stroke: var(--color-accent);
+  stroke-width: 3;
+  stroke-opacity: 1;
+}
+.md-wire .gedge.k-handoff:not(.solid) {
+  stroke-dasharray: 6 5;
+}
+[data-scene-part][data-traced] .md-part-ring {
+  opacity: 0.7;
+  stroke-width: 3;
+  stroke-dasharray: 8 6;
+}
+[data-scene-part][data-selected] .md-part-ring {
+  opacity: 1;
+  stroke-width: 6;
+  stroke-dasharray: none;
+}
+.md-region-header[role="button"] {
+  cursor: pointer;
+  outline: none;
+}
+.md-region .md-header-hit {
+  fill: var(--md-fill);
+  stroke: transparent;
+  stroke-dasharray: none;
+}
+.md-region-header:hover .md-header-hit,
+.md-region-header[data-selected] .md-header-hit,
+.md-region[data-traced] .md-header-hit {
+  stroke: var(--color-accent);
+}
+.md-region-header:focus-visible .md-header-hit {
+  stroke: var(--color-accent);
+  stroke-width: 4;
+}
+.md-live-count {
+  pointer-events: none;
+}

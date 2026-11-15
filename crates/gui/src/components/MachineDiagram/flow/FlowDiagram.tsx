@@ -1,4 +1,6 @@
 import { memo, type ReactNode } from "react";
+import { countDescription, type FlowPresentation } from "./presentation";
+import { LiveCount, RegionHeader } from "./RegionHeader";
 import { PortMark, StageMark } from "../ChangeMark";
 import { PartBox } from "../fixtures";
 import {
@@ -46,6 +48,8 @@ export interface FlowSceneProps {
   reducedMotion?: boolean;
   /** Makes parts focusable/activatable and cards followable. */
   interaction?: DiagramInteraction;
+  /** Optional live topology decoration; never enters compilation or layout. */
+  presentation?: FlowPresentation;
   /**
    * A Before/After morph in progress: `diagram` is arriving, `morph.from`
    * leaving. Parts and rails that read the same are drawn once; marked ones
@@ -112,6 +116,7 @@ export const FlowScene = memo(function FlowScene({
   label,
   reducedMotion,
   interaction,
+  presentation,
   morph,
   children,
 }: FlowSceneProps) {
@@ -132,7 +137,12 @@ export const FlowScene = memo(function FlowScene({
         height={d.height}
       >
         {d.regions.map((g) => (
-          <g key={g.id} className="md-region" data-region-id={g.id}>
+          <g
+            key={g.id}
+            className="md-region"
+            data-region-id={g.id}
+            data-traced={presentation?.traced?.has(g.id) || undefined}
+          >
             <rect
               x={g.x}
               y={g.y}
@@ -141,13 +151,17 @@ export const FlowScene = memo(function FlowScene({
               rx={18}
               fill="none"
             />
-            {g.label && (
-              <SvgText
-                x={regionLabelAt(g)[0]}
-                y={regionLabelAt(g)[1]}
-                runs={[[g.label, 600, "dim"]]}
-                size={18}
-              />
+            {presentation ? (
+              <RegionHeader region={g} presentation={presentation} />
+            ) : (
+              g.label && (
+                <SvgText
+                  x={regionLabelAt(g)[0]}
+                  y={regionLabelAt(g)[1]}
+                  runs={[[g.label, 600, "dim"]]}
+                  size={18}
+                />
+              )
             )}
           </g>
         ))}
@@ -158,7 +172,7 @@ export const FlowScene = memo(function FlowScene({
             <Layered
               key={r.id}
               layers={l}
-              to={() => <RailWire rail={r} />}
+              to={() => <RailWire rail={r} presentation={presentation} />}
               from={() => <RailWire rail={from!} />}
             />
           );
@@ -170,6 +184,7 @@ export const FlowScene = memo(function FlowScene({
             to={() => (
               <PartView
                 part={p}
+                presentation={presentation}
                 t={t}
                 arrangement={d.arrangement}
                 reducedMotion={reducedMotion}
@@ -258,9 +273,19 @@ function Layered({
   );
 }
 
-function RailWire({ rail: r }: { rail: DiagramRail }) {
+function RailWire({
+  rail: r,
+  presentation,
+}: {
+  rail: DiagramRail;
+  presentation?: FlowPresentation;
+}) {
   return (
     <Wire
+      id={r.id}
+      emphasis={presentation?.rails?.has(r.id)}
+      directional={presentation ? true : undefined}
+      conditional={presentation ? r.conditional : undefined}
       points={r.points}
       jumps={r.jumps}
       cornerRadii={r.cornerRadii}
@@ -285,6 +310,7 @@ function NameLabel({ part: p }: { part: DiagramPart }) {
 
 function PartView({
   part: p,
+  presentation,
   t,
   arrangement,
   reducedMotion,
@@ -292,6 +318,7 @@ function PartView({
   leaving,
 }: {
   part: DiagramPart;
+  presentation?: FlowPresentation;
   t: number;
   arrangement: string;
   reducedMotion?: boolean;
@@ -301,61 +328,77 @@ function PartView({
 }) {
   const drawings = useFlowDrawings();
   return (
-    <MachinePart
-      id={leaving ? undefined : p.id}
-      part={p.identity}
-      bb={p.bb}
-      timeline={p.timeline}
-      t={t}
-      view={{ kind: "scenario", name: arrangement }}
-      change={p.change}
-      changeNote={p.changeNote}
-      markMorph={markMorph}
-      status={p.status}
-      neutral={p.neutral}
-      x={p.position.x}
-      y={p.position.y}
-      scale={p.scale}
-      reducedMotion={reducedMotion}
-      activationHint={p.drill && !leaving ? DRILL_HINT : undefined}
+    <g
+      data-scene-part={p.id}
+      data-traced={presentation?.traced?.has(p.id) || undefined}
+      data-selected={presentation?.selected?.has(p.id) || undefined}
     >
-      {(frame) => {
-        const draw = Object.prototype.hasOwnProperty.call(drawings, p.kind)
-          ? drawings[p.kind]
-          : undefined;
-        return (
-          <>
-            {draw ? (
-              draw(frame.t, p)
-            ) : (
-              <PartBox x={p.bb[0]} y={p.bb[1]} w={p.bb[2]} h={p.bb[3]} />
-            )}
-            {p.drill && <DrillMark bb={p.bb} scale={p.scale} />}
-            {p.stageMarks.map((s) => (
-              <StageMark
-                key={s.name}
-                mark={s.change}
-                name={s.name}
-                bb={s.bb}
-                tag={s.tag}
-              />
-            ))}
-            {Object.entries(p.portChanges).map(([name, mark]) => {
-              const port = p.ports[name];
-              return port ? (
-                <PortMark
-                  key={name}
-                  mark={mark}
-                  name={name}
-                  x={port.local[0]}
-                  y={port.local[1]}
-                  side={port.side}
+      <MachinePart
+        id={leaving ? undefined : p.id}
+        part={p.identity}
+        bb={p.bb}
+        timeline={p.timeline}
+        t={t}
+        view={{ kind: "scenario", name: arrangement }}
+        change={p.change}
+        changeNote={p.changeNote}
+        markMorph={markMorph}
+        status={p.status}
+        neutral={p.neutral}
+        x={p.position.x}
+        y={p.position.y}
+        scale={p.scale}
+        reducedMotion={reducedMotion}
+        accessibleDetail={countDescription(presentation?.counts?.get(p.id))}
+        activationHint={p.drill && !leaving ? DRILL_HINT : undefined}
+      >
+        {(frame) => {
+          const draw = Object.prototype.hasOwnProperty.call(drawings, p.kind)
+            ? drawings[p.kind]
+            : undefined;
+          return (
+            <>
+              {draw ? (
+                draw(frame.t, p)
+              ) : (
+                <PartBox x={p.bb[0]} y={p.bb[1]} w={p.bb[2]} h={p.bb[3]} />
+              )}
+              {/* Atlas uses unchanged, full-scale neutral parts. Other flows
+                  keep their change-note/name slot instead of overlaying it. */}
+              {p.neutral && p.scale >= 1 && !p.changeNote && (
+                <LiveCount
+                  count={presentation?.counts?.get(p.id)}
+                  x={24}
+                  y={75}
                 />
-              ) : null;
-            })}
-          </>
-        );
-      }}
-    </MachinePart>
+              )}
+              {p.drill && <DrillMark bb={p.bb} scale={p.scale} />}
+              {p.stageMarks.map((s) => (
+                <StageMark
+                  key={s.name}
+                  mark={s.change}
+                  name={s.name}
+                  bb={s.bb}
+                  tag={s.tag}
+                />
+              ))}
+              {Object.entries(p.portChanges).map(([name, mark]) => {
+                const port = p.ports[name];
+                return port ? (
+                  <PortMark
+                    key={name}
+                    mark={mark}
+                    name={name}
+                    x={port.local[0]}
+                    y={port.local[1]}
+                    side={port.side}
+                  />
+                ) : null;
+              })}
+            </>
+          );
+        }}
+      </MachinePart>
+    </g>
   );
 }

@@ -12,6 +12,9 @@ export interface DiagramInteraction {
   readonly onActivatePart?: (id: string) => void;
   /** A part gained pointer hover or keyboard focus (`null` when it left). */
   readonly onInspectPart?: (id: string | null) => void;
+  /** Independent channels for hosts where pointer and keyboard traces overlap. */
+  readonly onHoverPart?: (id: string | null) => void;
+  readonly onFocusPart?: (id: string | null) => void;
   /** Click, or Enter/Space on a focused card: follow it. */
   readonly onActivateCard?: (id: string) => void;
   /** Part drawn as selected (pinned in the inspector). */

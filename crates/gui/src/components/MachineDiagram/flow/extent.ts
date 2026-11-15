@@ -293,20 +293,39 @@ export function railLabels(r: DiagramRail): LabelBox[] {
 
 /** Where a region names itself: inside its top-left corner. */
 export function regionLabelAt(g: DiagramRegion): Point {
-  return [g.x + 20, g.y + REGION_HEAD / 2];
+  return [g.x + 20, g.y + (g.liveHeader ? 14 : REGION_HEAD / 2)];
+}
+
+/** Count line reserved structurally, independent of live count magnitudes. */
+export function regionCountAt(g: DiagramRegion): Point {
+  return [g.x + 20, g.y + 37];
 }
 
 export function regionLabels(g: DiagramRegion): LabelBox[] {
-  if (!g.label) return [];
   const [x, y] = regionLabelAt(g);
-  return [
-    {
-      ...textBox(x, y, g.label, REGION_LABEL_SIZE),
+  const labels: LabelBox[] = g.label
+    ? [
+        {
+          ...textBox(x, y, g.label, REGION_LABEL_SIZE),
+          kind: "region",
+          owner: g.id,
+          text: g.label,
+        },
+      ]
+    : [];
+  if (g.liveHeader) {
+    const [cx, cy] = regionCountAt(g);
+    labels.push({
+      x0: cx,
+      x1: g.x + g.width - 20,
+      y0: cy - (REGION_LABEL_SIZE * LINE_EM) / 2,
+      y1: cy + (REGION_LABEL_SIZE * LINE_EM) / 2,
       kind: "region",
       owner: g.id,
-      text: g.label,
-    },
-  ];
+      text: "reserved live counts",
+    });
+  }
+  return labels;
 }
 
 /**

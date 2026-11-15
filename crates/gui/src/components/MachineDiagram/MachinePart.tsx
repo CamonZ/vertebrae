@@ -76,6 +76,8 @@ export interface MachinePartProps {
   title?: boolean;
   /** Appended to an interactive part's accessible name (what activation does). */
   activationHint?: string;
+  /** Additional current information included in the accessible name. */
+  accessibleDetail?: string;
   /** Draw smear ghosts (still views turn this off). */
   smear?: boolean;
   /** Override the prefers-reduced-motion media query. */
@@ -110,6 +112,7 @@ export function MachinePart({
   title = true,
   smear = true,
   activationHint,
+  accessibleDetail,
   reducedMotion,
   children,
 }: MachinePartProps) {
@@ -152,7 +155,7 @@ export function MachinePart({
         role={interactive ? "button" : "img"}
         aria-label={
           interactive
-            ? `${label}${neutral ? "" : ` Now: ${frame.status.current.text}.`}${activationHint ? ` ${activationHint}` : ""}`
+            ? `${label}${neutral ? "" : ` Now: ${frame.status.current.text}.`}${activationHint ? ` ${activationHint}` : ""}${accessibleDetail ? ` ${accessibleDetail}` : ""}`
             : label
         }
         data-part={part.name}
@@ -267,13 +270,25 @@ function partHandlers(
       e.stopPropagation();
       i.onActivatePart?.(id);
     },
-    onMouseEnter: () => i.onInspectPart?.(id),
-    onMouseLeave: () => i.onInspectPart?.(null),
+    onMouseEnter: () => {
+      i.onInspectPart?.(id);
+      i.onHoverPart?.(id);
+    },
+    onMouseLeave: () => {
+      i.onInspectPart?.(null);
+      i.onHoverPart?.(null);
+    },
     onFocus: (e: FocusEvent<SVGGElement>) => {
-      if (e.target === e.currentTarget) i.onInspectPart?.(id);
+      if (e.target === e.currentTarget) {
+        i.onInspectPart?.(id);
+        i.onFocusPart?.(id);
+      }
     },
     onBlur: (e: FocusEvent<SVGGElement>) => {
-      if (e.target === e.currentTarget) i.onInspectPart?.(null);
+      if (e.target === e.currentTarget) {
+        i.onInspectPart?.(null);
+        i.onFocusPart?.(null);
+      }
     },
   };
 }
