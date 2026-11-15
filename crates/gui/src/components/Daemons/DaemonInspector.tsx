@@ -40,7 +40,7 @@ interface DaemonInspectorProps {
   isUpdatingMaxConcurrency?: boolean;
   isReissuing?: boolean;
   isUnregistering?: boolean;
-  /** The daemon's reconnect credential is expired or rejected. */
+  /** The enrolled daemon has no usable refresh credential. */
   reenrollmentRequired?: boolean;
   closing?: boolean;
   onClose: () => void;
@@ -241,12 +241,12 @@ export function DaemonInspector({
                   data-testid="daemon-inspector-credential-reenrollment"
                 >
                   <p>
-                    This daemon&apos;s reconnect credential has expired or was
-                    rejected, so it cannot reconnect or renew itself. Rotate its
-                    credentials, then run the enrollment command with{" "}
+                    This daemon has no usable refresh credential, so it cannot
+                    renew its access credentials. Rotate its credentials, then
+                    run the enrollment command with{" "}
                     <code className="font-mono">--replace-existing</code> on the
                     daemon&apos;s machine. The running daemon reconnects once
-                    the new credential is saved.
+                    the new credentials are saved.
                   </p>
                   <Button
                     className="mt-2"

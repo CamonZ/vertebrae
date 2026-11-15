@@ -141,7 +141,7 @@ export function groupDaemonsByStatus(
 }
 
 /**
- * True when an enrolled daemon has no unexpired active reconnect credential.
+ * True when an enrolled daemon has no unexpired active refresh credential.
  * Such a daemon cannot renew itself; the owner must rotate and re-enroll.
  */
 export function daemonRequiresReenrollment(
@@ -151,7 +151,7 @@ export function daemonRequiresReenrollment(
   if (!metadata?.enrolled_at || metadata.status !== "active") return false;
   return !metadata.credentials.some(
     (credential) =>
-      credential.credential_kind === "reconnect" &&
+      credential.credential_kind === "refresh" &&
       credential.status === "active" &&
       Date.parse(credential.expires_at) > now
   );
