@@ -934,6 +934,7 @@ mod tests {
         assert!(page.has_more);
         assert_eq!(page.hidden_completed_count, 4);
         assert_eq!(page.entries[0].task_run.status, TaskRunStatus::Executing);
+        assert_eq!(page.entries[0].task_run.user_id, None);
         assert_eq!(page.entries[0].task.level, Level::Ticket);
         assert_eq!(page.entries[0].task.parent_id.as_deref(), Some("epic-1"));
         assert_eq!(
@@ -957,6 +958,8 @@ mod tests {
         );
         // max_concurrency resolves per run in Sacrum; history never asks for it.
         assert!(!body["query"].as_str().unwrap().contains("max_concurrency"));
+        // TaskRunHistoryRun does not expose user_id, unlike TaskRun.
+        assert!(!body["query"].as_str().unwrap().contains("user_id"));
     }
 
     #[tokio::test]

@@ -275,6 +275,15 @@ titles, completion and archival between fetches. This cache is separate from
 the per-task `taskRuns.byTask` entries, which task-list hydration seeds with
 only the active run, so those partial snapshots never stand in for history.
 
+The task list's current active-run projection also supplements the loaded
+history pages. This keeps an open epic, ticket or task's active run available
+even when more recently updated history pushes it past the first page, or the
+history request fails. Matching run IDs are deduplicated by update time; newer
+history snapshots win over stale active projections. Search, completion,
+archival and project scoping apply to both sources. History loading and errors
+are announced inline, with an explicit read-only retry on failure; existing
+rows remain available during recovery.
+
 ### Completed conversations in local chat history
 
 The maximized chat sidebar hides conversations associated with a ticket or task

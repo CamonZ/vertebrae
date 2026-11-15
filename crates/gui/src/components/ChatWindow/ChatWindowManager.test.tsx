@@ -48,6 +48,10 @@ vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
     commands: {
+      getTaskRunHistory: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: { entries: [], has_more: false, hidden_completed_count: 0 },
+      }),
       discoverLocalChatChildSessions: vi
         .fn()
         .mockResolvedValue({ status: "ok", data: [] }),

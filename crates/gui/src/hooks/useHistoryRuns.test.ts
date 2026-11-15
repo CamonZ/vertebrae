@@ -223,6 +223,25 @@ describe("useHistoryRuns", () => {
     expect(historyCalls()).toHaveLength(1);
   });
 
+  it("reports a failed history request and recovers through an explicit retry", async () => {
+    mocks.getTaskRunHistory.mockResolvedValueOnce({
+      status: "error",
+      error: { message: "History query rejected" },
+    });
+    const { result } = renderHistory();
+    expect(result.current.isLoading).toBe(true);
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.rows).toEqual([]);
+    expect(historyCalls()).toHaveLength(1);
+
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.rows).toHaveLength(2));
+    expect(result.current.isError).toBe(false);
+    expect(historyCalls()).toHaveLength(2);
+  });
+
   it("hides finished runs and completed tasks unless completed history is shown", async () => {
     const { result, rerender } = renderHistory();
     await settled(result);
@@ -293,6 +312,86 @@ describe("useHistoryRuns", () => {
     expect(new Set(result.current.rows.map((row) => row.id)).size).toBe(62);
     expect(result.current.hasMore).toBe(false);
   });
+
+  it.each(["epic", "ticket", "task"] as const)(
+    "keeps an open %s's active run visible beyond the first 50 history entries",
+    async (level) => {
+      const active = mocks.server.runs[0];
+      mocks.tasks = mocks.tasks.map((task) =>
+        task.id === active.task_id
+          ? {
+              ...task,
+              level,
+              run_controls: { active_run: active } as Task["run_controls"],
+            }
+          : task
+      );
+      for (let index = 0; index < 60; index += 1)
+        serverRun("task-a", `newer-failed-${index}`, 20, "failed");
+
+      const { result } = renderHistory();
+      await settled(result);
+      expect(result.current.rows.map((row) => row.id)).toContain(active.id);
+      expect(result.current.rows).toHaveLength(51);
+      expect(result.current.hasMore).toBe(true);
+      expect(historyCalls()).toHaveLength(1);
+      expect(mocks.getTaskRuns).not.toHaveBeenCalled();
+    }
+  );
+
+  it("does not regress newer terminal history to a stale active task projection", async () => {
+    const active = mocks.server.runs[0];
+    mocks.tasks = mocks.tasks.map((task) =>
+      task.id === active.task_id
+        ? {
+            ...task,
+            run_controls: { active_run: active } as Task["run_controls"],
+          }
+        : task
+    );
+    const { result } = renderHistory({ showCompleted: true });
+    await settled(result);
+    act(() =>
+      upsertTaskRunInHistoryCache(
+        { ...active, status: "completed", updated_at: at(40) },
+        getProjectScopeGeneration()
+      )
+    );
+    await waitFor(() =>
+      expect(
+        result.current.rows.find((row) => row.id === active.id)?.run.status
+      ).toBe("completed")
+    );
+  });
+
+  it.each(["queued", "executing", "waiting", "stopping"] as const)(
+    "keeps a %s run available when history fails, respecting search and project enablement",
+    async (status) => {
+      const active = { ...mocks.server.runs[0], status };
+      mocks.tasks = mocks.tasks.map((task) =>
+        task.id === active.task_id
+          ? {
+              ...task,
+              run_controls: { active_run: active } as Task["run_controls"],
+            }
+          : task
+      );
+      mocks.getTaskRunHistory.mockResolvedValue({
+        status: "error",
+        error: { message: "History unavailable" },
+      });
+      const { result, rerender } = renderHistory();
+      await waitFor(() => expect(result.current.isError).toBe(true));
+      expect(result.current.rows.map((row) => row.id)).toEqual([active.id]);
+
+      rerender({ searchQuery: "does not match" });
+      expect(result.current.rows).toEqual([]);
+      rerender({ enabled: false });
+      expect(result.current.rows).toEqual([]);
+      expect(result.current.isError).toBe(false);
+      expect(mocks.getTaskRuns).not.toHaveBeenCalled();
+    }
+  );
 
   it("applies realtime runs and status changes without refetching", async () => {
     const { result } = renderHistory();

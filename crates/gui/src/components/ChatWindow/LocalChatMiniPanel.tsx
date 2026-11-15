@@ -595,7 +595,29 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
             </div>
           )}
 
-          {sessionItems.length === 0 && historyRuns.rows.length === 0 ? (
+          {historyRuns.isError && (
+            <div role="alert" className="hc-mini-history-error">
+              Could not load run history.
+              <button
+                type="button"
+                disabled={historyRuns.isFetching}
+                onClick={historyRuns.retry}
+              >
+                Retry run history
+              </button>
+            </div>
+          )}
+
+          {historyRuns.isLoading && (
+            <div role="status" className="hc-mini-history-empty">
+              Loading run history…
+            </div>
+          )}
+
+          {sessionItems.length === 0 &&
+          historyRuns.rows.length === 0 &&
+          !historyRuns.isLoading &&
+          !historyRuns.isError ? (
             <div
               className="hc-mini-history-empty"
               data-testid={
