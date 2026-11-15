@@ -14,8 +14,8 @@
      • backward       → a bottom corridor (one horizontal lane per hop)
 
    ELK is intentionally avoided: its layered engine can't pin a phase to a
-   single column when the phase has internal edges. The graph face still uses
-   ELK (`layoutFull`); the map face is pure arithmetic.
+   single column when the phase has internal edges. The Graph uses the shared
+   machine-flow layout; the map face is pure arithmetic.
    ────────────────────────────────────────────────────────────────── */
 
 import { splitRef } from "./geometry";

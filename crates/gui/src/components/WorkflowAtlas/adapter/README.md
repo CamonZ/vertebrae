@@ -5,10 +5,9 @@ adapter. The caller scopes the summary using the existing Atlas scope logic and
 supplies only already loaded configs. `useAtlasMachineFlow` stabilizes its spec
 and uses the shipped `useLaidOutFlow` compiler/worker/cache lifecycle. Scoped
 Graph and zoom-expanded factory overview both consume this API and the complete
-`AtlasMachineScene` by default. Map retains `layoutCondensed` phase columns;
-Board and Run Console retain their hosts. Set `VITE_ATLAS_MACHINE_GRAPH=0` at
-build time (or pass `WorkflowAtlas.internalMachineGraph={false}` in a host) to
-restore the legacy Graph and overview for rollback until the cleanup ticket.
+`AtlasMachineScene`; it is the only Graph renderer (the legacy ELK Graph,
+its morph and its build-time rollback toggle were removed). Map retains
+`layoutCondensed` phase columns; Board and Run Console retain their hosts.
 Overview uses a uniform 0.32 projection from catalogue units into Atlas units;
 compiled part positions, rail identities, points, jumps and corner radii stay
 unchanged. Expanded factory-name buttons open their factory scope; shared
