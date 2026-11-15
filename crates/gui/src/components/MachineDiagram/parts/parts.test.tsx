@@ -109,6 +109,7 @@ const STORY_VERBS: Record<string, readonly string[]> = {
   "run end": ["finish", "resume", "stop"],
   "task run": ["fail", "finish", "stage", "start", "stop", "wait"],
   workflow: ["enter", "fail", "finish", "hand off", "step", "wait"],
+  factory: ["enter", "fail", "finish", "hand off", "step", "wait"],
 };
 
 /** Parts with no ports are all frame: their mechanism is inside it. */

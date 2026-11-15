@@ -35,6 +35,7 @@ import {
   HELD,
   tokenCard,
   type PartKindDef,
+  type PartWriter,
   type PortDef,
   type StepCard,
   type VerbContext,
@@ -50,20 +51,28 @@ export interface WorkflowProps {
   active: number;
 }
 
+/** A chip the verbs recolour and retire as they compile. */
+export type MutableChip = WorkflowChip & {
+  col: [number, CardRole][];
+  gone?: number;
+};
+
 interface Mutable {
   steps: readonly string[];
   transitions: readonly string[];
   layout: WorkflowLayout;
   lamps: WorkflowLampStep[][];
-  chips: (WorkflowChip & { col: [number, CardRole][]; gone?: number })[];
+  chips: MutableChip[];
   ports: WorkflowPortLight[][];
   bursts: [number, number, StateRole][];
 }
 
-export interface WorkflowState {
-  /** Mechanism timelines the drawing reads (WorkflowExtra). */
-  extra: Mutable;
-  /** The run at the station: its card, colour, lamp and chip. */
+/**
+ * The run at a station (workflow or factory): its card, colour, chip and
+ * whether it is parked. Shared by both flow kinds' verbs.
+ */
+export interface StationRun {
+  extra: { chips: MutableChip[] };
   card: StepCard | null;
   id: string | null;
   role: StateRole;
@@ -72,7 +81,32 @@ export interface WorkflowState {
   waiting: boolean;
 }
 
-const TRANSITION_TOKENS = ["payload", "request", "data", "result"] as const;
+export interface WorkflowState extends StationRun {
+  /** Mechanism timelines the drawing reads (WorkflowExtra). */
+  extra: Mutable;
+}
+
+/** A verb context over any station run (the helpers below need only these). */
+type RunCtx = { readonly out: PartWriter; readonly state: StationRun };
+
+export const TRANSITION_TOKENS = [
+  "payload",
+  "request",
+  "data",
+  "result",
+] as const;
+
+/** Chips for the other TaskRuns already at the station: parked amber, then active ink. */
+export const seedChips = (parked: number, active: number): MutableChip[] => [
+  ...Array.from({ length: parked }, () => ({
+    born: -1,
+    col: [[-1e9, "amber"]] as [number, CardRole][],
+  })),
+  ...Array.from({ length: active }, () => ({
+    born: -1,
+    col: [[-1e9, "ink"]] as [number, CardRole][],
+  })),
+];
 
 const propsOf = (props: Partial<WorkflowProps>) => ({
   steps: Array.isArray(props.steps) ? props.steps : [],
@@ -141,8 +175,8 @@ const last = (ctx: Ctx) => Math.max(0, ctx.state.extra.steps.length - 1);
 const typeAt = (ctx: Ctx, i: number) => ctx.state.extra.steps[i] ?? "step";
 
 /** Re-seat the run's card on new legs (it keeps its id across verbs). */
-function move(
-  ctx: Ctx,
+export function move(
+  ctx: RunCtx,
   pts: readonly (readonly [number, number])[],
   t: number,
   d: number,
@@ -163,17 +197,20 @@ function move(
   state.role = role;
 }
 
-function chipTo(ctx: Ctx, t: number, role: CardRole) {
+/** The run's chip changes colour at `t`. */
+export function chipTo(ctx: RunCtx, t: number, role: CardRole) {
   const chip = ctx.state.extra.chips[ctx.state.chip];
   if (chip) chip.col.push([t, role]);
 }
 
-function chipGone(ctx: Ctx, t: number) {
+/** The run's chip shrinks out at `t` (once). */
+export function chipGone(ctx: RunCtx, t: number) {
   const chip = ctx.state.extra.chips[ctx.state.chip];
   if (chip && chip.gone === undefined) chip.gone = t;
 }
 
-function parkedCount(ctx: Ctx, t: number) {
+/** TaskRuns parked (amber chips) at the station at `t`. */
+export function parkedCount(ctx: RunCtx, t: number) {
   return ctx.state.extra.chips.filter(
     (c) =>
       (c.gone === undefined || c.gone > t) &&
@@ -262,16 +299,10 @@ export const workflowPart: PartKindDef<WorkflowProps, WorkflowState> = {
   init: (props) => {
     const { steps, transitions } = propsOf(props);
     const layout = workflowLayout(steps, transitions);
-    const chips: Mutable["chips"] = [
-      ...Array.from({ length: Number(props.parked ?? 0) }, () => ({
-        born: -1,
-        col: [[-1e9, "amber"]] as [number, CardRole][],
-      })),
-      ...Array.from({ length: Number(props.active ?? 0) }, () => ({
-        born: -1,
-        col: [[-1e9, "ink"]] as [number, CardRole][],
-      })),
-    ];
+    const chips = seedChips(
+      Number(props.parked ?? 0),
+      Number(props.active ?? 0)
+    );
     return {
       extra: {
         steps,

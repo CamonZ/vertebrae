@@ -66,6 +66,7 @@ import { upcasterPart } from "./upcaster";
 import { waitChildrenPart } from "./waitChildren";
 import { workerPart } from "./worker";
 import { workflowPart } from "./workflow";
+import { factoryPart } from "./factory";
 
 export const STARTER_PARTS: readonly AnyPartKind[] = [
   sourcePart,
@@ -128,6 +129,7 @@ export const STARTER_PARTS: readonly AnyPartKind[] = [
   runEndPart,
   taskRunPart,
   workflowPart,
+  factoryPart,
   topologyEndpointPart,
 ];
 
@@ -137,6 +139,7 @@ export function registerStarterParts(r: PartRegistry): void {
 
 export {
   workflowPart,
+  factoryPart,
   topologyEndpointPart,
   aggregatorPart,
   alertPart,

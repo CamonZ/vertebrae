@@ -71,6 +71,7 @@ import { humanGateMachine } from "./humanGate";
 import { runEndMachine } from "./runEnd";
 import { taskRunMachine } from "./taskRun";
 import { workflowMachine } from "./workflow";
+import { factoryMachine } from "./factory";
 import type { MachinePartDef } from "./types";
 
 export type { MachinePartDef, PartScenario } from "./types";
@@ -135,6 +136,7 @@ export {
   runEndMachine,
   taskRunMachine,
   workflowMachine,
+  factoryMachine,
 };
 
 /** Implemented parts, in catalogue order. */
@@ -199,6 +201,7 @@ export const MACHINE_PARTS = {
   "run end": runEndMachine,
   "task run": taskRunMachine,
   workflow: workflowMachine,
+  factory: factoryMachine,
 } as const;
 
 export type MachinePartName = keyof typeof MACHINE_PARTS;
