@@ -231,7 +231,7 @@ describe("DaemonInspector", () => {
     expect(editor.getByText("Enter a whole number greater than zero.")).toBeInTheDocument();
   });
 
-  it("offers rotate-and-re-enroll when the reconnect credential cannot be renewed", async () => {
+  it("offers rotate-and-re-enroll when no usable refresh credential remains", async () => {
     const user = userEvent.setup();
     const onReissue = vi.fn();
     const { rerender } = renderInspector();

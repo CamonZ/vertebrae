@@ -104,14 +104,14 @@ describe("daemon fleet projections", () => {
 });
 
 describe("daemonRequiresReenrollment", () => {
-  const now = Date.parse("2026-10-20T12:00:00Z");
+  const now = Date.parse("2026-11-15T01:06:00Z");
   const credential = (
     overrides: Partial<DaemonCredentialMetadata>
   ): DaemonCredentialMetadata => ({
     id: "credential-1",
-    credential_kind: "reconnect",
+    credential_kind: "refresh",
     status: "active",
-    expires_at: "2026-11-19T12:00:00Z",
+    expires_at: "2026-12-15T01:05:19.237178Z",
     consumed_at: null,
     revoked_at: null,
     inserted_at: null,
@@ -129,27 +129,83 @@ describe("daemonRequiresReenrollment", () => {
     ...overrides,
   });
 
-  it("is false while an unexpired reconnect credential is active", () => {
-    expect(daemonRequiresReenrollment(metadata([credential({})]), now)).toBe(
-      false
-    );
+  const access = credential({
+    id: "access-1",
+    credential_kind: "access",
+    expires_at: "2026-11-15T02:05:19.237178Z",
+  });
+  const bootstrap = credential({
+    id: "bootstrap-1",
+    credential_kind: "bootstrap",
+    status: "consumed",
+    consumed_at: "2026-11-15T01:05:19.237178Z",
   });
 
-  it("is true once every reconnect credential is expired or revoked", () => {
+  it.each([
+    ["valid", access.expires_at],
+    ["expired", "2026-11-15T01:05:00Z"],
+  ])("allows refresh recovery with %s access", (_, expires_at) => {
+    expect(
+      daemonRequiresReenrollment(
+        metadata([bootstrap, { ...access, expires_at }, credential({})]),
+        now
+      )
+    ).toBe(false);
+  });
+
+  it.each([
+    ["missing", []],
+    [
+      "revoked",
+      [credential({ status: "revoked", revoked_at: "2026-11-15T01:05:30Z" })],
+    ],
+    ["expired", [credential({ expires_at: "2026-11-15T01:05:00Z" })]],
+    ["invalid expiry", [credential({ expires_at: "invalid" })]],
+    ["legacy reconnect only", [credential({ credential_kind: "reconnect" })]],
+  ])(
+    "requires recovery when refresh is %s, even with valid access",
+    (_, credentials) => {
+      expect(
+        daemonRequiresReenrollment(
+          metadata([bootstrap, access, ...credentials]),
+          now
+        )
+      ).toBe(true);
+    }
+  );
+
+  it("requires recovery at the exact refresh expiry boundary", () => {
+    const enrollment = metadata([
+      credential({ expires_at: new Date(now).toISOString() }),
+    ]);
+    expect(daemonRequiresReenrollment(enrollment, now - 1)).toBe(false);
+    expect(daemonRequiresReenrollment(enrollment, now)).toBe(true);
+    expect(daemonRequiresReenrollment(enrollment, now + 1)).toBe(true);
+  });
+
+  it("allows recovery when one refresh credential remains usable", () => {
     expect(
       daemonRequiresReenrollment(
         metadata([
-          credential({ expires_at: "2026-10-15T19:42:16Z" }),
-          credential({ id: "credential-2", status: "revoked" }),
-          credential({ id: "bootstrap", credential_kind: "bootstrap" }),
+          credential({ status: "revoked" }),
+          credential({ id: "refresh-2" }),
         ]),
         now
       )
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("ignores pending enrollments and missing metadata", () => {
     expect(daemonRequiresReenrollment(null, now)).toBe(false);
+    expect(daemonRequiresReenrollment(undefined, now)).toBe(false);
+    expect(
+      daemonRequiresReenrollment(metadata([], { enrolled_at: null }), now)
+    ).toBe(false);
+    for (const status of ["pending", "revoked", "removed"]) {
+      expect(daemonRequiresReenrollment(metadata([], { status }), now)).toBe(
+        false
+      );
+    }
     expect(
       daemonRequiresReenrollment(
         metadata([], { status: "pending", enrolled_at: null }),

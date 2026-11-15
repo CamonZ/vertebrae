@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { Daemon } from "../bindings";
+import type { Daemon, DaemonEnrollmentMetadata } from "../bindings";
 
 const mockUseDaemonFleet = vi.fn();
 const mockUseDaemonDetail = vi.fn();
+const mockUseDaemonEnrollmentMetadata = vi.fn();
 const mockUseWebSocketStatus = vi.fn();
 const mockUseDaemonMutations = vi.fn();
 const mockCreateDaemon = vi.fn();
@@ -26,15 +27,7 @@ vi.mock("../hooks/useDaemonFleet", () => ({
 }));
 vi.mock("../hooks/useDaemonDetail", () => ({
   useDaemonDetail: (...args: unknown[]) => mockUseDaemonDetail(...args),
-  useDaemonEnrollmentMetadata: () => ({
-    data: null,
-    isLoading: false,
-    isRefreshing: false,
-    error: null,
-    errorKind: null,
-    connectionId: null,
-    refetch: vi.fn(),
-  }),
+  useDaemonEnrollmentMetadata: () => mockUseDaemonEnrollmentMetadata(),
 }));
 vi.mock("../hooks/useWebSocketStatus", () => ({
   useWebSocketStatus: () => mockUseWebSocketStatus(),
@@ -100,6 +93,10 @@ describe("DaemonsPage", () => {
       connectionId: "identity-a",
       refetch: vi.fn(),
     });
+    mockUseDaemonEnrollmentMetadata.mockReturnValue({
+      data: null,
+      connectionId: "identity-a",
+    });
     mockUseWebSocketStatus.mockReturnValue("connected");
     mockUseDaemonMutations.mockReturnValue({
       createDaemon: mockCreateDaemon,
@@ -137,6 +134,79 @@ describe("DaemonsPage", () => {
       },
     });
   });
+
+  it.each(["active", "revoked"])(
+    "shows recovery only for unusable refresh metadata (%s)",
+    async (refreshStatus) => {
+      const user = userEvent.setup();
+      mockUseDaemonDetail.mockImplementation((id: string | null) => ({
+        data: id === active.id ? active : null,
+        isLoading: false,
+        error: null,
+        connectionId: "identity-a",
+        refetch: vi.fn(),
+      }));
+      const now = Date.now();
+      const metadata: DaemonEnrollmentMetadata = {
+        daemon_id: active.id,
+        status: "active",
+        enrolled_at: new Date(now - 120_000).toISOString(),
+        credentials: [
+          {
+            id: "access-1",
+            credential_kind: "access",
+            status: "active",
+            expires_at: new Date(now - 60_000).toISOString(),
+            consumed_at: null,
+            revoked_at: null,
+            inserted_at: null,
+            updated_at: null,
+          },
+          {
+            id: "refresh-1",
+            credential_kind: "refresh",
+            status: refreshStatus,
+            expires_at: new Date(now + 86_400_000).toISOString(),
+            consumed_at: null,
+            revoked_at:
+              refreshStatus === "revoked" ? new Date(now).toISOString() : null,
+            inserted_at: null,
+            updated_at: null,
+          },
+        ],
+      };
+      mockUseDaemonEnrollmentMetadata.mockReturnValue({
+        data: metadata,
+        connectionId: "identity-a",
+      });
+      renderPage();
+      await user.click(screen.getByTestId("daemon-row-active-1"));
+
+      expect(mockRotateDaemonCredentials).not.toHaveBeenCalled();
+      if (refreshStatus === "active") {
+        expect(
+          screen.queryByTestId("daemon-inspector-credential-reenrollment")
+        ).not.toBeInTheDocument();
+        expect(
+          screen.queryByRole("button", { name: "Rotate and re-enroll" })
+        ).not.toBeInTheDocument();
+        expect(screen.getByTestId("daemon-inspector-reissue")).toBeEnabled();
+      } else {
+        expect(
+          screen.getByTestId("daemon-inspector-credential-reenrollment")
+        ).toHaveTextContent("no usable refresh credential");
+        await user.click(
+          screen.getByRole("button", { name: "Rotate and re-enroll" })
+        );
+        await waitFor(() =>
+          expect(mockRotateDaemonCredentials).toHaveBeenCalledWith(active.id)
+        );
+        expect(
+          await screen.findByTestId("daemon-enrollment-token-step")
+        ).toBeInTheDocument();
+      }
+    }
+  );
 
   it("shows status counts and groups all fleet statuses", () => {
     renderPage();
