@@ -1,66 +1,31 @@
 /* ──────────────────────────────────────────────────────────────────
-   Workflow Atlas — the canonical workflow-topology surface
-   (P4 GRAPH + P5 MAP + P6 MORPH + P7 HOVER-TRACE).
+   Workflow Atlas — the canonical workflow-topology surface.
 
-   Graph uses the shared adapter, useLaidOutFlow worker/cache and
-   AtlasMachineScene in both scoped and overview hosts. Map retains its
-   phase-column layout. VITE_ATLAS_MACHINE_GRAPH=0 retains the legacy Graph
-   rollback path; the layoutFull/morph notes below describe that path.
-
-   Pipeline data → adapter → two layouts → a custom DOM+SVG canvas inside a
-   pan/zoom world:
-
-     GRAPH view (P4)  — `layoutFull`: nested workflow containers, ELK-positioned
-                        step nodes, routed handoff / step / loop edges.
-     MAP view (P5)    — `layoutCondensed`: deterministic value-stream phase
-                        columns, condensed workflow cards (step-count + live
-                        ember only), aggregated workflow→workflow edges with
-                        condition chips, plus a step-grouping control and a
-                        lit/dim workflow search.
-
-   THE MORPH (P6) — both layouts are held in state at once. The Map⇄Graph
-   SegmentedControl flips `view`; each workflow box is ONE persistent element
-   whose left/top/width/height CSS-transition (~0.66s) between its graph-rect and
-   its map-rect, while the view chrome (step nodes, edges, labels, columns,
-   chips) crossfades (~0.28s). A `morphing` flag hides all chrome and disables
-   pointer events for the duration so ONLY the boxes choreograph; the camera
-   glides to reframe via a `setTimeout`→`fit` (rAF is paused in background
-   frames). The board is sized to `max(full, cond)` so neither layout clips
-   mid-flight. Pan/zoom persists across the toggle (the hook is never remounted).
-
-   HOVER-TRACE (P7) — hovering a workflow is a quiet trace: its handoffs show
-   at full opacity in their in/out colour (no glow), connected workflows tint
-   their name, and the rest dims mildly; its loops stay at rest. The connected
-   set is computed per view: graph cross-edges vs. condensed map edges.
-   Hovering a step (graph view) traces that step instead: every edge entering
-   or leaving it (step links, branches, loops, handoffs) lights in its in/out
-   colour with its route chip, its neighbour steps light softly, and the rest
-   dims mildly. High-degree hub edges (e.g. Human Review) stay hidden at rest
-   and only appear when a trace reaches them. Lit edges are z-sorted last so
-   they paint over the dimmed ones. Search and trace compose: a query dims
-   non-matches; a trace overrides with lit/dim within (or across) the matches.
-
+   GRAPH view — the shared machine-flow path: the adapter, the
+                `useLaidOutFlow` worker/cache and `AtlasMachineScene`, hosted
+                by `ScopedMachineGraph` (factory scope) and by the zoom-expanded
+                `FactoryOverview` (no scope). See adapter/README.md.
+   MAP view   — `layoutCondensed`: deterministic value-stream phase columns,
+                condensed workflow cards (step-count + live ember only),
+                aggregated workflow→workflow edges with condition chips, plus
+                a lit/dim workflow search.
    BOARD view — the factory's Kanban board (`KanbanBoard`). Columns come from
-   the same `kanban_column` values the map uses as phases, so the board only
-   exists while a factory scope is selected; it replaces the pan/zoom canvas
-   and takes no part in the morph.
+                the same `kanban_column` values the map uses as phases, so the
+                board only exists while a factory scope is selected.
 
-   Re-layout discipline (plan risk #5): the ELK graph layout is async and
-   expensive, so it is memoised on a STRUCTURAL key (workflow/step ids + kinds +
-   phases + edge topology). The condensed map layout is pure + synchronous and is
-   memoised on the same key. Live `pipeline_counts` change the `live` ember and
-   re-render chrome only — they never re-trigger a layout.
+   HOVER-TRACE (Map) — hovering a workflow is a quiet trace: its handoffs show
+   at full opacity in their in/out colour (no glow), connected workflows tint
+   their name, and the rest dims mildly. Search and trace compose: a query
+   dims non-matches; a trace overrides with lit/dim within the matches.
+
+   Re-layout discipline: the condensed map layout is pure + synchronous and is
+   memoised on a STRUCTURAL key (workflow/step ids + kinds + phases + edge
+   topology). Live `pipeline_counts` change the `live` ember and re-render
+   chrome only — they never re-trigger a layout.
 
    Ported from docs/design/workflow-views.jsx (UnifiedViews).
    ────────────────────────────────────────────────────────────────── */
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScopedMachineGraph } from "./ScopedMachineGraph";
 import { useAtlasLayoutWarmup } from "./adapter/useAtlasLayoutWarmup";
 import type { PanZoomTransform } from "./hooks/usePanZoom";
@@ -82,7 +47,6 @@ import { usePipelineSummary } from "../../hooks/usePipelineSummary";
 import { useSteps } from "../../hooks/useStep";
 import type { JsonValue, RouteStepConfig } from "../../bindings";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
-import type { AtlasSelection } from "./inspector/selection";
 import { ColumnHeader } from "./ColumnHeader";
 import { EdgeLabel } from "./EdgeLabel";
 import { GraphEdge } from "./GraphEdge";
@@ -90,35 +54,22 @@ import { GraphMarkers } from "./GraphMarkers";
 import { KindLegend } from "./KindLegend";
 import { FactoryOverview } from "./FactoryOverview";
 import { RunConsole } from "./RunConsole";
-import { StepNodeGeo } from "./StepNodeGeo";
-import { WfBox, type WfBoxState, type WfBoxView } from "./WfBox";
+import { WfBox, type WfBoxState } from "./WfBox";
 import { ZoomWidget } from "./ZoomWidget";
 import { buildAtlasModel } from "./adapter/buildAtlasModel";
-import { selectionFromWorkflowTarget } from "./inspector/selection";
 import { usePanZoom } from "./hooks/usePanZoom";
 import { useFactoryFilterStore } from "../../stores/factoryFilterStore";
-import { roundedPath, routeFromSourcePort } from "./layout/geometry";
+import { roundedPath } from "./layout/geometry";
 import { layoutCondensed } from "./layout/layoutCondensed";
-import { layoutFull } from "./layout/layoutFull";
-import type {
-  AtlasModel,
-  CondensedLayout,
-  FullLayout,
-  Kind,
-  PlacedEdge,
-  Point,
-  Rect,
-} from "./layout/types";
+import type { AtlasModel, CondensedLayout, Kind } from "./layout/types";
 import "./WorkflowAtlas.css";
 
-const FULL_OPTS = { headH: 118 } as const;
 const COND_OPTS = { boxW: 264, boxH: 140 } as const;
 
-/** Camera-glide schedule for the morph (matches the 0.66s box transition). */
-const MORPH_FIT_DELAY = 30;
-const MORPH_END = 800;
+/** Delay before reframing the Map once its canvas has mounted. */
+const MAP_FIT_DELAY = 30;
 
-export type AtlasView = WfBoxView | "board";
+export type AtlasView = "graph" | "map" | "board";
 
 const TOPOLOGY_VIEW_OPTIONS: ReadonlyArray<SegmentedOption<AtlasView>> = [
   { value: "map", label: "Map" },
@@ -129,14 +80,14 @@ const BOARD_VIEW_OPTION: SegmentedOption<AtlasView> = {
   label: "Board",
 };
 
-/** Trace/search visual state applied to a box, edge, or step. */
+/** Trace/search visual state applied to a card or edge. */
 type TraceState = "" | "lit" | "dim";
 
 /**
- * Structural fingerprint of an `AtlasModel`: everything the layouts consume
- * (ids, kinds, phases, edge topology) and nothing they ignore (counts / `live`).
- * Two models with the same key produce the same geometry, so layouts are
- * memoised on it — `pipeline_counts` churn never re-runs them.
+ * Structural fingerprint of an `AtlasModel`: everything the Map layout
+ * consumes (ids, kinds, phases, edge topology) and nothing it ignores
+ * (counts / `live`). Two models with the same key produce the same geometry,
+ * so the layout is memoised on it — `pipeline_counts` churn never re-runs it.
  */
 export function layoutKey(model: AtlasModel): string {
   const wfs = model.workflows
@@ -154,12 +105,10 @@ export function layoutKey(model: AtlasModel): string {
   return `${wfs}#${steps}#${edges}#${forwardLabels}`;
 }
 
-export function WorkflowAtlas({
-  internalMachineGraph = import.meta.env.VITE_ATLAS_MACHINE_GRAPH !== "0",
-}: { internalMachineGraph?: boolean } = {}) {
+export function WorkflowAtlas() {
   const projectGeneration = useProjectScopeGeneration();
   const { summary, isLoading, error } = usePipelineSummary();
-  useAtlasLayoutWarmup(summary, internalMachineGraph);
+  useAtlasLayoutWarmup(summary);
 
   const [view, setView] = useState<AtlasView>("graph");
   const factoryFilter = useFactoryFilterStore((state) => state.factoryName);
@@ -188,22 +137,17 @@ export function WorkflowAtlas({
     [setFactoryFilter]
   );
   const [hover, setHover] = useState<string | null>(null);
-  // Step-node hover: the ref of the step node under the cursor (graph view).
-  // Its owning workflow drives `hover` (so the box stays traced while the cursor
-  // sits over a step that paints above it), and this id emphasises that one node.
-  const [hoverStep, setHoverStep] = useState<string | null>(null);
   // Edge-hover is written by the inspector in the global entity host. Keeping
   // it in the shared UI store lets the inspector move out of this component
   // without losing the canvas highlight interaction.
   const hoverEdge = useEntityPanelStore((state) => state.hoveredEdgeId);
-  const [morphing, setMorphing] = useState(false);
   const entitySelection = useEntityPanelStore((state) => state.selection);
 
   const showFactoryOverview = summary !== null && factoryFilter === null;
   const isBoard = view === "board";
-  // The topology layouts and the factory overview only know Graph and Map;
-  // Board stands in for Map there.
-  const canvasView: WfBoxView = isBoard ? "map" : view;
+  const isGraph = view === "graph";
+  // The factory overview only knows Graph and Map; Board stands in for Map.
+  const overviewView = isGraph ? "graph" : "map";
 
   // The board needs a factory scope. Clearing the scope while on Board returns
   // to the factory overview, which has no Board option.
@@ -272,14 +216,6 @@ export function WorkflowAtlas({
   // A selection from another factory should not remain open beside a scoped
   // canvas. The global host owns the panel, so close through the shared store.
   useEffect(() => {
-    if (
-      showFactoryOverview &&
-      !internalMachineGraph &&
-      entitySelection?.type !== "task"
-    ) {
-      if (entitySelection) useEntityPanelStore.getState().close();
-      return;
-    }
     if (!entitySelection || entitySelection.type === "task") return;
     const workflows = showFactoryOverview
       ? summary?.workflows
@@ -292,200 +228,44 @@ export function WorkflowAtlas({
     ) {
       useEntityPanelStore.getState().close();
     }
-  }, [
-    entitySelection,
-    model,
-    showFactoryOverview,
-    internalMachineGraph,
-    summary,
-  ]);
+  }, [entitySelection, model, showFactoryOverview, summary]);
 
-  const sel = useMemo<AtlasSelection | null>(() => {
-    if (!model || !entitySelection || entitySelection.type === "task") {
-      return null;
-    }
-    return selectionFromWorkflowTarget(model, entitySelection);
-  }, [entitySelection, model]);
-  const setSel = (selection: AtlasSelection | null) => {
-    const store = useEntityPanelStore.getState();
-    if (!selection) {
-      store.close();
-    } else if (selection.type === "workflow") {
-      store.openWorkflow(selection.workflowId);
-    } else {
-      store.openStep(selection.stepId, selection.workflowId);
-    }
-  };
+  const openWorkflow = (workflowId: string) =>
+    useEntityPanelStore.getState().openWorkflow(workflowId);
 
-  const isGraph = view === "graph";
-  const machineGraph =
-    internalMachineGraph && isGraph && factoryFilter !== null;
+  // The shared machine Graph hosts the factory scope; the overview hosts both
+  // of its own views. The Map canvas below is the scoped Map.
+  const machineGraph = isGraph && factoryFilter !== null;
+  const showMap = view === "map" && !showFactoryOverview;
 
   const key = useMemo(() => (model ? layoutKey(model) : ""), [model]);
 
-  // Per-step task counts (total parked + running), keyed by step ref. Lives off
-  // the model (not the layout) so it tracks live count churn without re-laying.
-  const stepCountById = useMemo(() => {
-    const m = new Map<string, { total: number; running: number }>();
-    model?.steps.forEach((s) =>
-      m.set(s.id, { total: s.total, running: s.running })
-    );
-    return m;
-  }, [model]);
-
-  // Async ELK graph layout, memoised on the structural key. The effect runs on
-  // `key` alone (so counts churn never re-lays out); it reads the latest `model`
-  // through a ref, and `keyRef` guards a stale async result from clobbering a
-  // newer one (key changed mid-flight).
-  const [full, setFull] = useState<FullLayout | null>(null);
-  const [layoutError, setLayoutError] = useState<string | null>(null);
-  const [workflowTitlePorts, setWorkflowTitlePorts] = useState<
-    Record<string, Point>
-  >({});
-  const reportWorkflowTitlePort = useCallback(
-    (workflowId: string, point: Point) => {
-      setWorkflowTitlePorts((current) => {
-        const previous = current[workflowId];
-        if (
-          previous &&
-          Math.abs(previous.x - point.x) < 0.5 &&
-          Math.abs(previous.y - point.y) < 0.5
-        ) {
-          return current;
-        }
-        return { ...current, [workflowId]: point };
-      });
-    },
-    []
-  );
-  const graphCross = useMemo(
-    () =>
-      (full?.cross ?? []).map((edge) => {
-        const titlePort = workflowTitlePorts[edge.fromWorkflow];
-        return titlePort
-          ? { ...edge, points: routeFromSourcePort(edge.points, titlePort) }
-          : edge;
-      }),
-    [full, workflowTitlePorts]
-  );
-  const keyRef = useRef(key);
-  keyRef.current = key;
-  const modelRef = useRef(model);
-  modelRef.current = model;
-
-  useEffect(() => {
-    const currentModel = modelRef.current;
-    if (internalMachineGraph || !currentModel || key === "") {
-      setFull(null);
-      return;
-    }
-    let cancelled = false;
-    setLayoutError(null);
-    layoutFull(currentModel, FULL_OPTS)
-      .then((result) => {
-        if (cancelled || keyRef.current !== key) return;
-        setFull(result);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        setLayoutError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [key, internalMachineGraph]);
-
-  // Condensed map layout — pure + synchronous, memoised on the same key (the
-  // model identity is stable for a given key, so this never thrashes on counts).
+  // Condensed map layout — pure + synchronous, memoised on the structural key
+  // (the model identity is stable for a given key, so this never thrashes on
+  // counts).
   const cond = useMemo<CondensedLayout | null>(
     () => (model && key !== "" ? layoutCondensed(model, COND_OPTS) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [key]
   );
 
-  // ── Camera: fits whichever layout is active. The board is sized to the union
-  // of both layouts so neither clips during the morph; the camera reframes the
-  // ACTIVE layout's content box on each view change.
   const canvasRef = useRef<HTMLDivElement>(null);
-  const dims = useMemo(() => {
-    if (isGraph) return { w: full?.width ?? 0, h: full?.height ?? 0 };
-    return { w: cond?.width ?? 0, h: cond?.height ?? 0 };
-  }, [isGraph, full, cond]);
-  const pz = usePanZoom(canvasRef, dims, {
-    min: 0.12,
-    max: 2.4,
-    enabled: !showFactoryOverview && !isBoard && !machineGraph,
-  });
-  const pzRef = useRef(pz);
-  pzRef.current = pz;
-
-  // ── THE MORPH (P6): on every view change after the first, arm the `morphing`
-  // flag (which hides chrome + freezes pointer events), then glide the camera to
-  // the new layout via setTimeout (NOT rAF — rAF is paused in background tabs).
-  // The flag clears once the box transition has landed. The board replaces the
-  // canvas outright, so entering it skips the morph and leaving it only refits.
-  const firstView = useRef(true);
-  const previousView = useRef(view);
-  useLayoutEffect(() => {
-    const from = previousView.current;
-    previousView.current = view;
-    if (firstView.current) {
-      firstView.current = false;
-      return;
-    }
-    setMorphing(false);
-    if (machineGraph || showFactoryOverview || view === "board") return;
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      pzRef.current.fit();
-      return;
-    }
-    if (from === "board") {
-      const tFit = setTimeout(() => pzRef.current.fit(), MORPH_FIT_DELAY);
-      return () => clearTimeout(tFit);
-    }
-    setMorphing(true); // arm the transition first…
-    const tFit = setTimeout(() => pzRef.current.fit(), MORPH_FIT_DELAY); // …then move
-    const tEnd = setTimeout(() => setMorphing(false), MORPH_END);
-    return () => {
-      clearTimeout(tFit);
-      clearTimeout(tEnd);
-    };
-  }, [
-    view,
-    machineGraph,
-    showFactoryOverview,
-    projectGeneration,
-    factoryFilter,
-  ]);
-
-  // Flatten intra (forward + loop) edges with their owning workflow id.
-  const intra = useMemo(
-    () =>
-      full
-        ? full.workflows.flatMap((w) =>
-            w.intra.map((e) => ({ ...e, wf: w.id }))
-          )
-        : [],
-    [full]
+  const pz = usePanZoom(
+    canvasRef,
+    { w: cond?.width ?? 0, h: cond?.height ?? 0 },
+    { min: 0.12, max: 2.4, enabled: showMap }
   );
+  const fitMap = pz.fit;
 
-  // Per-workflow placement lookups for each view (the persistent box reads its
-  // rect for the active view from these every render → CSS transitions the move).
-  const graphRectById = useMemo(() => {
-    const m = new Map<string, Rect>();
-    full?.workflows.forEach((w) =>
-      m.set(w.id, { x: w.x, y: w.y, w: w.w, h: w.h })
-    );
-    return m;
-  }, [full]);
+  // Reframe the Map whenever it is entered or its scope changes. The Map canvas
+  // mounts on entry, so the fit waits a tick for its board to have a size.
+  useEffect(() => {
+    if (!showMap) return;
+    const timer = setTimeout(fitMap, MAP_FIT_DELAY);
+    return () => clearTimeout(timer);
+  }, [showMap, fitMap, projectGeneration, factoryFilter]);
 
   const mapRectById = useMemo(() => {
-    const m = new Map<string, Rect>();
-    cond?.nodes.forEach((n) => m.set(n.id, { x: n.x, y: n.y, w: n.w, h: n.h }));
-    return m;
-  }, [cond]);
-
-  const condNodeById = useMemo(() => {
     const m = new Map<string, CondensedLayout["nodes"][number]>();
     cond?.nodes.forEach((n) => m.set(n.id, n));
     return m;
@@ -508,45 +288,17 @@ export function WorkflowAtlas({
     return m;
   }, [model]);
 
-  // ── STEP-TRACE: the hovered step node's edges (graph view only), the steps
-  // at their other ends, and the workflows those live in. null ⇒ no step
-  // hovered; the workflow trace below then applies.
-  const traceStep = isGraph ? hoverStep : null;
-  const stepTrace = useMemo(() => {
-    if (!traceStep) return null;
-    const edges = new Set<string>();
-    const steps = new Set<string>([traceStep]);
-    const workflows = new Set<string>(hover ? [hover] : []);
-    for (const e of [...graphCross, ...intra]) {
-      if (e.from !== traceStep && e.to !== traceStep) continue;
-      edges.add(e.id);
-      steps.add(e.from);
-      steps.add(e.to);
-      workflows.add(e.fromWorkflow);
-      workflows.add(e.toWorkflow);
-    }
-    return { edges, steps, workflows };
-  }, [traceStep, hover, graphCross, intra]);
-
-  // ── HOVER-TRACE (P7): the connected set of the hovered workflow, computed per
-  // view. Graph traces cross-workflow handoffs; map traces aggregated map edges.
-  // null ⇒ no workflow hovered, or a step trace is active.
+  // ── HOVER-TRACE: the connected set of the hovered workflow across the
+  // aggregated map edges. null ⇒ no workflow hovered.
   const connected = useMemo<Set<string> | null>(() => {
-    if (!hover || traceStep) return null;
+    if (!hover) return null;
     const set = new Set<string>([hover]);
-    if (isGraph) {
-      full?.cross.forEach((e) => {
-        if (e.fromWorkflow === hover) set.add(e.toWorkflow);
-        if (e.toWorkflow === hover) set.add(e.fromWorkflow);
-      });
-    } else {
-      cond?.edges.forEach((e) => {
-        if (e.from === hover) set.add(e.to);
-        if (e.to === hover) set.add(e.from);
-      });
-    }
+    cond?.edges.forEach((e) => {
+      if (e.from === hover) set.add(e.to);
+      if (e.to === hover) set.add(e.from);
+    });
     return set;
-  }, [hover, traceStep, isGraph, full, cond]);
+  }, [hover, cond]);
 
   // Search composes UNDER the trace: a query dims non-matching cards; an active
   // trace overrides resting/search state with lit/dim.
@@ -557,11 +309,9 @@ export function WorkflowAtlas({
     return !!wf && wf.name.toLowerCase().includes(q);
   };
 
-  // ── EDGE-HOVER: hovering a transition row in the inspector lights that one
-  // edge in the canvas. We resolve the hovered model edge, then in the active
-  // view light only it (graph matches by step-ref endpoints; map by the
-  // aggregated workflow pair) and dim the rest. A loop-back has no map edge, so
-  // it's inert in map view.
+  // ── EDGE-HOVER: hovering a transition row in the inspector lights the
+  // aggregated map edge for that workflow pair and dims the rest. A loop-back
+  // has no map edge, so it's inert.
   const hoveredEdge = useMemo(
     () =>
       hoverEdge && model
@@ -570,70 +320,24 @@ export function WorkflowAtlas({
     [hoverEdge, model]
   );
   const activeHoverEdge =
-    hoveredEdge &&
-    (isGraph || hoveredEdge.fromWorkflow !== hoveredEdge.toWorkflow)
+    hoveredEdge && hoveredEdge.fromWorkflow !== hoveredEdge.toWorkflow
       ? hoveredEdge
       : null;
   const hoverEndpoints = activeHoverEdge
     ? new Set([activeHoverEdge.fromWorkflow, activeHoverEdge.toWorkflow])
     : null;
+  const inspectedWorkflow =
+    entitySelection?.type === "workflow" ? entitySelection.workflowId : null;
 
-  /** Visual state of a workflow box / its step nodes. */
+  /** Visual state of a workflow card. */
   const wfState = (id: string): WfBoxState => {
     if (hoverEndpoints) return hoverEndpoints.has(id) ? "lit" : "dim";
-    if (stepTrace) return stepTrace.workflows.has(id) ? "lit" : "dim";
     if (connected) return connected.has(id) ? "lit" : "dim";
     if (q) return matches(id) ? "lit" : "dim";
     return "";
   };
 
-  /** Visual state of a step node — a step trace lights the hovered step and
-   *  its neighbours; a workflow trace only dims (its steps stay at rest). */
-  const stepState = (workflowId: string, ref: string): TraceState => {
-    if (!hoverEndpoints && stepTrace)
-      return stepTrace.steps.has(ref) ? "lit" : "dim";
-    const st = wfState(workflowId);
-    return connected && st === "lit" ? "" : st;
-  };
-
-  /** Visual state of a step link or branch: lit only on a step trace. */
-  const stepEdgeState = (e: PlacedEdge & { wf: string }): TraceState => {
-    if (!activeHoverEdge && stepTrace)
-      return stepTrace.edges.has(e.id) ? "lit" : "dim";
-    return wfState(e.wf) === "dim" ? "dim" : "";
-  };
-
-  /** Visual state of a graph cross-edge — edge-hover first (a single edge by its
-   *  step-ref endpoints), then the workflow hover-trace, then search. */
-  const crossEdgeState = (e: PlacedEdge): TraceState => {
-    if (activeHoverEdge) {
-      return e.from === activeHoverEdge.from && e.to === activeHoverEdge.to
-        ? "lit"
-        : "dim";
-    }
-    if (stepTrace) return stepTrace.edges.has(e.id) ? "lit" : "dim";
-    if (connected)
-      return e.fromWorkflow === hover || e.toWorkflow === hover ? "lit" : "dim";
-    if (q) return matches(e.fromWorkflow) && matches(e.toWorkflow) ? "" : "dim";
-    return "";
-  };
-
-  /** Visual state of a graph loop-back edge — edge-hover first, then trace, then
-   *  search (a loop belongs to a single workflow). */
-  const loopEdgeState = (e: PlacedEdge & { wf: string }): TraceState => {
-    if (activeHoverEdge) {
-      return e.from === activeHoverEdge.from && e.to === activeHoverEdge.to
-        ? "lit"
-        : "dim";
-    }
-    if (stepTrace) return stepTrace.edges.has(e.id) ? "lit" : "dim";
-    // A workflow trace leaves the hovered workflow's loops at rest.
-    if (connected) return hover === e.wf ? "" : "dim";
-    if (q) return matches(e.wf) ? "" : "dim";
-    return "";
-  };
-
-  /** Visual state of a condensed map edge — edge-hover, then trace, then search. */
+  /** Visual state of a map edge — edge-hover, then trace, then search. */
   const condEdgeState = (from: string, to: string): TraceState => {
     if (activeHoverEdge)
       return from === activeHoverEdge.fromWorkflow &&
@@ -645,48 +349,27 @@ export function WorkflowAtlas({
     return "";
   };
 
-  // During a morph, strip all connective tissue so ONLY the boxes choreograph;
-  // edges / step-nodes / labels / columns re-attach once the boxes have landed.
-  const showGraphChrome = isGraph && !morphing;
-  const showMapChrome = !isGraph && !morphing;
-
-  // Shared world box: the union of both layouts, so neither clips while a box
-  // travels from one layout's rect to the other's.
-  const board = {
-    w: Math.max(full?.width ?? 0, cond?.width ?? 0),
-    h: Math.max(full?.height ?? 0, cond?.height ?? 0),
-  };
-
-  /** The active-view rect for a workflow box (the persistent traveling element). */
-  const rectOf = (id: string): Rect | null =>
-    (isGraph ? graphRectById.get(id) : mapRectById.get(id)) ?? null;
-
-  // A cross-workflow handoff is a "return" edge when its target workflow sits
-  // above its source in the laid-out DAG — i.e. flow heads back up against the
-  // downward progression. Lit return edges render white (vs accent forward), so
-  // tracing a hub separates work flowing onward from paths returning back.
+  // A handoff is a "return" edge when its target card sits above its source.
+  // Lit return edges render white (vs accent forward), so tracing a hub
+  // separates work flowing onward from paths returning back.
   const crossIsBack = (from: string, to: string): boolean => {
-    const a = rectOf(from);
-    const b = rectOf(to);
+    const a = mapRectById.get(from);
+    const b = mapRectById.get(to);
     if (!a || !b) return false;
     return b.y + b.h / 2 < a.y + a.h / 2 - 4;
   };
 
-  // The single workflow the canvas is "focused" on for edge DIRECTION. One
-  // resolved value feeds both views: an inspected workflow whose transition row
-  // is hovered takes precedence (so panel and canvas agree), otherwise the
-  // hover-traced workflow — a box hover, or a step hover (which resolves to its
-  // workflow via `hover`). null ⇒ nothing focused.
+  // The workflow the canvas is "focused" on for edge DIRECTION: an inspected
+  // workflow whose transition row is hovered (so panel and canvas agree),
+  // otherwise the hover-traced workflow.
   const focusWorkflowId: string | null =
-    activeHoverEdge && sel?.type === "workflow" ? sel.workflowId : hover;
+    activeHoverEdge && inspectedWorkflow ? inspectedWorkflow : hover;
 
-  // A lit cross/handoff edge is coloured by its direction relative to the focused
-  // workflow — routes IN read white (return), routes OUT read accent (forward) —
-  // so the canvas agrees with the inspector's in/out coding. With nothing focused
-  // it falls back to geometric up/down detection. `back` is inert unless the edge
-  // is also lit (see `.gedge.lit.back`), so resting/dimmed edges are unaffected
-  // regardless of which branch they take. Graph cross-edges and map condensed
-  // edges are both keyed by workflow id, so one helper serves both views.
+  // A lit handoff is coloured by its direction relative to the focused
+  // workflow — routes IN read white (return), routes OUT read accent (forward)
+  // — so the canvas agrees with the inspector's in/out coding. With nothing
+  // focused it falls back to geometric up/down detection. `back` is inert
+  // unless the edge is also lit (see `.gedge.lit.back`).
   const edgeBack = (fromWorkflow: string, toWorkflow: string): boolean => {
     if (focusWorkflowId) {
       if (toWorkflow === focusWorkflowId) return true; // route IN → white
@@ -695,28 +378,11 @@ export function WorkflowAtlas({
     return crossIsBack(fromWorkflow, toWorkflow);
   };
 
-  /** Direction of a graph edge: on a step trace an edge reads IN (white) when it
-   *  lands on the hovered step and OUT (accent) when it leaves it. */
-  const graphEdgeBack = (e: PlacedEdge, fallback: boolean): boolean =>
-    !activeHoverEdge && stepTrace?.edges.has(e.id)
-      ? e.to === traceStep
-      : fallback;
+  // A workflow trace softens the dim and quiets lit handoffs; inspector
+  // edge-hover keeps the full contrast.
+  const traceClass = !activeHoverEdge && connected ? " trace-wf" : "";
 
-  // A trace's mode, as a board class: the CSS softens the dim (both traces) and
-  // quiets lit handoffs (workflow trace). Inspector edge-hover keeps the full
-  // contrast.
-  const traceClass = activeHoverEdge
-    ? ""
-    : stepTrace
-      ? " trace-step"
-      : connected
-        ? " trace-wf"
-        : "";
-
-  const ready =
-    showFactoryOverview ||
-    isBoard ||
-    (isGraph ? !!full && !!model : !!cond && !!model);
+  const mapReady = showMap && !!cond && !!model;
   const empty =
     !showFactoryOverview &&
     !isBoard &&
@@ -799,8 +465,7 @@ export function WorkflowAtlas({
       </header>
 
       <div className="uv-canvas" ref={canvasRef}>
-        {(isLoading ||
-          (!machineGraph && !ready && !empty && !error && !layoutError)) && (
+        {(isLoading || (showMap && !mapReady && !empty && !error)) && (
           <div className="uv-loading">
             <div className="sp" />
             {isBoard
@@ -809,31 +474,24 @@ export function WorkflowAtlas({
           </div>
         )}
 
-        {(error || (!machineGraph && layoutError)) && (
-          <div className="uv-empty">{error ?? layoutError}</div>
-        )}
+        {error && <div className="uv-empty">{error}</div>}
 
         {empty && !error && (
           <div className="uv-empty">no workflows to graph</div>
         )}
 
-        {showFactoryOverview &&
-          !isLoading &&
-          !error &&
-          !layoutError &&
-          summary && (
-            <FactoryOverview
-              key={projectGeneration}
-              machineGraph={internalMachineGraph}
-              routeConfigs={routeConfigs}
-              scope={JSON.stringify([projectGeneration, null])}
-              summary={summary}
-              query={query}
-              view={canvasView}
-              recentFactory={lastFactory}
-              onSelect={changeScope}
-            />
-          )}
+        {showFactoryOverview && !isLoading && !error && summary && (
+          <FactoryOverview
+            key={projectGeneration}
+            routeConfigs={routeConfigs}
+            scope={JSON.stringify([projectGeneration, null])}
+            summary={summary}
+            query={query}
+            view={overviewView}
+            recentFactory={lastFactory}
+            onSelect={changeScope}
+          />
+        )}
 
         {machineGraph && scopedSummary && !isLoading && !error && !empty && (
           <ScopedMachineGraph
@@ -852,173 +510,57 @@ export function WorkflowAtlas({
           </div>
         )}
 
-        {!machineGraph && !showFactoryOverview && !isBoard && ready && (
-          <div
-            className={"uv-scaler" + (morphing ? " morphing" : "")}
-            style={{ transform: pz.transform }}
-          >
+        {mapReady && cond && model && (
+          <div className="uv-scaler" style={{ transform: pz.transform }}>
             <div
               className={"uv-board" + traceClass}
-              style={{ width: board.w, height: board.h }}
+              style={{ width: cond.width, height: cond.height }}
             >
-              {/* ── MAP chrome: phase-column headers ─────────────────── */}
-              {cond && (
-                <div className={"uv-layer" + (showMapChrome ? "" : " hide")}>
-                  {cond.columns.map((col) => {
-                    const first = condNodeById.get(col.members[0]);
-                    if (!first) return null;
-                    return (
-                      <ColumnHeader
-                        key={col.index}
-                        column={col}
-                        left={first.x}
-                        width={first.w}
-                      />
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* ── MAP chrome: aggregated workflow→workflow handoffs ─── */}
-              {cond && (
-                <svg
-                  className={
-                    "al-edges uv-layer" + (showMapChrome ? "" : " hide")
-                  }
-                  width={board.w}
-                  height={board.h}
-                  viewBox={`0 0 ${board.w} ${board.h}`}
-                >
-                  <GraphMarkers />
-                  {cond.edges
-                    .slice()
-                    .sort(
-                      (a, b) =>
-                        litLast(condEdgeState(a.from, a.to)) -
-                        litLast(condEdgeState(b.from, b.to))
-                    )
-                    .map((e) => (
-                      <GraphEdge
-                        key={e.id}
-                        kind="handoff"
-                        state={condEdgeState(e.from, e.to)}
-                        back={edgeBack(e.from, e.to)}
-                        d={roundedPath(e.points, 9)}
-                      />
-                    ))}
-                </svg>
-              )}
-
-              {/* ── GRAPH chrome: cross + forward step edges ──────────── */}
-              {full && (
-                <svg
-                  className={
-                    "ag-edges uv-layer" + (showGraphChrome ? "" : " hide")
-                  }
-                  width={board.w}
-                  height={board.h}
-                  viewBox={`0 0 ${board.w} ${board.h}`}
-                >
-                  <GraphMarkers />
-                  {graphCross
-                    .slice()
-                    .sort(
-                      (a, b) =>
-                        litLast(crossEdgeState(a)) - litLast(crossEdgeState(b))
-                    )
-                    .map((e) => {
-                      const st = crossEdgeState(e);
-                      // hub overlay edges stay hidden at rest and only appear
-                      // when you trace one of their endpoints (P7) or hover the
-                      // matching transition row in the inspector.
-                      if (e.hub && st !== "lit") return null;
-                      return (
-                        <GraphEdge
-                          key={e.id}
-                          kind="handoff"
-                          state={st}
-                          back={graphEdgeBack(
-                            e,
-                            edgeBack(e.fromWorkflow, e.toWorkflow)
-                          )}
-                          d={roundedPath(e.points, 10)}
-                        />
-                      );
-                    })}
-                  {intra
-                    .filter((e) => e.kind === "forward" || e.kind === "branch")
-                    .sort(
-                      (a, b) =>
-                        litLast(stepEdgeState(a)) - litLast(stepEdgeState(b))
-                    )
-                    .map((e) => (
-                      <GraphEdge
-                        key={e.id}
-                        kind="step"
-                        state={stepEdgeState(e)}
-                        back={graphEdgeBack(e, false)}
-                        d={roundedPath(e.points, 6)}
-                      />
-                    ))}
-                </svg>
-              )}
-
-              {showGraphChrome &&
-                graphCross.map((edge) => {
-                  if (!edge.labelPos || !edge.label) return null;
+              {/* ── phase-column headers ─────────────────────────────── */}
+              <div className="uv-layer">
+                {cond.columns.map((col) => {
+                  const first = mapRectById.get(col.members[0]);
+                  if (!first) return null;
                   return (
-                    <EdgeLabel
-                      key={`graph-${edge.id}`}
-                      labels={[edge.label]}
-                      left={edge.labelPos.x}
-                      top={edge.labelPos.y}
-                      state={crossEdgeState(edge)}
-                      variant="graph"
+                    <ColumnHeader
+                      key={col.index}
+                      column={col}
+                      left={first.x}
+                      width={first.w}
                     />
                   );
                 })}
+              </div>
 
-              {/* ── GRAPH chrome: step nodes (above the boxes) ────────── */}
-              {full && (
-                <div
-                  className={
-                    "uv-layer uv-steplayer" + (showGraphChrome ? "" : " hide")
-                  }
-                  inert={!showGraphChrome}
-                  aria-hidden={!showGraphChrome}
-                >
-                  {full.workflows.map((w) => {
-                    return w.steps.map((s) => {
-                      const c = stepCountById.get(s.id);
-                      return (
-                        <StepNodeGeo
-                          key={s.id}
-                          step={s}
-                          total={c?.total ?? 0}
-                          running={c?.running ?? 0}
-                          state={stepState(w.id, s.id)}
-                          hovered={hoverStep === s.id}
-                          onSelect={(workflowId, stepId) =>
-                            setSel({ type: "step", workflowId, stepId })
-                          }
-                          onHover={(node) => {
-                            // Keep the box traced while the cursor is over a
-                            // node painted above it, and flag the exact node.
-                            setHover(node ? node.workflowId : null);
-                            setHoverStep(node ? node.id : null);
-                          }}
-                        />
-                      );
-                    });
-                  })}
-                </div>
-              )}
+              {/* ── aggregated workflow→workflow handoffs ────────────── */}
+              <svg
+                className="al-edges uv-layer"
+                width={cond.width}
+                height={cond.height}
+                viewBox={`0 0 ${cond.width} ${cond.height}`}
+              >
+                <GraphMarkers />
+                {cond.edges
+                  .slice()
+                  .sort(
+                    (a, b) =>
+                      litLast(condEdgeState(a.from, a.to)) -
+                      litLast(condEdgeState(b.from, b.to))
+                  )
+                  .map((e) => (
+                    <GraphEdge
+                      key={e.id}
+                      kind="handoff"
+                      state={condEdgeState(e.from, e.to)}
+                      back={edgeBack(e.from, e.to)}
+                      d={roundedPath(e.points, 9)}
+                    />
+                  ))}
+              </svg>
 
-              {/* ── The traveling element: ONE persistent box per workflow.
-                   Always mounted; its rect comes from the active view, so the
-                   CSS left/top/width/height transition does the morph. ────── */}
-              {model?.workflows.map((w) => {
-                const rect = rectOf(w.id);
+              {/* ── workflow cards ───────────────────────────────────── */}
+              {model.workflows.map((w) => {
+                const rect = mapRectById.get(w.id);
                 if (!rect) return null;
                 return (
                   <WfBox
@@ -1027,82 +569,31 @@ export function WorkflowAtlas({
                     rect={rect}
                     shape={mapShapeById.get(w.id) ?? []}
                     stepCount={w.stepIds.length}
-                    view={canvasView}
                     state={wfState(w.id)}
-                    onTitlePort={reportWorkflowTitlePort}
                     onHover={setHover}
-                    onSelect={(id) =>
-                      setSel({ type: "workflow", workflowId: id })
-                    }
+                    onSelect={openWorkflow}
                   />
                 );
               })}
 
-              {/* ── GRAPH chrome: loop-backs (above the boxes) ────────── */}
-              {full && (
-                <svg
-                  className={
-                    "ag-edges-top uv-layer" + (showGraphChrome ? "" : " hide")
-                  }
-                  width={board.w}
-                  height={board.h}
-                  viewBox={`0 0 ${board.w} ${board.h}`}
-                >
-                  <GraphMarkers />
-                  {intra
-                    .filter((e) => e.kind === "loop")
-                    .map((e) => {
-                      const st = loopEdgeState(e);
-                      return (
-                        <GraphEdge
-                          key={e.id}
-                          kind="loop"
-                          state={st}
-                          back={graphEdgeBack(e, true)}
-                          d={roundedPath(e.points, 7)}
-                        />
-                      );
-                    })}
-                </svg>
-              )}
-
-              {/* ── GRAPH chrome: route-decision chips on step edges ──── */}
-              {showGraphChrome &&
-                intra.map((e) => {
-                  if (!e.labelPos || !e.label) return null;
-                  return (
-                    <EdgeLabel
-                      key={`graph-step-${e.id}`}
-                      labels={[e.label]}
-                      left={e.labelPos.x}
-                      top={e.labelPos.y}
-                      state={
-                        e.kind === "loop" ? loopEdgeState(e) : stepEdgeState(e)
-                      }
-                      variant="graph"
-                    />
-                  );
-                })}
-
-              {/* ── MAP chrome: condition chips on the handoffs ───────── */}
-              {showMapChrome &&
-                cond?.edges.map((e) => {
-                  if (!e.labelPos || e.labels.length === 0) return null;
-                  return (
-                    <EdgeLabel
-                      key={`cc-${e.id}`}
-                      labels={e.labels}
-                      left={e.labelPos.x}
-                      top={e.labelPos.y}
-                      state={condEdgeState(e.from, e.to)}
-                    />
-                  );
-                })}
+              {/* ── condition chips on the handoffs ──────────────────── */}
+              {cond.edges.map((e) => {
+                if (!e.labelPos || e.labels.length === 0) return null;
+                return (
+                  <EdgeLabel
+                    key={`cc-${e.id}`}
+                    labels={e.labels}
+                    left={e.labelPos.x}
+                    top={e.labelPos.y}
+                    state={condEdgeState(e.from, e.to)}
+                  />
+                );
+              })}
             </div>
           </div>
         )}
 
-        {!machineGraph && !showFactoryOverview && !isBoard && ready && (
+        {mapReady && (
           <ZoomWidget
             onZoomIn={pz.zoomIn}
             onZoomOut={pz.zoomOut}
@@ -1110,13 +601,13 @@ export function WorkflowAtlas({
           />
         )}
 
-        {/* Run Console — docked over the canvas, OUTSIDE the morph layers so it
-            persists across the Map⇄Graph toggle. Reads the live task list; its
-            surfaces carry `data-no-pan` so dragging them never pans the world. */}
+        {/* Run Console — docked over the canvas so it persists across view
+            changes. Reads the live task list; its surfaces carry `data-no-pan`
+            so dragging them never pans the world. */}
         <RunConsole summary={scopedSummary} factoryName={factoryFilter} />
       </div>
 
-      {!machineGraph && !showFactoryOverview && !isBoard && <KindLegend />}
+      {showMap && <KindLegend />}
 
       {/* The global entity host renders the one workflow/step inspector. */}
     </main>

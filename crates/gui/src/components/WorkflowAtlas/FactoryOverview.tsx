@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useMemo, useLayoutEffect, useRef, useState } from "react";
 import type { JsonValue, PipelineSummary } from "../../bindings";
 import {
   NO_FACTORY_SCOPE,
@@ -15,19 +8,11 @@ import { ColumnHeader } from "./ColumnHeader";
 import { EdgeLabel } from "./EdgeLabel";
 import { GraphEdge } from "./GraphEdge";
 import { GraphMarkers } from "./GraphMarkers";
-import { StepNodeGeo } from "./StepNodeGeo";
-import { WfBox, type WfBoxView } from "./WfBox";
+import { WfBox } from "./WfBox";
 import { buildAtlasModel } from "./adapter/buildAtlasModel";
 import { usePanZoom } from "./hooks/usePanZoom";
 import { layoutCondensed } from "./layout/layoutCondensed";
-import { layoutFull } from "./layout/layoutFull";
-import type {
-  AtlasModel,
-  CondensedLayout,
-  FullLayout,
-  Point,
-  Rect,
-} from "./layout/types";
+import type { AtlasModel, Rect } from "./layout/types";
 import {
   buildFactoryOverviewGroups,
   factoryGroupKey,
@@ -38,7 +23,7 @@ import {
   separateRects,
 } from "./factoryOverviewModel";
 import { FactoryIndex } from "./FactoryIndex";
-import { roundedPath, routeFromSourcePort } from "./layout/geometry";
+import { roundedPath } from "./layout/geometry";
 import { ZoomWidget } from "./ZoomWidget";
 
 import { useAtlasMachineFlow } from "./adapter/useAtlasMachineFlow";
@@ -63,19 +48,17 @@ const MARKER_FIT_MAX = 1;
 
 type HighlightState = "" | "lit" | "dim";
 
-const FULL_OPTS = { headH: 118 } as const;
 const COND_OPTS = { boxW: 264, boxH: 140 } as const;
-// A disabled overview has no detailed topology. Switching to this stable empty
-// input retires the shared hook's pending result without starting another worker.
+// Map has no detailed topology. Switching to this stable empty input retires
+// the shared hook's pending result without starting another worker.
 const EMPTY_MACHINE_SUMMARY: PipelineSummary = { workflows: [] };
 
 interface FactoryOverviewProps {
   summary: PipelineSummary;
-  machineGraph?: boolean;
   scope?: string;
   routeConfigs?: ReadonlyMap<string, JsonValue | null>;
   query: string;
-  view: WfBoxView;
+  view: "graph" | "map";
   /** The factory the user last opened; marked and focused in the index. */
   recentFactory?: FactoryFilterValue;
   onSelect: (factoryName: FactoryFilterValue) => void;
@@ -85,22 +68,9 @@ function workflowScope(factoryName: string | null): FactoryFilterValue {
   return factoryName === null ? NO_FACTORY_SCOPE : factoryName;
 }
 
-function graphRects(full: FullLayout | null): Map<string, Rect> {
+function mapRects(cond: ReturnType<typeof layoutCondensed>): Map<string, Rect> {
   const rects = new Map<string, Rect>();
-  full?.workflows.forEach((workflow) =>
-    rects.set(workflow.id, {
-      x: workflow.x,
-      y: workflow.y,
-      w: workflow.w,
-      h: workflow.h,
-    })
-  );
-  return rects;
-}
-
-function mapRects(cond: CondensedLayout | null): Map<string, Rect> {
-  const rects = new Map<string, Rect>();
-  cond?.nodes.forEach((node) =>
+  cond.nodes.forEach((node) =>
     rects.set(node.id, { x: node.x, y: node.y, w: node.w, h: node.h })
   );
   return rects;
@@ -129,19 +99,18 @@ function stepShape(
 /**
  * The factory overview is the normal workflow canvas with a second semantic
  * layer on top. It never lays out workflows inside factory nodes: the selected
- * Graph or Map layout remains the world, while factories switch between a
- * dashed grouping region and an opaque summary node at the zoom threshold.
+ * Graph (the shared machine scene) or Map layout remains the world, while
+ * factories switch between a dashed grouping region and an opaque summary node
+ * at the zoom threshold.
  */
 export function FactoryOverview(props: FactoryOverviewProps) {
   const [attempt, setAttempt] = useState(0);
-  return props.machineGraph ? (
+  return (
     <SharedFactoryOverview
       key={attempt}
       {...props}
       retry={() => setAttempt((n) => n + 1)}
     />
-  ) : (
-    <FactoryOverviewCanvas {...props} />
   );
 }
 
@@ -240,60 +209,18 @@ function FactoryOverviewCanvas({
     [overviewSummary]
   );
 
-  const [fullState, setFullState] = useState<{
-    model: AtlasModel;
-    layout: FullLayout;
-  } | null>(null);
-  const full = fullState?.model === model ? fullState.layout : null;
-  const [workflowTitlePorts, setWorkflowTitlePorts] = useState<
-    Record<string, Point>
-  >({});
-  const reportWorkflowTitlePort = useCallback(
-    (workflowId: string, point: Point) => {
-      setWorkflowTitlePorts((current) => {
-        const previous = current[workflowId];
-        if (
-          previous &&
-          Math.abs(previous.x - point.x) < 0.5 &&
-          Math.abs(previous.y - point.y) < 0.5
-        ) {
-          return current;
-        }
-        return { ...current, [workflowId]: point };
-      });
-    },
-    []
-  );
-  const graphCross = useMemo(
-    () =>
-      (full?.cross ?? []).map((edge) => {
-        const titlePort = workflowTitlePorts[edge.fromWorkflow];
-        return titlePort
-          ? { ...edge, points: routeFromSourcePort(edge.points, titlePort) }
-          : edge;
-      }),
-    [full, workflowTitlePorts]
-  );
-  const [layoutError, setLayoutError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
   const cond = useMemo(() => layoutCondensed(model, COND_OPTS), [model]);
-  // The condensed geometry is a useful temporary world while ELK resolves in
-  // Graph mode. It also means opaque factory summaries appear immediately.
-  const workflowView: WfBoxView =
-    view === "graph" && (shared?.diagram || full) ? "graph" : "map";
-  const activeWidth =
-    workflowView === "graph"
-      ? shared?.diagram
-        ? shared.diagram.width * MACHINE_WORLD_SCALE
-        : (full?.width ?? 0)
-      : cond.width;
-  const activeHeight =
-    workflowView === "graph"
-      ? shared?.diagram
-        ? shared.diagram.height * MACHINE_WORLD_SCALE
-        : (full?.height ?? 0)
-      : cond.height;
+  // The condensed geometry is the temporary world while the shared Graph lays
+  // out, so opaque factory summaries appear immediately.
+  const sharedDiagram = shared?.diagram ?? null;
+  const activeWidth = sharedDiagram
+    ? sharedDiagram.width * MACHINE_WORLD_SCALE
+    : cond.width;
+  const activeHeight = sharedDiagram
+    ? sharedDiagram.height * MACHINE_WORLD_SCALE
+    : cond.height;
   const activeRects = useMemo(() => {
     if (shared?.diagram) {
       const rects = new Map<string, Rect>();
@@ -309,8 +236,8 @@ function FactoryOverviewCanvas({
       }
       return rects;
     }
-    return workflowView === "graph" ? graphRects(full) : mapRects(cond);
-  }, [cond, full, workflowView, shared]);
+    return mapRects(cond);
+  }, [cond, shared]);
   const layout = useMemo(
     () =>
       activeWidth > 0 && activeHeight > 0
@@ -438,55 +365,16 @@ function FactoryOverviewCanvas({
     );
   }, [pz.scale]);
 
-  // ELK is only needed once the user has zoomed into the grouped surface. The
-  // low-zoom factory view uses the synchronous Map geometry as an immediate
-  // fallback, so the overview does not pay for a second hidden layout.
-  useEffect(() => {
-    if (shared || view !== "graph" || !expanded || full) return;
-    let cancelled = false;
-    setLayoutError(null);
-    layoutFull(model, FULL_OPTS)
-      .then((result) => {
-        if (!cancelled) setFullState({ model, layout: result });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setLayoutError(
-            error instanceof Error ? error.message : String(error)
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [expanded, full, model, shared, view]);
-
-  // If ELK replaces the temporary Map geometry before the user takes over the
-  // camera, reframe once around the actual Graph world. Manual pan/zoom is
-  // preserved.
+  // If the shared Graph replaces the temporary Map geometry before the user
+  // takes over the camera, reframe once around the actual Graph world. Manual
+  // pan/zoom is preserved.
   const { fit, userControlled } = pz;
-  const sharedDiagram = shared?.diagram;
   useEffect(() => {
-    if ((full || sharedDiagram) && !userControlled) fit();
-  }, [fit, full, sharedDiagram, userControlled]);
+    if (sharedDiagram && !userControlled) fit();
+  }, [fit, sharedDiagram, userControlled]);
 
   const shapes = useMemo(() => stepShape(model), [model]);
-  const stepCounts = useMemo(
-    () =>
-      new Map(
-        model.steps.map((step) => [
-          step.id,
-          { total: step.total, running: step.running },
-        ])
-      ),
-    [model]
-  );
-  const intra = full?.workflows.flatMap((workflow) => workflow.intra) ?? [];
-
   const sharedState = shared?.model.layout;
-  if (layoutError) {
-    return <div className="factory-overview-empty">{layoutError}</div>;
-  }
 
   return (
     <div className="factory-overview" data-testid="factory-overview">
@@ -574,7 +462,7 @@ function FactoryOverviewCanvas({
                     </div>
                   )}
 
-                  {!shared && workflowView === "map" && (
+                  {!shared && (
                     <svg
                       className={
                         "factory-overview-workflow-edges al-edges" +
@@ -596,49 +484,6 @@ function FactoryOverviewCanvas({
                     </svg>
                   )}
 
-                  {workflowView === "graph" && full && (
-                    <svg
-                      className={
-                        "factory-overview-workflow-edges ag-edges" +
-                        (expanded ? " is-visible" : " is-hidden")
-                      }
-                      width={activeWidth}
-                      height={activeHeight}
-                      viewBox={`0 0 ${activeWidth} ${activeHeight}`}
-                      aria-hidden="true"
-                    >
-                      <GraphMarkers />
-                      {graphCross.map((edge) => (
-                        <GraphEdge
-                          key={edge.id}
-                          kind="handoff"
-                          d={roundedPath(edge.points, 10)}
-                        />
-                      ))}
-                      {intra.map((edge) => (
-                        <GraphEdge
-                          key={edge.id}
-                          kind={edge.kind === "loop" ? "loop" : "step"}
-                          d={roundedPath(edge.points, 7)}
-                        />
-                      ))}
-                    </svg>
-                  )}
-
-                  {workflowView === "graph" &&
-                    graphCross.map((edge) => {
-                      if (!edge.labelPos || !edge.label) return null;
-                      return (
-                        <EdgeLabel
-                          key={`graph-${edge.id}`}
-                          labels={[edge.label]}
-                          left={edge.labelPos.x}
-                          top={edge.labelPos.y}
-                          variant="graph"
-                        />
-                      );
-                    })}
-
                   <div
                     inert={!expanded}
                     className={
@@ -647,24 +492,6 @@ function FactoryOverviewCanvas({
                     }
                     aria-hidden={!expanded}
                   >
-                    {workflowView === "graph" && full && (
-                      <div className="uv-layer uv-steplayer">
-                        {full.workflows.flatMap((workflow) =>
-                          workflow.steps.map((step) => {
-                            const counts = stepCounts.get(step.id);
-                            return (
-                              <StepNodeGeo
-                                key={step.id}
-                                step={step}
-                                total={counts?.total ?? 0}
-                                running={counts?.running ?? 0}
-                              />
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
-
                     {shared?.diagram && (
                       <div
                         className="uv-machine-scene"
@@ -692,8 +519,6 @@ function FactoryOverviewCanvas({
                             rect={rect}
                             shape={shapes.get(workflow.id) ?? []}
                             stepCount={workflow.stepIds.length}
-                            view={workflowView}
-                            onTitlePort={reportWorkflowTitlePort}
                             onSelect={() =>
                               onSelect(workflowScope(workflow.factoryName))
                             }
@@ -702,7 +527,6 @@ function FactoryOverviewCanvas({
                       })}
 
                     {!shared &&
-                      workflowView === "map" &&
                       cond.edges.map((edge) => {
                         if (!edge.labelPos || edge.labels.length === 0)
                           return null;

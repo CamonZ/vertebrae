@@ -866,7 +866,6 @@ it.each([false, true])(
       <FactoryOverview
         summary={input.summary}
         routeConfigs={input.configs}
-        machineGraph
         view="graph"
         query=""
         onSelect={vi.fn()}
@@ -898,7 +897,6 @@ it.each([false, true])(
       <FactoryOverview
         summary={input.summary}
         routeConfigs={input.configs}
-        machineGraph
         view="map"
         query=""
         onSelect={vi.fn()}

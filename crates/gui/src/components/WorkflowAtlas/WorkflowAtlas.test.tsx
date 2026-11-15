@@ -14,8 +14,6 @@ import type {
   PipelineWorkflow,
 } from "../../bindings";
 import { buildAtlasModel } from "./adapter/buildAtlasModel";
-import { layoutFull } from "./layout/layoutFull";
-import type { AtlasModel, FullLayout } from "./layout/types";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { useFactoryFilterStore } from "../../stores/factoryFilterStore";
@@ -23,12 +21,14 @@ import { GlobalEntityPanelHost } from "../GlobalEntityPanelHost";
 import { WorkflowAtlas, layoutKey } from "./WorkflowAtlas";
 
 /* ── mocks ─────────────────────────────────────────────────────────
-   `layoutFull` wraps elkjs, which spawns a Web Worker that jsdom can't host.
-   Replace it with a deterministic stub that places each workflow + its steps on
-   a simple grid so the component has real geometry to render. `usePipelineSummary`
-   is mocked per-test to drive loading / empty / error / ready states. */
+   The Graph renders through the real shared machine-flow compiler and layout
+   (jsdom exercises the layout client's documented non-browser fallback).
+   `usePipelineSummary` is mocked per-test to drive loading / empty / error /
+   ready states. The background warm-up has its own tests. */
 
-vi.mock("./layout/layoutFull", () => ({ layoutFull: vi.fn() }));
+vi.mock("./adapter/useAtlasLayoutWarmup", () => ({
+  useAtlasLayoutWarmup: () => undefined,
+}));
 
 // The Run Console owns its own task feed (listReady + realtime events) and is
 // covered by RunConsole.test.tsx. Stub it here so the atlas-canvas tests don't
@@ -49,8 +49,6 @@ const mockSummary = vi.fn();
 vi.mock("../../hooks/usePipelineSummary", () => ({
   usePipelineSummary: () => mockSummary(),
 }));
-
-const layoutFullMock = vi.mocked(layoutFull);
 
 beforeEach(() => {
   usePanelLayoutStore.getState().reset();
@@ -247,54 +245,6 @@ const OVERVIEW_FIXTURE: PipelineSummary = {
   ],
 };
 
-/** Deterministic grid stub matching the real layoutFull output shape. */
-function stubLayout(model: AtlasModel): FullLayout {
-  const workflows = model.workflows.map((w, wi) => {
-    const steps = model.steps
-      .filter((s) => s.workflowId === w.id)
-      .map((s, si) => ({
-        id: s.id,
-        stepId: s.stepId,
-        workflowId: s.workflowId,
-        name: s.name,
-        kind: s.kind,
-        role: s.role,
-        idx: si + 1,
-        x: 40 + si * 160,
-        y: 60 + wi * 240,
-        w: 150,
-        h: 90,
-      }));
-    return {
-      id: w.id,
-      workflow: w,
-      x: 20,
-      y: 20 + wi * 240,
-      w: 600,
-      h: 200,
-      steps,
-      intra: [] as FullLayout["cross"],
-    };
-  });
-  const cross = model.edges
-    .filter((edge) => edge.kind === "cross")
-    .map((edge, index) => ({
-      ...edge,
-      points: [
-        { x: 620, y: 80 + index * 18 },
-        { x: 680, y: 80 + index * 18 },
-      ],
-      labelPos: null,
-    }));
-  return {
-    width: 700,
-    height: 20 + model.workflows.length * 240,
-    workflows,
-    cross,
-    hubIds: [],
-  };
-}
-
 afterEach(() => {
   vi.clearAllMocks();
   useEntityPanelStore.getState().reset();
@@ -304,10 +254,22 @@ afterEach(() => {
 function renderAtlasWithEntityHost() {
   return render(
     <>
-      <WorkflowAtlas internalMachineGraph={false} />
+      <WorkflowAtlas />
       <GlobalEntityPanelHost />
     </>
   );
+}
+
+/** Workflow names drawn as region headers in the shared Graph scene. */
+function regionNames(): string[] {
+  return Array.from(document.querySelectorAll("[data-region-header]")).map(
+    (header) => (header.getAttribute("aria-label") ?? "").split(". ")[0]
+  );
+}
+
+/** The scoped shared Graph, once its layout has resolved. */
+function findScopedGraph() {
+  return screen.findByLabelText("Factory workflow graph");
 }
 
 /* ── tests ─────────────────────────────────────────────────────── */
@@ -351,13 +313,12 @@ describe("layoutKey", () => {
 });
 
 describe("WorkflowAtlas", () => {
-  it("shows the loading state before the layout resolves", () => {
+  it("shows the loading state before the summary resolves", () => {
     mockSummary.mockReturnValue({
       summary: null,
       isLoading: true,
       error: null,
     });
-    layoutFullMock.mockReturnValue(new Promise(() => {}));
     renderAtlasWithEntityHost();
     expect(screen.getByText(/laying out workflow graph/i)).toBeInTheDocument();
   });
@@ -368,10 +329,26 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
     expect(
       await screen.findByText(/no factories configured/i)
     ).toBeInTheDocument();
+  });
+
+  it("starts without the retired legacy Graph toggle or renderer", async () => {
+    mockSummary.mockReturnValue({
+      summary: ALL_IN_FACTORY_FIXTURE,
+      isLoading: false,
+      error: null,
+    });
+    // A clean default launch: no stored experimental setting is consulted.
+    window.localStorage.clear();
+    render(<WorkflowAtlas />);
+    expect(await findScopedGraph()).toBeInTheDocument();
+    expect(document.querySelector(".ag-step")).toBeNull();
+    expect(document.querySelector(".ag-wf-name")).toBeNull();
+    expect(document.querySelector(".ag-edges")).toBeNull();
+    expect(document.querySelector(".morphing")).toBeNull();
   });
 
   it("shows opaque factory nodes and collapsed routes until a factory is selected", async () => {
@@ -381,9 +358,8 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
 
     expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
     expect(
@@ -400,22 +376,12 @@ describe("WorkflowAtlas", () => {
     expect(
       document.querySelectorAll(".factory-overview-factories .uv-wf")
     ).toHaveLength(4);
-    expect(
-      screen.getByTestId("workflow-node-Unnamed workflow")
-    ).toBeInTheDocument();
     expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
       "is-collapsed"
     );
     expect(
       document.querySelector(".factory-overview-map-columns")
     ).not.toBeInTheDocument();
-    const workflowEdges = Array.from(
-      document.querySelectorAll(".factory-overview-workflow-edges")
-    );
-    expect(workflowEdges.length).toBeGreaterThan(0);
-    expect(
-      workflowEdges.every((edge) => edge.classList.contains("is-hidden"))
-    ).toBe(true);
     expect(document.querySelector(".factory-overview-regions")).toHaveClass(
       "is-hidden"
     );
@@ -426,13 +392,14 @@ describe("WorkflowAtlas", () => {
       screen.getByTestId("factory-transition-Factory B>Factory C")
     ).toBeInTheDocument();
     expect(screen.getAllByText("2 routes")).toHaveLength(2);
-    expect(
-      document.querySelectorAll(".factory-overview-factories .ag-step")
-    ).toHaveLength(0);
-    expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
-      "is-collapsed"
-    );
     expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
+    // The collapsed Graph overview holds the shared scene, never legacy cards.
+    expect(
+      await screen.findByLabelText("Factory overview workflow graph")
+    ).toBeInTheDocument();
+    expect(
+      document.querySelectorAll(".factory-overview-workflows .uv-wf")
+    ).toHaveLength(0);
 
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     expect(screen.getByTestId("factory-overview")).toBeInTheDocument();
@@ -442,6 +409,16 @@ describe("WorkflowAtlas", () => {
     expect(
       document.querySelector(".factory-overview-map-columns")
     ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("workflow-node-Unnamed workflow")
+    ).toBeInTheDocument();
+    const workflowEdges = Array.from(
+      document.querySelectorAll(".factory-overview-workflow-edges")
+    );
+    expect(workflowEdges.length).toBeGreaterThan(0);
+    expect(
+      workflowEdges.every((edge) => edge.classList.contains("is-hidden"))
+    ).toBe(true);
 
     fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
     expect(
@@ -456,12 +433,11 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
 
     const stage = await screen.findByTestId("factory-overview-stage");
-    expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument();
+    await screen.findByLabelText("Factory overview workflow graph");
     expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
       "is-collapsed"
     );
@@ -481,17 +457,16 @@ describe("WorkflowAtlas", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("step-node-Plan")).toBeInTheDocument();
-      expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument();
       expect(
         screen.getByTestId("factory-region-Factory A")
       ).toBeInTheDocument();
       expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
         "is-expanded"
       );
-      expect(
-        document.querySelector(".factory-overview-workflow-edges")
-      ).toHaveClass("is-visible");
     });
+    expect(regionNames()).toEqual(
+      expect.arrayContaining(["Build", "Review", "Pack", "Ship"])
+    );
     expect(
       document.querySelectorAll(".factory-overview-factories .uv-wf")
     ).toHaveLength(4);
@@ -501,7 +476,7 @@ describe("WorkflowAtlas", () => {
       )
     ).toHaveLength(0);
     expect(
-      document.querySelectorAll(".factory-overview-workflow-edges .gedge")
+      document.querySelectorAll(".factory-overview-workflows .md-wire path")
         .length
     ).toBeGreaterThan(0);
   });
@@ -513,9 +488,8 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
 
     expect(
       await screen.findByRole("heading", { name: "Workflow Factories" })
@@ -570,96 +544,79 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
 
-    fireEvent.click(screen.getByTestId("factory-node-No Factory"));
+    fireEvent.click(await screen.findByTestId("factory-node-No Factory"));
 
-    await waitFor(() => {
-      expect(document.querySelector(".ag-wf-name")).toHaveTextContent(
-        "Unclassified"
-      );
-      expect(document.querySelectorAll(".uv-wf")).toHaveLength(1);
-    });
-    expect(document.querySelector(".ag-wf-name")).not.toHaveTextContent(
-      "Build"
-    );
+    await findScopedGraph();
+    await waitFor(() => expect(regionNames()).toEqual(["Unclassified"]));
 
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
-    await waitFor(() =>
+    await waitFor(() => {
+      expect(document.querySelectorAll(".uv-wf")).toHaveLength(1);
       expect(document.querySelector(".al-name")).toHaveTextContent(
         "Unclassified"
-      )
-    );
+      );
+    });
   });
 
-  it("zooms from an opaque factory node into that factory's graph", async () => {
+  it("opens an opaque factory node into that factory's graph", async () => {
     useFactoryFilterStore.getState().reset();
     mockSummary.mockReturnValue({
       summary: OVERVIEW_FIXTURE,
       isLoading: false,
       error: null,
     });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
 
-    fireEvent.click(screen.getByTestId("factory-node-Factory A"));
+    fireEvent.click(await screen.findByTestId("factory-node-Factory A"));
 
+    await findScopedGraph();
     await waitFor(() => {
-      expect(document.querySelectorAll(".uv-wf")).toHaveLength(2);
-      const names = Array.from(document.querySelectorAll(".ag-wf-name")).map(
-        (name) => name.textContent
-      );
+      const names = regionNames();
       expect(names).toContain("Build");
       expect(names).toContain("Unnamed workflow");
     });
-    expect(
-      Array.from(document.querySelectorAll(".ag-wf-name")).map(
-        (name) => name.textContent
-      )
-    ).not.toContain("Review");
+    expect(regionNames()).not.toContain("Review");
   });
 
-  it("renders the graph from a fixture summary", async () => {
+  it("renders the shared graph from a fixture summary", async () => {
     mockSummary.mockReturnValue({
       summary: ALL_IN_FACTORY_FIXTURE,
       isLoading: false,
       error: null,
     });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
 
-    // workflow boxes — query the graph face (both faces are mounted for the
-    // P6 morph; the map face is just hidden in graph view)
-    await waitFor(() =>
-      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
-    );
+    await findScopedGraph();
     // A factory scope replaces the topology crumb with a way back out.
     const breadcrumb = screen.getByRole("navigation", { name: "Breadcrumb" });
     expect(breadcrumb).toHaveTextContent("Factories/Factory A");
     expect(
       screen.queryByText("design · workflow topology · elk")
     ).not.toBeInTheDocument();
-    const graphNames = Array.from(document.querySelectorAll(".ag-wf-name")).map(
-      (n) => n.textContent
+    await waitFor(() =>
+      expect(regionNames()).toEqual(expect.arrayContaining(["Build", "Review"]))
     );
-    expect(graphNames).toContain("Build");
-    expect(graphNames).toContain("Review");
 
-    // step nodes (rendered from the placed geometry)
-    expect(screen.getByText("Plan")).toBeInTheDocument();
-    expect(screen.getByText("Ship")).toBeInTheDocument();
+    // step parts carry the step names
+    expect(screen.getByTestId("step-node-Plan")).toBeInTheDocument();
+    expect(screen.getByTestId("step-node-Ship")).toBeInTheDocument();
 
-    // step count meta + running pill (wf-review has an active TaskRun)
-    expect(screen.getAllByText(/3 steps/).length).toBeGreaterThan(0);
-    expect(document.querySelectorAll(".uv-running").length).toBeGreaterThan(0);
+    // wf-review has an active TaskRun: its header reports it
+    const review = Array.from(
+      document.querySelectorAll("[data-region-header]")
+    ).find((header) => header.getAttribute("aria-label")?.startsWith("Review"));
+    expect(review?.getAttribute("aria-label")).toMatch(/2 active/);
 
     // zoom widget + search (the toolbar carries it in graph view too)
     expect(screen.getByLabelText(/fit to view/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/find a workflow/i)).toBeInTheDocument();
+    // The Map legend belongs to the Map view only.
+    expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
   });
 
   it("keeps workflow and step inspectors to the left of normal chat", async () => {
@@ -673,14 +630,18 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
     renderAtlasWithEntityHost();
-    await waitFor(() =>
-      expect(screen.getByTestId("workflow-node-Build")).toBeInTheDocument()
-    );
+    await findScopedGraph();
+    const build = await waitFor(() => {
+      const header = Array.from(
+        document.querySelectorAll<SVGElement>("[data-region-header]")
+      ).find((el) => el.getAttribute("aria-label")?.startsWith("Build"));
+      if (!header) throw new Error("Build header not rendered yet");
+      return header;
+    });
 
-    fireEvent.click(screen.getByTestId("workflow-node-Build"));
+    fireEvent.click(build);
     expect(await screen.findByText(/Workflow Details/)).toBeInTheDocument();
     const inspector = screen.getByTestId("global-entity-panel");
     expect(inspector).toHaveAttribute("data-chat-adjacent", "true");
@@ -688,43 +649,12 @@ describe("WorkflowAtlas", () => {
       "calc(432px + var(--s-3))"
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Step Execute" }));
+    fireEvent.click(
+      screen.getByTestId("step-node-Execute").querySelector("[data-part-id]")!
+    );
     expect(await screen.findByText("Step Configuration")).toBeInTheDocument();
     expect(inspector).toHaveAttribute("data-chat-adjacent", "true");
     expect(screen.getAllByTestId("global-entity-panel")).toHaveLength(1);
-  });
-
-  it("does not re-run the ELK layout when only pipeline_counts change", async () => {
-    mockSummary.mockReturnValue({
-      summary: ALL_IN_FACTORY_FIXTURE,
-      isLoading: false,
-      error: null,
-    });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
-
-    const { rerender } = render(<WorkflowAtlas internalMachineGraph={false} />);
-    await waitFor(() =>
-      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
-    );
-    expect(layoutFullMock).toHaveBeenCalledTimes(1);
-
-    // bump counts only — same structural key → no new layout
-    mockSummary.mockReturnValue({
-      summary: {
-        workflows: ALL_IN_FACTORY_FIXTURE.workflows.map((w) => ({
-          ...w,
-          workflow_steps: w.workflow_steps.map((s) => ({
-            ...s,
-            pipeline_counts: { ...s.pipeline_counts, active: 9 },
-          })),
-        })),
-      },
-      isLoading: false,
-      error: null,
-    });
-    rerender(<WorkflowAtlas internalMachineGraph={false} />);
-
-    await waitFor(() => expect(layoutFullMock).toHaveBeenCalledTimes(1));
   });
 
   it("scopes Graph and Map to the selected exact factory", async () => {
@@ -733,10 +663,9 @@ describe("WorkflowAtlas", () => {
       isLoading: false,
       error: null,
     });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
 
     useFactoryFilterStore.getState().reset();
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
     await waitFor(() =>
       expect(
         document.querySelectorAll("[data-testid^='factory-node-']")
@@ -747,16 +676,12 @@ describe("WorkflowAtlas", () => {
       target: { value: "Factory A" },
     });
 
-    await waitFor(() => {
-      expect(document.querySelectorAll(".uv-wf")).toHaveLength(1);
-      expect(document.querySelector(".ag-wf-name")).toHaveTextContent("Build");
-      expect(document.querySelector(".ag-wf-name")).not.toHaveTextContent(
-        "Review"
-      );
-    });
+    await findScopedGraph();
+    await waitFor(() => expect(regionNames()).toEqual(["Build"]));
 
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     await waitFor(() => {
+      expect(document.querySelectorAll(".uv-wf")).toHaveLength(1);
       expect(document.querySelector(".al-name")).toHaveTextContent("Build");
       expect(document.querySelector(".al-name")).not.toHaveTextContent(
         "Review"
@@ -774,15 +699,9 @@ describe("WorkflowAtlas", () => {
 
 describe("WorkflowAtlas — MAP view", () => {
   /** Render the atlas and switch to the Map view (condensed layout is real). */
-  async function renderMap() {
-    mockSummary.mockReturnValue({
-      summary: ALL_IN_FACTORY_FIXTURE,
-      isLoading: false,
-      error: null,
-    });
-    // graph layout never resolves here — the map view doesn't need it
-    layoutFullMock.mockReturnValue(new Promise(() => {}));
-    const utils = render(<WorkflowAtlas internalMachineGraph={false} />);
+  async function renderMap(summary: PipelineSummary = ALL_IN_FACTORY_FIXTURE) {
+    mockSummary.mockReturnValue({ summary, isLoading: false, error: null });
+    const utils = render(<WorkflowAtlas />);
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     // condensed cards render synchronously once the map is active
     await waitFor(() =>
@@ -791,7 +710,7 @@ describe("WorkflowAtlas — MAP view", () => {
     return utils;
   }
 
-  /** The travelling card wrapper for a workflow, found via its map-face name. */
+  /** The card wrapper for a workflow, found via its map-face name. */
   function mapCard(name: string): HTMLElement {
     const names = Array.from(
       document.querySelectorAll<HTMLElement>(".al-name")
@@ -800,6 +719,32 @@ describe("WorkflowAtlas — MAP view", () => {
     if (!el) throw new Error(`no map card for "${name}"`);
     return el.closest(".uv-wf") as HTMLElement;
   }
+
+  /** wf-a → wf-b, where wf-a sits left of wf-b in the condensed map. */
+  const HANDOFF: PipelineSummary = {
+    workflows: [
+      makeWorkflow("wf-a", [makeStep("a1", "wf-a", 0, { name: "Aye" })], {
+        name: "Aye",
+        transitions: [
+          {
+            id: "x1",
+            from_workflow_id: "wf-a",
+            to_workflow_id: "wf-b",
+            target_step_id: "b1",
+            label: "go",
+          },
+        ],
+      }),
+      makeWorkflow("wf-b", [makeStep("b1", "wf-b", 0, { name: "Bee" })], {
+        name: "Bee",
+        display_order: 1,
+      }),
+      makeWorkflow("wf-c", [makeStep("c1", "wf-c", 0, { name: "Sea" })], {
+        name: "Sea",
+        display_order: 2,
+      }),
+    ],
+  };
 
   it("renders condensed phase columns + workflow cards", async () => {
     await renderMap();
@@ -811,6 +756,8 @@ describe("WorkflowAtlas — MAP view", () => {
     );
     expect(headers.some((t) => t.includes("Dev"))).toBe(true);
     expect(headers.some((t) => t.includes("QA"))).toBe(true);
+    // Map cards carry no Graph face.
+    expect(document.querySelector(".uv-face-graph")).toBeNull();
   });
 
   it("renders step strips as ribbons", async () => {
@@ -843,6 +790,74 @@ describe("WorkflowAtlas — MAP view", () => {
     expect(within(legend).queryByText("entry")).not.toBeInTheDocument();
     expect(within(legend).queryByText("final")).not.toBeInTheDocument();
     expect(within(legend).queryByText("done")).not.toBeInTheDocument();
+    // Each of the eight backend step types appears exactly once.
+    const items = Array.from(legend.querySelectorAll(".lg-item")).map(
+      (item) => item.textContent
+    );
+    expect(items).toHaveLength(8);
+    expect(new Set(items).size).toBe(8);
+  });
+
+  it("traces a hovered workflow's handoffs and colours them by direction", async () => {
+    await renderMap(HANDOFF);
+    const board = document.querySelector(".uv-board")!;
+    const edge = () =>
+      document
+        .querySelector(".al-edges .gedge.k-handoff")!
+        .getAttribute("class") ?? "";
+    expect(edge()).not.toMatch(/\b(lit|dim)\b/);
+
+    // Hover wf-b → the handoff is an INCOMING route → white (back); the
+    // unconnected workflow recedes.
+    fireEvent.mouseEnter(mapCard("Bee"));
+    expect(board.className).toContain("trace-wf");
+    expect(mapCard("Bee").className).toContain("lit");
+    expect(mapCard("Aye").className).toContain("lit");
+    expect(mapCard("Sea").className).toContain("dim");
+    expect(edge()).toContain("lit");
+    expect(edge()).toContain("back");
+    fireEvent.mouseLeave(mapCard("Bee"));
+    expect(board.className).not.toContain("trace-wf");
+    expect(mapCard("Sea").className).not.toContain("dim");
+
+    // Hover wf-a → the SAME handoff is an OUTGOING route → accent (not back).
+    fireEvent.mouseEnter(mapCard("Aye"));
+    expect(edge()).toContain("lit");
+    expect(edge()).not.toContain("back");
+  });
+
+  it("lights the map handoff for a hovered inspector row, coloured by route direction", async () => {
+    mockSummary.mockReturnValue({
+      summary: HANDOFF,
+      isLoading: false,
+      error: null,
+    });
+    renderAtlasWithEntityHost();
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+    await waitFor(() =>
+      expect(
+        document.querySelector(".al-edges .gedge.k-handoff")
+      ).toBeInTheDocument()
+    );
+    const edge = document.querySelector(".al-edges .gedge.k-handoff")!;
+
+    // open wf-b's inspector → the handoff is a ROUTE IN there
+    fireEvent.click(
+      within(mapCard("Bee")).getByRole("button", { name: "Bee" })
+    );
+    const inRow = await waitFor(() => {
+      const el = document.querySelector(".wfd-tr.in");
+      if (!el) throw new Error("routes-in row not rendered yet");
+      return el as HTMLElement;
+    });
+
+    fireEvent.mouseEnter(inRow);
+    expect(edge.getAttribute("class")).toContain("lit");
+    expect(edge.getAttribute("class")).toContain("back");
+    expect(mapCard("Sea").className).toContain("dim");
+
+    fireEvent.mouseLeave(inRow);
+    expect(edge.getAttribute("class")).not.toContain("lit");
   });
 });
 
@@ -853,12 +868,11 @@ describe("WorkflowAtlas — BOARD view", () => {
       isLoading: false,
       error: null,
     });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
   });
 
   it("offers Board only while a factory is selected", async () => {
     useFactoryFilterStore.getState().reset();
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
 
     expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
     expect(
@@ -871,7 +885,7 @@ describe("WorkflowAtlas — BOARD view", () => {
   });
 
   it("renders the selected factory's board in place of the canvas", async () => {
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
 
     fireEvent.click(screen.getByRole("radio", { name: "Board" }));
 
@@ -889,7 +903,7 @@ describe("WorkflowAtlas — BOARD view", () => {
   });
 
   it("follows the Atlas factory filter", async () => {
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
     fireEvent.click(screen.getByRole("radio", { name: "Board" }));
 
     act(() => useFactoryFilterStore.getState().setFactoryName("Factory B"));
@@ -900,7 +914,7 @@ describe("WorkflowAtlas — BOARD view", () => {
   });
 
   it("returns to the factory overview when the factory is cleared", async () => {
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
     fireEvent.click(screen.getByRole("radio", { name: "Board" }));
 
     act(() => useFactoryFilterStore.getState().setFactoryName(null));
@@ -914,7 +928,7 @@ describe("WorkflowAtlas — BOARD view", () => {
   });
 
   it("goes back to the topology canvas when leaving Board", async () => {
-    render(<WorkflowAtlas internalMachineGraph={false} />);
+    render(<WorkflowAtlas />);
     fireEvent.click(screen.getByRole("radio", { name: "Board" }));
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
 
@@ -925,470 +939,14 @@ describe("WorkflowAtlas — BOARD view", () => {
   });
 });
 
-/* ── P6 morph ──────────────────────────────────────────────────────
-   Toggling the view should arm the shared-element morph (`morphing` on the
-   scaler) and then clear it once the box transition has landed. The boxes are
-   ONE persistent element across the toggle (same DOM node, new rect). */
-describe("WorkflowAtlas — morph (P6)", () => {
-  function scaler(): HTMLElement {
-    return document.querySelector(".uv-scaler") as HTMLElement;
-  }
-
-  it("sets then clears `morphing` when the view toggles", async () => {
-    vi.useFakeTimers();
-    try {
-      mockSummary.mockReturnValue({
-        summary: ALL_IN_FACTORY_FIXTURE,
-        isLoading: false,
-        error: null,
-      });
-      // both layouts resolve so a real box exists in either view
-      layoutFullMock.mockImplementation(async (model) => stubLayout(model));
-
-      render(<WorkflowAtlas internalMachineGraph={false} />);
-      // let the async ELK stub settle
-      await act(async () => {
-        await Promise.resolve();
-      });
-      expect(scaler()).toBeInTheDocument();
-      expect(scaler().className).not.toContain("morphing");
-
-      // toggle graph → map
-      act(() => {
-        fireEvent.click(screen.getByRole("radio", { name: "Map" }));
-      });
-      // morph is armed immediately (layout effect)
-      expect(scaler().className).toContain("morphing");
-
-      // …and clears once the box transition has landed
-      act(() => {
-        vi.advanceTimersByTime(900);
-      });
-      expect(scaler().className).not.toContain("morphing");
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("keeps one persistent box element across the toggle", async () => {
-    mockSummary.mockReturnValue({
-      summary: ALL_IN_FACTORY_FIXTURE,
-      isLoading: false,
-      error: null,
-    });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
-
-    render(<WorkflowAtlas internalMachineGraph={false} />);
-    await waitFor(() =>
-      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
-    );
-    const before = Array.from(
-      document.querySelectorAll<HTMLElement>(".uv-wf")
-    ).find((el) => el.querySelector(".ag-wf-name")?.textContent === "Build")!;
-
-    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
-    // the SAME node now carries the map face (graph face is hidden, not removed)
-    expect(before.querySelector(".al-name")?.textContent).toBe("Build");
-    expect(document.querySelectorAll(".uv-wf")).toContain(before);
-  });
-});
-
-/* ── P7 hover-trace ────────────────────────────────────────────────
-   Hovering a workflow lights its connected set and dims the rest, per view;
-   hovering a step traces that step's own edges. */
-describe("WorkflowAtlas — hover-trace (P7)", () => {
-  /** The travelling box wrapper for a workflow, found via its graph-face name. */
-  function graphBox(name: string): HTMLElement {
-    const el = Array.from(
-      document.querySelectorAll<HTMLElement>(".ag-wf-name")
-    ).find((n) => n.textContent === name)!;
-    return el.closest(".uv-wf") as HTMLElement;
-  }
-
-  it("applies lit/dim classes on hover (graph view)", async () => {
-    mockSummary.mockReturnValue({
-      summary: ALL_IN_FACTORY_FIXTURE,
-      isLoading: false,
-      error: null,
-    });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
-
-    render(<WorkflowAtlas internalMachineGraph={false} />);
-    await waitFor(() =>
-      expect(document.querySelector(".ag-wf-name")).toBeInTheDocument()
-    );
-
-    const build = graphBox("Build");
-    const review = graphBox("Review");
-
-    // nothing hovered → no trace state
-    expect(build.className).not.toContain("lit");
-    expect(build.className).not.toContain("dim");
-    expect(review.className).not.toContain("dim");
-
-    // hover Build → Build lit, the unconnected Review dimmed (no cross-edge in
-    // the stub layout, so Review is outside Build's connected set)
-    fireEvent.mouseEnter(build);
-    expect(build.className).toContain("lit");
-    expect(review.className).toContain("dim");
-
-    // leave → trace clears
-    fireEvent.mouseLeave(build);
-    expect(build.className).not.toContain("lit");
-    expect(review.className).not.toContain("dim");
-  });
-
-  it("keeps the workflow traced and emphasises the node when a step is hovered", async () => {
-    mockSummary.mockReturnValue({
-      summary: ALL_IN_FACTORY_FIXTURE,
-      isLoading: false,
-      error: null,
-    });
-    layoutFullMock.mockImplementation(async (model) => stubLayout(model));
-
-    render(<WorkflowAtlas internalMachineGraph={false} />);
-    await waitFor(() =>
-      expect(document.querySelector(".ag-step")).toBeInTheDocument()
-    );
-
-    const build = graphBox("Build");
-    const review = graphBox("Review");
-    // The "Execute" step node of wf-build (paints in the layer above the box).
-    const stepName = Array.from(
-      document.querySelectorAll<HTMLElement>(".ag-step-name")
-    ).find((n) => n.textContent === "Execute")!;
-    const stepNode = stepName.closest(".ag-step") as HTMLElement;
-
-    // Hovering the step keeps its workflow traced (lit, NOT dropped) — the box
-    // does not lose hover just because the cursor crossed onto a node above it.
-    fireEvent.mouseEnter(stepNode);
-    expect(build.className).toContain("lit");
-    expect(review.className).toContain("dim");
-    // …and the exact node under the cursor is emphasised over its lit siblings.
-    expect(stepNode.className).toContain("s-hover");
-
-    // leaving the node clears both the trace and the node emphasis
-    fireEvent.mouseLeave(stepNode);
-    expect(build.className).not.toContain("lit");
-    expect(document.querySelector(".ag-step.s-hover")).not.toBeInTheDocument();
-  });
-
-  /** `stubLayout` plus each workflow's next-step links (synthesised, as
-   *  layoutFull does) and its model loops and branches, positioned. */
-  function stubLayoutWithIntra(model: AtlasModel): FullLayout {
-    const layout = stubLayout(model);
-    const points = [
-      { x: 40, y: 100 },
-      { x: 200, y: 100 },
-    ];
-    return {
-      ...layout,
-      workflows: layout.workflows.map((w) => ({
-        ...w,
-        intra: [
-          ...w.steps.slice(1).map((to, i) => ({
-            id: `F_${w.steps[i].id}_${to.id}`,
-            kind: "forward" as const,
-            from: w.steps[i].id,
-            to: to.id,
-            fromWorkflow: w.id,
-            toWorkflow: w.id,
-            label: null,
-            points,
-            labelPos: null,
-          })),
-          ...model.edges
-            .filter((e) => e.kind !== "cross" && e.fromWorkflow === w.id)
-            .map((e) => ({ ...e, points, labelPos: null })),
-        ],
-      })),
-    };
-  }
-
-  async function renderTraceable() {
-    mockSummary.mockReturnValue({
-      summary: ALL_IN_FACTORY_FIXTURE,
-      isLoading: false,
-      error: null,
-    });
-    layoutFullMock.mockImplementation(async (model) =>
-      stubLayoutWithIntra(model)
-    );
-    render(<WorkflowAtlas internalMachineGraph={false} />);
-    await waitFor(() =>
-      expect(document.querySelector(".gedge.k-loop")).toBeInTheDocument()
-    );
-  }
-
-  function stepNode(name: string): HTMLElement {
-    // Finish steps carry their name for screen readers only.
-    return Array.from(
-      document.querySelectorAll<HTMLElement>(".ag-step-name, .ag-sr-only")
-    )
-      .find((n) => n.textContent === name)!
-      .closest(".ag-step") as HTMLElement;
-  }
-
-  it("keeps a workflow hover quiet: steps and loops stay at rest", async () => {
-    await renderTraceable();
-    const board = document.querySelector(".uv-board")!;
-
-    fireEvent.mouseEnter(graphBox("Build"));
-    expect(board.className).toContain("trace-wf");
-    expect(stepNode("Plan").className).not.toMatch(/s-(lit|dim)/);
-    const loop = document.querySelector(".gedge.k-loop")!;
-    expect(loop.getAttribute("class")).not.toMatch(/\b(lit|dim)\b/);
-    expect(document.querySelector(".gedge.k-step.lit")).toBeNull();
-    // Review is outside Build's connected set: its step recedes.
-    expect(stepNode("Approve").className).toContain("s-dim");
-
-    fireEvent.mouseLeave(graphBox("Build"));
-    expect(board.className).not.toContain("trace-wf");
-  });
-
-  it("traces the edges entering and leaving a hovered step", async () => {
-    await renderTraceable();
-    const board = document.querySelector(".uv-board")!;
-
-    // Plan → Execute leaves Plan; the Execute → Plan loop lands on it.
-    fireEvent.mouseEnter(stepNode("Plan"));
-    expect(board.className).toContain("trace-step");
-    expect(board.className).not.toContain("trace-wf");
-
-    const litLinks = document.querySelectorAll(".gedge.k-step.lit");
-    expect(litLinks).toHaveLength(1);
-    expect(litLinks[0].getAttribute("class")).not.toContain("back");
-    // Execute → Ship does not touch Plan.
-    expect(document.querySelectorAll(".gedge.k-step.dim")).toHaveLength(1);
-    const loop = document.querySelector(".gedge.k-loop")!;
-    expect(loop.getAttribute("class")).toContain("lit");
-    expect(loop.getAttribute("class")).toContain("back");
-
-    // The neighbour lights softly; unrelated steps recede.
-    expect(stepNode("Execute").className).toContain("s-lit");
-    expect(stepNode("Ship").className).toContain("s-dim");
-    expect(stepNode("Approve").className).toContain("s-dim");
-    expect(graphBox("Build").className).toContain("lit");
-
-    // From Execute, the loop leaves the step: it reads OUT, not back.
-    fireEvent.mouseLeave(stepNode("Plan"));
-    fireEvent.mouseEnter(stepNode("Execute"));
-    expect(document.querySelectorAll(".gedge.k-step.lit")).toHaveLength(2);
-    expect(
-      document.querySelector(".gedge.k-loop")!.getAttribute("class")
-    ).not.toContain("back");
-    expect(stepNode("Plan").className).toContain("s-lit");
-    expect(stepNode("Ship").className).toContain("s-lit");
-  });
-
-  it("lights the matching canvas edge while an inspector transition row is hovered", async () => {
-    mockSummary.mockReturnValue({
-      summary: FIXTURE,
-      isLoading: false,
-      error: null,
-    });
-    // Enrich the stub so wf-build's loop-back (s2 → s1) actually renders on the
-    // canvas — the base stub carries no intra edges.
-    const model = buildAtlasModel(FIXTURE);
-    const loop = model.edges.find((e) => e.kind === "loop")!;
-    layoutFullMock.mockImplementation(async (m) => {
-      const base = stubLayout(m);
-      const wfBuild = base.workflows.find((w) => w.id === "wf-build")!;
-      wfBuild.intra = [
-        {
-          id: loop.id,
-          kind: "loop",
-          from: loop.from,
-          to: loop.to,
-          fromWorkflow: loop.fromWorkflow,
-          toWorkflow: loop.toWorkflow,
-          label: loop.label,
-          points: [
-            { x: 0, y: 0 },
-            { x: 10, y: 10 },
-          ],
-          labelPos: null,
-        },
-      ];
-      return base;
-    });
-
-    renderAtlasWithEntityHost();
-    await waitFor(() =>
-      expect(document.querySelector(".gedge.k-loop")).toBeInTheDocument()
-    );
-    const loopEdge = document.querySelector(".gedge.k-loop")!;
-    expect(loopEdge.getAttribute("class")).not.toContain("lit");
-
-    // open the wf-build inspector, then hover its loop-back row
-    fireEvent.click(graphBox("Build"));
-    const row = await waitFor(() => {
-      const el = document.querySelector(".wfd-tr.loop");
-      if (!el) throw new Error("loop-back row not rendered yet");
-      return el as HTMLElement;
-    });
-
-    fireEvent.mouseEnter(row);
-    expect(loopEdge.getAttribute("class")).toContain("lit");
-
-    fireEvent.mouseLeave(row);
-    expect(loopEdge.getAttribute("class")).not.toContain("lit");
-  });
-
-  it("colours a row-hovered edge by route direction: a route IN lights white (back), not by geometry", async () => {
-    const summary: PipelineSummary = {
-      workflows: [
-        makeWorkflow("wf-a", [makeStep("a1", "wf-a", 0, { name: "Aye" })], {
-          name: "Aye",
-        }),
-        makeWorkflow("wf-b", [makeStep("b1", "wf-b", 0, { name: "Bee" })], {
-          name: "Bee",
-        }),
-      ],
-    };
-    // wf-a → wf-b handoff. In the stub, wf-a sits ABOVE wf-b, so geometric
-    // detection would call this "forward" (orange). But hovering wf-b's Routes-IN
-    // row must light it white, because relative to wf-b it's an incoming route.
-    summary.workflows[0].transitions = [
-      {
-        id: "x1",
-        from_workflow_id: "wf-a",
-        to_workflow_id: "wf-b",
-        target_step_id: "b1",
-        label: "go",
-      },
-    ];
-    mockSummary.mockReturnValue({ summary, isLoading: false, error: null });
-
-    const cross = buildAtlasModel(summary).edges.find(
-      (e) => e.kind === "cross"
-    )!;
-    layoutFullMock.mockImplementation(async (m) => {
-      const base = stubLayout(m);
-      base.cross = [
-        {
-          id: cross.id,
-          kind: "cross",
-          from: cross.from,
-          to: cross.to,
-          fromWorkflow: cross.fromWorkflow,
-          toWorkflow: cross.toWorkflow,
-          label: cross.label,
-          points: [
-            { x: 0, y: 0 },
-            { x: 10, y: 10 },
-          ],
-          labelPos: null,
-        },
-      ];
-      return base;
-    });
-
-    renderAtlasWithEntityHost();
-    // scope to the GRAPH cross-edge layer (the map layer also renders a hidden
-    // handoff path for the same workflow pair).
-    await waitFor(() =>
-      expect(
-        document.querySelector(".ag-edges .gedge.k-handoff")
-      ).toBeInTheDocument()
-    );
-    const edge = document.querySelector(".ag-edges .gedge.k-handoff")!;
-
-    // open wf-b's inspector → the handoff is a ROUTE IN there
-    fireEvent.click(graphBox("Bee"));
-    const inRow = await waitFor(() => {
-      const el = document.querySelector(".wfd-tr.in");
-      if (!el) throw new Error("routes-in row not rendered yet");
-      return el as HTMLElement;
-    });
-
-    fireEvent.mouseEnter(inRow);
-    const cls = edge.getAttribute("class") ?? "";
-    expect(cls).toContain("lit");
-    expect(cls).toContain("back"); // white by direction, NOT geometric forward
-  });
-
-  it("colours box-hover edges by direction relative to the hovered workflow", async () => {
-    const summary: PipelineSummary = {
-      workflows: [
-        makeWorkflow("wf-a", [makeStep("a1", "wf-a", 0, { name: "Aye" })], {
-          name: "Aye",
-        }),
-        makeWorkflow("wf-b", [makeStep("b1", "wf-b", 0, { name: "Bee" })], {
-          name: "Bee",
-        }),
-      ],
-    };
-    // wf-a → wf-b handoff. wf-a sits ABOVE wf-b in the stub (geometric = forward).
-    summary.workflows[0].transitions = [
-      {
-        id: "x1",
-        from_workflow_id: "wf-a",
-        to_workflow_id: "wf-b",
-        target_step_id: "b1",
-        label: "go",
-      },
-    ];
-    mockSummary.mockReturnValue({ summary, isLoading: false, error: null });
-
-    const cross = buildAtlasModel(summary).edges.find(
-      (e) => e.kind === "cross"
-    )!;
-    layoutFullMock.mockImplementation(async (m) => {
-      const base = stubLayout(m);
-      base.cross = [
-        {
-          id: cross.id,
-          kind: "cross",
-          from: cross.from,
-          to: cross.to,
-          fromWorkflow: cross.fromWorkflow,
-          toWorkflow: cross.toWorkflow,
-          label: cross.label,
-          points: [
-            { x: 0, y: 0 },
-            { x: 10, y: 10 },
-          ],
-          labelPos: null,
-        },
-      ];
-      return base;
-    });
-
-    render(<WorkflowAtlas internalMachineGraph={false} />);
-    await waitFor(() =>
-      expect(
-        document.querySelector(".ag-edges .gedge.k-handoff")
-      ).toBeInTheDocument()
-    );
-    const edge = document.querySelector(".ag-edges .gedge.k-handoff")!;
-
-    // Hover wf-b → the handoff is an INCOMING route → white (back).
-    fireEvent.mouseEnter(graphBox("Bee"));
-    let cls = edge.getAttribute("class") ?? "";
-    expect(cls).toContain("lit");
-    expect(cls).toContain("back");
-    fireEvent.mouseLeave(graphBox("Bee"));
-
-    // Hover wf-a → the SAME handoff is an OUTGOING route → accent (not back).
-    fireEvent.mouseEnter(graphBox("Aye"));
-    cls = edge.getAttribute("class") ?? "";
-    expect(cls).toContain("lit");
-    expect(cls).not.toContain("back");
-  });
-});
-
 it("keeps shared rendering in Graph and returns through Map, Board and the factory overview", async () => {
   mockSummary.mockReturnValue({
     summary: FIXTURE,
     isLoading: false,
     error: null,
   });
-  layoutFullMock.mockImplementation(async (model) => stubLayout(model));
-  const view = render(<WorkflowAtlas internalMachineGraph />);
-  expect(
-    await screen.findByLabelText("Factory workflow graph")
-  ).toBeInTheDocument();
+  const view = render(<WorkflowAtlas />);
+  expect(await findScopedGraph()).toBeInTheDocument();
   fireEvent.click(screen.getByRole("radio", { name: "Map" }));
   expect(
     screen.queryByLabelText("Factory workflow graph")
@@ -1401,9 +959,7 @@ it("keeps shared rendering in Graph and returns through Map, Board and the facto
     "Factory A"
   );
   fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
-  expect(
-    await screen.findByLabelText("Factory workflow graph")
-  ).toBeInTheDocument();
+  expect(await findScopedGraph()).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Factories" }));
   expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
   expect(

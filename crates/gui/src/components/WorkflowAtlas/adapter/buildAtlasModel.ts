@@ -178,8 +178,7 @@ function resolveTargetStep(
  *  - `edges`: intra-workflow `loop` edges (from `transitions_to` that point
  *    backward), `branch` edges (a route step's transitions that jump past its
  *    next step) and cross-workflow `handoff` edges (synthesised refs each end).
- *    Next-in-order links are NOT emitted — `layoutFull` generates them from
- *    step order.
+ *    Next-in-order links are NOT emitted — they are implied by step order.
  *  - `phases`: ordered phase columns.
  *  - `forwardLabels`: route-decision labels (`<rule> · <mode>`) for implied
  *    next-in-order links out of route steps, and session-directive labels
@@ -244,7 +243,7 @@ export function buildAtlasModel(
 
       // ── intra-workflow loop-backs and route branches ──
       // A transition into an earlier (or same) step in order is a loop. The
-      // next-in-order link is implied and synthesised in layoutFull; a route
+      // next-in-order link is implied by step order; a route
       // step's jumps further ahead are emitted as branches so every decision
       // has an edge. Route edges are labelled with their decisions; other
       // edges with their session directive, when they carry one.

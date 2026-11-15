@@ -82,10 +82,7 @@ export const atlasTopology = (summary: PipelineSummary): PipelineSummary =>
  * only composes cached workflows. Requests run at background priority: the
  * Graph on screen always jumps the queue.
  */
-export function useAtlasLayoutWarmup(
-  summary: PipelineSummary | null,
-  enabled: boolean
-): void {
+export function useAtlasLayoutWarmup(summary: PipelineSummary | null): void {
   const structure = summary ? structureOf(summary) : null;
   const topology = useMemo(
     () =>
@@ -101,7 +98,7 @@ export function useAtlasLayoutWarmup(
       ),
     [topology]
   );
-  const routeSteps = useSteps(routeStepIds, enabled);
+  const routeSteps = useSteps(routeStepIds);
   const loaded = routeSteps.every((step) => step !== null);
   const routeConfigsKey = loaded
     ? JSON.stringify(
@@ -113,7 +110,7 @@ export function useAtlasLayoutWarmup(
       )
     : null;
   useEffect(() => {
-    if (!enabled || !topology || routeConfigsKey === null) return;
+    if (!topology || routeConfigsKey === null) return;
     const configs = JSON.parse(routeConfigsKey) as (JsonValue | null)[];
     const routeConfigs = new Map(
       routeStepIds.map((id, index) => [id, configs[index]])
@@ -138,5 +135,5 @@ export function useAtlasLayoutWarmup(
       clearTimeout(timer);
       abort.abort();
     };
-  }, [enabled, topology, routeStepIds, routeConfigsKey]);
+  }, [topology, routeStepIds, routeConfigsKey]);
 }

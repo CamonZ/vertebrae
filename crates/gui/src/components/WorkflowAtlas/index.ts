@@ -6,13 +6,11 @@
  */
 export { WorkflowAtlas, layoutKey } from "./WorkflowAtlas";
 export { WfBox } from "./WfBox";
-export type { WfBoxProps, WfBoxState, WfBoxView } from "./WfBox";
+export type { WfBoxProps, WfBoxState } from "./WfBox";
 export { StepStrip } from "./StepStrip";
 export type { StepStripProps } from "./StepStrip";
 export { EdgeLabel } from "./EdgeLabel";
 export type { EdgeLabelProps, EdgeLabelState } from "./EdgeLabel";
-export { StepNodeGeo } from "./StepNodeGeo";
-export type { StepNodeGeoProps, StepNodeState } from "./StepNodeGeo";
 export { ColumnHeader } from "./ColumnHeader";
 export type { ColumnHeaderProps } from "./ColumnHeader";
 export { ZoomWidget } from "./ZoomWidget";
@@ -45,6 +43,5 @@ export type {
 export { useRunConsoleTasks } from "./hooks/useRunConsoleTasks";
 
 export { buildAtlasModel } from "./adapter/buildAtlasModel";
-export { layoutFull } from "./layout/layoutFull";
 export { layoutCondensed } from "./layout/layoutCondensed";
 export * from "./layout/types";

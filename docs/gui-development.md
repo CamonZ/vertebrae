@@ -225,35 +225,43 @@ those that resume or fork its conversation into another step, including an
 workflow's route and `wait_children` steps are loaded with `useSteps`, which
 shares `useStep`'s per-step query cache so realtime step updates reach both.
 
-On the Atlas graph, every edge leaving a route step carries a chip naming the
-decisions that take it as `<rule> · <mode>` (`new` when a decision has no
-directive), on loop-backs, next-step links and the `branch` edges drawn for
-route transitions that jump past the next step. Loop-backs and next-step links
-leaving other steps carry `<mode>`, or `<mode> · <step>` when the directive
-continues another step's conversation; edges without a directive have no chip.
+The Atlas Graph has one renderer: the shared machine-flow path
+(`adapter/buildMachineFlow.ts` → `useLaidOutFlow` worker/cache →
+`AtlasMachineScene`), hosted by `ScopedMachineGraph.tsx` for a factory scope and
+by the zoom-expanded `FactoryOverview.tsx` without one. The legacy ELK Graph
+(`layoutFull`, `StepNodeGeo`, the Map⇄Graph morph) and its
+`VITE_ATLAS_MACHINE_GRAPH` rollback toggle are gone; `WfBox` now draws only Map
+cards and factory nodes. `adapter/README.md` documents the adapter, its
+structural key and the presentation boundary.
+
 `WorkflowAtlas.tsx` loads the scoped route steps with `useSteps` and passes
-their `route_config`s to `buildAtlasModel`; the labels are part of
-`layoutKey`, so a directive change re-runs the layout.
+their `route_config`s to both the Graph adapter and `buildAtlasModel`. In the
+Graph each route decision keeps its own port and rail, labelled with its
+session directive; other steps' transitions carry `<mode>` or
+`<mode> · <step>` labels. Directives are part of the adapter's structural key,
+so a directive change re-lays out the Graph. On the Map, aggregated handoffs
+carry condition chips, and route labels are part of `layoutKey`.
 
 Sacrum's `step_transition_created` event carries no directive, so
 `usePipelineSummary` refetches the summary after applying it. Sacrum sends no
 event when a kept transition's directive changes; the Atlas shows that change
 after the next summary fetch, such as on reconnect or reload.
 
-Hovering a workflow on the Atlas is a quiet trace: its handoffs keep their
-in/out colour at resting width without glow, its loops stay at rest, and other
-workflows dim mildly. Hovering a step on the graph traces that step instead:
-the step links, branches, loops and handoffs entering (white) or leaving
-(accent) it light with their chips, its neighbour steps light, and the rest
-dims mildly. The board carries the mode as `trace-wf` or `trace-step`; hovering
-an inspector transition row keeps the full-contrast single-edge highlight.
+Hovering on the Atlas is a quiet trace. In the Graph (`useAtlasPresentation`)
+hovering or focusing a workflow, step or rail lights it, its incident rails
+and their other ends, and dims the rest; the Connections panel lists the
+traced rails by direction. On the Map, hovering a workflow card lights its
+handoffs in their in/out colour (white entering, accent leaving) and dims
+unconnected cards; the board carries the mode as `trace-wf`. In both views
+hovering an inspector transition row emphasises that single edge at full
+contrast.
 
 The Kanban board is the Atlas's third view (Map | Graph | Board), not a page of
 its own. It is offered only while a factory scope is selected, because its
 columns come from the scoped workflows' `kanban_column` values, the same values
 the map uses as phases. `KanbanBoard` takes the scope from the Atlas factory
-filter and replaces the pan/zoom canvas; it takes no part in the morph, and
-clearing the factory returns to the factory overview in Map view.
+filter and replaces the pan/zoom canvas; clearing the factory returns to the
+factory overview in Map view.
 
 After changing the Rust Tauri types, regenerate bindings with
 `npm run generate:types` and keep `src/bindings.ts` limited to the reviewed

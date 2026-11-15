@@ -13,7 +13,6 @@ const KINDS: ReadonlyArray<Kind> = [
   "llm",
   "execute",
   "structured",
-  "execute",
   "route",
   "wait",
   "human",

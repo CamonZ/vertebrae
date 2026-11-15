@@ -192,8 +192,8 @@ function translatedRect(rect: Rect, offsetX: number, offsetY: number): Rect {
 /**
  * Place the factory overlay over an already-laid-out workflow canvas.
  *
- * The workflow rectangles are deliberately supplied by `layoutFull` or
- * `layoutCondensed`: factories do not get their own grid or nested workflow
+ * The workflow rectangles are deliberately supplied by the shared Graph scene
+ * regions or `layoutCondensed`: factories do not get their own grid or nested workflow
  * layout. Their high-zoom regions and low-zoom summary nodes are two views of
  * the same geometry.
  */

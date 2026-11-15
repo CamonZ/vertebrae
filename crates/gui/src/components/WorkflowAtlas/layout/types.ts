@@ -2,9 +2,9 @@
    Workflow Atlas — shared model + layout types.
 
    `buildAtlasModel(summary)` produces an `AtlasModel` (the pure, geometry-free
-   description of the topology). The two layout ports — `layoutFull` (nested
-   graph) and `layoutCondensed` (phase-column map) — consume an `AtlasModel`
-   and emit positioned geometry (`FullLayout` / `CondensedLayout`).
+   description of the topology). The Map layout (`layoutCondensed`) consumes an
+   `AtlasModel` and emits positioned geometry (`CondensedLayout`). The Graph
+   uses the shared machine-flow adapter instead (adapter/buildMachineFlow.ts).
    ────────────────────────────────────────────────────────────────── */
 
 import type { SessionDirective } from "../../../bindings";
@@ -33,7 +33,7 @@ export type Role = "entry" | "process" | "exit";
 
 /** Edge category — intra-workflow forward/loop, or cross-workflow handoff. */
 /**
- * `forward`: implied next-in-order link (synthesised in layoutFull) ·
+ * `forward`: implied next-in-order link (never emitted by the adapter) ·
  * `branch`: a route step's transition that jumps past its next step ·
  * `loop`: a transition back to an earlier (or the same) step ·
  * `cross`: a workflow handoff.
@@ -92,7 +92,7 @@ export interface AtlasWorkflow {
 /**
  * A directed edge in the topology model. Endpoints are `AtlasStep.id` refs
  * (`"<workflowId>.<stepId>"`). Forward intra-workflow links are intentionally
- * NOT emitted by the adapter — `layoutFull` synthesises them from step order.
+ * NOT emitted by the adapter — they are implied by step order.
  */
 export interface AtlasEdge {
   id: string;
@@ -144,60 +144,6 @@ export interface Rect {
   y: number;
   w: number;
   h: number;
-}
-
-/** A laid-out point label (e.g. a transition condition chip). */
-export interface LabelPos extends Point {
-  text: string;
-}
-
-/** A positioned step node inside the full graph layout. */
-export interface PlacedStep extends Rect {
-  id: string;
-  stepId: string;
-  workflowId: string;
-  name: string;
-  kind: Kind;
-  role: Role;
-  /** True when this step follows the first run-boundary seam in its workflow. */
-  futureRun?: boolean;
-  /** 1-based ordinal shown on the node. */
-  idx: number;
-}
-
-/** A positioned edge (after routing) ready to render. */
-export interface PlacedEdge {
-  id: string;
-  kind: EdgeKind;
-  from: string;
-  to: string;
-  fromWorkflow: string;
-  toWorkflow: string;
-  label: string | null;
-  points: Point[];
-  labelPos: LabelPos | null;
-  /** Hub-overlay cross edge (hidden at rest, shown only on trace). */
-  hub?: boolean;
-}
-
-/** A positioned workflow container in the full graph layout. */
-export interface PlacedWorkflow extends Rect {
-  id: string;
-  workflow: AtlasWorkflow;
-  steps: PlacedStep[];
-  /** Intra-workflow edges (forward + loop), positioned. */
-  intra: PlacedEdge[];
-}
-
-/** Result of `layoutFull` — nested workflow⊃step graph with routed edges. */
-export interface FullLayout {
-  width: number;
-  height: number;
-  workflows: PlacedWorkflow[];
-  /** Cross-workflow handoff edges (incl. hub overlays), positioned. */
-  cross: PlacedEdge[];
-  /** Ids of detected hub workflows. */
-  hubIds: string[];
 }
 
 /** A positioned workflow card in the condensed map layout. */
