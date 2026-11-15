@@ -1,6 +1,10 @@
 import type { DiffPreferences } from "../../../utils/codeAppearance";
-import { useMemo, useState, type ReactNode } from "react";
-import { parseDiffFromFile, type FileContents } from "@pierre/diffs";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  DIFFS_TAG_NAME,
+  parseDiffFromFile,
+  type FileContents,
+} from "@pierre/diffs";
 import { Editor } from "@pierre/diffs/edit";
 import {
   EditProvider,
@@ -31,7 +35,22 @@ export interface DocumentEditorProps {
   onChange(text: string): void;
   readOnly?: boolean;
   diffStyle?: DiffPreferences["diffStyle"];
+  /**
+   * File view only: lines to select, and to scroll to once rendered unless
+   * already `scrolled`.
+   */
+  reveal?: {
+    line: number;
+    endLine: number;
+    nonce: number;
+    scrolled: boolean;
+  } | null;
+  /** Called once the revealed lines were scrolled into view. */
+  onRevealed?(): void;
 }
+
+/** How long to wait for a large file's lines to render before giving up. */
+const REVEAL_TIMEOUT_MS = 15_000;
 
 /**
  * Edit one document as a full file or as a diff against its complete
@@ -47,6 +66,8 @@ export default function DocumentEditor({
   onChange,
   readOnly = false,
   diffStyle,
+  reveal,
+  onRevealed,
 }: DocumentEditorProps): ReactNode {
   const fileOptions = usePierreThemeOptions();
   const preferences = usePierreDiffOptions();
@@ -65,6 +86,44 @@ export default function DocumentEditor({
     return [working, parseDiffFromFile(old, working)] as const;
   });
 
+  const hostRef = useRef<HTMLDivElement>(null);
+  const revealLine = reveal?.line;
+  const revealEnd = reveal?.endLine;
+  const revealNonce = reveal?.nonce;
+  const revealPending = reveal != null && !reveal.scrolled;
+  const onRevealedRef = useRef(onRevealed);
+  onRevealedRef.current = onRevealed;
+  const selectedLines = useMemo(
+    () =>
+      revealLine === undefined || revealEnd === undefined
+        ? null
+        : { start: revealLine, end: revealEnd },
+    [revealLine, revealEnd]
+  );
+
+  // Pierre renders lines asynchronously into its shadow root; scroll once the
+  // first revealed line exists. A remount after the scroll (a save, a view
+  // change) keeps the selection without scrolling back.
+  useEffect(() => {
+    if (!revealPending || revealLine === undefined || view !== "file") return;
+    let frame = 0;
+    const deadline = performance.now() + REVEAL_TIMEOUT_MS;
+    const scroll = () => {
+      const container = hostRef.current?.querySelector(DIFFS_TAG_NAME);
+      const selector = `[data-line="${revealLine}"]`;
+      const row =
+        container?.shadowRoot?.querySelector(selector) ??
+        container?.querySelector(selector);
+      if (row) {
+        row.scrollIntoView({ block: "center" });
+        onRevealedRef.current?.();
+      } else if (performance.now() < deadline)
+        frame = requestAnimationFrame(scroll);
+    };
+    scroll();
+    return () => cancelAnimationFrame(frame);
+  }, [view, revealPending, revealLine, revealNonce]);
+
   return (
     <WorkerPoolContext.Provider value={diffWorkerPool}>
       <EditProvider createEditor={createEditor}>
@@ -77,13 +136,16 @@ export default function DocumentEditor({
             onEditComplete={() => "accept"}
           />
         ) : file ? (
-          <File
-            file={file}
-            options={fileOptions}
-            edit={!readOnly}
-            onEditChange={(event) => onChange(event.file.contents)}
-            onEditComplete={() => "accept"}
-          />
+          <div ref={hostRef} style={{ display: "contents" }}>
+            <File
+              file={file}
+              options={fileOptions}
+              selectedLines={selectedLines}
+              edit={!readOnly}
+              onEditChange={(event) => onChange(event.file.contents)}
+              onEditComplete={() => "accept"}
+            />
+          </div>
         ) : null}
       </EditProvider>
     </WorkerPoolContext.Provider>

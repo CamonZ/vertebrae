@@ -70,8 +70,20 @@ vi.mock("./workspace/DocumentEditor", () => ({
     baseline,
     onChange,
     diffStyle,
+    reveal,
+    onRevealed,
   }: DocumentEditorProps) => (
-    <div data-testid="document-editor" data-layout={diffStyle}>
+    <div
+      data-testid="document-editor"
+      data-layout={diffStyle}
+      data-reveal={reveal ? `${reveal.line}-${reveal.endLine}` : ""}
+      data-scrolled={reveal?.scrolled ? "true" : "false"}
+    >
+      {reveal && !reveal.scrolled && (
+        <button type="button" onClick={() => onRevealed?.()}>
+          Finish reveal
+        </button>
+      )}
       <p>
         {view} editor for {path}
       </p>
@@ -954,4 +966,104 @@ it("offers only Base and Compare and switches diff layout without reloading Git 
       screen.getByRole("navigation", { name: "Changed files" })
     ).getAllByText("Open")
   ).toHaveLength(2);
+});
+
+describe("WorktreeChanges source references", () => {
+  const editor = () => screen.findByTestId("document-editor");
+  const active = () =>
+    useDocumentStore.getState().workspaces["/worktree"]?.active ?? null;
+
+  it("opens a reference in full-file mode when the working-copy load fails", async () => {
+    load.mockResolvedValue({
+      status: "error",
+      error: { message: "git failed" },
+    } as never);
+    render(
+      <WorktreeChanges
+        worktreePath="/worktree"
+        sourceJump={{ path: "src/app.ts", line: 2, nonce: 1 }}
+      />
+    );
+    expect(await screen.findByText("file editor for src/app.ts")).toBeVisible();
+    expect(await editor()).toHaveAttribute("data-reveal", "2-2");
+    // The failure stays visible in All Changes.
+    fireEvent.click(screen.getByRole("button", { name: "All changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("git failed");
+  });
+
+  it("waits for the working copy instead of routing on a failed past-commit load", async () => {
+    let finish!: (value: Awaited<ReturnType<typeof load>>) => void;
+    load.mockImplementation(async (_path, request) =>
+      request.target.kind === "working_tree"
+        ? { status: "ok", data: modified }
+        : ({ status: "error", error: { message: "no commit" } } as never)
+    );
+    const view = render(<WorktreeChanges worktreePath="/worktree" />);
+    await screen.findByLabelText("Diff for src/app.ts");
+    selectComparison(
+      screen.getByRole("combobox", { name: "Comparison target" }),
+      "head"
+    );
+    expect(await screen.findByText("no commit")).toBeVisible();
+
+    load.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    view.rerender(
+      <WorktreeChanges
+        worktreePath="/worktree"
+        sourceJump={{ path: "src/app.ts", line: 1, nonce: 1 }}
+      />
+    );
+    await waitFor(() =>
+      expect(load).toHaveBeenLastCalledWith(
+        "/worktree",
+        expect.objectContaining({ target: { kind: "working_tree" } })
+      )
+    );
+    await act(async () => {});
+    // The past-commit error does not route the changed line to a file.
+    expect(active()).toBeNull();
+    expect(screen.queryByTestId("document-editor")).toBeNull();
+
+    await act(async () => finish({ status: "ok", data: modified }));
+    expect(
+      await screen.findByRole("status", { name: "Jump target" })
+    ).toHaveTextContent("src/app.ts");
+    expect(active()).toBeNull();
+  });
+
+  it("scrolls a revealed range once and drops it on the first edit", async () => {
+    load.mockResolvedValue({ status: "ok", data: modified });
+    render(
+      <WorktreeChanges
+        worktreePath="/worktree"
+        sourceJump={{ path: "src/util.ts", line: 1, nonce: 1 }}
+      />
+    );
+    const document = await editor();
+    expect(document).toHaveAttribute("data-reveal", "1-1");
+    expect(document).toHaveAttribute("data-scrolled", "false");
+    expect(active()).toBe("src/util.ts");
+    expect(screen.getByRole("button", { name: "Show files" })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Finish reveal" }));
+    // Still selected, but a remount (save, view change) no longer scrolls.
+    expect(await editor()).toHaveAttribute("data-scrolled", "true");
+    expect(screen.queryByRole("button", { name: "Finish reveal" })).toBeNull();
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Edit src/util.ts" }),
+      { target: { value: "edited" } }
+    );
+    await waitFor(async () =>
+      expect(await editor()).toHaveAttribute("data-reveal", "")
+    );
+  });
 });

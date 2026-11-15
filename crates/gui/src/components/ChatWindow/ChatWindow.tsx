@@ -325,31 +325,31 @@ export function ChatWindow({
   } | null>(null);
   const openEvidence = useCallback(
     (location: SourceLocation) => {
+      setBackgroundSession(null);
+      // Working-copy evidence in the conversation's own worktree opens in
+      // Changes, which routes it to the diff or the full file. Open documents
+      // keep their drafts in the store.
+      if (ownWorktreePath && location.base === undefined) {
+        setEvidence(null);
+        setChangesSession(sessionId);
+        setEvidenceJump((previous) => ({
+          sessionId,
+          worktreePath: ownWorktreePath,
+          target: { ...location, nonce: (previous?.target.nonce ?? 0) + 1 },
+        }));
+        return;
+      }
+      // A project checkout or an explicit revision range has no Changes
+      // view of its own, so it is shown read-only in place.
       if (!evidenceCheckout) return;
       setEvidence((previous) => ({
         sessionId,
         checkout: evidenceCheckout,
         target: { ...location, nonce: (previous?.target.nonce ?? 0) + 1 },
       }));
-      // Open documents keep their drafts in the store while hidden.
       setChangesSession(null);
-      setBackgroundSession(null);
     },
-    [evidenceCheckout, sessionId]
-  );
-  const openEvidenceInChanges = useCallback(
-    (location: EvidenceTarget) => {
-      if (!ownWorktreePath) return;
-      activate(ownWorktreePath, null);
-      setEvidence(null);
-      setChangesSession(sessionId);
-      setEvidenceJump((previous) => ({
-        sessionId,
-        worktreePath: ownWorktreePath,
-        target: { ...location, nonce: (previous?.target.nonce ?? 0) + 1 },
-      }));
-    },
-    [ownWorktreePath, sessionId]
+    [ownWorktreePath, evidenceCheckout, sessionId]
   );
   const attachSelection = (
     anchor: CodeSelection,
@@ -576,11 +576,6 @@ export function ChatWindow({
               checkout={shownEvidence.checkout}
               target={shownEvidence.target}
               onClose={() => setEvidence(null)}
-              onOpenInChanges={
-                ownWorktreePath && shownEvidence.target.base === undefined
-                  ? () => openEvidenceInChanges(shownEvidence.target)
-                  : undefined
-              }
             />
           </aside>
         )}

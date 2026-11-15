@@ -18,21 +18,19 @@ const lineSuffix = ({ line, endLine }: SourceLocation) =>
   line ? `:${line}${endLine && endLine !== line ? `–${endLine}` : ""}` : "";
 
 /**
- * Read-only Pierre view of a flow's code evidence in the conversation's
- * checkout: the file at the referenced lines, or its diff when it changed
- * or the evidence names a revision range.
+ * Read-only Pierre view of flow code evidence that the Changes workspace
+ * cannot show: a project checkout without a conversation worktree, or an
+ * explicit revision range. The file at the referenced lines, or its diff
+ * when it changed or the evidence names a revision range.
  */
 export function SourceEvidence({
   checkout,
   target,
   onClose,
-  onOpenInChanges,
 }: {
   checkout: string;
   target: EvidenceTarget;
   onClose(): void;
-  /** Offered when the checkout is the conversation's own worktree. */
-  onOpenInChanges?: () => void;
 }) {
   const { path, base, head } = target;
   const [reload, setReload] = useState(0);
@@ -113,15 +111,6 @@ export function SourceEvidence({
         </span>
         {shown?.kind === "diff" && (
           <span className="evidence-revisions">{shown.label}</span>
-        )}
-        {onOpenInChanges && (
-          <button
-            type="button"
-            className="evidence-action"
-            onClick={onOpenInChanges}
-          >
-            Open in Changes
-          </button>
         )}
         <button
           type="button"
