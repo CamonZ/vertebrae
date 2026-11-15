@@ -1,5 +1,6 @@
 import { materializeLiveAssistantMessages } from "./liveAssistantMessages";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { doStartSession } from "../hooks/useLocalChat";
 import { useChatStore, type ChatMessage } from "./chatStore";
 import {
   clearPersistedLocalChatSessions,
@@ -248,45 +249,173 @@ describe("chatStore", () => {
       );
     });
 
-    it("hydrates a persisted session for the same project path", () => {
-      const id = useChatStore.getState().openSession("Task One", "/repo/root");
-      useChatStore.getState().addMessage(id, {
-        kind: "user",
-        text: "remember this",
-        timestamp: "2026-01-01T00:00:00Z",
-      });
-      useChatStore.getState().setBackendSessionId(id, "backend-1");
-      useChatStore.getState().setProviderResumeId(id, "conv-1");
-      useChatStore.getState().setSessionSelectedModel(id, "opus");
-      useChatStore.getState().setSessionReasoningEffort(id, "high");
-      useChatStore
+    it.each(["fast", "default"])(
+      "hydrates a persisted session with %s tier for the same project path",
+      (tier) => {
+        const id = useChatStore.getState().openSession("Task One", "/repo/root");
+        useChatStore.getState().addMessage(id, {
+          kind: "user",
+          text: "remember this",
+          timestamp: "2026-01-01T00:00:00Z",
+        });
+        useChatStore.getState().setBackendSessionId(id, "backend-1");
+        useChatStore.getState().setProviderResumeId(id, "conv-1");
+        useChatStore.getState().setSessionSelectedModel(id, "opus");
+        useChatStore.getState().setSessionReasoningEffort(id, "high");
+        useChatStore.getState().setSessionSpeedTier(id, tier);
+        useChatStore
+          .getState()
+          .setSessionUsage(id, "claude-sonnet-4", { used: 50, max: 200000 });
+
+        useChatStore.setState({
+          sessions: {},
+          activeSessionId: null,
+          panelOpen: false,
+        });
+
+        const reopened = useChatStore
+          .getState()
+          .openSession("Replacement Label", "/repo/root");
+
+        expect(reopened).toBe(id);
+        expect(useChatStore.getState().activeSessionId).toBe(id);
+        expect(useChatStore.getState().panelOpen).toBe(true);
+        expect(useChatStore.getState().sessions[id]).toMatchObject({
+          label: "Task One",
+          projectPath: "/repo/root",
+          backendSessionId: null,
+          providerResumeId: "conv-1",
+          selectedModelId: "opus",
+          selectedReasoningEffort: "high",
+          selectedSpeedTier: tier,
+          model: "claude-sonnet-4",
+          tokenUsage: { used: 50, max: 200000 },
+        });
+        expect(useChatStore.getState().sessions[id].messages).toEqual([]);
+      }
+    );
+
+    it.each([
+      ["fast", undefined],
+      ["default", undefined],
+      ["fast", null],
+      ["default", null],
+    ] as const)(
+      "recovers %s from older metadata with local selection %s and sends it on resume",
+      async (tier, localTier) => {
+        const id = useChatStore
+          .getState()
+          .openSession("Recover tier", "/repo/tier");
+        useChatStore.getState().setProviderResumeId(id, "tier-thread");
+        if (localTier === null)
+          useChatStore.getState().setSessionSpeedTier(id, null);
+        useChatStore.setState({ sessions: {}, activeSessionId: null });
+        const event = JSON.stringify({
+          version: 1,
+          event_id: "tier-event",
+          stream_id: "replay",
+          sequence: 1,
+          correlation: { session_id: "tier-thread" },
+          timestamp: "2026-01-01T00:00:00Z",
+          semantics: "snapshot",
+          type: "session_started",
+          data: {
+            provider: "openai",
+            provider_resume_id: "tier-thread",
+            model: "gpt-test",
+            speed_tier_status: { requested: tier, active: null },
+            tools: [],
+          },
+        });
+        const replay = vi
+          .spyOn(commands, "loadLocalChatSessionReplay")
+          .mockResolvedValueOnce({
+            status: "ok",
+            data: {
+              events: [JSON.stringify({ type: "future_event" })],
+              cache_key: "tier-revision",
+              next_cursor: "tier-older",
+              has_more: true,
+            },
+          })
+          .mockResolvedValueOnce({
+            status: "ok",
+            data: {
+              events: [event],
+              cache_key: "tier-revision",
+              next_cursor: null,
+              has_more: false,
+            },
+          });
+        useChatStore.getState().openSession("Recover tier", "/repo/tier");
+        await vi.waitFor(() =>
+          expect(useChatStore.getState().sessions[id].selectedSpeedTier).toBe(tier)
+        );
+        expect(replay).toHaveBeenCalledTimes(2);
+        expect(
+          useChatStore.getState().sessions[id].providerReplay?.nextCursor
+        ).toBe("tier-older");
+        expect(loadPersistedLocalChatSession(id)?.selectedSpeedTier).toBe(tier);
+        const create = vi
+          .spyOn(commands, "createLocalChatSession")
+          .mockResolvedValue({ status: "ok", data: null });
+        await doStartSession(useChatStore.getState().sessions[id], id, {
+          setBackendSessionId: vi.fn(),
+          addMessage: vi.fn(),
+          setSessionLifecycle: vi.fn(),
+        });
+        expect(create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            provider_resume_id: "tier-thread",
+            speed_tier: tier,
+          })
+        );
+      }
+    );
+
+    it("keeps a user selection made while provider recovery is pending", async () => {
+      const id = useChatStore
         .getState()
-        .setSessionUsage(id, "claude-sonnet-4", { used: 50, max: 200000 });
-
-      useChatStore.setState({
-        sessions: {},
-        activeSessionId: null,
-        panelOpen: false,
+        .openSession("Tier race", "/repo/tier-race");
+      useChatStore.getState().setProviderResumeId(id, "race-thread");
+      useChatStore.setState({ sessions: {}, activeSessionId: null });
+      let resolve!: (
+        value: Awaited<ReturnType<typeof commands.loadLocalChatSessionReplay>>
+      ) => void;
+      vi.spyOn(commands, "loadLocalChatSessionReplay").mockImplementation(
+        () =>
+          new Promise((done) => {
+            resolve = done;
+          })
+      );
+      useChatStore.getState().openSession("Tier race", "/repo/tier-race");
+      useChatStore.getState().setSessionSpeedTier(id, "default");
+      resolve({
+        status: "ok",
+        data: {
+          events: [
+            JSON.stringify({
+              version: 1,
+              type: "session_started",
+              data: {
+                provider_resume_id: "race-thread",
+                speed_tier_status: { requested: "fast" },
+              },
+            }),
+          ],
+          cache_key: "race",
+          next_cursor: null,
+          has_more: false,
+        },
       });
-
-      const reopened = useChatStore
-        .getState()
-        .openSession("Replacement Label", "/repo/root");
-
-      expect(reopened).toBe(id);
-      expect(useChatStore.getState().activeSessionId).toBe(id);
-      expect(useChatStore.getState().panelOpen).toBe(true);
-      expect(useChatStore.getState().sessions[id]).toMatchObject({
-        label: "Task One",
-        projectPath: "/repo/root",
-        backendSessionId: null,
-        providerResumeId: "conv-1",
-        selectedModelId: "opus",
-        selectedReasoningEffort: "high",
-        model: "claude-sonnet-4",
-        tokenUsage: { used: 50, max: 200000 },
-      });
-      expect(useChatStore.getState().sessions[id].messages).toEqual([]);
+      await vi.waitFor(() =>
+        expect(useChatStore.getState().sessions[id].providerReplay?.loaded).toBe(
+          true
+        )
+      );
+      expect(useChatStore.getState().sessions[id].selectedSpeedTier).toBe(
+        "default"
+      );
     });
 
     it("replays normalized provider events when reopening a persisted session", async () => {
@@ -414,6 +543,8 @@ describe("chatStore", () => {
         .getState()
         .openSession("Incomplete Replay", "/repo/root");
       useChatStore.getState().setProviderResumeId(id, "conv-incomplete");
+      // Known settings keep transcript pagination lazy.
+      useChatStore.getState().setSessionSpeedTier(id, "default");
       useChatStore.setState({
         sessions: {},
         activeSessionId: null,
@@ -892,6 +1023,8 @@ describe("chatStore", () => {
         .getState()
         .openSession("Paged Replay", "/repo/root");
       useChatStore.getState().setProviderResumeId(id, "conv-paged");
+      // Known settings keep transcript pagination lazy.
+      useChatStore.getState().setSessionSpeedTier(id, "default");
       useChatStore.setState({
         sessions: {},
         activeSessionId: null,
@@ -1025,6 +1158,8 @@ describe("chatStore", () => {
         .getState()
         .openSession("Duplicate Replay", "/repo/duplicates");
       useChatStore.getState().setProviderResumeId(id, "conv-duplicates");
+      // Known settings keep transcript pagination lazy.
+      useChatStore.getState().setSessionSpeedTier(id, "default");
       useChatStore.setState({ sessions: {}, activeSessionId: null });
       const event = (sequence: number) =>
         JSON.stringify({
@@ -1090,6 +1225,8 @@ describe("chatStore", () => {
         .getState()
         .openSession("Live Replay", "/repo/root");
       useChatStore.getState().setProviderResumeId(id, "conv-live");
+      // Known settings keep transcript pagination lazy.
+      useChatStore.getState().setSessionSpeedTier(id, "default");
       useChatStore.setState({
         sessions: {},
         activeSessionId: null,

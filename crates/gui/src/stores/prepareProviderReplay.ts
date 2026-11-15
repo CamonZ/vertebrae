@@ -1,3 +1,4 @@
+import { replaySpeedTier } from "../utils/localChatSpeedTier";
 import type { ChatMessage, ChatSession } from "./chatStore";
 import {
   parseSessionLogs,
@@ -21,6 +22,7 @@ export type ReplayContext = Pick<
 >;
 
 export interface ReplayPreparation {
+  recoveredSpeedTier?: string;
   kind: "initial" | "older";
   refresh: boolean;
   lines: string[];
@@ -30,6 +32,7 @@ export interface ReplayPreparation {
 }
 
 export interface PreparedReplay {
+  recoveredSpeedTier?: string;
   /** Replay projection alone, kept so a conflicting result can be rebased. */
   projected: ChatMessage[];
   messages: ChatMessage[];
@@ -45,7 +48,13 @@ export function prepareProviderReplay(
   input: ReplayPreparation
 ): PreparedReplay {
   const projected = replayLinesToChatMessages(input.lines, input.context);
-  return { projected, ...mergeProjectedReplay(projected, input) };
+  return {
+    projected,
+    recoveredSpeedTier:
+      input.recoveredSpeedTier ??
+      replaySpeedTier(input.lines, input.context.providerResumeId),
+    ...mergeProjectedReplay(projected, input),
+  };
 }
 
 /** Merge an existing projection with a (possibly newer) session snapshot. */

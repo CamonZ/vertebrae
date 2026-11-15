@@ -1334,3 +1334,45 @@ fn text_after_a_per_block_thinking_snapshot_keeps_its_streamed_item_id() {
     let orphan = decoder.decode_line(r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"late"}}}"#).unwrap();
     assert!(orphan[0].correlation.item_id.is_none());
 }
+
+#[test]
+fn historical_init_recovers_only_reported_tiers_without_inferring_from_model() {
+    for (state, expected) in [
+        (Some("on"), Some(SpeedTier::Fast)),
+        (Some("off"), Some(SpeedTier::Default)),
+        (Some("cooldown"), Some(SpeedTier::Default)),
+        (Some("future"), None),
+        (None, None),
+    ] {
+        let context =
+            ClaudeDecodeContext::one_shot(RunId::from("history"), StreamId::from("history"));
+        let mut decoder = configured_decoder(context);
+        let mut init = serde_json::json!({"type":"system","subtype":"init","session_id":"history","model":"claude-opus-5"});
+        if let Some(state) = state {
+            init["fast_mode_state"] = serde_json::json!(state);
+        }
+        let events = decoder.decode_line(&init.to_string()).unwrap();
+        let status = events.iter().find_map(|event| match &event.payload {
+            HarnessEventPayloadV1::SessionStarted(start) => start.speed_tier_status.as_ref(),
+            _ => None,
+        });
+        assert_eq!(status.and_then(|status| status.active), expected);
+        assert!(status.is_none_or(|status| status.requested.is_none()));
+    }
+    let mut context =
+        ClaudeDecodeContext::one_shot(RunId::from("request"), StreamId::from("request"));
+    context.requested_speed_tier = Some(SpeedTier::Default);
+    let mut decoder = configured_decoder(context);
+    let events = decoder
+        .decode_line(r#"{"type":"system","subtype":"init","session_id":"request"}"#)
+        .unwrap();
+    let status = events
+        .iter()
+        .find_map(|event| match &event.payload {
+            HarnessEventPayloadV1::SessionStarted(start) => start.speed_tier_status.as_ref(),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(status.requested, Some(SpeedTier::Default));
+    assert_eq!(status.active, None);
+}

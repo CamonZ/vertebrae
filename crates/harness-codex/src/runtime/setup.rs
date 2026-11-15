@@ -39,7 +39,7 @@ pub(crate) async fn setup_session(
     let reasoning_effort = mode
         .source_id()
         .and(request_config.reasoning_effort.clone());
-    let thread_params = thread_params(&config, &request_config);
+    let mut thread_params = thread_params(&config, &request_config);
     let (method, params) = match &mode {
         SessionMode::New => {
             let mut params = thread_params.clone();
@@ -104,6 +104,12 @@ pub(crate) async fn setup_session(
             return Err(error);
         }
     }
+    let speed_tier = request_config.speed_tier.or_else(|| {
+        crate::speed_tier::service_tier(response.get("serviceTier").and_then(Value::as_str))
+    });
+    if let Some(tier) = speed_tier {
+        add_service_tier(&mut thread_params, Some(tier));
+    }
     let model = optional_string(&response, &["/model"])
         .or(request_config.model)
         .unwrap_or_else(|| "Codex default".into());
@@ -113,7 +119,7 @@ pub(crate) async fn setup_session(
     let provider_ref = ProviderThreadRef::new(thread.clone());
     let (closed, closed_rx) = watch::channel(false);
     let turn_overrides = Mutex::new(TurnOverrides {
-        speed_tier: request_config.speed_tier,
+        speed_tier,
         model: Some(model.clone()),
         reasoning_effort,
         permission: config.permission.clone(),
@@ -149,7 +155,7 @@ pub(crate) async fn setup_session(
             provider: "openai".into(),
             model: Some(model),
             provider_resume_id: Some(ProviderResumeId::new(thread.clone())),
-            speed_tier_status: None,
+            speed_tier_status: crate::speed_tier::requested_status(speed_tier),
             tools: Vec::new(),
         }),
     )
@@ -197,8 +203,8 @@ fn add_developer_instructions(
     }
 }
 
-fn add_service_tier(params: &mut Value, request_config: &vertebrae_harness_core::RequestConfig) {
-    let Some(speed_tier) = request_config.speed_tier else {
+fn add_service_tier(params: &mut Value, speed_tier: Option<SpeedTier>) {
+    let Some(speed_tier) = speed_tier else {
         return;
     };
     params["serviceTier"] = json!(match speed_tier {
@@ -207,8 +213,9 @@ fn add_service_tier(params: &mut Value, request_config: &vertebrae_harness_core:
     });
 }
 
-/// Thread parameters shared by `thread/start` and `thread/resume`. Codex does
-/// not persist per-thread config, so resume carries the same parameters.
+/// Thread parameters shared by `thread/start` and `thread/resume`. Send known
+/// settings explicitly, including for older Codex versions without persisted
+/// per-thread configuration.
 fn thread_params(
     config: &CodexProviderConfig,
     request_config: &vertebrae_harness_core::RequestConfig,
@@ -223,7 +230,7 @@ fn thread_params(
     if let Some(effort) = &request_config.reasoning_effort {
         params["effort"] = json!(effort);
     }
-    add_service_tier(&mut params, request_config);
+    add_service_tier(&mut params, request_config.speed_tier);
     if let Some(personality) = &request_config.personality {
         params["personality"] = json!(personality);
     }
@@ -591,14 +598,7 @@ mod tests {
             (SpeedTier::Fast, "priority"),
         ] {
             let mut params = json!({});
-            add_service_tier(
-                &mut params,
-                &vertebrae_harness_core::RequestConfig {
-                    verbosity: None,
-                    speed_tier: Some(speed_tier),
-                    ..Default::default()
-                },
-            );
+            add_service_tier(&mut params, Some(speed_tier));
             assert_eq!(params["serviceTier"], service_tier);
         }
     }
@@ -606,10 +606,7 @@ mod tests {
     #[test]
     fn omits_codex_service_tier_when_unset() {
         let mut params = json!({"serviceName": "vertebrae"});
-        add_service_tier(
-            &mut params,
-            &vertebrae_harness_core::RequestConfig::default(),
-        );
+        add_service_tier(&mut params, None);
         assert_eq!(params, json!({"serviceName": "vertebrae"}));
     }
 

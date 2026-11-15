@@ -436,7 +436,7 @@ impl ClaudeStreamDecoder {
                 false,
                 Some("Claude did not report fast-mode availability.".into()),
             ),
-            None => (Some(SpeedTier::Default), true, None),
+            None => (None, false, None),
         };
         Some(SpeedTierStatus {
             requested,

@@ -242,6 +242,9 @@ export function useChatSession(sessionId: string) {
     !harnessCatalog || selectedHarnessInfo?.available === true;
   const canUseComposer =
     !hasPendingUserQuestion &&
+    (isActive ||
+      selectedSpeedTier != null ||
+      session?.providerReplay?.loading !== "initial") &&
     (lockedHarness ||
       hasResume ||
       !!session?.messages.length ||

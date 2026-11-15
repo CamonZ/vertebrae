@@ -327,6 +327,33 @@ never on the adapter crates directly.
 | `gate.rs` | `LocalChatGateBinding`, the hidden gate protocol instructions (draft or whole-artifact), and the bound `vtb gate` / `vtb artifact add` command check |
 | `manager.rs` | Session registry and pane/session bookkeeping |
 
+#### Conversation speed-tier restoration
+
+An explicit fast/default `selectedSpeedTier` is authoritative. Missing and null
+mean “current tier” (Rust's optional field normalizes missing to null). Without
+an explicit tier, replay and live session-init
+metadata recover the normalized requested tier, or the provider-reported active
+tier when requested intent is absent. Recovery never overwrites a selection
+made while replay is pending. Provider defaults apply only to empty new chats;
+existing conversations do not inherit a changed global speed default.
+
+For an unknown local tier, replay searches older pages for the latest known
+root-conversation setting without adding those messages to the visible window.
+This can require reading the full history for legacy conversations. The composer
+waits for initial recovery before resuming with an unknown tier. Recovered
+settings are persisted and used for the next resume and outgoing turn.
+
+Codex maps app-server `serviceTier` and rollout `thread_settings_applied`
+(`thread_settings.service_tier`) / `session_configured` metadata: `priority`
+means fast, and `default` means default. These are requested configuration, not
+confirmation of the tier serving a turn. Copied settings with a different
+`thread_id` are ignored. Old `turn_context` records carry no service tier.
+Claude recovers a reported `fast_mode_state`: on means fast, off/cooldown means
+default; a separately known fast request survives temporary fallback. Missing
+or unsupported metadata remains unknown. Neither adapter infers a confirmed
+tier from model capability or request settings alone. Historical provider files
+that never recorded a tier cannot reconstruct it.
+
 #### Built-in local-chat model menus
 
 `vertebrae_harness::curate_local_chat_models` owns picker selection policy:

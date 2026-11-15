@@ -1,3 +1,4 @@
+import { replaySpeedTier } from "../utils/localChatSpeedTier";
 import { localChatActivityStatus } from "../utils/localChatActivity";
 import {
   isSelfProviderAgentToolCall,
@@ -1675,7 +1676,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
     session: ChatSession,
     cursor: string | null
   ): Promise<
-    | { status: "ok"; page: LoadLocalChatSessionReplayOutput }
+    | {
+        status: "ok";
+        page: LoadLocalChatSessionReplayOutput;
+      }
     | { status: "error"; error: string }
   > => {
     if (!session.providerResumeId) {
@@ -1725,9 +1729,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
     retainFromEventId?: string,
     existingCacheKey?: string | null
   ): Promise<
-    | { status: "ok"; page: LoadLocalChatSessionReplayOutput }
+    | {
+        status: "ok";
+        page: LoadLocalChatSessionReplayOutput;
+        recoveredSpeedTier?: string;
+      }
     | { status: "error"; error: string }
   > => {
+    const recoveryGeneration =
+      get().sessions[session.id]?.providerReplay?.generation;
     const collected: string[][] = [];
     let cacheKey: string | null | undefined;
     let cursor: string | null = null;
@@ -1767,10 +1777,37 @@ export const useChatStore = create<ChatStore>((set, get) => {
         !result.page.has_more ||
         !result.page.next_cursor
       ) {
-        return {
-          status: "ok",
-          page: { ...result.page, events: collected.reverse().flat() },
-        };
+        const page = { ...result.page, events: collected.reverse().flat() };
+        let tier = replaySpeedTier(page.events, session.providerResumeId);
+        // Metadata can precede the visible message window. Search older pages
+        // only without a local choice, keeping message pagination intact.
+        let metadataPage = page;
+        const metadataCursors = new Set<string>();
+        while (
+          tier === undefined &&
+          get().sessions[session.id]?.providerResumeId ===
+            session.providerResumeId &&
+          get().sessions[session.id]?.providerReplay?.generation ===
+            recoveryGeneration &&
+          get().sessions[session.id]?.selectedSpeedTier == null &&
+          metadataPage.has_more &&
+          metadataPage.next_cursor &&
+          !metadataCursors.has(metadataPage.next_cursor)
+        ) {
+          metadataCursors.add(metadataPage.next_cursor);
+          const older = await requestProviderReplayPage(
+            session,
+            metadataPage.next_cursor
+          );
+          if (
+            older.status === "error" ||
+            older.page.cache_key !== page.cache_key
+          )
+            break;
+          metadataPage = older.page;
+          tier = replaySpeedTier(metadataPage.events, session.providerResumeId);
+        }
+        return { status: "ok", page, recoveredSpeedTier: tier };
       }
 
       if (seenCursors.has(result.page.next_cursor)) {
@@ -1872,6 +1909,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
             messages,
             installedMessageCount: result.installedMessageCount,
           }),
+          // Missing and null both mean "current tier" across Rust persistence.
+          selectedSpeedTier:
+            latest.selectedSpeedTier == null
+              ? (prepared.recoveredSpeedTier ?? latest.selectedSpeedTier)
+              : latest.selectedSpeedTier,
           liveAssistantMessages: indexLiveAssistantMessages(messages),
         };
         applied = true;
@@ -1882,6 +1924,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
         };
       });
 
+      const updated = get().sessions[sessionId];
+      if (
+        applied &&
+        updated &&
+        updated.selectedSpeedTier !== source.selectedSpeedTier
+      ) {
+        void persistLocalChatSession(updated);
+      }
       return applied;
     } catch (error) {
       if (controller.signal.aborted) return false;
@@ -2063,6 +2113,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             owns,
             (current) => ({
               kind: "initial",
+              recoveredSpeedTier: result.recoveredSpeedTier,
               refresh,
               lines,
               context: {

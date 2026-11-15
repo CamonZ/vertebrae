@@ -418,3 +418,40 @@ fn incomplete_final_records_are_tolerated_without_a_copied_history_marker() {
     assert!(tail.drafts.is_empty());
     assert!(tail.older_records_exist);
 }
+
+#[test]
+fn replay_recovers_only_known_owned_service_tier_settings() {
+    for (wire, expected) in [
+        ("priority", Some(vertebrae_harness_core::SpeedTier::Fast)),
+        ("default", Some(vertebrae_harness_core::SpeedTier::Default)),
+        ("future", None),
+    ] {
+        let body = json!({"type":"event_msg", "payload":{"type":"thread_settings_applied",
+            "thread_id":"code-mode", "thread_settings":{"model":"gpt-test", "service_tier":wire}}})
+        .to_string()
+            + "\n";
+        let drafts = parse(&body);
+        let statuses: Vec<_> = drafts
+            .iter()
+            .filter_map(|event| match &event.payload {
+                HarnessEventPayloadV1::SessionStarted(start) => start.speed_tier_status.as_ref(),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            statuses.first().and_then(|status| status.requested),
+            expected
+        );
+        assert!(statuses.iter().all(|status| status.active.is_none()));
+        let foreign = body.replace("code-mode", "other-thread");
+        assert!(parse(&foreign).iter().all(|event| !matches!(&event.payload,
+            HarnessEventPayloadV1::SessionStarted(start) if start.speed_tier_status.is_some())));
+    }
+    for value in [json!(null), json!(false), json!(42)] {
+        let body =
+            json!({"type":"event_msg","payload":{"type":"session_configured","service_tier":value}})
+                .to_string() + "\n";
+        assert!(parse(&body).iter().all(|event| !matches!(&event.payload,
+            HarnessEventPayloadV1::SessionStarted(start) if start.speed_tier_status.is_some())));
+    }
+}

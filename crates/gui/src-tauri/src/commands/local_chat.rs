@@ -1389,6 +1389,29 @@ mod tests {
         .expect("valid index entry")
     }
 
+    #[test]
+    fn session_index_speed_tier_preserves_choices_and_normalizes_absence_to_null() {
+        let legacy = serde_json::to_value(index_entry("tier")).unwrap();
+        assert!(legacy["selectedSpeedTier"].is_null());
+        for tier in ["fast", "default"] {
+            let mut wire = legacy.clone();
+            wire["selectedSpeedTier"] = serde_json::json!(tier);
+            let entry: LocalChatSessionIndexEntry = serde_json::from_value(wire).unwrap();
+            assert_eq!(entry.selected_speed_tier.as_deref(), Some(tier));
+            assert_eq!(
+                serde_json::to_value(entry).unwrap()["selectedSpeedTier"],
+                tier
+            );
+        }
+        let mut missing = legacy.clone();
+        missing.as_object_mut().unwrap().remove("selectedSpeedTier");
+        let entry: LocalChatSessionIndexEntry = serde_json::from_value(missing).unwrap();
+        assert!(serde_json::to_value(entry).unwrap()["selectedSpeedTier"].is_null());
+        let mut malformed = legacy;
+        malformed["selectedSpeedTier"] = serde_json::json!(42);
+        assert!(serde_json::from_value::<LocalChatSessionIndexEntry>(malformed).is_err());
+    }
+
     fn annotation_fixture(
         dir: &std::path::Path,
         session_ids: &[&str],
