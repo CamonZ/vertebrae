@@ -175,6 +175,7 @@ pub(super) async fn finish(
     catalog: &mut Catalog,
     path: &Path,
     root: &Path,
+    recovered: Option<&BTreeMap<String, Entry>>,
 ) -> Result<(), CommandError> {
     let prefix = format!("{project}/");
     if catalog
@@ -183,11 +184,18 @@ pub(super) async fn finish(
         .keys()
         .any(|id| id.starts_with(&prefix))
     {
-        let snapshot = fetch_snapshot(client, project, machine).await?;
-        for entry in snapshot.values() {
-            merge(catalog, project, entry.clone());
-        }
-        reconcile(catalog, project, &snapshot);
+        let fetched;
+        let snapshot = match recovered {
+            Some(snapshot) => snapshot,
+            None => {
+                fetched = fetch_snapshot(client, project, machine).await?;
+                for entry in fetched.values() {
+                    merge(catalog, project, entry.clone());
+                }
+                &fetched
+            }
+        };
+        reconcile(catalog, project, snapshot);
         // Commit local-only sidecars and the verified checkpoint before cleanup.
         save(path, catalog)?;
     }

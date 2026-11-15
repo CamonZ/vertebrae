@@ -113,7 +113,8 @@ async fn interrupted_readback_retains_sources_then_restart_verifies_and_retires_
         "machine",
         &mut catalog,
         &path,
-        root.path()
+        root.path(),
+        None,
     )
     .await
     .is_err());
@@ -129,6 +130,7 @@ async fn interrupted_readback_retains_sources_then_restart_verifies_and_retires_
         &mut restarted,
         &path,
         root.path(),
+        None,
     )
     .await
     .unwrap();
@@ -182,6 +184,7 @@ async fn interrupted_readback_retains_sources_then_restart_verifies_and_retires_
         &mut restarted,
         &path,
         root.path(),
+        None,
     )
     .await
     .unwrap();
@@ -339,7 +342,8 @@ async fn a_failed_later_page_cannot_verify_a_matching_earlier_page() {
         "machine",
         &mut catalog,
         &path,
-        root.path()
+        root.path(),
+        None,
     )
     .await
     .is_err());

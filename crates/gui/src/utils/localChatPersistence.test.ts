@@ -582,6 +582,106 @@ describe("localChatPersistence", () => {
     expect(save.mock.calls[1][0].sessions[0].title).toBe("Second");
   });
 
+  it("issues no index write when only usage, lifecycle or partial text change", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    vi.spyOn(freshCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    const save = vi
+      .spyOn(freshCommands, "saveLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: null });
+    const persistence = await import("./localChatPersistence");
+    await persistence.hydrateLocalChatSessionIndex();
+    const base = makeSession({ id: "streaming", messageCount: 1 });
+    await persistence.persistLocalChatSession(base);
+    save.mockClear();
+
+    for (let used = 1; used <= 20; used++) {
+      await persistence.persistLocalChatSession({
+        ...base,
+        tokenUsage: { used, max: 200000 },
+      });
+    }
+    expect(
+      persistence.loadPersistedLocalChatSession("streaming")?.tokenUsage
+    ).toEqual({ used: 20, max: 200000 });
+    await persistence.persistLocalChatSession({ ...base, lifecycle: "error" });
+    await persistence.persistLocalChatSession({
+      ...base,
+      messages: [
+        ...base.messages,
+        { kind: "assistant", text: "par", isPartial: true },
+      ] as ChatSession["messages"],
+    });
+
+    expect(save).not.toHaveBeenCalled();
+
+    // A changed persisted field still produces exactly one targeted write.
+    await persistence.persistLocalChatSession({ ...base, title: "Renamed" });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0][0].changedIds).toEqual(["streaming"]);
+  });
+
+  it("applies merged remote entries unless a local edit or deletion is pending", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    vi.spyOn(freshCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    const save = vi
+      .spyOn(freshCommands, "saveLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: null });
+    const persistence = await import("./localChatPersistence");
+
+    // Before hydration, startup recovery reads the already merged entry.
+    expect(
+      persistence.applyRemoteLocalChatSession("remote", makeSession())
+    ).toBeUndefined();
+    await persistence.hydrateLocalChatSessionIndex();
+
+    const applied = persistence.applyRemoteLocalChatSession(
+      "remote",
+      makeSession({ id: "remote", title: "From catalog" })
+    );
+    expect(applied?.title).toBe("From catalog");
+    expect(persistence.loadPersistedLocalChatSession("remote")?.title).toBe(
+      "From catalog"
+    );
+    expect(save).not.toHaveBeenCalled();
+
+    let acknowledge!: () => void;
+    save.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          acknowledge = () => resolve({ status: "ok", data: null });
+        })
+    );
+    const edit = persistence.persistLocalChatSession(
+      makeSession({ id: "remote", title: "Local edit" })
+    );
+    await waitFor(() => expect(acknowledge).toBeTypeOf("function"));
+    expect(
+      persistence.applyRemoteLocalChatSession(
+        "remote",
+        makeSession({ id: "remote", title: "Stale remote" })
+      )
+    ).toBeUndefined();
+    acknowledge();
+    await edit;
+    expect(persistence.loadPersistedLocalChatSession("remote")?.title).toBe(
+      "Local edit"
+    );
+
+    expect(persistence.applyRemoteLocalChatSession("remote", null)).toBeNull();
+    expect(persistence.loadPersistedLocalChatSession("remote")).toBeNull();
+    expect(
+      persistence.applyRemoteLocalChatSession("remote", null)
+    ).toBeUndefined();
+  });
+
   it("merges existing app index entries before the first async save", async () => {
     vi.resetModules();
     const { commands: freshCommands } = await import("../bindings");

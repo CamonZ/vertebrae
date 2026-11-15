@@ -301,7 +301,12 @@ fn merge(catalog: &mut Catalog, project: &str, entry: Entry) {
     if entry.revision < record.remote.revision {
         return;
     }
-    if entry.payload["deleted"] == true || (record.import_only && entry.revision > 0) {
+    if entry.payload["deleted"] == true
+        || (record.import_only && entry.revision > 0)
+        || record.desired.as_ref() == Some(&entry.payload)
+    {
+        // Tombstones are terminal, and an entry already carrying the local
+        // intent (for example after a lost acknowledgement) needs no write.
         record.desired = None;
         record.conflicted = false;
     }
@@ -354,29 +359,56 @@ async fn fetch_snapshot(
     Ok(snapshot)
 }
 
+/// Full recovery: read every page, merge it, then deliver pending writes.
+/// Reserved for startup, reconnect and explicit recovery.
 async fn exchange(
     client: &GraphqlClient,
     project: &str,
     machine: &str,
     catalog: &mut Catalog,
     path: &Path,
-) -> Result<(), CommandError> {
+) -> Result<Recovery, CommandError> {
     let snapshot = fetch_snapshot(client, project, machine).await?;
-    for entry in snapshot.into_values() {
-        merge(catalog, project, entry);
+    for entry in snapshot.values() {
+        merge(catalog, project, entry.clone());
     }
     save(path, catalog)?;
+    let delivered = deliver(client, project, machine, catalog, path).await?;
+    Ok(Recovery {
+        snapshot,
+        delivered,
+    })
+}
 
+struct Recovery {
+    snapshot: BTreeMap<String, Entry>,
+    delivered: usize,
+}
+
+/// Bounded conflict retries per entry. Each conflict adopts the authoritative
+/// entry returned by the backend before retrying the local intent.
+const DELIVERY_ATTEMPTS: usize = 2;
+
+/// Outbox delivery: send only pending entries of `project`, using the cached
+/// remote revision as the expected revision. Never reads the catalog.
+async fn deliver(
+    client: &GraphqlClient,
+    project: &str,
+    machine: &str,
+    catalog: &mut Catalog,
+    path: &Path,
+) -> Result<usize, CommandError> {
     let prefix = format!("{project}/");
     let pending: Vec<_> = catalog
         .records
-        .keys()
-        .filter(|k| k.starts_with(&prefix))
-        .cloned()
+        .iter()
+        .filter(|(k, r)| k.starts_with(&prefix) && r.desired.is_some())
+        .map(|(k, _)| k.clone())
         .collect();
+    let mut sent = 0;
 
     for id in pending {
-        for _ in 0..2 {
+        for _ in 0..DELIVERY_ATTEMPTS {
             let record = catalog.records.get(&id).expect("record retained");
             let Some(payload) = record.desired.clone() else {
                 break;
@@ -392,6 +424,7 @@ async fn exchange(
                 ),
                 fields = FIELDS,
             );
+            sent += 1;
             let ack: Ack = client
                 .execute(
                     &mutation_query,
@@ -432,7 +465,7 @@ async fn exchange(
             save(path, catalog)?;
         }
     }
-    Ok(())
+    Ok(sent)
 }
 
 fn root() -> Result<std::path::PathBuf, CommandError> {
@@ -618,34 +651,16 @@ pub(super) async fn synchronize(
         }
 
         save(&path, &catalog)?;
-        if exchange(&client, &project.project_id, &machine, &mut catalog, &path)
-            .await
-            .is_err()
-        {
-            tracing::info!(
-                pending = catalog
-                    .records
-                    .values()
-                    .filter(|r| r.desired.is_some())
-                    .count(),
-                unmapped = catalog.unmapped.len(),
-                "chat_catalog_offline"
-            );
-        }
-
-        if migration::finish(
+        sync_project(
             &client,
             &project.project_id,
             &machine,
             &mut catalog,
             &path,
             &root,
+            editing,
         )
-        .await
-        .is_err()
-        {
-            tracing::info!("chat_catalog_migration_pending");
-        }
+        .await;
 
         if state
             .sacrum_client
@@ -666,6 +681,59 @@ pub(super) async fn synchronize(
     Ok(())
 }
 
+/// Network step of one project. Saves (`editing`) deliver only the outbox, so
+/// write acknowledgements and unaffected projects never cause a catalog scan.
+/// Full reads are reserved for recovery (load) and migration verification.
+async fn sync_project(
+    client: &GraphqlClient,
+    project: &str,
+    machine: &str,
+    catalog: &mut Catalog,
+    path: &Path,
+    root: &Path,
+    editing: bool,
+) {
+    let outcome = if editing {
+        deliver(client, project, machine, catalog, path)
+            .await
+            .map(|_| None)
+    } else {
+        exchange(client, project, machine, catalog, path)
+            .await
+            .map(Some)
+    };
+    let recovery = match outcome {
+        Ok(recovery) => recovery,
+        Err(_) => {
+            tracing::info!(
+                pending = catalog
+                    .records
+                    .values()
+                    .filter(|r| r.desired.is_some())
+                    .count(),
+                unmapped = catalog.unmapped.len(),
+                "chat_catalog_offline"
+            );
+            None
+        }
+    };
+
+    let verified = if editing {
+        migration::cleanup_index(root, catalog)
+    } else {
+        // A recovery snapshot taken before any write of this project is
+        // already an independent, complete read and can verify imports.
+        let snapshot = recovery
+            .as_ref()
+            .filter(|r| r.delivered == 0)
+            .map(|r| &r.snapshot);
+        migration::finish(client, project, machine, catalog, path, root, snapshot).await
+    };
+    if verified.is_err() {
+        tracing::info!("chat_catalog_migration_pending");
+    }
+}
+
 fn hydrate_snapshot(
     catalog: &Catalog,
     project_id: &str,
@@ -678,63 +746,212 @@ fn hydrate_snapshot(
             continue;
         }
 
-        let payload = record.desired.as_ref().unwrap_or(&record.remote.payload);
-        if payload["deleted"] == true {
-            sessions.retain(|s| s.id != record.remote.chat_id);
-            continue;
-        }
-
         let previous = sessions
             .iter()
             .find(|s| s.id == record.remote.chat_id)
             .cloned();
-        let mut value = payload["metadata"].clone();
-        value["activityStatus"] = payload
-            .get("status")
-            .cloned()
-            .unwrap_or_else(|| json!("idle"));
-        value["id"] = json!(record.remote.chat_id);
-        value["projectPath"] = json!(project_path);
-        let sidecar = catalog.sidecars.get(id);
-        value["gate"] = previous
-            .as_ref()
-            .and_then(|s| s.gate.as_ref())
-            .or_else(|| sidecar.and_then(|s| s.gate.as_ref()))
-            .map(|g| serde_json::to_value(g).unwrap())
-            .unwrap_or(Value::Null);
-
-        let mut association = previous
-            .as_ref()
-            .and_then(|s| s.association.clone())
-            .or_else(|| sidecar.and_then(|s| s.association.clone()))
-            .unwrap_or_else(|| {
-                json!({
-                    "ticketId": null,
-                    "ticketTitle": null,
-                    "worktreePath": null,
-                    "branch": null,
-                    "lastProcessedAt": null,
-                    "processedAtCount": 0,
-                    "awaitingWorktree": null,
-                    "recentWorktrees": []
-                })
-            });
-        association["ticketId"] = payload["task_id"].clone();
-        // The association reader requires an explicit nullable title. Titles are
-        // not stored in local sidecars and must not survive an entity rebind.
-        association["ticketTitle"] = Value::Null;
-        association["entityLevel"] = payload["metadata"]
-            .get("entityLevel")
-            .cloned()
-            .filter(|v| v.is_string())
-            .unwrap_or_else(|| json!("ticket"));
-        value["association"] = association;
-
-        if let Ok(session) = serde_json::from_value(value) {
-            sessions.retain(|s| s.id != record.remote.chat_id);
-            sessions.push(session);
+        match hydrate_record(catalog, id, record, project_path, previous.as_ref()) {
+            Hydrated::Deleted => sessions.retain(|s| s.id != record.remote.chat_id),
+            Hydrated::Session(session) => {
+                sessions.retain(|s| s.id != record.remote.chat_id);
+                sessions.push(*session);
+            }
+            Hydrated::Invalid => {}
         }
     }
+}
+
+enum Hydrated {
+    Deleted,
+    Session(Box<LocalChatSessionIndexEntry>),
+    Invalid,
+}
+
+/// Visible summary of one catalog record. Local-only association and gate
+/// details come from the previous visible session or the durable sidecar.
+fn hydrate_record(
+    catalog: &Catalog,
+    id: &str,
+    record: &Record,
+    project_path: &str,
+    previous: Option<&LocalChatSessionIndexEntry>,
+) -> Hydrated {
+    let payload = record.desired.as_ref().unwrap_or(&record.remote.payload);
+    if payload["deleted"] == true {
+        return Hydrated::Deleted;
+    }
+
+    let mut value = payload["metadata"].clone();
+    value["activityStatus"] = payload
+        .get("status")
+        .cloned()
+        .unwrap_or_else(|| json!("idle"));
+    value["id"] = json!(record.remote.chat_id);
+    value["projectPath"] = json!(project_path);
+    let sidecar = catalog.sidecars.get(id);
+    value["gate"] = previous
+        .and_then(|s| s.gate.as_ref())
+        .or_else(|| sidecar.and_then(|s| s.gate.as_ref()))
+        .map(|g| serde_json::to_value(g).unwrap())
+        .unwrap_or(Value::Null);
+
+    let mut association = previous
+        .and_then(|s| s.association.clone())
+        .or_else(|| sidecar.and_then(|s| s.association.clone()))
+        .unwrap_or_else(|| {
+            json!({
+                "ticketId": null,
+                "ticketTitle": null,
+                "worktreePath": null,
+                "branch": null,
+                "lastProcessedAt": null,
+                "processedAtCount": 0,
+                "awaitingWorktree": null,
+                "recentWorktrees": []
+            })
+        });
+    association["ticketId"] = payload["task_id"].clone();
+    // The association reader requires an explicit nullable title. Titles are
+    // not stored in local sidecars and must not survive an entity rebind.
+    association["ticketTitle"] = Value::Null;
+    association["entityLevel"] = payload["metadata"]
+        .get("entityLevel")
+        .cloned()
+        .filter(|v| v.is_string())
+        .unwrap_or_else(|| json!("ticket"));
+    value["association"] = association;
+
+    match serde_json::from_value(value) {
+        Ok(session) => Hydrated::Session(Box::new(session)),
+        Err(_) => Hydrated::Invalid,
+    }
+}
+
+/// Typed `chat_catalog_*` CDC entry broadcast on a project channel.
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct CatalogChange {
+    pub project_id: String,
+    pub installation_id: String,
+    pub chat_id: String,
+    pub revision: u64,
+    pub payload: Value,
+}
+
+/// Visible result of a merged CDC entry; `session` is `None` for a tombstone.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CatalogEntryChanged {
+    pub session_id: String,
+    pub session: Option<LocalChatSessionIndexEntry>,
+}
+
+/// Durably merge a CDC entry into the account-scoped cache. Returns the
+/// visible update to publish, or `None` when the entry is unrelated, already
+/// applied (including own-write echoes) or leaves the visible projection
+/// unchanged. Never reads the remote catalog.
+pub(crate) async fn apply_change(
+    state: &AppState,
+    change: CatalogChange,
+) -> Result<Option<CatalogEntryChanged>, CommandError> {
+    let _guard = SERIAL.lock().await;
+    let client = state.sacrum_client.read().await.clone();
+    let Some(client) = client else {
+        return Ok(None);
+    };
+    let root = root()?;
+    let _disk_guard = lock_file(&root, ".chat-catalog.lock")?;
+    let machine = installation(&root)?;
+    let Some(project) = change_scope(&change, &machine, state.project_config.get_projects()) else {
+        return Ok(None);
+    };
+    // Unknown credentials never resolve another account's catalog; startup
+    // recovery registers this connection and reads the complete state.
+    let Ok(identity) = scope_identity(&root, &client, &change.installation_id, false).await else {
+        return Ok(None);
+    };
+    let path = state_path(&root, &identity);
+    let mut catalog = load(&path)?;
+    apply_entry(
+        &mut catalog,
+        &path,
+        &project.project_id,
+        &project.path,
+        change,
+    )
+}
+
+/// The configured project an entry belongs to, if it targets this installation.
+fn change_scope(
+    change: &CatalogChange,
+    machine: &str,
+    projects: Vec<crate::project_config::SavedProject>,
+) -> Option<crate::project_config::SavedProject> {
+    if change.installation_id != machine {
+        return None;
+    }
+    projects
+        .into_iter()
+        .find(|p| p.project_id == change.project_id)
+}
+
+fn apply_entry(
+    catalog: &mut Catalog,
+    path: &Path,
+    project_id: &str,
+    project_path: &str,
+    change: CatalogChange,
+) -> Result<Option<CatalogEntryChanged>, CommandError> {
+    let id = key(project_id, &change.chat_id);
+    let previous = catalog.records.get(&id).map(|record| {
+        if change.revision <= record.remote.revision {
+            return None;
+        }
+        Some(
+            record
+                .desired
+                .as_ref()
+                .unwrap_or(&record.remote.payload)
+                .clone(),
+        )
+    });
+    let previous = match previous {
+        // Duplicate, out-of-order or acknowledged own-write echo.
+        Some(None) => return Ok(None),
+        Some(Some(payload)) => Some(payload),
+        None => None,
+    };
+
+    merge(
+        catalog,
+        project_id,
+        Entry {
+            chat_id: change.chat_id.clone(),
+            revision: change.revision,
+            payload: change.payload,
+        },
+    );
+    save(path, catalog)?;
+
+    let record = &catalog.records[&id];
+    let current = record.desired.as_ref().unwrap_or(&record.remote.payload);
+    if previous.as_ref() == Some(current) {
+        return Ok(None);
+    }
+    tracing::info!(
+        chat_id = %record.remote.chat_id,
+        revision = record.remote.revision,
+        "chat_catalog_cdc_applied"
+    );
+
+    let session = match hydrate_record(catalog, &id, record, project_path, None) {
+        Hydrated::Deleted => None,
+        Hydrated::Session(session) => Some(*session),
+        Hydrated::Invalid => return Ok(None),
+    };
+    Ok(Some(CatalogEntryChanged {
+        session_id: change.chat_id,
+        session,
+    }))
 }
 
 /// Return true when backend persistence handled the write. Do not recreate
@@ -913,7 +1130,7 @@ pub(super) async fn store_classifications(
     payload["classifications"] = serde_json::to_value(all).map_err(|_| error())?;
     enqueue(&mut catalog, &project, chat_id, payload);
     save(&path, &catalog)?;
-    let _ = exchange(&client, &project, &machine, &mut catalog, &path).await;
+    let _ = deliver(&client, &project, &machine, &mut catalog, &path).await;
     Ok(())
 }
 
@@ -1546,5 +1763,414 @@ mod tests {
                 .unwrap();
         assert_eq!(expected["pending"], json!([]));
         assert_eq!(expected["projects"][0]["entries"][0]["payload"], payload(7));
+    }
+
+    /// Records the kind of each GraphQL request ("scan" or "put").
+    type Requests = std::sync::Arc<std::sync::Mutex<Vec<&'static str>>>;
+
+    async fn counting_server(
+        respond: impl Fn(&Value) -> Value + Send + Sync + 'static,
+    ) -> (MockServer, GraphqlClient, Requests) {
+        let server = MockServer::start().await;
+        let requests = Requests::default();
+        let observed = requests.clone();
+        Mock::given(matchers::method("POST"))
+            .respond_with(move |request: &wiremock::Request| {
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                let query = body["query"].as_str().unwrap();
+                observed
+                    .lock()
+                    .unwrap()
+                    .push(if query.contains("putChatCatalog") {
+                        "put"
+                    } else {
+                        assert!(query.contains("chatCatalog("));
+                        "scan"
+                    });
+                ResponseTemplate::new(200).set_body_json(json!({"data": respond(&body)}))
+            })
+            .mount(&server)
+            .await;
+        let client = GraphqlClient::new(SacrumConfig {
+            base_url: server.uri(),
+            api_token: "fixture".into(),
+            project_id: "project".into(),
+        });
+        (server, client, requests)
+    }
+
+    fn accept(body: &Value, revision: u64) -> Value {
+        let vars = &body["variables"];
+        let payload: Value = serde_json::from_str(vars["v"].as_str().unwrap()).unwrap();
+        json!({"putChatCatalog": {
+            "status": "accepted",
+            "entry": {"chatId": vars["c"], "revision": revision, "payload": payload}
+        }})
+    }
+
+    fn acknowledged(catalog: &mut Catalog, project: &str, chat: &str, revision: u64, n: u8) {
+        merge(
+            catalog,
+            project,
+            Entry {
+                chat_id: chat.into(),
+                revision,
+                payload: payload(n),
+            },
+        );
+    }
+
+    #[tokio::test]
+    async fn saves_deliver_only_changed_entries_without_scanning_any_project() {
+        let (_server, client, requests) = counting_server(|body| {
+            assert_eq!(
+                body["variables"]["r"], 3,
+                "expected revision comes from cache"
+            );
+            assert_eq!(body["variables"]["p"], "edited");
+            accept(body, 4)
+        })
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.json");
+        let mut catalog = Catalog::default();
+        acknowledged(&mut catalog, "edited", "chat", 3, 1);
+        acknowledged(&mut catalog, "edited", "other", 9, 1);
+        acknowledged(&mut catalog, "untouched", "chat", 5, 1);
+        // Unverified imports must not turn a save into a verification scan.
+        migration::queue(&mut catalog, "edited/chat", payload(1));
+        migration::queue(&mut catalog, "untouched/chat", payload(1));
+
+        // An identical projection (usage-only, lifecycle-only) queues nothing.
+        enqueue(&mut catalog, "edited", "other", payload(1));
+        enqueue(&mut catalog, "untouched", "chat", payload(1));
+        enqueue(&mut catalog, "edited", "chat", payload(2));
+        for project in ["edited", "untouched"] {
+            sync_project(
+                &client,
+                project,
+                "machine",
+                &mut catalog,
+                &path,
+                dir.path(),
+                true,
+            )
+            .await;
+        }
+
+        assert_eq!(*requests.lock().unwrap(), ["put"]);
+        assert!(catalog.records["edited/chat"].desired.is_none());
+        assert_eq!(catalog.records["edited/chat"].remote.revision, 4);
+
+        // Repeating the save with nothing pending issues zero requests.
+        sync_project(
+            &client,
+            "edited",
+            "machine",
+            &mut catalog,
+            &path,
+            dir.path(),
+            true,
+        )
+        .await;
+        assert_eq!(requests.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn new_classification_is_a_single_mutation_without_a_scan() {
+        let (_server, client, requests) = counting_server(|body| {
+            let sent: Value =
+                serde_json::from_str(body["variables"]["v"].as_str().unwrap()).unwrap();
+            assert_eq!(sent["classifications"][0]["tool_id"], "t");
+            accept(body, 2)
+        })
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.json");
+        let mut catalog = Catalog::default();
+        acknowledged(&mut catalog, "project", "chat", 1, 1);
+
+        let mut classified = payload(1);
+        classified["classifications"] = json!([{"tool_id": "t"}]);
+        enqueue(&mut catalog, "project", "chat", classified);
+        deliver(&client, "project", "machine", &mut catalog, &path)
+            .await
+            .unwrap();
+
+        assert_eq!(*requests.lock().unwrap(), ["put"]);
+    }
+
+    #[tokio::test]
+    async fn conflicts_converge_on_authoritative_revisions_with_bounded_retries() {
+        // Remote moved to revision 4; the retry carries the authoritative revision.
+        let (_server, client, requests) =
+            counting_server(|body| match body["variables"]["r"].as_u64().unwrap() {
+                1 => json!({"putChatCatalog": {
+                    "status": "conflict",
+                    "entry": {"chatId": "chat", "revision": 4, "payload": payload(9)}
+                }}),
+                4 => accept(body, 5),
+                other => panic!("unexpected expected revision {other}"),
+            })
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.json");
+        let mut catalog = Catalog::default();
+        acknowledged(&mut catalog, "project", "chat", 1, 1);
+        enqueue(&mut catalog, "project", "chat", payload(2));
+        deliver(&client, "project", "machine", &mut catalog, &path)
+            .await
+            .unwrap();
+        assert_eq!(*requests.lock().unwrap(), ["put", "put"]);
+        let record = &catalog.records["project/chat"];
+        assert!(record.desired.is_none() && !record.conflicted);
+        assert_eq!(record.remote.revision, 5);
+        assert_eq!(record.remote.payload, payload(2));
+
+        // A permanently conflicting backend stops after the bounded attempts and
+        // retains the intent durably for a later retry.
+        let (_server, client, requests) = counting_server(|body| {
+            let revision = body["variables"]["r"].as_u64().unwrap() + 1;
+            json!({"putChatCatalog": {
+                "status": "conflict",
+                "entry": {"chatId": "chat", "revision": revision, "payload": payload(9)}
+            }})
+        })
+        .await;
+        enqueue(&mut catalog, "project", "chat", payload(3));
+        deliver(&client, "project", "machine", &mut catalog, &path)
+            .await
+            .unwrap();
+        assert_eq!(requests.lock().unwrap().len(), DELIVERY_ATTEMPTS);
+        let restarted = load(&path).unwrap();
+        assert!(restarted.records["project/chat"].conflicted);
+        assert_eq!(restarted.records["project/chat"].desired, Some(payload(3)));
+
+        // A remote tombstone wins and can never be resurrected.
+        let (_server, client, requests) = counting_server(|_| {
+            let mut deleted = payload(0);
+            deleted["deleted"] = json!(true);
+            json!({"putChatCatalog": {
+                "status": "conflict",
+                "entry": {"chatId": "chat", "revision": 20, "payload": deleted}
+            }})
+        })
+        .await;
+        deliver(&client, "project", "machine", &mut catalog, &path)
+            .await
+            .unwrap();
+        assert_eq!(requests.lock().unwrap().len(), 1);
+        enqueue(&mut catalog, "project", "chat", payload(4));
+        assert!(catalog.records["project/chat"].desired.is_none());
+        assert_eq!(
+            catalog.records["project/chat"].remote.payload["deleted"],
+            true
+        );
+    }
+
+    #[tokio::test]
+    async fn recovery_scans_once_and_verifies_pending_imports_from_that_snapshot() {
+        let (_server, client, requests) = counting_server(|body| {
+            if body["query"].as_str().unwrap().contains("putChatCatalog") {
+                return accept(body, 2);
+            }
+            json!({"chatCatalog": {
+                "entries": [{"chatId": "chat", "revision": 1, "payload": payload(1)}],
+                "nextCursor": null
+            }})
+        })
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.json");
+        let mut catalog = Catalog::default();
+        migration::queue(&mut catalog, "project/chat", payload(1));
+
+        sync_project(
+            &client,
+            "project",
+            "machine",
+            &mut catalog,
+            &path,
+            dir.path(),
+            false,
+        )
+        .await;
+        assert_eq!(*requests.lock().unwrap(), ["scan"]);
+        assert!(catalog.migration.verified.contains("project/chat"));
+
+        // After delivering a write, verification needs an independent read-back.
+        migration::queue(&mut catalog, "project/next", payload(5));
+        enqueue(&mut catalog, "project", "next", payload(5));
+        requests.lock().unwrap().clear();
+        sync_project(
+            &client,
+            "project",
+            "machine",
+            &mut catalog,
+            &path,
+            dir.path(),
+            false,
+        )
+        .await;
+        assert_eq!(*requests.lock().unwrap(), ["scan", "put", "scan"]);
+    }
+
+    fn change(chat: &str, revision: u64, payload: Value) -> CatalogChange {
+        CatalogChange {
+            project_id: "project".into(),
+            installation_id: "machine".into(),
+            chat_id: chat.into(),
+            revision,
+            payload,
+        }
+    }
+
+    #[test]
+    fn cdc_echoes_duplicates_and_reordered_entries_are_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.json");
+        let mut catalog = Catalog::default();
+        acknowledged(&mut catalog, "project", "chat", 4, 1);
+        save(&path, &catalog).unwrap();
+        let before = fs::read(&path).unwrap();
+
+        for revision in [4, 3, 0] {
+            let update = apply_entry(
+                &mut catalog,
+                &path,
+                "project",
+                "/repo",
+                change("chat", revision, payload(8)),
+            );
+            assert!(update.unwrap().is_none());
+        }
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            before,
+            "no durable write for echoes"
+        );
+        assert_eq!(catalog.records["project/chat"].remote.payload, payload(1));
+    }
+
+    #[test]
+    fn newer_cdc_entry_updates_cache_and_visible_summary_with_local_sidecar() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.json");
+        let mut catalog = Catalog::default();
+        acknowledged(&mut catalog, "project", "chat", 1, 1);
+        catalog.sidecars.insert(
+            "project/chat".into(),
+            migration::Sidecar {
+                project_path: Some("/repo".into()),
+                association: Some(json!({"worktreePath": "local-only"})),
+                gate: None,
+            },
+        );
+
+        let update = apply_entry(
+            &mut catalog,
+            &path,
+            "project",
+            "/repo",
+            change("chat", 2, payload(5)),
+        )
+        .unwrap()
+        .unwrap();
+        let session = update.session.unwrap();
+        assert_eq!(update.session_id, "chat");
+        assert_eq!(session.label, "chat-5");
+        assert_eq!(session.project_path.as_deref(), Some("/repo"));
+        assert_eq!(session.association.unwrap()["worktreePath"], "local-only");
+        assert_eq!(
+            load(&path).unwrap().records["project/chat"].remote.revision,
+            2
+        );
+
+        // A remote creation is also merged incrementally.
+        let created = apply_entry(
+            &mut catalog,
+            &path,
+            "project",
+            "/repo",
+            change("new", 1, payload(6)),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(created.session.unwrap().label, "chat-6");
+
+        // A tombstone publishes a deletion and cannot be resurrected locally.
+        let mut deleted = payload(5);
+        deleted["deleted"] = json!(true);
+        let update = apply_entry(
+            &mut catalog,
+            &path,
+            "project",
+            "/repo",
+            change("chat", 3, deleted),
+        )
+        .unwrap()
+        .unwrap();
+        assert!(update.session.is_none());
+        enqueue(&mut catalog, "project", "chat", payload(7));
+        assert!(catalog.records["project/chat"].desired.is_none());
+    }
+
+    #[test]
+    fn cdc_preserves_pending_local_edits_and_settles_lost_acknowledgements() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.json");
+        let mut catalog = Catalog::default();
+        acknowledged(&mut catalog, "project", "edited", 1, 1);
+        enqueue(&mut catalog, "project", "edited", payload(2));
+        acknowledged(&mut catalog, "project", "lost", 1, 1);
+        enqueue(&mut catalog, "project", "lost", payload(3));
+        let mutation = catalog.records["project/edited"].mutation_id.clone();
+
+        // A concurrent remote change advances the expected revision but the
+        // local intent stays visible and pending with its stable mutation id.
+        let update = apply_entry(
+            &mut catalog,
+            &path,
+            "project",
+            "/repo",
+            change("edited", 2, payload(9)),
+        );
+        assert!(update.unwrap().is_none());
+        let record = &catalog.records["project/edited"];
+        assert_eq!(record.desired, Some(payload(2)));
+        assert_eq!(record.remote.revision, 2);
+        assert_eq!(record.mutation_id, mutation);
+
+        // The echo of a write whose acknowledgement was lost settles the outbox.
+        let update = apply_entry(
+            &mut catalog,
+            &path,
+            "project",
+            "/repo",
+            change("lost", 2, payload(3)),
+        );
+        assert!(update.unwrap().is_none());
+        assert!(catalog.records["project/lost"].desired.is_none());
+        assert!(load(&path).unwrap().records["project/lost"]
+            .desired
+            .is_none());
+    }
+
+    #[test]
+    fn cdc_for_other_installations_or_unconfigured_projects_is_out_of_scope() {
+        let projects = || {
+            vec![crate::project_config::SavedProject {
+                slug: "slug".into(),
+                project_id: "project".into(),
+                path: "/repo".into(),
+            }]
+        };
+        assert!(change_scope(&change("chat", 1, payload(1)), "machine", projects()).is_some());
+        assert!(
+            change_scope(&change("chat", 1, payload(1)), "other-machine", projects()).is_none()
+        );
+        let mut foreign = change("chat", 1, payload(1));
+        foreign.project_id = "elsewhere".into();
+        assert!(change_scope(&foreign, "machine", projects()).is_none());
     }
 }
