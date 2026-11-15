@@ -230,6 +230,7 @@ export type CatalogView =
   | { readonly kind: "state"; readonly state: UniversalState };
 
 export interface CatalogPartProps {
+  labelPlacement?: import("../partLabels").PartLabels;
   def: MachinePartDef;
   view: CatalogView;
   change?: ChangeMark;
@@ -247,6 +248,7 @@ export interface CatalogPartProps {
  * (its pose taken from scenarios 0 and 1, VL-07). Render inside a MachineDiagram.
  */
 export function CatalogPart({
+  labelPlacement,
   def,
   view,
   change,
@@ -277,6 +279,7 @@ export function CatalogPart({
   return (
     <MachinePart
       part={def.part}
+      labelPlacement={labelPlacement}
       bb={sc.bb ?? def.bb}
       timeline={sc.timeline}
       t={t}

@@ -302,3 +302,62 @@ describe("flow playback", () => {
     expect(shownT()).toBe(before.travel.beats![2].t);
   });
 });
+
+it.each([
+  ["shown", "beside"],
+  ["shown", "below"],
+  ["shown", "hidden"],
+  ["shown", "hover"],
+  ["hidden", "beside"],
+  ["hidden", "below"],
+  ["hidden", "hidden"],
+  ["hidden", "hover"],
+  ["hover", "beside"],
+  ["hover", "below"],
+  ["hover", "hidden"],
+  ["hover", "hover"],
+])(
+  "flow fence renders title %s and subtitle %s with a per-part override",
+  async (title, subtitle) => {
+    const { container } = renderFlow(
+      JSON.stringify({
+        version: 1,
+        labels: { title, subtitle },
+        parts: [
+          { id: "one", kind: "worker", label: "First name", job: "first job" },
+          {
+            id: "two",
+            kind: "worker",
+            label: "Second name",
+            job: "second job",
+            labels: { title: "hidden", subtitle: "hidden" },
+          },
+        ],
+      })
+    );
+    await screen.findByTestId("flow-player");
+    expect(screen.queryByTestId("flow-errors")).toBeNull();
+    const header = () =>
+      container.querySelector('[data-part-labels="one"]')?.textContent ?? "";
+    expect(header().includes("First name")).toBe(title === "shown");
+    expect(header().includes("first job")).toBe(
+      subtitle === "beside" || subtitle === "below"
+    );
+    expect(
+      container.querySelector('[data-part-labels="two"]')?.textContent
+    ).toBe("");
+    if (title === "hover" || subtitle === "hover") {
+      const part = container.querySelector('[data-part-id="one"]')!;
+      fireEvent.focus(part);
+      const overlay = container.querySelector(".md-label-layer")!;
+      expect(overlay.textContent?.includes("First name")).toBe(
+        title === "hover"
+      );
+      expect(overlay.textContent?.includes("first job")).toBe(
+        subtitle === "hover"
+      );
+      fireEvent.blur(part);
+      expect(overlay.textContent).toBe("");
+    }
+  }
+);

@@ -86,6 +86,7 @@ export type DrillSpec =
   | { readonly artifact: string };
 
 export interface PartSpec {
+  readonly labels?: import("../partLabels").PartLabels;
   /** Stable id; rails and steps refer to it. */
   readonly id: string;
   /** A registered part kind, e.g. `worker`, `session`, `event rail`. */
@@ -258,6 +259,7 @@ export interface BandSpec {
 }
 
 export interface FlowSpec {
+  readonly labels?: import("../partLabels").PartLabels;
   readonly version: number;
   readonly title?: string;
   /**
