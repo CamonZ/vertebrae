@@ -1,4 +1,5 @@
 import { workflowTopology } from "./topology";
+import { topologyEndpointPart } from "./topologyEndpoint";
 import { failureDetectorPart } from "./failureDetector";
 import { fencingTokenPart } from "./fencingToken";
 import { gossipPart } from "./gossip";
@@ -125,6 +126,7 @@ export const STARTER_PARTS: readonly AnyPartKind[] = [
   workflowTopology(humanGatePart),
   runEndPart,
   taskRunPart,
+  topologyEndpointPart,
 ];
 
 export function registerStarterParts(r: PartRegistry): void {
@@ -132,6 +134,7 @@ export function registerStarterParts(r: PartRegistry): void {
 }
 
 export {
+  topologyEndpointPart,
   aggregatorPart,
   alertPart,
   approvalPart,
