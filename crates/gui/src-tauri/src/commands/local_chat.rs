@@ -963,11 +963,26 @@ pub async fn load_local_chat_session_replay(
         limit: input.limit.map(|limit| limit as usize),
     };
     let replay = tauri::async_runtime::spawn_blocking(move || {
-        HarnessRuntimeFactory::new(HarnessFactoryConfig::default()).replay_transcript_page(
+        let phase = if page_request.cursor.is_some() { "older" } else { "newest" };
+        let result = HarnessRuntimeFactory::new(HarnessFactoryConfig::default()).replay_transcript_page(
             harness,
             &request,
             &page_request,
-        )
+        );
+        match &result {
+            Ok(page) => log::debug!(
+                "[LOCAL_CHAT_REPLAY] provider={harness:?} session={} phase={phase} cursor={:?} cache_key={:?} next_cursor={:?} events={}",
+                request.provider_resume_id, page_request.cursor,
+                page.as_ref().map(|page| &page.cache_key),
+                page.as_ref().and_then(|page| page.next_cursor.as_ref()),
+                page.as_ref().map_or(0, |page| page.events.len()),
+            ),
+            Err(error) => log::warn!(
+                "[LOCAL_CHAT_REPLAY] provider={harness:?} session={} phase={phase} cursor={:?} error={error}",
+                request.provider_resume_id, page_request.cursor,
+            ),
+        }
+        result
     })
     .await
     .map_err(|error| CommandError {

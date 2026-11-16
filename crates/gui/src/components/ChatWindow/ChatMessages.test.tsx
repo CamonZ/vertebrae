@@ -823,9 +823,65 @@ describe("ChatMessages", () => {
         })}
       />
     );
+    expect(screen.getByText("Loading older messages…")).toHaveAttribute(
+      "role",
+      "status"
+    );
     expect(
-      screen.getByRole("button", { name: "Loading older messages…" })
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "Load older messages" })
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    { replayError: "History failed" },
+    { isLoadingOlderMessages: true },
+    { isLoadingInitialHistory: true },
+    { isVisible: false },
+    { hasOlderMessages: false },
+  ])("does not automatically load unavailable history: %j", (overrides) => {
+    const onLoadOlderMessages = vi.fn().mockResolvedValue(false);
+    render(
+      <ChatMessages
+        {...defaultProps({
+          hasOlderMessages: true,
+          onLoadOlderMessages,
+          ...overrides,
+        })}
+      />
+    );
+    fireEvent.wheel(screen.getByTestId("chat-messages-scroll"), {
+      deltaY: -100,
+    });
+    expect(onLoadOlderMessages).not.toHaveBeenCalled();
+  });
+
+  it("loads once near the boundary on upward wheel input even without overflow", async () => {
+    let resolveLoad: ((applied: boolean) => void) | undefined;
+    const onLoadOlderMessages = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveLoad = resolve;
+        })
+    );
+    render(
+      <ChatMessages
+        {...defaultProps({ hasOlderMessages: true, onLoadOlderMessages })}
+      />
+    );
+    const container = screen.getByTestId("chat-messages-scroll");
+    fireEvent.wheel(container, { deltaY: 100 });
+    expect(onLoadOlderMessages).not.toHaveBeenCalled();
+    container.scrollTop = 250;
+    fireEvent.wheel(container, { deltaY: -100 });
+    expect(onLoadOlderMessages).not.toHaveBeenCalled();
+    container.scrollTop = 200;
+    fireEvent.wheel(container, { deltaY: -100 });
+    fireEvent.wheel(container, { deltaY: -100 });
+    expect(onLoadOlderMessages).toHaveBeenCalledTimes(1);
+    await act(async () => resolveLoad?.(false));
+    fireEvent.wheel(container, { deltaY: -100 });
+    expect(onLoadOlderMessages).toHaveBeenCalledTimes(2);
+    await act(async () => resolveLoad?.(false));
   });
 
   it("preserves the visible scroll anchor when older messages are prepended", async () => {
@@ -854,11 +910,10 @@ describe("ChatMessages", () => {
       clientHeight: { configurable: true, value: 100 },
       scrollHeight: { configurable: true, value: 400 },
     });
+    container.scrollTop = 300;
+    fireEvent.scroll(container);
     container.scrollTop = 150;
     fireEvent.scroll(container);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Load older messages" })
-    );
     expect(onLoadOlderMessages).toHaveBeenCalledTimes(1);
 
     Object.defineProperty(container, "scrollHeight", {
@@ -915,11 +970,10 @@ describe("ChatMessages", () => {
       clientHeight: { configurable: true, value: 100 },
       scrollHeight: { configurable: true, value: 400 },
     });
+    container.scrollTop = 300;
+    fireEvent.scroll(container);
     container.scrollTop = 150;
     fireEvent.scroll(container);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Load older messages" })
-    );
 
     Object.defineProperty(container, "scrollHeight", {
       configurable: true,
@@ -990,11 +1044,10 @@ describe("ChatMessages", () => {
       clientHeight: { configurable: true, value: 100 },
       scrollHeight: { configurable: true, value: 400 },
     });
+    container.scrollTop = 300;
+    fireEvent.scroll(container);
     container.scrollTop = 150;
     fireEvent.scroll(container);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Load older messages" })
-    );
 
     rerender(
       <ChatMessages

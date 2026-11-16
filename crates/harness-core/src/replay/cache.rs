@@ -31,6 +31,8 @@ struct CachedReplay {
     events: usize,
     bytes: usize,
     older_records_exist: bool,
+    // A prefix can have no older records while still missing newer events.
+    newer_records_exist: bool,
 }
 
 #[derive(Debug, Default)]
@@ -87,6 +89,7 @@ impl TranscriptReplayCache {
         let mut entries = self.lock_entries()?;
         let Some(index) = entries.iter().position(|entry| {
             !entry.older_records_exist
+                && !entry.newer_records_exist
                 && entry.replay.transcript_path == transcript_path
                 && &entry.replay.revision == revision
                 && entry.replay.projection_key == projection_key
@@ -119,6 +122,7 @@ impl TranscriptReplayCache {
                 events,
                 bytes,
                 older_records_exist: false,
+                newer_records_exist: false,
             },
         );
         Ok(replay)
@@ -179,6 +183,7 @@ impl TranscriptReplayCache {
                 events: end - start,
                 bytes,
                 older_records_exist: start > 0,
+                newer_records_exist: end < replay.events.len(),
             },
         );
         Ok(())
@@ -215,10 +220,17 @@ impl TranscriptReplayCache {
         entry: &CachedReplay,
         request: &TranscriptReplayPageRequest,
     ) -> Result<Option<TranscriptReplayPage>, HarnessError> {
+        if request.cursor.is_none() && entry.newer_records_exist {
+            return Ok(None);
+        }
         if let Some(cursor) = request.cursor.as_deref() {
             let cache_key = transcript_cache_key(&entry.replay);
             match decode_cursor(cursor, &cache_key)? {
-                CursorBoundary::TranscriptEnd => {}
+                CursorBoundary::TranscriptEnd => {
+                    if entry.newer_records_exist {
+                        return Ok(None);
+                    }
+                }
                 CursorBoundary::Event(event_id) => {
                     let serves_cursor = entry
                         .replay
@@ -640,6 +652,178 @@ mod tests {
                 .unwrap()
                 .is_none(),
             "byte weight independently evicts the oldest replay"
+        );
+    }
+
+    #[test]
+    fn generated_cache_schedules_match_the_full_transcript_model() {
+        // Fixed seeds make failures reproducible without adding a random-number
+        // dependency. The oracle is an integer range, not replay.page().
+        for seed in 0_u64..128 {
+            let file = NamedTempFile::new().unwrap();
+            let event_bytes = serde_json::to_vec(&event(1)).unwrap().len();
+            let cache = TranscriptReplayCache::with_limits(
+                1,
+                (seed % 5 + 1) as usize,
+                event_bytes * (seed % 3 + 1) as usize + 128,
+            );
+            let mut random = seed + 1;
+            let mut count = 12_u64;
+            let mut revision = 0_u64;
+            let mut cursors = Vec::<(String, u64, u64)>::new();
+            for step in 0..48 {
+                random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let action = (random >> 32) % 5;
+                if action == 0 {
+                    count += 1;
+                    revision += 1;
+                    std::fs::write(file.path(), count.to_string()).unwrap();
+                } else if action == 1 {
+                    // A competing projection evicts the retained window.
+                    cache
+                        .insert(replay_for(file.path(), 1..3, "other"))
+                        .unwrap();
+                }
+                let replay = replay_for(file.path(), 1..count + 1, "model");
+                let saved = if action >= 3 && !cursors.is_empty() {
+                    Some(cursors[(random as usize) % cursors.len()].clone())
+                } else {
+                    None
+                };
+                let limit = ((random >> 16) % 7 + 1) as usize;
+                let request = TranscriptReplayPageRequest {
+                    cursor: saved.as_ref().map(|(cursor, _, _)| cursor.clone()),
+                    limit: Some(limit),
+                };
+                let drafts = || {
+                    replay
+                        .events
+                        .iter()
+                        .map(|event| crate::HarnessEventDraftV1 {
+                            stream_id: event.stream_id.clone(),
+                            correlation: event.correlation.clone(),
+                            timestamp: event.timestamp,
+                            semantics: event.semantics,
+                            provider_sequence: event.provider_sequence,
+                            payload: event.payload.clone(),
+                        })
+                        .collect::<Vec<_>>()
+                };
+                let result = super::super::load_transcript_page(
+                    &request,
+                    &cache,
+                    replay.transcript_path.clone(),
+                    replay.revision.clone(),
+                    &replay.projection_key,
+                    || {
+                        Ok(crate::TailReadOutcome {
+                            drafts: drafts(),
+                            older_records_exist: false,
+                            bytes_read: 0,
+                        })
+                    },
+                    || {
+                        let mut full = replay.clone();
+                        full.events =
+                            super::super::sequence_replay_drafts(&replay.projection_key, drafts());
+                        Ok(full)
+                    },
+                );
+                let context = format!("seed={seed} step={step} action={action}");
+                if saved
+                    .as_ref()
+                    .is_some_and(|(_, version, _)| *version != revision)
+                {
+                    let error = result.expect_err(&format!("{context}: stale cursor accepted"));
+                    assert!(
+                        error.to_string().contains("no longer matches"),
+                        "{context}: {error}"
+                    );
+                    continue;
+                }
+                let end = saved.as_ref().map_or(count, |(_, _, end)| *end);
+                let page = result
+                    .unwrap_or_else(|error| panic!("{context}: {error}"))
+                    .unwrap();
+                let actual = page
+                    .events
+                    .iter()
+                    .map(|event| event.provider_sequence.unwrap())
+                    .collect::<Vec<_>>();
+                // Retained windows may return fewer than the requested limit.
+                // Every page must still be a contiguous suffix of the requested
+                // boundary and its next cursor must continue from that suffix.
+                assert!(actual.len() <= limit, "{context}");
+                assert!(end == 0 || !actual.is_empty(), "{context}");
+                let start = end - actual.len() as u64;
+                assert_eq!(
+                    actual,
+                    (start + 1..end + 1).collect::<Vec<_>>(),
+                    "{context}"
+                );
+                assert_eq!(page.has_more, start > 0, "{context}");
+                assert_eq!(page.next_cursor.is_some(), page.has_more, "{context}");
+                if let Some(cursor) = page.next_cursor {
+                    cursors.push((cursor, revision, start));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn oldest_retained_window_is_not_a_complete_replay() {
+        let file = NamedTempFile::new().unwrap();
+        let replay = replay_for(file.path(), 1..7, "window-reopen");
+        let key = transcript_cache_key(&replay);
+        let cache = TranscriptReplayCache::with_limits(8, 2, usize::MAX);
+        cache.insert(replay.clone()).unwrap();
+        cache
+            .retain_window_for_page(&replay, Some(&encode_event_cursor(&key, "event-3")))
+            .unwrap();
+        assert!(
+            cache
+                .get(file.path(), &replay.revision, &replay.projection_key)
+                .unwrap()
+                .is_none()
+        );
+        for cursor in [None, Some(super::super::encode_deferred_cursor(&key))] {
+            assert!(
+                cache
+                    .page(
+                        file.path(),
+                        &replay.revision,
+                        &replay.projection_key,
+                        &TranscriptReplayPageRequest {
+                            cursor,
+                            limit: Some(2)
+                        }
+                    )
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        // Reopening starts with a cold tail again, while this cache retains
+        // events 1 and 2. The older-page cursor still names a newer event.
+        let page = super::super::load_transcript_page(
+            &TranscriptReplayPageRequest {
+                cursor: Some(encode_event_cursor(&key, "event-5")),
+                limit: Some(2),
+            },
+            &cache,
+            replay.transcript_path.clone(),
+            replay.revision.clone(),
+            &replay.projection_key,
+            || panic!("older request must not read a tail"),
+            || Ok(replay.clone()),
+        )
+        .expect("reopening must normalize a cache miss")
+        .unwrap();
+        assert_eq!(
+            page.events
+                .iter()
+                .map(|event| event.sequence)
+                .collect::<Vec<_>>(),
+            vec![3, 4]
         );
     }
 

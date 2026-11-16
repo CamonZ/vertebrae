@@ -194,6 +194,7 @@ function browser(height = 1200, viewport = 100) {
       rerender();
     },
     async prepend(delta: number) {
+      if (!visible || top > 240) return false;
       let resolve!: (applied: boolean) => void;
       load = () =>
         new Promise<boolean>((done) => {
@@ -201,10 +202,7 @@ function browser(height = 1200, viewport = 100) {
         });
 
       rerender();
-      const loadButton = view.getByRole("button", {
-        name: "Load older messages",
-      });
-      fireEvent.click(loadButton);
+      fireEvent.wheel(container, { deltaY: -1 });
 
       height += delta;
       messages = [
@@ -215,7 +213,10 @@ function browser(height = 1200, viewport = 100) {
       rerender();
 
       await act(async () => resolve(true));
+      load = undefined;
+      rerender();
       scroll();
+      return true;
     },
     unmount: view.unmount,
   };
@@ -544,7 +545,7 @@ it(
               case "prepend": {
                 const before = b.top;
 
-                await b.prepend(event.size);
+                if (!(await b.prepend(event.size))) break;
                 following = false;
 
                 const maximum = b.max();
