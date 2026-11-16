@@ -2,9 +2,7 @@ import { isStatechartMetadata } from "./statechart";
 import { StatechartPreview } from "./StatechartPreview";
 import { isFlowMetadata } from "./flowArtifact";
 import { FlowSpecView } from "../shared/FlowSpecView";
-import type { CSSProperties } from "react";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { PanelCode } from "../shared/PanelCode";
 import type { Artifact } from "../../bindings";
 import { parseHarnessJsonl } from "../../types/conversation";
 import { MarkdownContent } from "../shared/MarkdownContent";
@@ -14,34 +12,13 @@ interface ArtifactPreviewBodyProps {
   artifact: Artifact;
 }
 
-const jsonSyntaxTheme = {
-  ...vscDarkPlus,
-  'pre[class*="language-"]': {
-    ...(vscDarkPlus['pre[class*="language-"]'] as CSSProperties),
-    background: "transparent",
-    margin: 0,
-  },
-  'code[class*="language-"]': {
-    ...(vscDarkPlus['code[class*="language-"]'] as CSSProperties),
-    background: "none",
-  },
-};
-
-const jsonCodeStyle: CSSProperties = {
-  margin: 0,
-  padding: "0.75rem",
-  background: "transparent",
-  fontSize: "var(--text-13)",
-  lineHeight: "1.6",
-  overflow: "auto",
-  maxHeight: "24rem",
-};
-
 function RawArtifactBody({
   body,
+  filename,
   diagnostic,
 }: {
   body: string;
+  filename: string;
   diagnostic: string;
 }) {
   return (
@@ -49,12 +26,14 @@ function RawArtifactBody({
       <p role="alert" className="text-sm text-warn">
         {diagnostic}
       </p>
-      <pre
-        data-testid="artifact-raw-body"
-        className="max-h-96 overflow-auto rounded-md border border-border bg-bg p-3 font-mono text-xs whitespace-pre-wrap"
-      >
-        {body}
-      </pre>
+      <div data-testid="artifact-raw-body">
+        <PanelCode
+          source={body}
+          language="text"
+          filename={filename}
+          label="Artifact source"
+        />
+      </div>
     </div>
   );
 }
@@ -79,6 +58,7 @@ export function ArtifactPreviewBody({ artifact }: ArtifactPreviewBodyProps) {
     return (
       <RawArtifactBody
         body={artifact.body}
+        filename={artifact.filename}
         diagnostic="This artifact has no presentation metadata. Showing its raw contents."
       />
     );
@@ -99,6 +79,7 @@ export function ArtifactPreviewBody({ artifact }: ArtifactPreviewBodyProps) {
     ) : (
       <RawArtifactBody
         body={artifact.body}
+        filename={artifact.filename}
         diagnostic="This conversation transcript is malformed or uses an unsupported event type. Showing its raw contents."
       />
     );
@@ -112,21 +93,14 @@ export function ArtifactPreviewBody({ artifact }: ArtifactPreviewBodyProps) {
           data-testid="artifact-json-preview"
           className="max-h-96 overflow-auto rounded-md border border-border bg-bg font-mono text-xs"
         >
-          <SyntaxHighlighter
-            style={jsonSyntaxTheme as { [key: string]: CSSProperties }}
-            language="json"
-            PreTag="div"
-            customStyle={jsonCodeStyle}
-            codeTagProps={{ className: "font-mono" }}
-          >
-            {formatted}
-          </SyntaxHighlighter>
+          <PanelCode source={formatted} language="json" label="Artifact JSON" />
         </div>
       );
     } catch {
       return (
         <RawArtifactBody
           body={artifact.body}
+          filename={artifact.filename}
           diagnostic="This artifact declares JSON content, but its body is not valid JSON. Showing its raw contents."
         />
       );
@@ -136,6 +110,7 @@ export function ArtifactPreviewBody({ artifact }: ArtifactPreviewBodyProps) {
   return (
     <RawArtifactBody
       body={artifact.body}
+      filename={artifact.filename}
       diagnostic={`Unsupported artifact presentation (${metadata.content_kind}/${metadata.format}). Showing its raw contents.`}
     />
   );

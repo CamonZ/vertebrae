@@ -1,7 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { Artifact } from "../../bindings";
 import { ArtifactPreviewBody } from "./ArtifactPreviewBody";
+
+vi.mock("../shared/PanelCode", () => ({
+  PanelCode: ({
+    source,
+    language,
+    onChange,
+    filename,
+  }: import("../shared/PanelCode").PanelCodeProps) => (
+    <pre
+      data-filename={filename}
+      data-language={language}
+      data-editable={!!onChange}
+    >
+      {source}
+    </pre>
+  ),
+}));
 
 const artifact = (overrides: Partial<Artifact> = {}): Artifact => ({
   id: "artifact-1",
@@ -59,9 +76,10 @@ describe("ArtifactPreviewBody", () => {
     expect(screen.getByTestId("artifact-json-preview").textContent).toBe(
       '{\n  "z": 1,\n  "nested": {\n    "a": true\n  }\n}'
     );
-    expect(
-      container.querySelectorAll('[data-testid="artifact-json-preview"] span')
-    ).not.toHaveLength(0);
+    expect(container.querySelector('[data-language="json"]')).toHaveAttribute(
+      "data-editable",
+      "false"
+    );
   });
 
   it("preserves invalid JSON as selectable raw content", () => {
@@ -78,6 +96,33 @@ describe("ArtifactPreviewBody", () => {
     expect(screen.getByTestId("artifact-raw-body")).toHaveTextContent(
       "{not json}"
     );
+  });
+
+  it("retains raw source and diagnostics without metadata", () => {
+    render(
+      <ArtifactPreviewBody
+        artifact={artifact({ body: "  raw\ncontents  ", metadata: null })}
+      />
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "no presentation metadata"
+    );
+    expect(screen.getByTestId("artifact-raw-body").textContent).toBe(
+      "  raw\ncontents  "
+    );
+  });
+
+  it("retains an empty declared JSON body as a readable diagnostic", () => {
+    render(
+      <ArtifactPreviewBody
+        artifact={artifact({
+          body: "",
+          metadata: { ...artifact().metadata!, format: "json" },
+        })}
+      />
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent("not valid JSON");
+    expect(screen.getByTestId("artifact-raw-body").textContent).toBe("");
   });
 
   it("renders normalized conversation JSONL without active-chat controls", () => {
@@ -153,5 +198,19 @@ describe("ArtifactPreviewBody", () => {
       "Unsupported artifact presentation"
     );
     expect(screen.getByTestId("artifact-raw-body")).toHaveTextContent("body");
+  });
+  it("passes raw known-extension artifacts to the source viewer unchanged", () => {
+    const { container } = render(
+      <ArtifactPreviewBody
+        artifact={artifact({
+          filename: "example.py",
+          body: "# source\nprint(42)\n",
+          metadata: null,
+        })}
+      />
+    );
+    const code = container.querySelector('[data-filename="example.py"]');
+    expect(code?.textContent).toBe("# source\nprint(42)\n");
+    expect(code).toHaveAttribute("data-editable", "false");
   });
 });

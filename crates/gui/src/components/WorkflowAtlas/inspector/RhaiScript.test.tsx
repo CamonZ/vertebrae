@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { formatRhaiScript, RhaiScript } from "./RhaiScript";
 
@@ -17,17 +17,23 @@ describe("formatRhaiScript", () => {
 });
 
 describe("RhaiScript", () => {
-  it("registers Rhai highlighting and renders the formatted display source", () => {
-    render(<RhaiScript source="let count=1;" />);
-
-    const code = screen
-      .getByTestId("rhai-script-highlighted")
-      .querySelector("code");
-    expect(code).toHaveClass("language-rhai");
-    const keyword = [...(code?.querySelectorAll(".token") ?? [])].find(
-      (token) => token.textContent === "let"
+  it("renders display-only formatting through Pierre", async () => {
+    const { container } = render(
+      <RhaiScript source={'let value = "};"; // braces {\n#{value: value}'} />
     );
-    expect(keyword?.getAttribute("style")).toMatch(/color:/);
-    expect(code).toHaveTextContent("let count=1;");
+    await waitFor(() => {
+      const code = container
+        .querySelector("diffs-container")
+        ?.shadowRoot?.querySelector("[data-code]");
+      expect(
+        Array.from(code?.querySelectorAll("[data-line]") ?? [])
+          .map((line) => line.textContent)
+          .join("\n")
+      ).toBe(
+        formatRhaiScript('let value = "};"; // braces {\n#{value: value}')
+      );
+      expect(code?.querySelector("span[style]")).not.toBeNull();
+      expect(code?.hasAttribute("contenteditable")).toBe(false);
+    });
   });
 });

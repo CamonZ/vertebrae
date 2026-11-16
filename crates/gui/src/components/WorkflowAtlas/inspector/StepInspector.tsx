@@ -18,6 +18,7 @@
 
    Ported from docs/design/wf-detail.jsx (WfInspector, step branch).
    ────────────────────────────────────────────────────────────────── */
+import { useProjectScopeGeneration } from "../../../stores/projectScopedStores";
 import { useEffect, useMemo, useState } from "react";
 import { CloseIcon, IconButton } from "../../panels";
 import { OverflowMenu } from "../../molecules/OverflowMenu";
@@ -35,6 +36,7 @@ import {
   type WaitChildrenStepConfig,
 } from "../../../bindings";
 import { unwrapCommand } from "../../../query";
+import { PanelCode } from "../../shared/PanelCode";
 import { LiquidHighlight } from "../../StepDetail/LiquidHighlight";
 import { SchemaTree } from "../../StepDetail/SchemaTree";
 import { splitRef } from "../layout/geometry";
@@ -67,6 +69,16 @@ export interface StepInspectorProps {
   /** Close the panel (also reachable via Escape through the glass-panel stack). */
   onClose: () => void;
   onDeleted?: () => void;
+}
+
+export function StepInspector(props: StepInspectorProps) {
+  const generation = useProjectScopeGeneration();
+  return (
+    <StepInspectorContent
+      key={`${generation}:${props.workflowId}:${props.stepId}`}
+      {...props}
+    />
+  );
 }
 
 /** A resolved, clickable transition out of the inspected step. */
@@ -112,7 +124,7 @@ function stepTypeLabelFor(value: unknown): string | null {
     : null;
 }
 
-export function StepInspector({
+function StepInspectorContent({
   model,
   workflowId,
   stepId,
@@ -397,6 +409,9 @@ export function StepInspector({
   const isInference = cfg?.step_type === "llm_inference";
   const hasRouteConfig = route?.route_config != null;
 
+  const fieldError = (field: string) =>
+    error?.toLowerCase().includes(field) ? error : undefined;
+
   const listValue = (value: string) =>
     value
       .split(/[\n,]/)
@@ -575,6 +590,7 @@ export function StepInspector({
           </span>
           <button
             className="wfd-action"
+            disabled={saving || isLoading || !cfg}
             onClick={() => setEditing((value) => !value)}
             type="button"
           >
@@ -643,9 +659,12 @@ export function StepInspector({
             <>
               <label>
                 Prompt
-                <textarea
-                  value={prompt}
-                  onChange={(e) => setPrompt(e.target.value)}
+                <PanelCode
+                  label="Prompt"
+                  language="liquid"
+                  source={prompt}
+                  onChange={setPrompt}
+                  error={fieldError("prompt")}
                 />
               </label>
               <label>
@@ -677,26 +696,29 @@ export function StepInspector({
             <StructuredInferenceQuestions
               value={structured}
               onChange={setStructured}
+              error={error}
             />
           ) : null}
           {isExecute ? (
             <>
               <label>
                 Rhai script
-                <textarea
-                  aria-label="Rhai script"
-                  value={script}
-                  onChange={(event) => setScript(event.target.value)}
-                  spellCheck={false}
+                <PanelCode
+                  label="Rhai script"
+                  language="rhai"
+                  source={script}
+                  onChange={setScript}
+                  error={fieldError("script")}
                 />
               </label>
               <label>
                 Output schema
-                <textarea
-                  aria-label="Output schema"
-                  value={outputSchema}
-                  onChange={(event) => setOutputSchema(event.target.value)}
-                  placeholder="JSON Schema"
+                <PanelCode
+                  label="Output schema"
+                  language="json"
+                  source={outputSchema}
+                  onChange={setOutputSchema}
+                  error={fieldError("output schema")}
                 />
               </label>
             </>
@@ -712,35 +734,35 @@ export function StepInspector({
           {outputConfig ? (
             <label>
               Output schema
-              <textarea
-                value={outputSchema}
-                onChange={(e) => setOutputSchema(e.target.value)}
-                placeholder="JSON Schema (optional)"
+              <PanelCode
+                label="Output schema"
+                language="json"
+                source={outputSchema}
+                onChange={setOutputSchema}
+                error={fieldError("output schema")}
               />
             </label>
           ) : null}
           {cfg?.step_type === "route" ? (
             <label>
               Route config
-              <textarea
-                value={routeConfig}
-                onChange={(e) => setRouteConfig(e.target.value)}
-                placeholder="Route configuration JSON"
-                aria-invalid={error === "Route config must be valid JSON."}
-                aria-describedby={
-                  error === "Route config must be valid JSON."
-                    ? "step-editor-error"
-                    : undefined
-                }
+              <PanelCode
+                label="Route config"
+                language="json"
+                source={routeConfig}
+                onChange={setRouteConfig}
+                error={fieldError("route config")}
               />
             </label>
           ) : null}
           <label>
             Persistence options
-            <textarea
-              value={persistenceOptions}
-              onChange={(e) => setPersistenceOptions(e.target.value)}
-              placeholder='{"artifact":{"logical_name":"result"}}'
+            <PanelCode
+              label="Persistence options"
+              language="json"
+              source={persistenceOptions}
+              onChange={setPersistenceOptions}
+              error={fieldError("persistence")}
             />
           </label>
           {error ? (
@@ -788,13 +810,17 @@ export function StepInspector({
                 {isLoading ? "Loading…" : "No state"}
               </div>
             ) : (
-              <pre className="wfd-prompt">
+              <div>
                 {typeof structuredState === "string" ? (
                   <LiquidHighlight source={structuredState} />
                 ) : (
-                  JSON.stringify(structuredState, null, 2)
+                  <PanelCode
+                    source={JSON.stringify(structuredState, null, 2)}
+                    language="json"
+                    label="State"
+                  />
                 )}
-              </pre>
+              </div>
             )}
           </section>
         ) : isExecute ? (
@@ -814,9 +840,7 @@ export function StepInspector({
           <section className="wfd-sec">
             <div className="wfd-lbl">Prompt</div>
             {inference?.prompt ? (
-              <pre className="wfd-prompt">
-                <LiquidHighlight source={inference.prompt} />
-              </pre>
+              <LiquidHighlight source={inference.prompt} />
             ) : (
               <div className="wfd-placeholder">
                 {isLoading
@@ -966,7 +990,11 @@ export function StepInspector({
           >
             <div className="wfd-lbl">Questions</div>
             {structuredConfig?.questions ? (
-              <pre>{JSON.stringify(structuredConfig.questions, null, 2)}</pre>
+              <PanelCode
+                source={JSON.stringify(structuredConfig.questions, null, 2)}
+                language="json"
+                label="Questions"
+              />
             ) : (
               <div className="wfd-placeholder">
                 {isLoading ? "Loading…" : "No questions configured"}
@@ -998,9 +1026,11 @@ export function StepInspector({
         <section className="wfd-sec">
           <div className="wfd-lbl">Persistence</div>
           {cfg?.persistence_options ? (
-            <pre className="wfd-prompt">
-              {JSON.stringify(cfg.persistence_options, null, 2)}
-            </pre>
+            <PanelCode
+              source={JSON.stringify(cfg.persistence_options, null, 2)}
+              language="json"
+              label="Persistence options"
+            />
           ) : (
             <div className="wfd-placeholder">
               {isLoading ? "Loading…" : "No persistence configured"}
@@ -1142,9 +1172,13 @@ export function StepInspector({
             {isLoading ? (
               <div className="wfd-placeholder">Loading…</div>
             ) : hasRouteConfig ? (
-              <pre data-testid="route-config-value" className="wfd-prompt">
-                {JSON.stringify(route?.route_config, null, 2)}
-              </pre>
+              <div data-testid="route-config-value">
+                <PanelCode
+                  source={JSON.stringify(route?.route_config, null, 2)}
+                  language="json"
+                  label="Route config"
+                />
+              </div>
             ) : (
               <div
                 data-testid="route-config-unconfigured"
