@@ -226,7 +226,7 @@ export function WorkflowInspector({
         <div className="wfd-hd-top">
           <span className="wfd-eyebrow">
             <span className="dot" />
-            Workflow Details · {wf.phase}
+            Workflow details · {wf.phase}
           </span>
           {wf.isDefault ? <span className="wfd-badge">default</span> : null}
           <span className={"wfd-status" + (wf.running > 0 ? " live" : "")}>

@@ -557,7 +557,8 @@ describe("marks read without colour", () => {
         )
       )
     );
-    for (const c of colours) expect(c).toMatch(/--md-(ink|edge|bg|dim)\b/);
+    for (const c of colours)
+      expect(c).toMatch(/--md-(ink|edge|bg|dim|text-dim|text-ink)\b/);
   });
 
   it("story-step marks differ by glyph and border style in the chapters", () => {

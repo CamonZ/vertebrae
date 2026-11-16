@@ -4,11 +4,13 @@ import {
   type TextareaHTMLAttributes,
 } from "react";
 
+// Same edge, radius and focus halo as the `.ctl` controls (selects, chips).
 const baseClasses =
-  "w-full bg-[var(--color-bg-1)] border border-[var(--color-line-strong)] " +
+  "w-full bg-transparent border border-[var(--ctl-line)] " +
   "font-sans text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] " +
-  "rounded-[var(--radius-md)] transition-[border-color,box-shadow] duration-[var(--t-fast)] ease-[var(--ease-default)] " +
-  "focus:outline-none focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_var(--color-accent-wash)] " +
+  "rounded-[var(--ctl-radius)] transition-[border-color,box-shadow,background-color] duration-[var(--t-fast)] ease-[var(--ease-default)] " +
+  "hover:border-[var(--ctl-line-hover)] " +
+  "focus:outline-none focus:border-[var(--ctl-ring)] focus:shadow-[0_0_0_3px_color-mix(in_oklch,var(--color-accent)_22%,transparent)] " +
   "disabled:cursor-not-allowed disabled:opacity-50";
 
 const invalidClasses =
@@ -32,7 +34,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
 ) {
   const classes = [
     baseClasses,
-    "h-[34px] px-3 text-sm",
+    "h-8 px-2.5 text-[13px]",
     invalid && invalidClasses,
     mono && monoClasses,
     className,

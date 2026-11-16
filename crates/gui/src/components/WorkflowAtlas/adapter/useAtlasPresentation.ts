@@ -33,7 +33,9 @@ export function useAtlasPresentation(
   diagram?: DiagramTimeline,
   query = "",
   /** Opens the level a station or stub leads to (double-click or Enter). */
-  onOpen?: (target: AtlasLevelTarget) => void
+  onOpen?: (target: AtlasLevelTarget) => void,
+  /** A part pointed at from outside the scene (the level index beside it). */
+  pointed: string | null = null
 ) {
   const selection = useEntityPanelStore((s) => s.selection);
   const edge = useEntityPanelStore((s) => s.hoveredEdgeId);
@@ -64,9 +66,10 @@ export function useAtlasPresentation(
   // Clicks focus SVG buttons too. A subsequent pointer entry must be able to
   // replace that trace; leaving either channel restores the remaining one.
   const trace =
-    latestInput === "hover"
+    valid(pointed) ??
+    (latestInput === "hover"
       ? (valid(hover) ?? valid(focus))
-      : (valid(focus) ?? valid(hover));
+      : (valid(focus) ?? valid(hover)));
   const roots = trace ? new Set([trace]) : selected;
   const traced = new Set(roots);
   const rails = new Set<string>();
@@ -172,6 +175,7 @@ export function useAtlasPresentation(
     onHoverPart: (id) => inspect("hover", id),
     onFocusPart: (id) => inspect("focus", id),
     activePart: [...selected][0] ?? null,
+    pointedPart: valid(pointed),
   };
   const dimmed = new Set<string>();
   const q = query.trim().toLocaleLowerCase();
@@ -276,6 +280,7 @@ export function useAtlasPresentation(
     interaction,
     presentation,
     trace: traceInfo,
+    traceId: trace,
     tracing: !!trace || !!pointedRail,
   };
 }

@@ -24,7 +24,7 @@ export function KanbanColumn({
       aria-label={`${columnName} column, ${tasks.length} tasks`}
     >
       <div className="flex items-center justify-between border-b border-[var(--color-line)] px-4 py-3">
-        <h2 className="min-w-0 truncate font-mono text-eyebrow font-medium uppercase tracking-eyebrow text-[var(--color-fg-mute)]">
+        <h2 className="min-w-0 truncate t-label text-[var(--color-fg-mute)]">
           {columnName}
         </h2>
         <Count

@@ -45,7 +45,7 @@ const variantClass: Record<TextVariant, string> = {
   "body-sm": "font-sans text-sm leading-snug font-normal",
   label: "font-sans text-sm leading-snug font-medium",
   caption: "font-sans text-xs leading-snug font-normal",
-  eyebrow: "font-mono text-eyebrow uppercase tracking-[0.16em] font-medium",
+  eyebrow: "t-label",
   mono: "font-mono text-sm leading-relaxed font-normal",
   "mono-sm": "font-mono text-xs leading-snug font-normal",
 };

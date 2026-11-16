@@ -566,7 +566,7 @@ export function Sidebar() {
       className={[
         // Uniform 4px gap (`gap-1`) mirrors the design rail's `.app-rail { gap: 4px }`.
         "relative flex w-12 shrink-0 flex-col items-center gap-1 py-1.5",
-        "border-r border-[var(--color-line)] bg-[var(--color-bg)]",
+        "bg-[var(--color-canvas)]",
       ].join(" ")}
     >
       <div className="relative flex h-7 items-center justify-center">

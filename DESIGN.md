@@ -1,120 +1,108 @@
 ---
-version: alpha
-name: Articulated (Vertebrae GUI)
-description: Vertebrae's desktop GUI design system. Adopted from Sacrum's Articulated with one deliberate exception — glow is reserved as a semantic signal for live execution state.
+version: beta
+name: Hearth (Vertebrae GUI)
+description: Vertebrae's desktop GUI design system. Charcoal surfaces with a rose-quartz accent (mulberry on cream in light), Geist for interface text, JetBrains Mono for data, and Newsreader reserved for brand and display moments. Glow is reserved as a semantic signal for live execution state.
 colors:
   bg: "#0a0a0a"
-  surface: "#111111"
-  surface-raised: "#161616"
-  border: "#1f1f1f"
-  border-strong: "#2a2a2a"
-  text-primary: "#f4f1ec"
-  text-secondary: "#b8b5af"
-  text-muted: "#6f6c66"
-  accent: "#ff5c2e"
-  accent-hover: "#e84a1e"
-  accent-fg: "#0a0a0a"
-  success: "#22c55e"
-  warning: "#eab308"
-  error: "#ef4444"
-  info: "#a78bfa"
-  bg-light: "#f7f4ee"
-  surface-light: "#ffffff"
-  border-light: "#e6e1d7"
-  border-strong-light: "#c9c3b5"
-  text-primary-light: "#0a0a0a"
-  text-secondary-light: "#4a4742"
-  text-muted-light: "#807c75"
+  bg-1: "#111111"
+  bg-2: "#161616"
+  bg-3: "#1f1f1f"
+  bg-4: "#2a2a2a"
+  fg: "#f4f1ec"
+  fg-soft: "#b8b5af"
+  fg-mute: "#6f6c66"
+  fg-faint: "#4a4742"
+  line: "#1f1f1f"
+  line-strong: "#2a2a2a"
+  accent: "#dda7c7"
+  accent-deep: "#eac1d9"
+  accent-wash: "#2d2029"
+  on-primary: "#0a0a0a"
+  bg-light: "#faf6ec"
+  bg-1-light: "#f2ede0"
+  fg-light: "#1a1a20"
+  fg-mute-light: "#66665e"
+  line-light: "#dcd4c1"
+  accent-light: "#854568"
 typography:
   family-sans: "Geist"
-  family-mono: "Geist Mono"
+  family-mono: "JetBrains Mono"
+  family-serif: "Newsreader"
 rounded:
-  sm: "0.375rem"
-  md: "0.5rem"
-  lg: "0.75rem"
-  pill: "9999px"
+  xs: "2px"
+  sm: "3px"
+  md: "5px"
+  lg: "8px"
+  xl: "12px"
+  full: "9999px"
 ---
 
-# Articulated, applied to the Vertebrae GUI
+# Hearth, the Vertebrae GUI design system
 
-The Vertebrae desktop GUI uses Sacrum's [Articulated](../sacrum/DESIGN.md) design system as its chassis: monochrome warm neutrals, a single persimmon accent, Geist + Geist Mono, structural rhythm built from borders and tonal surface shifts.
+Tokens live in `crates/gui/src/index.css` (`@theme` primitives plus the `:root`
+adapter vocabulary `--bg`, `--fg`, `--s-*`, `--r-*`). This document describes
+the rules for using them; when a value here and `index.css` disagree,
+`index.css` wins and this file should be corrected.
 
-There is **one deliberate divergence** from strict Articulated. Articulated says no shadows, no glow, anywhere. The GUI keeps a tightly-scoped glow utility because the product's job is to show workflow execution as it happens — and a flat surface cannot communicate "this thing is moving right now" the way a soft pulse can.
-
-The rule that resolves the tension is simple:
+Hearth is a quiet chrome: tonal surface steps, hairlines, one accent, and
+generous spacing. Static UI is flat. The rule that keeps execution state
+legible:
 
 > **Glow means running. Nothing else.**
 
-Static UI is flat. Hover, selection, focus, and emphasis are conveyed through borders and tonal shifts. A glow appears only on entities that are actively executing — a step pill in the in-progress state, a daemon-active timeline node, an animated React Flow edge for a transition currently flowing. The signal stays meaningful because nothing else competes with it.
+Hover, selection, focus, and emphasis are conveyed through tonal shifts and
+the accent. A glow appears only on entities that are actively executing — an
+in-progress step pill, a live timeline node, a streaming speaker ember, an
+animated edge for a transition currently flowing.
 
 ## Colors
 
-The palette is identical to Articulated's. A single persimmon accent at the same hex in both themes; warm neutrals (never pure black or pure white) for backgrounds and text; status colors are designed per-theme to remain accessible.
-
 ### Dark theme (default)
 
-| Token | Hex | Role |
+| Token | Value | Role |
 | --- | --- | --- |
-| `bg-primary` | `#0a0a0a` | Page background |
-| `bg-secondary` | `#111111` | Cards, panels |
-| `bg-tertiary` / `bg-elevated` | `#161616` | Raised surfaces |
-| `border` | `#1f1f1f` | Standard 1px divider |
-| `border-strong` | `#2a2a2a` | Emphasized divider, hover state |
-| `text-primary` | `#f4f1ec` | Body, headings |
-| `text-secondary` | `#b8b5af` | Secondary copy |
-| `text-muted` | `#6f6c66` | De-emphasized labels, timestamps |
+| `--color-bg` | `#0a0a0a` | App background |
+| `--color-bg-1` | `#111111` | Panels, panes |
+| `--color-bg-2` | `#161616` | Raised surfaces, popovers, composer |
+| `--color-bg-3` / `bg-4` | `#1f1f1f` / `#2a2a2a` | Hover, selected rows, chips |
+| `--color-line` / `line-strong` | `#1f1f1f` / `#2a2a2a` | Hairlines, emphasized dividers |
+| `--color-fg` | `#f4f1ec` | Body, headings |
+| `--color-fg-soft` | `#b8b5af` | Secondary copy, controls at rest |
+| `--color-fg-mute` | `#6f6c66` | Labels, timestamps, icons at rest |
+| `--color-fg-faint` | `#4a4742` | Decorative marks, completed-activity dots |
+| `--color-accent` | `#dda7c7` | Primary action, selection indicator, focus |
+| `--color-accent-wash` | `#2d2029` | Selected nav item, accent badges |
 
 ### Light theme
 
-| Token | Hex | Role |
-| --- | --- | --- |
-| `bg-primary` | `#f7f4ee` | Page background |
-| `bg-secondary` / `bg-elevated` | `#ffffff` | Cards, panels |
-| `border` | `#e6e1d7` | Standard divider |
-| `border-strong` | `#c9c3b5` | Emphasized divider |
-| `text-primary` | `#0a0a0a` | Body, headings |
-| `text-secondary` | `#4a4742` | Secondary copy |
-| `text-muted` | `#807c75` | De-emphasized labels |
+`.light` on `<html>` swaps to warm cream paper (`--color-bg #faf6ec`,
+`--color-fg #1a1a20`, `--color-line #dcd4c1`) and a mulberry accent
+(`#854568`). Status colors are re-tuned per theme for contrast.
 
-### Shared
+### Status and step kinds
 
-| Token | Hex | Role |
-| --- | --- | --- |
-| `accent` (primary) | `#ff5c2e` | Primary actions, focus, running-state glow, the one accented element per cluster |
-| `accent-hover` | `#e84a1e` | Hover state — darker, never lighter |
-| `success` | `#22c55e` | Met / completed |
-| `warning` | `#eab308` | In-progress route badge, human-validation badge |
-| `error` | `#ef4444` | Failure, destructive hover |
-| `info` | `#a78bfa` | Pending review, neutral informational |
+`--color-ok`, `--color-warn`, `--color-err`, `--color-info` (each with a
+`-wash` variant) are semantic only. Step types keep their own hues
+(`--color-step-*`, with `-wash` and `-fg` variants); this is the sanctioned
+exception to the one-accent rule, used as icon/lamp tints, never as fills for
+whole surfaces.
 
-`--color-primary` and `--color-accent` resolve to the same persimmon. The legacy split into amber + orange has been collapsed to a single accent per Articulated's "one accent" rule.
-
-Theme is toggled by adding `light` or `dark` class to `<html>` (see `hooks/useTheme.ts`). The default is dark.
+Theme is toggled by adding `light` or `dark` to `<html>` (see
+`hooks/useTheme.ts`). The default is dark.
 
 ## Typography
 
-Two families, no third. Loaded weights: Geist 400/500/600/700; Geist Mono 400/500.
-
 | Role | Family | Use |
 | --- | --- | --- |
-| `body` | Geist | Default body copy |
-| `body-sm` | Geist | Secondary body |
-| `heading` | Geist 600 | Card and section titles |
-| `label` (caps + tracking) | Geist Mono | Section labels (`GOAL`, `PROMPT`, `OVERVIEW`) |
-| `mono` | Geist Mono | IDs, timestamps, numerics, step counts, model names, code, file paths, ticket short-IDs |
-| `caption` | Geist | Footnotes, fine print |
+| Interface | Geist 400/500/600 | All chrome: pane and panel titles, buttons, menus, labels, body copy |
+| Data | JetBrains Mono 400/500 | IDs, timestamps, token/context counts, model IDs, paths, code, step-type values |
+| Display | Newsreader | Brand wordmark and project monogram, empty-state marks, Hearth "cursive roles" (accent numerals, ledes, field hints, inline `<em>`) |
 
-**Mono is reserved for identifiers and numerics.** This is enforced for:
-
-- Task and ticket short-IDs (`4e4bbbde`, `dd32dd28`)
-- Timestamps (`Apr 2 at 06:47 AM`, `4/27/2026, 10:16:57 AM`)
-- Model identifiers (`haiku`, `sonnet`, `opus`)
-- Step ordering (`1`, `2`, `3` in step badges)
-- Section counts (`(0)`, `0/2`, `0%`)
-- Step type values (`execute`, `wait_children`)
-- File paths and code snippets
-
-Body content (titles, descriptions, goal/criterion text) stays in Geist Sans. The PROMPT block in step configuration is the canonical case for Mono on a raised surface — it contains code and Liquid templating, not prose.
+- Base interface size is 13px (`--text-13`), secondary 12px, meta 11px.
+- **Mono is for data, not labels.** Speaker labels, section headings and menu
+  items are sans; do not set them in caps-mono.
+- **Serif is never chrome.** Pane titles, panel/modal titles and breadcrumbs
+  are sans.
 
 ## Hierarchy and elevation
 
@@ -153,12 +141,13 @@ The CSS variables `--shadow-glow`, `--shadow-glow-sm`, and the keyframes `pulse-
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `radius-sm` | `0.375rem` | Chips, dots, micro-elements |
-| `radius-md` | `0.5rem` | Buttons, inputs, badges |
-| `radius-lg` | `0.75rem` | Cards, panels, surfaces |
+| `radius-sm` | `3px` | Chips, micro-elements, inline code |
+| `radius-md` | `5px` | Buttons, inputs, menu items, popovers |
+| `radius-lg` | `8px` | Cards, panels, composer |
+| `radius-xl` | `12px` | Command palette, large overlays |
 | `radius-full` | `9999px` | Status pills, indicator dots |
 
-`radius-xl` and `radius-2xl` are deprecated — collapse new components to the four sizes above.
+Avoid sizes outside this scale.
 
 ## Components
 
@@ -175,16 +164,16 @@ It is what gives the panel structural rhythm without drawing an unbroken line. U
 
 ### Buttons
 
-A button group has at most **one** persimmon-accented button — the primary action. All others demote to outline or ghost.
+A button group has at most **one** accent-filled button — the primary action. All others demote to outline or ghost.
 
 ```text
 [ Run Step ]   [ ⚡ Run Workflow ]   [ Chat ]   [ Delete ]
-   outline           solid persimmon     ghost     ghost (red on hover)
+   outline           solid accent     ghost     ghost (red on hover)
 ```
 
 For the task detail panel:
 
-- **Run Workflow** is the primary action (the whole point is to move the task through the workflow). Solid persimmon background, `accent-fg` text.
+- **Run Workflow** is the primary action (the whole point is to move the task through the workflow). Solid accent background, `on-primary` text.
 - **Run Step** is secondary (running just one step is a manual override). Neutral outline using `border-border-strong`.
 - **Chat** is tertiary. Ghost button — no border, `text-text-secondary`, hover lifts to `text-text-primary` with `bg-bg-hover`.
 - **Delete** is destructive. Ghost neutral by default — turns `error` red only on hover. Never destructive-colored at rest.
@@ -221,7 +210,26 @@ Three states:
 
 ### Workflow zone (pipeline view)
 
-Workflows in the pipeline view use a dashed border (`2px dashed`) in `rgba(100, 116, 139, 0.4)` by default. When highlighted via a transition click, the dashed border switches to persimmon `#ff5c2e`. **No solid ring is added** — the dashed accent border alone communicates the highlight. Selected workflows (clicked directly) keep a solid `ring-2 ring-primary` to distinguish active selection from transition-highlight.
+Workflows in the pipeline view use a dashed border (`2px dashed`) in `rgba(100, 116, 139, 0.4)` by default. When highlighted via a transition click, the dashed border switches to the accent. **No solid ring is added** — the dashed accent border alone communicates the highlight. Selected workflows (clicked directly) keep a solid `ring-2 ring-primary` to distinguish active selection from transition-highlight.
+
+## Chrome reduction patterns
+
+These keep surfaces minimal while every capability stays reachable.
+
+- **Overflow menu.** Pane headers show at most title, context chip, status
+  dot, one or two contextual toggles (shown inline only while open or busy),
+  Stop, `⋯`, and close. Everything else lives in the `⋯` menu
+  (`molecules/OverflowMenu`), which closes on selection, outside click and
+  Escape, and returns focus to its trigger.
+- **Model chip.** The composer shows a permission chip and a single model chip
+  (`provider · model · effort`). Provider, model, effort and speed pickers live
+  in the chip's popover. A stale or unsupported choice marks the chip with
+  `warn` instead of adding inline controls.
+- **Quiet activity rows.** Completed background work and notices render as a
+  single muted sans line with a flat dot. Only warnings get a boxed wash; only
+  live rows (thinking, subagent progress) get the accent ember.
+- **⌘K palette.** One keyboard entry point for pages, tasks, chats and app
+  actions, with scope tabs and a key-hint footer.
 
 ## Layout and spacing
 
@@ -251,20 +259,19 @@ Decorative motion is not permitted: no scale-on-hover, bounce, spring, glow-on-h
 ## Don'ts
 
 - Don't add glow except for live-execution semantics — see the glow rule above.
-- Don't introduce a third type family or a serif accent.
-- Don't use Geist Sans for IDs / timestamps / numerics, or Geist Mono for body copy.
+- Don't introduce a fourth type family, and don't use Newsreader for chrome (titles, labels, menus).
+- Don't use Geist for IDs / timestamps / numerics, or JetBrains Mono for labels and body copy.
 - Don't add shadow-based elevation to cards, modals, buttons, or inputs.
 - Don't add hover glow, glow-border, or shadow-glow to anything that is not actively running.
 - Don't use the dot-grid background (`.neural-grid` is intentionally a no-op now — references are kept only to avoid touching every page; do not add new ones).
 - Don't lighten or desaturate `accent` between themes — the hex is identical in both.
 - Don't add a third accent color. The palette ships one. Status colors are semantic, not decorative.
 - Don't use pure white or pure black for text or backgrounds. Use the warm neutrals defined above.
-- Don't put more than one persimmon-accented element per visual cluster (button row, header, badge group). Demote the rest to outline or ghost.
+- Don't put more than one accent-filled element per visual cluster (button row, header, badge group). Demote the rest to outline or ghost.
 
 ## Implementation notes
 
 - Tokens live in `crates/gui/src/index.css` under `@theme { ... }`. Tailwind v4 auto-generates utility classes from the `--color-*` variables — so `bg-primary`, `text-text-primary`, `border-border-strong` etc. are all available without extra config.
-- Both `--color-primary` and `--color-accent` resolve to persimmon. New components should prefer `primary` for clarity; `accent` aliases remain for migration compatibility.
+- `--color-primary` aliases `--color-accent`. Prefer `primary` for filled actions and `accent` for indicators.
 - The `SpineRule` component lives at `crates/gui/src/components/SpineRule.tsx`.
 - The light theme is selected by adding the `light` class to `<html>`. See `hooks/useTheme.ts`.
-- Reference: Sacrum's full Articulated spec at `../sacrum/DESIGN.md`.

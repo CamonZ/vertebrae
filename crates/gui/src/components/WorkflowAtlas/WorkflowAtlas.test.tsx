@@ -19,6 +19,7 @@ import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { useFactoryFilterStore } from "../../stores/factoryFilterStore";
 import { GlobalEntityPanelHost } from "../GlobalEntityPanelHost";
 import { WorkflowAtlas, layoutKey } from "./WorkflowAtlas";
+import { chooseDropdownValue } from "../../test/dropdown";
 
 /* ── mocks ─────────────────────────────────────────────────────────
    The Graph renders through the real shared machine-flow compiler and layout
@@ -684,7 +685,7 @@ describe("WorkflowAtlas", () => {
 
     // A click inspects the workflow; a double-click opens its steps.
     fireEvent.click(build);
-    expect(await screen.findByText(/Workflow Details/)).toBeInTheDocument();
+    expect(await screen.findByText(/Workflow details/)).toBeInTheDocument();
     const inspector = screen.getByTestId("global-entity-panel");
     expect(inspector).toHaveAttribute("data-chat-adjacent", "true");
     expect(inspector.style.getPropertyValue("--detail-panel-chat-offset")).toBe(
@@ -698,7 +699,7 @@ describe("WorkflowAtlas", () => {
         "[data-part-id]"
       )!
     );
-    expect(await screen.findByText("Step Configuration")).toBeInTheDocument();
+    expect(await screen.findByText("Step configuration")).toBeInTheDocument();
     expect(inspector).toHaveAttribute("data-chat-adjacent", "true");
     expect(screen.getAllByTestId("global-entity-panel")).toHaveLength(1);
   });
@@ -714,9 +715,7 @@ describe("WorkflowAtlas", () => {
     render(<WorkflowAtlas />);
     await waitFor(() => expect(stationNames("factory")).toHaveLength(2));
 
-    fireEvent.change(screen.getByLabelText("Filter by factory"), {
-      target: { value: "Factory A" },
-    });
+    chooseDropdownValue(screen.getByLabelText("Filter by factory"), "Factory A");
 
     await findScopedGraph();
     await waitFor(() => expect(stationNames()).toEqual(["Build"]));

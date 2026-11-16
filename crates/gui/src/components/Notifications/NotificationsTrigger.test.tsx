@@ -36,7 +36,7 @@ describe("NotificationsTrigger", () => {
     const trigger = screen.getByTestId("notifications-trigger");
     expect(screen.getByTestId("notifications-trigger-icon")).toBeVisible();
     expect(screen.getByTestId("notifications-trigger-count")).toHaveTextContent(
-      "1 new"
+      "1"
     );
     expect(trigger).toHaveAttribute(
       "aria-label",

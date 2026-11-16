@@ -25,6 +25,12 @@ import {
   useGuiUpdateStore,
   type GuiUpdateInfo,
 } from "../stores/guiUpdateStore";
+import {
+  chooseDropdownValue,
+  dropdownOptions,
+  dropdownOptionValues,
+  getDropdownOption,
+} from "../test/dropdown";
 
 const mockGetSupportedLocalChatHarnesses = vi.fn();
 const mockGetLocalFileEditors = vi.fn();
@@ -195,7 +201,6 @@ describe("SettingsPage", () => {
   });
 
   it("selects and restores a dedicated inline model independently of main chat defaults", async () => {
-    const user = userEvent.setup();
     const settings = (
       <MemoryRouter>
         <SettingsPage />
@@ -205,22 +210,22 @@ describe("SettingsPage", () => {
 
     openCodeEditorSettings();
 
-    await screen.findByRole("option", { name: "Custom model" });
     await waitFor(() => {
-      const dedicatedOption = screen.getByRole("option", {
-        name: "Custom model",
-      });
-
-      expect(dedicatedOption).toBeEnabled();
+      expect(
+        getDropdownOption(
+          screen.getByLabelText("Inline discussion mode"),
+          "Custom model"
+        )?.disabled
+      ).toBe(false);
     });
 
     const modePicker = screen.getByLabelText("Inline discussion mode");
 
-    await user.selectOptions(modePicker, "dedicated");
+    chooseDropdownValue(modePicker, "dedicated");
 
     const modelPicker = screen.getByLabelText("Inline discussion model");
 
-    await user.selectOptions(modelPicker, "opus");
+    chooseDropdownValue(modelPicker, "opus");
 
     const preference = useUIStore.getState().inlineDiscussionPreference;
     const mainDefaults = useLocalChatDefaultsStore.getState();
@@ -242,20 +247,20 @@ describe("SettingsPage", () => {
         "Inline discussion model"
       );
 
-      expect(restoredModelPicker).toHaveValue("opus");
+      expect(restoredModelPicker).toHaveAttribute("data-value", "opus");
     });
 
     const providerPicker = screen.getByLabelText("Inline discussion provider");
 
-    await user.selectOptions(providerPicker, "openai");
+    chooseDropdownValue(providerPicker, "openai");
 
     const updatedModelPicker = screen.getByLabelText("Inline discussion model");
 
-    expect(updatedModelPicker).toHaveValue("gpt-5.6-luna");
+    expect(updatedModelPicker).toHaveAttribute("data-value", "gpt-5.6-luna");
 
     const restoredModePicker = screen.getByLabelText("Inline discussion mode");
 
-    await user.selectOptions(restoredModePicker, "follow");
+    chooseDropdownValue(restoredModePicker, "follow");
 
     const inheritedPreference =
       useUIStore.getState().inlineDiscussionPreference;
@@ -270,7 +275,6 @@ describe("SettingsPage", () => {
   });
 
   it("reports inline preference persistence failure without claiming it was saved", async () => {
-    const user = userEvent.setup();
     const settings = (
       <MemoryRouter>
         <SettingsPage />
@@ -281,11 +285,12 @@ describe("SettingsPage", () => {
     openCodeEditorSettings();
 
     await waitFor(() => {
-      const dedicatedOption = screen.getByRole("option", {
-        name: "Custom model",
-      });
-
-      expect(dedicatedOption).toBeEnabled();
+      expect(
+        getDropdownOption(
+          screen.getByLabelText("Inline discussion mode"),
+          "Custom model"
+        )?.disabled
+      ).toBe(false);
     });
 
     const storage = vi.spyOn(Storage.prototype, "setItem");
@@ -297,7 +302,7 @@ describe("SettingsPage", () => {
     try {
       const modePicker = screen.getByLabelText("Inline discussion mode");
 
-      await user.selectOptions(modePicker, "dedicated");
+      chooseDropdownValue(modePicker, "dedicated");
 
       const storageError = screen.getByText(
         /Could not save the inline discussion choice/
@@ -329,8 +334,8 @@ describe("SettingsPage", () => {
     const providerPicker = screen.getByLabelText("Inline discussion provider");
     const modelPicker = screen.getByLabelText("Inline discussion model");
 
-    expect(providerPicker).toHaveValue("removed");
-    expect(modelPicker).toHaveValue("stale");
+    expect(providerPicker).toHaveAttribute("data-value", "removed");
+    expect(modelPicker).toHaveAttribute("data-value", "stale");
   });
 
   it("groups code settings separately from global appearance and filters inline options by model", async () => {
@@ -338,7 +343,6 @@ describe("SettingsPage", () => {
       status: "ok",
       data: inlineDiscussionCatalog,
     });
-    const user = userEvent.setup();
     const settings = (
       <MemoryRouter>
         <SettingsPage />
@@ -355,11 +359,12 @@ describe("SettingsPage", () => {
     expect(theme).toBeNull();
 
     await waitFor(() => {
-      const dedicated = screen.getByRole("option", {
-        name: "Custom model",
-      });
-
-      expect(dedicated).toBeEnabled();
+      expect(
+        getDropdownOption(
+          screen.getByLabelText("Inline discussion mode"),
+          "Custom model"
+        )?.disabled
+      ).toBe(false);
     });
 
     const mode = screen.getByLabelText("Inline discussion mode");
@@ -369,18 +374,18 @@ describe("SettingsPage", () => {
 
     expect(inheritedOptions).toBeNull();
 
-    await user.selectOptions(mode, "dedicated");
+    chooseDropdownValue(mode, "dedicated");
 
     const provider = screen.getByLabelText("Inline discussion provider");
 
-    await user.selectOptions(provider, "custom");
+    chooseDropdownValue(provider, "custom");
 
     const effort = screen.getByLabelText("Inline discussion reasoning effort");
     const speed = screen.getByLabelText("Inline discussion speed tier");
     const customOptions = screen.getByRole("group", {
       name: "Custom inline discussion options",
     });
-    const dropdowns = within(customOptions).getAllByRole("combobox");
+    const dropdowns = customOptions.querySelectorAll('[aria-haspopup="listbox"]');
     const personality = screen.queryByLabelText(
       "Inline discussion personality"
     );
@@ -391,8 +396,8 @@ describe("SettingsPage", () => {
 
     expect(effortChoices).toBeNull();
 
-    await user.selectOptions(effort, "high");
-    await user.selectOptions(speed, "fast");
+    chooseDropdownValue(effort, "high");
+    chooseDropdownValue(speed, "fast");
 
     const saved = useUIStore.getState().inlineDiscussionPreference;
 
@@ -403,7 +408,7 @@ describe("SettingsPage", () => {
 
     const model = screen.getByLabelText("Inline discussion model");
 
-    await user.selectOptions(model, "plain");
+    chooseDropdownValue(model, "plain");
 
     const reset = useUIStore.getState().inlineDiscussionPreference;
 
@@ -412,8 +417,8 @@ describe("SettingsPage", () => {
       providerId: "custom",
       modelId: "plain",
     });
-    expect(effort).toHaveValue("");
-    expect(speed).toHaveValue("");
+    expect(effort).toHaveAttribute("data-value", "");
+    expect(speed).toHaveAttribute("data-value", "");
   });
 
   it("keeps file-link settings available when harness discovery fails", async () => {
@@ -456,12 +461,16 @@ describe("SettingsPage", () => {
     expect(
       await screen.findByTestId("settings-external-editor-error")
     ).toHaveTextContent("Editor discovery failed");
-    expect(screen.getByTestId("settings-external-editor")).toHaveValue(
+    expect(screen.getByTestId("settings-external-editor")).toHaveAttribute(
+      "data-value",
       "app:/Applications/Visual Studio Code.app"
     );
     expect(
-      screen.getByRole("option", { name: "Configured editor (unavailable)" })
-    ).toBeInTheDocument();
+      getDropdownOption(
+        screen.getByTestId("settings-external-editor"),
+        "Configured editor (unavailable)"
+      )
+    ).not.toBeNull();
   });
 
   it("renders an available release and lets the user review it", async () => {
@@ -1028,19 +1037,18 @@ describe("SettingsPage", () => {
     await user.click(screen.getByTestId("settings-nav-updates"));
     const channelSelect = screen.getByTestId("settings-update-channel");
     expect(
-      screen.getByRole("option", {
-        name: "release (stable) (unavailable)",
-      })
-    ).toBeDisabled();
-    expect(
-      screen.getByRole("option", { name: "master (edge)" })
-    ).not.toBeDisabled();
+      getDropdownOption(channelSelect, "release (stable) (unavailable)")
+        ?.disabled
+    ).toBe(true);
+    expect(getDropdownOption(channelSelect, "master (edge)")?.disabled).toBe(
+      false
+    );
     expect(
       screen.getByTestId("settings-update-channel-unavailable")
     ).toHaveTextContent("release (stable) is unavailable");
 
-    await user.selectOptions(channelSelect, "master");
-    expect(channelSelect).toHaveValue("master");
+    chooseDropdownValue(channelSelect, "master");
+    expect(channelSelect).toHaveAttribute("data-value", "master");
     expect(screen.getByText("Vertebrae 0.2.0")).toBeVisible();
   });
 
@@ -1057,7 +1065,7 @@ describe("SettingsPage", () => {
     expect(screen.getByTestId("settings-nav-appearance")).toHaveTextContent(
       "Appearance"
     );
-    expect(screen.getByTestId("default-harness")).toHaveValue("anthropic");
+    expect(screen.getByTestId("default-harness")).toHaveAttribute("data-value", "anthropic");
     expect(screen.getByTestId("codex-default-reasoning-effort")).toBeVisible();
     expect(screen.queryByTestId("settings-theme")).not.toBeInTheDocument();
     expect(screen.queryByText("Saved on this device")).not.toBeInTheDocument();
@@ -1088,24 +1096,79 @@ describe("SettingsPage", () => {
     expect(
       await screen.findByTestId("harness-defaults-provider-openrouter")
     ).toBeVisible();
-    const modelOptions = Array.from(
-      (
-        screen.getByTestId(
-          "provider-openrouter-default-model"
-        ) as HTMLSelectElement
-      ).options
+    const modelOptions = dropdownOptions(
+      screen.getByTestId("provider-openrouter-default-model")
     ).map((option) => option.value);
     expect(modelOptions).toContain("moonshotai/kimi-k2");
     expect(modelOptions).not.toContain("opus");
     expect(
-      Array.from(
-        (screen.getByTestId("default-harness") as HTMLSelectElement).options
-      ).map((option) => option.value)
+      dropdownOptions(screen.getByTestId("default-harness")).map(
+        (option) => option.value
+      )
     ).toEqual(["anthropic", "openai", "openrouter"]);
   });
 
-  it("exposes and retains the persisted thinking indicator style", async () => {
+  it("picks an accent from swatches that each preview their own colour", async () => {
     const user = userEvent.setup();
+    useUIStore.setState({ accent: "orchid" });
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+    await user.click(screen.getByTestId("settings-nav-appearance"));
+    const group = screen.getByRole("radiogroup", { name: "Accent" });
+    const swatches = within(group).getAllByRole("radio");
+    expect(swatches.map((swatch) => swatch.getAttribute("data-accent"))).toEqual(
+      ["orchid", "ember", "jade", "lagoon", "cobalt", "iris"]
+    );
+    expect(within(group).getByRole("radio", { name: "Orchid" })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
+    await user.click(within(group).getByRole("radio", { name: "Cobalt" }));
+    expect(useUIStore.getState().accent).toBe("cobalt");
+    expect(within(group).getByRole("radio", { name: "Cobalt" })).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
+  });
+
+  it("groups pages in a tree and expands the current page to its sections", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+    const tree = screen.getByRole("navigation", { name: "Settings" });
+    expect(within(tree).getByText("General")).toBeInTheDocument();
+    expect(within(tree).getByText("Models")).toBeInTheDocument();
+    expect(within(tree).getByText("System")).toBeInTheDocument();
+
+    const sections = await within(tree).findByRole("list", {
+      name: "Chat sections",
+    });
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    await user.click(
+      await within(sections).findByRole("button", { name: "Gate chats" })
+    );
+    expect(scrollIntoView).toHaveBeenCalled();
+    expect(
+      within(sections).getByRole("button", { name: "Gate chats" })
+    ).toHaveAttribute("aria-current", "location");
+
+    await user.click(screen.getByTestId("settings-nav-appearance"));
+    expect(
+      await within(tree).findByRole("list", { name: "Appearance sections" })
+    ).toBeInTheDocument();
+    expect(
+      within(tree).queryByRole("list", { name: "Chat sections" })
+    ).toBeNull();
+  });
+
+  it("exposes and retains the persisted thinking indicator style", async () => {
     const { unmount } = render(
       <MemoryRouter>
         <SettingsPage />
@@ -1113,9 +1176,9 @@ describe("SettingsPage", () => {
     );
 
     const selector = await screen.findByTestId("settings-thinking-indicator");
-    expect(selector).toHaveValue("classic");
+    expect(selector).toHaveAttribute("data-value", "classic");
 
-    await user.selectOptions(selector, "futuristic");
+    chooseDropdownValue(selector, "futuristic");
     expect(useUIStore.getState().thinkingIndicatorStyle).toBe("futuristic");
     expect(
       JSON.parse(localStorage.getItem("vertebrae-ui-storage") ?? "{}").state
@@ -1130,7 +1193,7 @@ describe("SettingsPage", () => {
     );
     expect(
       await screen.findByTestId("settings-thinking-indicator")
-    ).toHaveValue("futuristic");
+    ).toHaveAttribute("data-value", "futuristic");
   });
 
   it("persists when stalled gate chats are steered", async () => {
@@ -1169,38 +1232,30 @@ describe("SettingsPage", () => {
     );
     await screen.findByTestId("harness-defaults-claude");
 
-    await user.selectOptions(
-      screen.getByTestId("claude-default-model"),
-      "opus"
-    );
-    await user.selectOptions(
-      screen.getByTestId("claude-default-permission"),
-      "plan"
-    );
-    await user.selectOptions(screen.getByTestId("default-harness"), "openai");
+    chooseDropdownValue(screen.getByTestId("claude-default-model"), "opus");
+    chooseDropdownValue(screen.getByTestId("claude-default-permission"), "plan");
+    chooseDropdownValue(screen.getByTestId("default-harness"), "openai");
 
     openCodeEditorSettings();
-    await screen.findByRole("option", { name: "Visual Studio Code" });
-
-    await user.selectOptions(
-      screen.getByTestId("settings-external-editor"),
-      "app:/Applications/Visual Studio Code.app"
+    await waitFor(() =>
+      expect(
+        getDropdownOption(
+          screen.getByTestId("settings-external-editor"),
+          "Visual Studio Code"
+        )
+      ).not.toBeNull()
     );
+
+    chooseDropdownValue(screen.getByTestId("settings-external-editor"), "app:/Applications/Visual Studio Code.app");
     await user.click(screen.getByTestId("settings-nav-appearance"));
-    expect(screen.getByTestId("settings-theme")).toHaveValue("system");
+    expect(screen.getByTestId("settings-theme")).toHaveAttribute("data-value", "system");
     expect(
       screen.queryByTestId("settings-external-editor")
     ).not.toBeInTheDocument();
-    await user.selectOptions(screen.getByTestId("settings-theme"), "dark");
+    chooseDropdownValue(screen.getByTestId("settings-theme"), "dark");
     await user.click(screen.getByTestId("settings-nav-chat"));
-    await user.selectOptions(
-      screen.getByTestId("codex-default-reasoning-effort"),
-      "high"
-    );
-    await user.selectOptions(
-      screen.getByTestId("codex-default-speed-tier"),
-      "fast"
-    );
+    chooseDropdownValue(screen.getByTestId("codex-default-reasoning-effort"), "high");
+    chooseDropdownValue(screen.getByTestId("codex-default-speed-tier"), "fast");
 
     await waitFor(() => {
       expect(useLocalChatDefaultsStore.getState().defaults).toEqual({
@@ -1242,26 +1297,26 @@ describe("SettingsPage", () => {
     await user.click(screen.getByTestId("settings-nav-code-editor"));
 
     // System appearance with a light OS (the default matchMedia mock).
-    const codeTheme = screen.getByRole("combobox", { name: "Code theme" });
-    expect(codeTheme).toHaveValue("pierre-light");
-    await user.selectOptions(codeTheme, "github-light");
+    const codeTheme = screen.getByRole("button", { name: "Code theme" });
+    expect(codeTheme).toHaveAttribute("data-value", "pierre-light");
+    chooseDropdownValue(codeTheme, "github-light");
     expect(useUIStore.getState()).toMatchObject({
       codeThemeLight: "github-light",
       codeThemeDark: "pierre-dark",
     });
 
-    const foreground = screen.getByRole("combobox", {
+    const foreground = screen.getByRole("button", {
       name: "Inline code text",
     });
-    const background = screen.getByRole("combobox", {
+    const background = screen.getByRole("button", {
       name: "Inline code background",
     });
     const reset = screen.getByTestId("settings-inline-code-reset");
-    expect(foreground).toHaveValue("");
+    expect(foreground).toHaveAttribute("data-value", "");
     expect(reset).toBeDisabled();
 
-    await user.selectOptions(foreground, "info");
-    await user.selectOptions(background, "bg-2");
+    chooseDropdownValue(foreground, "info");
+    chooseDropdownValue(background, "bg-2");
     expect(useUIStore.getState()).toMatchObject({
       inlineCodeForeground: "info",
       inlineCodeBackground: "bg-2",
@@ -1273,8 +1328,8 @@ describe("SettingsPage", () => {
       inlineCodeBackground: null,
       codeThemeLight: "github-light",
     });
-    expect(foreground).toHaveValue("");
-    expect(background).toHaveValue("");
+    expect(foreground).toHaveAttribute("data-value", "");
+    expect(background).toHaveAttribute("data-value", "");
   });
 
   it("previews inline code, fenced code and a diff", async () => {
@@ -1316,15 +1371,15 @@ describe("SettingsPage", () => {
 
     await user.click(screen.getByTestId("settings-nav-code-editor"));
 
-    expect(screen.getByRole("combobox", { name: "Code theme" })).toHaveValue(
+    expect(screen.getByRole("button", { name: "Code theme" })).toHaveAttribute("data-value", 
       "pierre-light"
     );
-    expect(screen.getByRole("combobox", { name: "Diff layout" })).toHaveValue(
+    expect(screen.getByRole("button", { name: "Diff layout" })).toHaveAttribute("data-value", 
       "unified"
     );
     expect(
-      screen.getByRole("combobox", { name: "Inline code text" })
-    ).toHaveValue("");
+      screen.getByRole("button", { name: "Inline code text" })
+    ).toHaveAttribute("data-value", "");
   });
 
   it("configures and resets diff options", async () => {
@@ -1339,8 +1394,8 @@ describe("SettingsPage", () => {
     const reset = screen.getByRole("button", { name: "Reset diff options" });
     expect(reset).toBeDisabled();
 
-    const choose = (name: string, value: string) =>
-      user.selectOptions(screen.getByRole("combobox", { name }), value);
+    const choose = async (name: string, value: string) =>
+      chooseDropdownValue(screen.getByRole("button", { name }), value);
     await choose("Diff layout", "split");
     await choose("Change markers", "classic");
     await choose("Inline changes", "char");
@@ -1364,7 +1419,7 @@ describe("SettingsPage", () => {
     expect(useUIStore.getState().diffPreferences).toEqual(
       DEFAULT_DIFF_PREFERENCES
     );
-    expect(screen.getByRole("combobox", { name: "Diff layout" })).toHaveValue(
+    expect(screen.getByRole("button", { name: "Diff layout" })).toHaveAttribute("data-value", 
       "unified"
     );
   });
@@ -1395,9 +1450,8 @@ describe("SettingsPage", () => {
       return user;
     }
 
-    const picker = () => screen.getByRole("combobox", { name: "Code theme" });
-    const optionValues = () =>
-      Array.from(picker().querySelectorAll("option"), (option) => option.value);
+    const picker = () => screen.getByRole("button", { name: "Code theme" });
+    const optionValues = () => dropdownOptionValues(picker());
 
     it.each([
       ["light", false, "light"],
@@ -1414,7 +1468,7 @@ describe("SettingsPage", () => {
         await openCodeEditor();
 
         expect(
-          screen.getAllByRole("combobox", { name: "Code theme" })
+          screen.getAllByRole("button", { name: "Code theme" })
         ).toHaveLength(1);
         expect(picker()).toHaveAttribute("data-scheme", scheme);
         expect(optionValues()).toEqual(
@@ -1429,7 +1483,7 @@ describe("SettingsPage", () => {
       useUIStore.setState({ theme: "light", codeThemeDark: "tokyo-night" });
       const user = await openCodeEditor();
 
-      await user.selectOptions(picker(), "one-light");
+      chooseDropdownValue(picker(), "one-light");
       expect(optionValues()).not.toContain("tokyo-night");
 
       const darkAppearanceNavigation = screen.getByTestId(
@@ -1437,20 +1491,20 @@ describe("SettingsPage", () => {
       );
       await user.click(darkAppearanceNavigation);
       const darkThemePicker = screen.getByTestId("settings-theme");
-      await user.selectOptions(darkThemePicker, "dark");
+      chooseDropdownValue(darkThemePicker, "dark");
       openCodeEditorSettings();
-      expect(picker()).toHaveValue("tokyo-night");
+      expect(picker()).toHaveAttribute("data-value", "tokyo-night");
       expect(optionValues()).not.toContain("one-light");
-      await user.selectOptions(picker(), "nord");
+      chooseDropdownValue(picker(), "nord");
 
       const lightAppearanceNavigation = screen.getByTestId(
         "settings-nav-appearance"
       );
       await user.click(lightAppearanceNavigation);
       const lightThemePicker = screen.getByTestId("settings-theme");
-      await user.selectOptions(lightThemePicker, "light");
+      chooseDropdownValue(lightThemePicker, "light");
       openCodeEditorSettings();
-      expect(picker()).toHaveValue("one-light");
+      expect(picker()).toHaveAttribute("data-value", "one-light");
       expect(useUIStore.getState()).toMatchObject({
         codeThemeDark: "nord",
         codeThemeLight: "one-light",
@@ -1462,7 +1516,7 @@ describe("SettingsPage", () => {
       useUIStore.setState({ theme: "dark", codeThemeDark: "github-light" });
       await openCodeEditor();
 
-      expect(picker()).toHaveValue("pierre-dark");
+      expect(picker()).toHaveAttribute("data-value", "pierre-dark");
     });
   });
 });

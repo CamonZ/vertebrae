@@ -20,6 +20,7 @@
    ────────────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useState } from "react";
 import { CloseIcon, IconButton } from "../../panels";
+import { OverflowMenu } from "../../molecules/OverflowMenu";
 import { IdChip } from "../../shared/HearthPrimitives";
 import { useStep, useSteps } from "../../../hooks";
 import {
@@ -570,7 +571,7 @@ export function StepInspector({
         <div className="wfd-hd-top">
           <span className="wfd-eyebrow">
             <span className="dot" />
-            Step Configuration
+            Step configuration
           </span>
           <button
             className="wfd-action"
@@ -579,9 +580,19 @@ export function StepInspector({
           >
             {editing ? "Cancel" : "Edit"}
           </button>
-          <button className="wfd-action danger" onClick={remove} type="button">
-            Delete
-          </button>
+          <OverflowMenu
+            label="More step actions"
+            triggerClassName="wfd-action wfd-more"
+            testId="step-overflow-menu"
+            items={[
+              {
+                key: "delete",
+                label: "Delete step",
+                danger: true,
+                onSelect: () => void remove(),
+              },
+            ]}
+          />
           <span className="wfd-close">
             <IconButton onClick={onClose} ariaLabel="Close panel">
               <CloseIcon />
@@ -788,7 +799,7 @@ export function StepInspector({
           </section>
         ) : isExecute ? (
           <section className="wfd-sec" data-testid="execute-script-section">
-            <div className="wfd-lbl">Rhai Script</div>
+            <div className="wfd-lbl">Rhai script</div>
             {executeConfig?.script ? (
               <div data-testid="execute-script-value">
                 <RhaiScript source={executeConfig.script} />
@@ -968,7 +979,7 @@ export function StepInspector({
         cfg?.step_type === "wait_children" ||
         isExecute ? (
           <section className="wfd-sec">
-            <div className="wfd-lbl">Output Schema</div>
+            <div className="wfd-lbl">Output schema</div>
             {(outputConfig?.output_schema ?? executeConfig?.output_schema) ? (
               <SchemaTree
                 schema={
@@ -1048,7 +1059,7 @@ export function StepInspector({
 
         {cfg?.step_type === "wait_children" ? (
           <section className="wfd-sec" data-testid="children-session-section">
-            <div className="wfd-lbl">Children Session</div>
+            <div className="wfd-lbl">Children session</div>
             {childrenSession ? (
               <div className="wfd-rows">
                 <div className="wfd-row">
@@ -1127,7 +1138,7 @@ export function StepInspector({
 
         {cfg?.step_type === "route" ? (
           <section className="wfd-sec" data-testid="route-config-section">
-            <div className="wfd-lbl">Route Config</div>
+            <div className="wfd-lbl">Route config</div>
             {isLoading ? (
               <div className="wfd-placeholder">Loading…</div>
             ) : hasRouteConfig ? (

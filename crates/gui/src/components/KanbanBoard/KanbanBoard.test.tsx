@@ -17,6 +17,8 @@ import { GlobalEntityPanelHost } from "../GlobalEntityPanelHost";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { NO_FACTORY_SCOPE } from "../../utils/workflowFactory";
 import type { Task, Workflow, WorkflowTransition } from "../../bindings";
+import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
+import { chooseDropdownValue } from "../../test/dropdown";
 
 /** Mock workflows default to no factory, so the No Factory board shows them. */
 function renderBoard(factoryName: KanbanFactoryScope = NO_FACTORY_SCOPE) {
@@ -377,7 +379,7 @@ describe("KanbanBoard", () => {
 
       // Filter to epic only
       const levelSelect = screen.getByLabelText("Filter by level");
-      fireEvent.change(levelSelect, { target: { value: "epic" } });
+      chooseDropdownValue(levelSelect, "epic");
 
       expect(screen.getByText("My Epic")).toBeInTheDocument();
       expect(screen.queryByText("My Ticket")).not.toBeInTheDocument();
@@ -534,135 +536,23 @@ describe("KanbanBoard", () => {
     });
   });
 
-  describe("search filtering", () => {
-    it("filters cards by task title across all columns", () => {
-      mockWorkflows = [
-        createMockWorkflow({ id: "wf-1", kanban_column: "Col A" }),
-        createMockWorkflow({ id: "wf-2", kanban_column: "Col B" }),
-      ];
-      mockTasks = [
-        createMockTask({
-          id: "t-1",
-          title: "Login feature",
-          workflow_id: "wf-1",
-        }),
-        createMockTask({
-          id: "t-2",
-          title: "Signup feature",
-          workflow_id: "wf-1",
-        }),
-        createMockTask({
-          id: "t-3",
-          title: "Dashboard widget",
-          workflow_id: "wf-2",
-        }),
-      ];
-      renderBoard();
-
-      const searchInput = screen.getByLabelText("Search tasks by title or ID");
-      fireEvent.change(searchInput, { target: { value: "feature" } });
-
-      expect(screen.getByText("Login feature")).toBeInTheDocument();
-      expect(screen.getByText("Signup feature")).toBeInTheDocument();
-      expect(screen.queryByText("Dashboard widget")).not.toBeInTheDocument();
-    });
-
-    it("search is case insensitive", () => {
+  describe("search", () => {
+    it("opens the command palette scoped to tasks instead of filtering in place", () => {
+      useCommandPaletteStore.setState({ open: false, scope: "all" });
       mockWorkflows = [
         createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
       ];
       mockTasks = [
-        createMockTask({
-          id: "t-1",
-          title: "Login Feature",
-          workflow_id: "wf-1",
-        }),
+        createMockTask({ id: "t-1", title: "Task", workflow_id: "wf-1" }),
       ];
       renderBoard();
 
-      const searchInput = screen.getByLabelText("Search tasks by title or ID");
-      fireEvent.change(searchInput, { target: { value: "login" } });
+      fireEvent.click(screen.getByRole("button", { name: "Search tasks" }));
 
-      expect(screen.getByText("Login Feature")).toBeInTheDocument();
-    });
-
-    it("filters cards by task description", () => {
-      mockWorkflows = [
-        createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
-      ];
-      mockTasks = [
-        createMockTask({
-          id: "t-1",
-          title: "Description match",
-          description: "Contains backend search needle",
-          workflow_id: "wf-1",
-        }),
-        createMockTask({
-          id: "t-2",
-          title: "Description miss",
-          description: "Unrelated content",
-          workflow_id: "wf-1",
-        }),
-      ];
-      renderBoard();
-
-      const searchInput = screen.getByLabelText("Search tasks by title or ID");
-      fireEvent.change(searchInput, { target: { value: "search needle" } });
-
-      expect(screen.getByText("Description match")).toBeInTheDocument();
-      expect(screen.queryByText("Description miss")).not.toBeInTheDocument();
-    });
-
-    it("filters cards by full task ID", () => {
-      mockWorkflows = [
-        createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
-      ];
-      mockTasks = [
-        createMockTask({
-          id: "5d7658d4-1b54-4fc4-b2e6-f3df7894fa0c",
-          title: "Matching ID task",
-          workflow_id: "wf-1",
-        }),
-        createMockTask({
-          id: "11111111-2222-4333-8444-555555555555",
-          title: "Other task",
-          workflow_id: "wf-1",
-        }),
-      ];
-      renderBoard();
-
-      const searchInput = screen.getByLabelText("Search tasks by title or ID");
-      fireEvent.change(searchInput, {
-        target: { value: "5d7658d4-1b54-4fc4-b2e6-f3df7894fa0c" },
+      expect(useCommandPaletteStore.getState()).toMatchObject({
+        open: true,
+        scope: "tasks",
       });
-
-      expect(screen.getByText("Matching ID task")).toBeInTheDocument();
-      expect(screen.queryByText("Other task")).not.toBeInTheDocument();
-    });
-
-    it("filters cards by 8-character short task ID", () => {
-      mockWorkflows = [
-        createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
-      ];
-      mockTasks = [
-        createMockTask({
-          id: "5d7658d4-1b54-4fc4-b2e6-f3df7894fa0c",
-          title: "Matching short ID task",
-          workflow_id: "wf-1",
-        }),
-        createMockTask({
-          id: "11111111-2222-4333-8444-555555555555",
-          title: "Other task",
-          workflow_id: "wf-1",
-        }),
-      ];
-      renderBoard();
-
-      const searchInput = screen.getByLabelText("Search tasks by title or ID");
-      fireEvent.change(searchInput, { target: { value: "5d7658d4" } });
-
-      expect(screen.getByText("Matching short ID task")).toBeInTheDocument();
-      expect(screen.queryByText("Other task")).not.toBeInTheDocument();
     });
   });
 
@@ -676,14 +566,10 @@ describe("KanbanBoard", () => {
       ];
       renderBoard();
 
-      // No clear button initially
       expect(screen.queryByText("Clear")).not.toBeInTheDocument();
 
-      // Apply a search filter
-      const searchInput = screen.getByLabelText("Search tasks by title or ID");
-      fireEvent.change(searchInput, { target: { value: "something" } });
+      chooseDropdownValue(screen.getByLabelText("Filter by level"), "ticket");
 
-      // Now clear button appears
       expect(screen.getByText("Clear")).toBeInTheDocument();
     });
 
@@ -692,20 +578,26 @@ describe("KanbanBoard", () => {
         createMockWorkflow({ id: "wf-1", kanban_column: "Col" }),
       ];
       mockTasks = [
-        createMockTask({ id: "t-1", title: "Find Me", workflow_id: "wf-1" }),
-        createMockTask({ id: "t-2", title: "Hidden", workflow_id: "wf-1" }),
+        createMockTask({
+          id: "t-1",
+          title: "Find Me",
+          level: "ticket",
+          workflow_id: "wf-1",
+        }),
+        createMockTask({
+          id: "t-2",
+          title: "Hidden",
+          level: "task",
+          workflow_id: "wf-1",
+        }),
       ];
       renderBoard();
 
-      // Apply search
-      const searchInput = screen.getByLabelText("Search tasks by title or ID");
-      fireEvent.change(searchInput, { target: { value: "Find" } });
+      chooseDropdownValue(screen.getByLabelText("Filter by level"), "ticket");
       expect(screen.queryByText("Hidden")).not.toBeInTheDocument();
 
-      // Click clear
       fireEvent.click(screen.getByText("Clear"));
 
-      // Both tasks visible again
       expect(screen.getByText("Find Me")).toBeInTheDocument();
       expect(screen.getByText("Hidden")).toBeInTheDocument();
     });

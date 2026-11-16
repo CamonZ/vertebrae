@@ -42,7 +42,7 @@ function Disclosure({
         data-testid={`${testIdBase}-toggle`}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1 font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)] hover:text-[var(--color-fg-soft)]"
+        className="flex items-center gap-1 t-label text-[var(--color-fg-mute)] hover:text-[var(--color-fg-soft)]"
       >
         <span aria-hidden="true">{open ? "▾" : "▸"}</span>
         <span>{label}</span>

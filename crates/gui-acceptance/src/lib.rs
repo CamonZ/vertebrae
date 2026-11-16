@@ -294,7 +294,7 @@ pub async fn wait_for_js(
 
 pub async fn wait_for_page(client: &Client, path: &str, project: Option<&str>) {
     let selector = match path.split('?').next().unwrap_or(path) {
-        "/tasks" => "[data-testid='task-search-input']",
+        "/tasks" => "[data-testid='task-search-button']",
         "/design" => ".uv-controls",
         "/artifacts" => "[role='tree'][aria-label='Project artifacts']",
         "/welcome" => "[data-testid='welcome-install']",
@@ -339,6 +339,28 @@ fn retryable_click(error: &fantoccini::error::CmdError) -> bool {
     matches!(error, CmdError::Standard(reply) if matches!(reply.error,
         ErrorStatus::ElementClickIntercepted | ErrorStatus::ElementNotInteractable
         | ErrorStatus::StaleElementReference | ErrorStatus::NoSuchElement))
+}
+
+/// Chat panes keep secondary actions (history, split, Changes…) in a `⋯`
+/// overflow menu. Click the action matched by `css`: directly when it is on
+/// the header, otherwise after opening the pane overflow menu that holds it.
+pub async fn click_pane_action(client: &Client, css: &str, description: &str) {
+    wait_for_js(
+        client,
+        &format!("{description} on a pane header or in its overflow menu"),
+        r#"const [css] = arguments;
+        const shown = (el) => el.getClientRects().length > 0;
+        if ([...document.querySelectorAll(css)].some(shown)) return true;
+        // Open one closed pane menu per pass; React renders it before the next.
+        const closed = [...document.querySelectorAll('[data-testid="pane-overflow-menu"]')]
+            .find((trigger) => shown(trigger) && trigger.getAttribute('aria-expanded') !== 'true');
+        closed?.click();
+        return false;"#,
+        vec![css.into()],
+        std::time::Duration::from_secs(10),
+    )
+    .await;
+    click_when_ready(client, fantoccini::Locator::Css(css), description).await;
 }
 
 /// Wait for a stable, unobstructed target after its panel finishes animating.
@@ -458,7 +480,10 @@ async fn pointer_clicks_svg_when_ready(
         .unwrap_or_else(|error| panic!("failed to release pointer after {description}: {error}"));
 }
 
-/// Factory options can rerender while a workflow update completes.
+/// Choose `value` in a picker: a native `<select>`, or the app's `Dropdown`
+/// (a trigger button whose open menu is an ARIA listbox of options carrying
+/// `data-value`). Factory options can rerender while a workflow update
+/// completes, and catalog-backed options can arrive disabled, so this retries.
 pub async fn select_when_ready(client: &Client, locator: fantoccini::Locator<'_>, value: &str) {
     wait_until(
         &format!("select option {value}"),
@@ -469,8 +494,49 @@ pub async fn select_when_ready(client: &Client, locator: fantoccini::Locator<'_>
                 if !element.is_displayed().await? || !element.is_enabled().await? {
                     return Ok(false);
                 }
-                element.select_by_value(value).await?;
-                Ok::<_, fantoccini::error::CmdError>(true)
+                if element.tag_name().await?.eq_ignore_ascii_case("select") {
+                    element.select_by_value(value).await?;
+                    return Ok(true);
+                }
+                if element.attr("data-value").await?.as_deref() == Some(value) {
+                    return Ok(true);
+                }
+                if element.attr("aria-expanded").await?.as_deref() != Some("true")
+                    && let Err(error) = element.click().await
+                {
+                    if !retryable_click(&error) {
+                        return Err(error);
+                    }
+                    client
+                        .execute("arguments[0].click();", vec![serde_json::to_value(&element)?])
+                        .await?;
+                }
+                let Some(list) = element.attr("aria-controls").await? else {
+                    return Ok(false);
+                };
+                // A missing or still-disabled option is retried; once chosen,
+                // the next pass sees the trigger's new `data-value`. A menu
+                // near a scroll edge can be reported as obscured, so an
+                // intercepted pointer click falls back to activating the
+                // option directly.
+                let option_css = format!(
+                    "[id='{list}'] [role='option'][data-value='{value}']:not([aria-disabled='true'])"
+                );
+                let option = client
+                    .find(fantoccini::Locator::Css(&option_css))
+                    .await?;
+                if let Err(error) = option.click().await {
+                    if !retryable_click(&error) {
+                        return Err(error);
+                    }
+                    client
+                        .execute(
+                            "document.querySelector(arguments[0])?.click();",
+                            vec![option_css.into()],
+                        )
+                        .await?;
+                }
+                Ok(false)
             }
             .await;
             match result {

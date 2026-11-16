@@ -216,7 +216,7 @@ export function AcceptanceCriteria({
     <div className="space-y-3 px-4 py-3" data-testid="acceptance-criteria">
       {/* Summary bar */}
       <div className="flex items-center justify-between">
-        <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+        <span className="t-label text-[var(--color-fg-mute)]">
           {metCount}/{totalCount} met
         </span>
         <div className="flex items-center gap-2">

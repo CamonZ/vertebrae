@@ -152,7 +152,9 @@ export function InlineDiscussionSettings({
       className="mt-8 border-t border-[var(--color-line)] pt-5"
       aria-label="Inline discussions"
     >
-      <h3 className="text-sm font-medium">Inline discussions</h3>
+      <h3 className="text-sm font-medium" data-settings-anchor>
+        Inline discussions
+      </h3>
       <p className="mt-1 text-sm text-[var(--color-fg-soft)]">
         Choose who answers questions about selected code. Changes apply to the
         next question, including follow-ups; running replies keep their captured

@@ -57,7 +57,7 @@ Feature: Exclusive entity detail panels
     And the GUI is on the pipeline view
     And I select factory "No Factory"
     When I click on the element with test id "workflow-station-Existing workflow panel"
-    Then the GUI should show "Workflow Details" within 10 seconds
+    Then the GUI should show "Workflow details" within 10 seconds
     When I press the "Escape" key
     When I click on the element with test id "local-chat-launcher"
     And I type "open the linked workflow" into the element with test id "local-chat-composer"

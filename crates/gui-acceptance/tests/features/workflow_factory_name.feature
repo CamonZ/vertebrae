@@ -9,7 +9,7 @@ Feature: Workflow factory name in the GUI
     And I select factory "Shared Factory"
     Then the GUI should show an element with test id "workflow-station-Factory GUI Workflow" within 5 seconds
     When I click on the element with test id "workflow-station-Factory GUI Workflow"
-    Then the GUI should show "Workflow Details" within 5 seconds
+    Then the GUI should show "Workflow details" within 5 seconds
     And the GUI element with test id "factory-name-value" should have text "Shared Factory" within 5 seconds
     When I click on the element with test id "factory-name-edit"
     And I click on the element with test id "factory-name-clear"

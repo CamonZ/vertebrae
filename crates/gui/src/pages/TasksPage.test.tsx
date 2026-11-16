@@ -9,6 +9,7 @@ import {
   createMockTaskRunControls,
   userEvent,
   waitFor,
+  within,
 } from "../test/test-utils";
 import { TasksPage } from "./TasksPage";
 import { GlobalEntityPanelHost } from "../components/GlobalEntityPanelHost";
@@ -17,6 +18,7 @@ import type { Task, TaskFilterOptions } from "../bindings";
 import { queryClient, queryKeys } from "../query";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
+import { useCommandPaletteStore } from "../stores/commandPaletteStore";
 
 function seedTaskRuns(tasks: Task[]) {
   for (const task of tasks) {
@@ -260,7 +262,7 @@ describe("TasksPage", () => {
     expect(screen.queryByText(/Selected/)).not.toBeInTheDocument();
   });
 
-  it("renders the 'N tasks · M roots' count readout (bold number, no parentheses)", () => {
+  it("shows the task total on the All filter instead of a header readout", () => {
     const parent = createMockTask({
       id: "10000000-0000-0000-0000-000000000000",
       title: "Root epic",
@@ -279,9 +281,14 @@ describe("TasksPage", () => {
 
     render(<TasksPageWithHeader />);
 
+    const statuses = screen.getByRole("group", {
+      name: "Filter tasks by status",
+    });
+    expect(
+      within(statuses).getByRole("button", { name: "All3" })
+    ).toBeInTheDocument();
     const headerActions = screen.getByTestId("shell-header-actions");
-    expect(headerActions).toHaveTextContent("3 tasks · 2 roots");
-    expect(headerActions.textContent).not.toMatch(/\(2 roots\)/);
+    expect(headerActions.textContent).not.toMatch(/tasks|roots/);
   });
 
   it("renders the accent 'N running' pulse readout when runs are active", () => {
@@ -316,7 +323,7 @@ describe("TasksPage", () => {
     expect(screen.queryByTestId("topbar-live-count")).not.toBeInTheDocument();
   });
 
-  it("renders a hide-done toggle that flips its label and .on class", async () => {
+  it("keeps Hide done as a checkbox in the View menu", async () => {
     const user = userEvent.setup();
     mockTasks = [
       createMockTask({
@@ -327,16 +334,21 @@ describe("TasksPage", () => {
 
     render(<TasksPageWithHeader />);
 
-    const toggle = screen.getByTestId("tasks-hide-done");
-    expect(toggle).toHaveTextContent("Hide done");
-    expect(toggle).not.toHaveClass("on");
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    const trigger = screen.getByTestId("tasks-view-menu");
+    await user.click(trigger);
+    expect(screen.getByTestId("tasks-hide-done")).toHaveAttribute(
+      "aria-checked",
+      "false"
+    );
 
-    await user.click(toggle);
+    await user.click(screen.getByTestId("tasks-hide-done"));
+    expect(trigger).toHaveClass("on");
 
-    expect(toggle).toHaveTextContent("Done hidden");
-    expect(toggle).toHaveClass("on");
-    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await user.click(trigger);
+    expect(screen.getByTestId("tasks-hide-done")).toHaveAttribute(
+      "aria-checked",
+      "true"
+    );
   });
 
   it("hides completed leaf children once the toggle is on", async () => {
@@ -365,6 +377,7 @@ describe("TasksPage", () => {
     await user.click(screen.getByRole("button", { name: /^expand$/i }));
     expect(screen.getByText("Done child")).toBeInTheDocument();
 
+    await user.click(screen.getByTestId("tasks-view-menu"));
     await user.click(screen.getByTestId("tasks-hide-done"));
 
     expect(screen.getByText("Open child")).toBeInTheDocument();
@@ -390,22 +403,61 @@ describe("TasksPage", () => {
 
     // Turn hide-done on, then activate the "done" scope. Scoping force-expands
     // the tree, and filtering must bypass hide-done so the done child shows.
+    await user.click(screen.getByTestId("tasks-view-menu"));
     await user.click(screen.getByTestId("tasks-hide-done"));
     await user.click(screen.getByRole("button", { name: /done1/i }));
 
     expect(await screen.findByText("Done child")).toBeInTheDocument();
   });
 
-  it("focuses the search box when '/' is pressed outside a text field", async () => {
-    mockTasks = [];
+  it("offers All plus statuses, and Updated in last 24h combines with a status", async () => {
+    const user = userEvent.setup();
+    const now = new Date().toISOString();
+    mockTasks = [
+      createMockTask({
+        id: "90000000-0000-0000-0000-000000000000",
+        title: "Fresh done",
+        completed_at: now,
+        updated_at: now,
+      }),
+      createMockTask({
+        id: "91000000-0000-0000-0000-000000000000",
+        title: "Old done",
+        completed_at: "2024-01-02T00:00:00Z",
+        updated_at: "2024-01-02T00:00:00Z",
+      }),
+    ];
     render(<TasksPageWithHeader />);
 
-    const input = screen.getByTestId("task-search-input");
-    expect(document.activeElement).not.toBe(input);
+    const statuses = screen.getByRole("group", {
+      name: "Filter tasks by status",
+    });
+    expect(
+      within(statuses).getByRole("button", { name: /^All/ })
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      within(statuses).queryByRole("button", { name: /recent/i })
+    ).toBeNull();
 
-    fireEvent.keyDown(window, { key: "/" });
+    await user.click(within(statuses).getByRole("button", { name: /done/i }));
+    await user.click(screen.getByTestId("tasks-view-menu"));
+    await user.click(screen.getByTestId("tasks-recent-only"));
 
-    expect(document.activeElement).toBe(input);
+    expect(await screen.findByText("Fresh done")).toBeInTheDocument();
+    expect(screen.queryByText("Old done")).not.toBeInTheDocument();
+  });
+
+  it("opens the command palette scoped to tasks from the search button", () => {
+    mockTasks = [];
+    useCommandPaletteStore.setState({ open: false, scope: "all" });
+    render(<TasksPageWithHeader />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Search tasks" }));
+
+    expect(useCommandPaletteStore.getState()).toMatchObject({
+      open: true,
+      scope: "tasks",
+    });
   });
 
   it("does not steal focus on '/' while typing in another field", async () => {

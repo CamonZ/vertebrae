@@ -226,9 +226,9 @@ async fn open_browser(world: &mut GuiWorld) {
     )
     .await;
 
-    gui_acceptance::click_when_ready(
+    gui_acceptance::click_pane_action(
         &client,
-        Locator::Css("[title='Toggle chat history']"),
+        "[title='Toggle chat history']",
         "conversation history",
     )
     .await;

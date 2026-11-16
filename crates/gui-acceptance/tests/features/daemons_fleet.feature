@@ -4,17 +4,18 @@ Feature: Daemon fleet management
 
   Scenario: Register, inspect, re-issue, and unregister a pending daemon
     Given the GUI is showing the daemon fleet
-    Then the GUI should show an element with test id "daemon-status-filters" within 10 seconds
+    Then the GUI should show an element with test id "daemons-search" within 10 seconds
     And the GUI should show an element with test id "daemon-register" within 10 seconds
     When I register a uniquely named daemon
     Then the GUI should show an element with test id "daemon-enrollment-token-step" within 10 seconds
     When I click on the element with test id "daemon-enrollment-done"
     Then the registered daemon row should be visible within 15 seconds
-    When I click on the element with test id "daemon-status-filter-pending"
-    Then the daemon status filter "pending" should be selected within 5 seconds
+    When I click on the element with test id "daemon-group-toggle-pending"
+    Then the daemon group "pending" should be collapsed within 5 seconds
+    And the registered daemon row should disappear within 5 seconds
+    When I click on the element with test id "daemon-group-toggle-pending"
+    Then the daemon group "pending" should be expanded within 5 seconds
     And the registered daemon row should be visible within 5 seconds
-    When I click on the element with test id "daemon-status-filter-pending"
-    Then the daemon status filter "pending" should not be selected within 5 seconds
     When I search for the registered daemon
     Then the registered daemon row should be visible within 5 seconds
     When I open the registered daemon inspector

@@ -45,11 +45,12 @@ export const MIN_FLOW_HEIGHT = 320;
 /**
  * Where a neutral part's live count sits, in part space: the legacy slot under
  * the title, or after the last always-shown line of an explicit label
- * placement (so it never sits on a placed title).
+ * placement (so it never sits on a placed title). When every line is a hover
+ * line, the count follows them, outside the opaque plate they are drawn on.
  */
 function liveCountAt(p: DiagramPart): { x: number; y: number } {
   if (!p.labels) return { x: 24, y: 75 };
-  const lines = placedLabels({
+  const placed = placedLabels({
     identity: p.identity,
     bb: p.bb,
     scale: p.scale,
@@ -57,7 +58,9 @@ function liveCountAt(p: DiagramPart): { x: number; y: number } {
     labels: p.labels,
     change: p.change,
     changeNote: p.changeNote,
-  }).filter((l) => !l.hover);
+  });
+  const shown = placed.filter((l) => !l.hover);
+  const lines = shown.length > 0 ? shown : placed;
   const last = lines.find((l) => l.key === "subtitle") ?? lines[0];
   if (!last) return { x: 24, y: 75 };
   return { x: (last.box.x1 + 12) / p.scale, y: last.y / p.scale };

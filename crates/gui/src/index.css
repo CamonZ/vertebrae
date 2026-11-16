@@ -1,6 +1,8 @@
-/* Google Fonts — Hearth typography stack:
-   Newsreader (display serif), Geist (UI sans), JetBrains Mono (mono) */
-@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,300;1,6..72,400&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
+/* Google Fonts — Hearth typeface pairings (see "Typeface pairings" below).
+   Faces download only when a pairing uses them. */
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,300;1,6..72,400&family=Geist:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300..500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wdth,wght@0,75..100,400..700;1,75..100,400..700&family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Serif:ital,wght@0,400;0,500;1,400&family=IBM+Plex+Mono:wght@300;400;500&family=Bricolage+Grotesque:opsz,wght@12..96,400..700&family=Literata:ital,opsz,wght@0,7..72,400..600;1,7..72,400&family=Fraunces:ital,opsz,wght@0,9..144,400..600;1,9..144,400&family=Spline+Sans+Mono:wght@300..500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400&family=DM+Serif+Text:ital@0;1&family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&family=Space+Grotesk:wght@400..700&family=Space+Mono:wght@400;700&family=Public+Sans:ital,wght@0,400..700;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..600;1,8..60,400&family=Playfair+Display:ital,wght@0,400..700;1,400&family=Source+Code+Pro:wght@300..500&family=Hanken+Grotesk:ital,wght@0,400..700;1,400&family=Syne:wght@400..700&family=Onest:wght@400..700&family=Lora:ital,wght@0,400..600;1,400&family=Young+Serif&family=Fira+Code:wght@300..500&display=swap");
 
 @import "tailwindcss";
 
@@ -23,6 +25,8 @@
 
   /* Surfaces — neutral charcoal, five steps from near-black to raised. */
   --color-bg: #0a0a0a;
+  /* Canvas: the shell (titlebar + rail) the content sheet rests on. */
+  --color-canvas: #050505;
   --color-bg-1: #111111;
   --color-bg-2: #161616;
   --color-bg-3: #1f1f1f;
@@ -39,6 +43,9 @@
 
   /* Persistent selection uses a raised neutral surface and an accent indicator. */
   --color-selection: #1f1f1f;
+  /* Text selection is an accent tint: the neutral row-selection surface is
+     nearly invisible behind text on the charcoal/cream panels. */
+  --color-text-selection: oklch(0.78 0.11 345 / 0.3);
 
   /* Text — off-white neutrals, five steps to ghost. */
   --color-fg: #f4f1ec;
@@ -58,19 +65,20 @@
   --color-border: var(--color-line);
   --color-border-focus: var(--color-line-strong);
 
-  /* Rose quartz on charcoal; mulberry on cream in .light. Selection surfaces
-     stay neutral, with the accent reserved for markers and small washes. */
-  --color-accent: #dda7c7;
-  --color-accent-deep: #eac1d9;
-  --color-accent-mute: #c28bae;
-  --color-accent-wash: #2d2029;
-  --color-accent-glow: rgba(221, 167, 199, 0.08);
+  /* Accent (default Orchid; others via html[data-accent], see ACCENTS at the
+     end of this file). Selection surfaces stay neutral, with the accent
+     reserved for markers, primary actions and small washes. */
+  --color-accent: oklch(0.78 0.11 345);
+  --color-accent-deep: oklch(0.85 0.083 345);
+  --color-accent-mute: oklch(0.69 0.099 345);
+  --color-accent-wash: oklch(0.27 0.031 345);
+  --color-accent-glow: oklch(0.78 0.11 345 / 0.08);
 
   /* Action roles keep filled controls readable independently of surface/text
      tokens. Both the legacy .btn and shared React controls consume these. */
   --color-primary: var(--color-accent);
   --color-primary-hover: var(--color-accent-deep);
-  --color-primary-pressed: #c28bae;
+  --color-primary-pressed: oklch(0.69 0.099 345);
   --color-on-primary: #0a0a0a;
   --color-disabled-bg: #1f1f1f;
   --color-disabled-fg: #b8b5af;
@@ -78,20 +86,20 @@
 
   /* User turns have their own reading surface, distinct from neutral replies
      and primary action fills. Shared by main and inline conversations. */
-  --color-user-message-bg: #070707;
+  --color-user-message-bg: #1f1f1f;
   --color-user-message-fg: #f4f1ec;
-  --color-user-message-border: #080808;
-  --color-user-message-label: #b8b5af;
+  --color-user-message-border: #1f1f1f;
+  --color-user-message-label: #6f6c66;
 
   /* Status — four semantic states, each with a wash background variant */
   --color-ok: oklch(0.78 0.15 145);
   --color-ok-wash: oklch(0.32 0.1 145);
   --color-warn: oklch(0.78 0.15 75);
-  --color-warn-wash: oklch(0.32 0.1 70);
-  --color-err: oklch(0.72 0.18 25);
+  --color-warn-wash: oklch(0.32 0.069 70);
+  --color-err: oklch(0.72 0.174 25);
   --color-err-wash: oklch(0.32 0.12 25);
   --color-info: oklch(0.78 0.13 220);
-  --color-info-wash: oklch(0.32 0.1 220);
+  --color-info-wash: oklch(0.32 0.058 220);
   /* Readable text on status washes; distinct from decorative status marks. */
   --color-ok-fg: var(--color-ok);
   --color-warn-fg: var(--color-warn);
@@ -100,23 +108,23 @@
      bar  = top accent strip on a step node
      wash = subtle background tint on tinted surfaces
      fg   = readable foreground on the wash background */
-  --color-step-llm: oklch(0.72 0.16 285); /* violet — agent runs code */
+  --color-step-llm: oklch(0.72 0.151 285); /* violet — agent runs code */
   --color-step-llm-wash: oklch(0.32 0.12 285);
-  --color-step-llm-fg: oklch(0.82 0.14 285);
+  --color-step-llm-fg: oklch(0.82 0.093 285);
 
   --color-step-structured: oklch(
     0.78 0.13 200
   ); /* teal — structured inference */
-  --color-step-structured-wash: oklch(0.32 0.1 200);
+  --color-step-structured-wash: oklch(0.32 0.054 200);
   --color-step-structured-fg: oklch(0.85 0.12 200);
 
   --color-step-route: oklch(0.82 0.18 135); /* lime — routing decision */
-  --color-step-route-wash: oklch(0.32 0.12 135);
+  --color-step-route-wash: oklch(0.32 0.093 135);
   --color-step-route-fg: oklch(0.88 0.16 135);
 
   --color-step-human: oklch(0.8 0.15 70); /* warm amber — human acts */
-  --color-step-human-wash: oklch(0.32 0.1 70);
-  --color-step-human-fg: oklch(0.85 0.14 70);
+  --color-step-human-wash: oklch(0.32 0.069 70);
+  --color-step-human-fg: oklch(0.85 0.117 70);
 
   --color-step-wait: oklch(0.72 0.08 70); /* muted amber — paused on children */
   --color-step-wait-wash: oklch(0.3 0.05 70);
@@ -314,7 +322,8 @@
   --text-10: var(--text-2xs); /* 10px */
   --text-11: var(--text-eyebrow); /* 11px */
   --text-12: var(--text-xs); /* 12px */
-  --text-13: var(--text-13); /* 13px — from @theme */
+  /* --text-13 is defined directly in @theme; re-aliasing it here would be a
+     self-referential cycle that invalidates every var(--text-13). */
   --text-14: var(--text-sm); /* 14px */
   --text-15: var(--text-base); /* 15px */
   --text-16: var(--text-lg); /* 16px */
@@ -401,11 +410,13 @@
    ============================================================================= */
 .light {
   --color-bg: #faf6ec; /* warm cream paper */
+  --color-canvas: #ebe4d2;
   --color-bg-1: #f2ede0;
   --color-bg-2: #e9e3d3;
   --color-bg-3: #dcd4c1;
   --color-bg-4: #cac0a8;
   --color-selection: #e9e3d3;
+  --color-text-selection: oklch(0.48 0.11 345 / 0.2);
 
   --color-fg: #1a1a20;
   --color-fg-soft: #3a3a44;
@@ -418,47 +429,47 @@
   --color-line-strong: #b9b09c;
 
   /* Mulberry gives controls emphasis without tinting the paper surfaces. */
-  --color-accent: #854568;
-  --color-accent-deep: #713a58;
-  --color-accent-mute: #854568;
-  --color-accent-wash: #f0e3e9;
-  --color-accent-glow: rgba(133, 69, 104, 0.08);
-  --color-primary-pressed: #5f304a;
+  --color-accent: oklch(0.48 0.11 345);
+  --color-accent-deep: oklch(0.42 0.11 345);
+  --color-accent-mute: oklch(0.48 0.11 345);
+  --color-accent-wash: oklch(0.945 0.024 345);
+  --color-accent-glow: oklch(0.48 0.11 345 / 0.08);
+  --color-primary-pressed: oklch(0.35 0.099 345);
   --color-on-primary: #faf6ec;
   --color-disabled-bg: #e9e3d3;
   --color-disabled-fg: #66665e;
   --color-disabled-border: #b9b09c;
-  --color-user-message-bg: #efede8;
+  --color-user-message-bg: #e9e3d3;
   --color-user-message-fg: #1a1a20;
-  --color-user-message-border: #b9b09c;
-  --color-user-message-label: #52524c;
+  --color-user-message-border: #e9e3d3;
+  --color-user-message-label: #66665e;
 
   --color-ok: oklch(0.5 0.15 145);
   --color-ok-wash: oklch(0.92 0.05 145);
-  --color-warn: oklch(0.55 0.15 70);
-  --color-warn-wash: oklch(0.93 0.06 75);
+  --color-warn: oklch(0.55 0.119 70);
+  --color-warn-wash: oklch(0.93 0.057 75);
   --color-err: oklch(0.5 0.18 25);
-  --color-err-wash: oklch(0.93 0.05 25);
-  --color-info: oklch(0.48 0.13 220);
+  --color-err-wash: oklch(0.93 0.035 25);
+  --color-info: oklch(0.48 0.087 220);
   --color-info-wash: oklch(0.93 0.04 220);
   --color-ok-fg: oklch(0.45 0.13 145);
-  --color-warn-fg: oklch(0.48 0.13 70);
+  --color-warn-fg: oklch(0.48 0.103 70);
 
   --color-step-llm: oklch(0.52 0.18 285);
-  --color-step-llm-wash: oklch(0.93 0.05 285);
+  --color-step-llm-wash: oklch(0.93 0.034 285);
   --color-step-llm-fg: oklch(0.42 0.18 285);
 
-  --color-step-structured: oklch(0.52 0.13 200);
+  --color-step-structured: oklch(0.52 0.088 200);
   --color-step-structured-wash: oklch(0.93 0.05 200);
-  --color-step-structured-fg: oklch(0.4 0.13 200);
+  --color-step-structured-fg: oklch(0.4 0.068 200);
 
-  --color-step-route: oklch(0.55 0.18 135);
+  --color-step-route: oklch(0.55 0.16 135);
   --color-step-route-wash: oklch(0.93 0.07 135);
-  --color-step-route-fg: oklch(0.45 0.18 135);
+  --color-step-route-fg: oklch(0.45 0.131 135);
 
-  --color-step-human: oklch(0.55 0.15 70);
-  --color-step-human-wash: oklch(0.93 0.06 75);
-  --color-step-human-fg: oklch(0.45 0.15 70);
+  --color-step-human: oklch(0.55 0.119 70);
+  --color-step-human-wash: oklch(0.93 0.057 75);
+  --color-step-human-fg: oklch(0.45 0.097 70);
 
   --color-step-wait: oklch(0.52 0.08 70);
   --color-step-wait-wash: oklch(0.92 0.03 70);
@@ -470,7 +481,7 @@
 
   --color-step-finish: oklch(0.55 0.15 145);
   --color-step-finish-wash: oklch(0.93 0.06 145);
-  --color-step-finish-fg: oklch(0.45 0.15 145);
+  --color-step-finish-fg: oklch(0.45 0.141 145);
 
   /* Light-mode shadows carry visible elevation */
   --shadow-1: 0 1px 2px rgba(20, 20, 20, 0.08);
@@ -491,14 +502,30 @@
 /* =============================================================================
    BASE STYLES
    ============================================================================= */
+/* Text rendering. Thin "antialiased" smoothing only on Retina-class screens:
+   on 1x displays it drops macOS stroke dilation and glyphs turn thin and
+   jagged, so 1x keeps the platform default. Never synthesize bold or italic
+   (faux styles look smeared); faces render in the weights they ship. */
 html {
   font-size: 16px;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
   text-rendering: optimizeLegibility;
+  font-synthesis: none;
+  font-optical-sizing: auto;
+  font-kerning: normal;
 }
 
-@media (width >= 1600px) {
+@media (min-resolution: 2dppx) {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Larger base on big Retina screens only: at 1x a 17px root puts rem-based
+   text on fractional pixel sizes, which render soft. */
+@media (width >= 1600px) and (min-resolution: 2dppx) {
   html {
     font-size: 17px;
   }
@@ -510,7 +537,7 @@ body {
   font-weight: 400;
   line-height: 1.6;
   letter-spacing: -0.005em;
-  font-feature-settings: "ss01", "cv11";
+  font-feature-settings: var(--font-features, normal);
   background-color: var(--color-bg);
   color: var(--color-fg);
 }
@@ -552,14 +579,14 @@ body {
   outline-offset: 2px;
 }
 
-/* Text selection shares the neutral selected surface and readable foreground. */
+/* Text selection uses an accent tint with readable foreground text. */
 ::selection {
-  background-color: var(--color-selection);
+  background-color: var(--color-text-selection);
   color: var(--color-fg);
 }
 
 html.light ::selection {
-  background-color: var(--color-selection);
+  background-color: var(--color-text-selection);
   color: var(--color-fg);
 }
 
@@ -2049,13 +2076,30 @@ html.light ::selection {
   background: var(--bg);
 }
 
-.tasks-v2 .scope-row,
-.tasks-v2 .scope-primary,
-.daemons-page .daemons-status-filters {
+.tasks-v2 .scope-row {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--s-2);
   flex-wrap: wrap;
+}
+
+/* Status filters (Tasks scopes, Daemon statuses) are one segmented control:
+   a recessed track with the chosen segment raised out of it. */
+.tasks-v2 .scope-primary,
+.daemons-page .daemons-status-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex-wrap: wrap;
+  padding: 2px;
+  border: 1px solid var(--ctl-line);
+  border-radius: var(--r-md);
+  background-color: color-mix(in oklch, var(--color-canvas) 60%, transparent);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
+}
+.light .tasks-v2 .scope-primary,
+.light .daemons-page .daemons-status-filters {
+  box-shadow: inset 0 1px 2px rgba(68, 52, 31, 0.1);
 }
 
 .tasks-v2 .scope-chip,
@@ -2063,33 +2107,47 @@ html.light ::selection {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 22px;
-  padding: 0 9px;
+  height: 24px;
+  padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: var(--r-sm);
+  border-radius: calc(var(--r-md) - 2px);
   background: transparent;
   color: var(--fg-mute);
   font-family: var(--sans);
-  font-size: var(--text-xs);
-  font-weight: 400;
+  font-size: var(--text-12);
+  font-weight: 500;
   cursor: pointer;
   transition:
     background var(--t-fast) var(--ease),
     color var(--t-fast) var(--ease),
-    border-color var(--t-fast) var(--ease);
+    box-shadow var(--t-fast) var(--ease);
 }
 
 .tasks-v2 .scope-chip:hover,
 .daemons-page .scope-chip:hover {
-  background: var(--bg-1);
-  color: var(--fg-soft);
+  color: var(--fg);
 }
 
 .tasks-v2 .scope-chip.active,
 .daemons-page .scope-chip.active {
-  background: var(--accent-wash);
-  color: var(--accent);
-  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+  background: var(--bg-3);
+  color: var(--fg);
+  border-color: transparent;
+  box-shadow:
+    0 1px 0 color-mix(in oklch, var(--fg) 8%, transparent) inset,
+    0 1px 3px rgba(0, 0, 0, 0.45);
+}
+.light .tasks-v2 .scope-chip.active,
+.light .daemons-page .scope-chip.active {
+  background: var(--color-bg);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 1px 3px rgba(68, 52, 31, 0.2);
+}
+/* Nothing to show: still reachable, but recedes. */
+.tasks-v2 .scope-chip[data-empty],
+.daemons-page .scope-chip[data-empty] {
+  color: var(--fg-faint);
 }
 
 /* Thin divider that splits the scope chips into groups (Recent | Queued),
@@ -2125,21 +2183,22 @@ html.light ::selection {
 }
 
 .tasks-v2 .scope-secondary .hide-done,
-.scope-level select,
 .tasks-v2 .scope-expand button,
 .daemons-page .daemon-register-button {
-  height: 26px;
+  /* Same shape as `.ctl.ctl-outline`; these buttons predate the class. */
+  height: var(--ctl-h);
   padding: 0 var(--s-2);
-  gap: var(--s-1);
+  gap: var(--s-1h);
   background: transparent;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
-  font-family: var(--mono);
-  font-size: var(--text-2xs);
-  letter-spacing: 0.04em;
-  color: var(--fg-mute);
+  border: 1px solid var(--ctl-line);
+  border-radius: var(--ctl-radius);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  letter-spacing: 0;
+  color: var(--fg-soft);
   transition:
     color var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease),
     border-color var(--t-fast) var(--ease);
 }
 
@@ -2159,18 +2218,12 @@ html.light ::selection {
   white-space: nowrap;
 }
 
-/* Native <select> sizes to content and needs right room for the caret overlay. */
-.scope-level select {
-  width: auto;
-  padding-right: var(--s-6);
-}
-
 .tasks-v2 .scope-secondary .hide-done:hover,
-.scope-level select:hover,
 .tasks-v2 .scope-expand button:hover,
 .daemons-page .daemon-register-button:hover {
   color: var(--fg);
-  border-color: var(--fg-faint);
+  background: var(--bg-2);
+  border-color: var(--ctl-line-hover);
 }
 
 /* Active "Hide done" keeps the accent treatment. Placed after the shared rule
@@ -2190,15 +2243,6 @@ html.light ::selection {
   width: 12px;
   height: 12px;
   margin-top: -1px;
-}
-
-/* The Select atom renders its dropdown caret as a rotated border-box pseudo
-   whose visible vertex falls ~5px below box center. Recolor it to the muted
-   chip text and raise it so it reads at the same height as the "Expand all"
-   chevron and the eye. */
-.scope-level > span::after {
-  border-color: var(--fg-mute);
-  margin-top: -5px;
 }
 
 .tasks-v2 .hide-done svg {
@@ -2750,10 +2794,19 @@ html.light ::selection {
   outline: none;
 }
 
+/* Focus lifts the composer instead of outlining it: a tinted edge and a
+   soft halo, so typing never draws a hard accent rectangle. */
 .chat-input-shell:focus-within {
-  border-color: var(--color-accent);
+  border-color: color-mix(in oklch, var(--color-accent) 32%, var(--color-line-strong));
   background-color: var(--color-bg);
-  box-shadow: none;
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--color-accent) 9%, transparent),
+    0 6px 18px -8px rgba(0, 0, 0, 0.45);
+}
+.light .chat-input-shell:focus-within {
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--color-accent) 10%, transparent),
+    0 6px 18px -10px rgba(68, 52, 31, 0.25);
 }
 
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
@@ -2835,6 +2888,8 @@ html.light ::selection {
    (the panel is fixed-anchored, not draggable), so `.hc-head` is not a grab
    handle here. */
 .hc-panel .hc-head {
+  user-select: none;
+  -webkit-user-select: none;
   position: relative;
   flex-shrink: 0;
   background: color-mix(in oklch, var(--bg-3) 26%, transparent);
@@ -2852,10 +2907,11 @@ html.light ::selection {
   display: flex;
   align-items: center;
   gap: var(--s-1h);
-  font-family: var(--serif);
-  font-size: var(--text-16);
-  letter-spacing: -0.01em;
-  line-height: 1;
+  font-family: var(--sans);
+  font-size: var(--text-13);
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.2;
   color: var(--fg);
 }
 .hc-panel .hc-title .label {
@@ -3011,6 +3067,95 @@ html.light ::selection {
   line-height: 13px;
   text-align: center;
 }
+/* Overflow (`⋯`) menu — secondary pane actions live here so headers stay
+   at a few visible controls. Popover sits on bg-2 with a hairline, no shadow
+   elevation beyond a soft drop for legibility over transcript text. */
+.ovf {
+  position: relative;
+  display: inline-flex;
+}
+.ovf-menu {
+  position: absolute;
+  top: calc(100% + var(--s-1));
+  right: 0;
+  z-index: 40;
+  min-width: 13rem;
+  padding: var(--s-1);
+  border: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+.ovf-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-soft);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+.ovf-item:hover:not(:disabled),
+.ovf-item:focus-visible {
+  background: var(--bg-4);
+  color: var(--fg);
+  outline: none;
+}
+.ovf-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.ovf-item.danger:hover:not(:disabled),
+.ovf-item.danger:focus-visible {
+  background: var(--err-wash);
+  color: var(--err);
+}
+.ovf-icon {
+  display: inline-flex;
+  width: 16px;
+  flex-shrink: 0;
+  justify-content: center;
+  color: var(--fg-mute);
+}
+.ovf-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ovf-badge {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  line-height: 16px;
+  text-align: center;
+}
+.ovf-check {
+  color: var(--accent);
+  font-size: var(--text-11);
+}
+.ovf-sep {
+  height: 1px;
+  margin: var(--s-1) var(--s-1h);
+  background: color-mix(in oklch, var(--fg) 8%, transparent);
+}
+.hc-panel .hc-title-spinner {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--fg-mute);
+}
 .hc-panel .hc-ctrl.danger:hover {
   background: var(--err-wash);
   color: var(--err);
@@ -3025,6 +3170,72 @@ html.light ::selection {
 }
 .hc-panel .hc-chat-controls.right {
   justify-content: flex-end;
+}
+/* Composer model chip — provider, model, effort and speed collapse into one
+   control whose popover holds the full pickers. */
+.hc-panel .hc-model-settings {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+/* Shape, type and states come from `.ctl.ctl-quiet`. */
+.hc-panel .hc-model-chip {
+  min-width: 0;
+  max-width: 18rem;
+}
+.hc-panel .hc-model-chip.attention {
+  border-color: color-mix(in oklch, var(--warn) 45%, transparent);
+  color: var(--warn);
+}
+.hc-panel .hc-model-chip-provider {
+  flex-shrink: 0;
+  color: var(--fg-mute);
+}
+.hc-panel .hc-model-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-model-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--s-2));
+  z-index: 60;
+  display: grid;
+  gap: var(--s-1);
+  width: 17rem;
+  padding: var(--s-2);
+  border: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+  border-radius: var(--r-md);
+  background: var(--bg-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+.hc-panel .hc-model-pop .hc-model-row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-2);
+  max-width: none;
+}
+.hc-panel .hc-model-pop .hc-model-row > span {
+  color: var(--fg-mute);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+}
+.hc-panel .hc-model-pop .hc-model-row select {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+/* Permission mode is a `.ctl.ctl-quiet` select sized to its label. */
+.hc-panel .hc-chat-controls .hc-permission-picker .dd-trigger {
+  max-width: 13rem;
+  field-sizing: content;
+}
+.hc-panel .hc-composer-alert {
+  color: var(--warn);
+  font-size: var(--text-11);
 }
 .hc-panel .hc-model-picker,
 .hc-panel .hc-effort-picker,
@@ -3044,28 +3255,20 @@ html.light ::selection {
   min-width: 0;
   max-width: 100%;
   align-items: center;
-  gap: var(--s-1);
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  color: var(--fg-mute);
 }
-.hc-panel .hc-model-picker select,
-.hc-panel .hc-effort-picker select,
-.hc-panel .hc-speed-picker select,
-.hc-panel .hc-provider-picker select,
-.hc-panel .hc-permission-picker select {
+.hc-panel .hc-model-picker select:not(.ctl),
+.hc-panel .hc-effort-picker select:not(.ctl),
+.hc-panel .hc-speed-picker select:not(.ctl),
+.hc-panel .hc-provider-picker select:not(.ctl) {
   min-width: 78px;
   max-width: 132px;
   height: 24px;
   border: 1px solid var(--line);
   border-radius: var(--r-xs);
-  background: var(--bg);
+  background-color: var(--bg);
   color: var(--fg);
   font: inherit;
   outline: none;
-}
-.hc-panel .hc-permission-picker select {
-  max-width: 116px;
 }
 .hc-panel .hc-provider-picker select {
   max-width: 104px;
@@ -3073,11 +3276,10 @@ html.light ::selection {
 .hc-panel .hc-effort-picker select {
   max-width: 112px;
 }
-.hc-panel .hc-model-picker select:focus-visible,
-.hc-panel .hc-effort-picker select:focus-visible,
-.hc-panel .hc-speed-picker select:focus-visible,
-.hc-panel .hc-provider-picker select:focus-visible,
-.hc-panel .hc-permission-picker select:focus-visible {
+.hc-panel .hc-model-picker select:not(.ctl):focus-visible,
+.hc-panel .hc-effort-picker select:not(.ctl):focus-visible,
+.hc-panel .hc-speed-picker select:not(.ctl):focus-visible,
+.hc-panel .hc-provider-picker select:not(.ctl):focus-visible {
   border-color: var(--accent);
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -3868,9 +4070,10 @@ html.light ::selection {
 .tasks-v2 .t-row {
   position: relative;
   display: grid;
-  grid-template-columns: auto 1fr auto 16px;
+  /* indent · body · tags · status · priority · updated */
+  grid-template-columns: auto minmax(0, 1fr) 260px 96px 72px 56px;
   align-items: center;
-  gap: var(--s-3);
+  column-gap: var(--s-3);
   padding: 0 var(--s-5);
   cursor: pointer;
   /* Opaque resting fill (== page bg, so visually identical to transparent at
@@ -4013,9 +4216,13 @@ html.light ::selection {
   font-family: var(--sans);
   font-style: normal;
   font-size: var(--text-sm); /* 14px */
-  font-weight: 500;
+  font-weight: 400;
   color: var(--fg);
   letter-spacing: -0.005em;
+}
+
+.tasks-v2 .t-row.l0 .t-title {
+  font-weight: 500;
 }
 
 .tasks-v2 .t-title.done {
@@ -4031,101 +4238,145 @@ html.light ::selection {
 }
 
 .tasks-v2 .t-meta {
-  margin-top: 1px;
-  /* Align the meta line under the title, not the chevron (docs/design
-     tasks-v2.html `.t-meta` uses --s-10). The offset is the title's left edge
-     inside .t-top: chevron 14px + gap 8px + glyph 14px + gap 8px = 44px. */
-  margin-left: 44px;
+  margin-top: 2px;
+  /* Align under the title: chevron 18px + gap 8px + glyph 14px + gap 8px. */
+  margin-left: 48px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-family: var(--mono);
-  font-size: var(--text-2xs);
-  color: var(--fg-faint);
-  letter-spacing: 0.02em;
-  flex-wrap: wrap;
-  row-gap: 2px;
-}
-
-.tasks-v2 .t-meta > span,
-.tasks-v2 .t-meta .c-breakdown,
-.tasks-v2 .t-meta .c-pipeline {
+  gap: 12px;
+  min-width: 0;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  color: var(--fg-mute);
   white-space: nowrap;
 }
 
-.tasks-v2 .t-meta .sep {
-  color: var(--fg-ghost);
-}
-
-.tasks-v2 .t-meta .tag {
-  color: var(--fg-mute);
-  border-bottom: 1px dotted var(--fg-ghost);
-}
-
-/* The id chip now leads the meta line. Pull it left by its own inset so its
-   text aligns under the title rather than the chip's padding box. */
+/* The id leads the line; pull it left by its inset so the text aligns under
+   the title. Readable contrast: it is the row's handle. */
 .tasks-v2 .t-meta .t-id {
   margin-left: -5px;
+  color: var(--fg-mute);
 }
 
-/* Dedicated, fixed-width column at the row's right edge so every priority glyph
-   lands on one vertical lane regardless of run-chip / timestamp width. The slot
-   reserves its width even when a row has no priority, keeping the lane intact. */
+.tasks-v2 .t-progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tasks-v2 .t-progress-bar {
+  display: inline-flex;
+  width: 56px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-3);
+}
+
+.tasks-v2 .t-progress-bar .seg.done {
+  background: var(--ok);
+}
+
+.tasks-v2 .t-progress-bar .seg.running {
+  background: var(--accent);
+}
+
+.tasks-v2 .t-progress-bar .seg.waiting {
+  background: var(--warn);
+}
+
+.tasks-v2 .t-progress-live.running {
+  color: var(--accent);
+}
+
+.tasks-v2 .t-progress-live.waiting {
+  color: var(--warn);
+}
+
+.tasks-v2 .t-step {
+  color: var(--fg-soft);
+}
+
+/* Tags lane: right-aligned so the pills end against the status lane. */
+.tasks-v2 .t-tags {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tasks-v2 .t-tags .tag {
+  padding: 1px 6px;
+  border-radius: var(--r-xs);
+  background: var(--bg-2);
+  color: var(--fg-mute);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+}
+
+.tasks-v2 .t-tags .tag-more {
+  color: var(--fg-faint);
+  font-size: var(--text-2xs);
+}
+
+/* Status column: run chip, Blocked or Done, aligned on one lane. */
+.tasks-v2 .t-status-col {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.tasks-v2 .t-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.tasks-v2 .t-status.done {
+  color: var(--ok);
+  opacity: 0.85;
+}
+
+.tasks-v2 .t-status.blocked {
+  color: var(--err);
+}
+
+.tasks-v2 .t-status.blocked::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  border: 1.5px solid currentColor;
+}
+
+.tasks-v2 .t-when {
+  text-align: right;
+  color: var(--fg-mute);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Priority lane: only high and critical are marked. */
 .tasks-v2 .t-pri-col {
   display: flex;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
 }
 
 .tasks-v2 .t-pri {
-  font-family: var(--mono);
   font-size: var(--text-xs);
-  font-weight: 700;
-  line-height: 1;
-  flex-shrink: 0;
-  opacity: 0.6;
+  white-space: nowrap;
 }
 
-/* Four priority levels (reference has three). Colours follow getPriorityIndicator:
-   critical/high read as urgent, medium/low recede. */
 .tasks-v2 .t-pri.critical {
   color: var(--err);
-  opacity: 0.9;
 }
 
 .tasks-v2 .t-pri.high {
   color: var(--warn);
-}
-
-.tasks-v2 .t-pri.medium {
-  color: var(--fg-soft);
-}
-
-.tasks-v2 .t-pri.low {
-  color: var(--fg-faint);
-}
-
-.tasks-v2 .t-right {
-  display: flex;
-  align-items: center;
-  gap: var(--s-3);
-  justify-content: flex-end;
-  flex-shrink: 0;
-}
-
-.tasks-v2 .t-right .chip-slot {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.tasks-v2 .t-right .when {
-  min-width: 50px;
-  text-align: right;
-  color: var(--fg-faint);
-  font-family: var(--mono);
-  font-size: var(--text-2xs);
-  white-space: nowrap;
 }
 
 .tasks-v2 .caption-strip {
@@ -4274,6 +4525,58 @@ html.light ::selection {
   border-color: var(--panel-border);
 }
 
+/* Focus hint: with several side panels open, the one Escape and ⌘\ act on
+   (top of the panel focus stack) reads as nearer — a lit top edge and a
+   deeper shadow — while the others sit back with a muted title. The border
+   itself stays constant, so focus never redraws a hard outline. No glow —
+   glow means running. The focused panel is also raised so a just-opened or
+   clicked panel is never covered. */
+.hc-panel,
+.detail.detail-float {
+  --panel-lift: 0 1px 0 color-mix(in oklch, var(--fg) 7%, transparent) inset,
+    0 10px 28px -12px rgba(0, 0, 0, 0.5);
+}
+.hc-panel[data-focused],
+.detail.detail-float[data-focused] {
+  --panel-lift: 0 1px 0 color-mix(in oklch, var(--fg) 20%, transparent) inset,
+    0 22px 56px -16px rgba(0, 0, 0, 0.7);
+}
+.light .hc-panel,
+.light .detail.detail-float {
+  --panel-lift: 0 1px 0 rgba(255, 255, 255, 0.6) inset,
+    0 10px 26px -14px rgba(68, 52, 31, 0.18);
+}
+.light .hc-panel[data-focused],
+.light .detail.detail-float[data-focused] {
+  --panel-lift: 0 1px 0 rgba(255, 255, 255, 0.95) inset,
+    0 22px 52px -18px rgba(68, 52, 31, 0.32);
+}
+.hc-panel,
+.detail.detail-float,
+.detail-opaque.detail.detail-float,
+.light .hc-panel,
+.light .detail.detail-float,
+.light .detail-opaque.detail.detail-float {
+  box-shadow: var(--panel-lift);
+}
+.hc-panel {
+  transition-property: width, box-shadow;
+  transition-duration: var(--t-slow), var(--t-base, 180ms);
+  transition-timing-function: var(--ease);
+}
+.detail.detail-float {
+  transition: box-shadow var(--t-base, 180ms) var(--ease);
+}
+.detail.detail-float:not(.notifications-panel)[data-focused] {
+  z-index: 72;
+}
+.hc-panel:not([data-focused]) .hc-title,
+.detail.detail-float:not([data-focused]) [data-panel-title],
+.detail.detail-float:not([data-focused]) .wfd-title {
+  color: var(--fg-soft);
+  transition: color var(--t-fast) var(--ease);
+}
+
 .light .hc-launch {
   background: color-mix(in oklch, var(--bg-2) 34%, transparent);
   -webkit-backdrop-filter: blur(20px) saturate(1.35) brightness(1.03);
@@ -4384,20 +4687,6 @@ html.light ::selection {
   line-height: 1.1;
 }
 
-/* Hero sits within the header band: transparent so the accent wash shows
-   through, and no divider of its own (the wrapper's gradient line is it). */
-.tasks-v2-detail-shell .t-detail-hero {
-  padding: var(--s-1) var(--s-5) var(--s-4);
-  background: transparent;
-}
-
-.tasks-v2-detail-shell .t-detail-hero .hero-status {
-  background: color-mix(in oklch, var(--bg-2) 72%, var(--bg-1));
-  border-color: var(--panel-border);
-  border-left-color: var(--panel-border);
-  border-radius: var(--r-md);
-}
-
 .tasks-v2-detail-shell .t-detail-body {
   /* Transparent so the glass surface shows through the scrolling content,
      matching the reference (docs/design/tasks-v2.html `.t-detail-body` has no
@@ -4494,11 +4783,12 @@ html.light ::selection {
     max-width: 48vw;
   }
 
-  .tasks-v2 .t-right {
-    min-width: 92px;
+  .tasks-v2 .t-row {
+    grid-template-columns: auto minmax(0, 1fr) 96px 64px;
   }
 
-  .tasks-v2 .t-right .when {
+  .tasks-v2 .t-tags,
+  .tasks-v2 .t-when {
     display: none;
   }
 }
@@ -4688,4 +4978,1464 @@ html.light ::selection {
 .app-toggle[data-active-color]:not([data-active-color="neutral"])[aria-checked="true"] {
   background: color-mix(in oklch, var(--toggle-color) 22%, transparent);
   border-color: var(--toggle-color);
+}
+
+/* ── ⌘K command palette ─────────────────────────────────────────────────── */
+.cmdk-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  background: color-mix(in oklch, var(--bg) 55%, transparent);
+}
+.cmdk {
+  display: flex;
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: 60vh;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+  border-radius: var(--radius-xl);
+  background: var(--bg-2);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.35);
+  color: var(--fg);
+  font-family: var(--sans);
+}
+.cmdk-search {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  color: var(--fg-mute);
+}
+.cmdk-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-14);
+  outline: none;
+}
+.cmdk-input::placeholder {
+  color: var(--fg-mute);
+}
+.cmdk-scopes {
+  display: flex;
+  gap: var(--s-1);
+  padding: 0 var(--s-3) var(--s-2);
+  border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+}
+.cmdk-scope {
+  padding: 3px var(--s-2);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--fg-mute);
+  font: inherit;
+  font-size: var(--text-12);
+  cursor: pointer;
+}
+.cmdk-scope:hover {
+  color: var(--fg);
+}
+.cmdk-scope[aria-selected="true"] {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.cmdk-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-1) var(--s-2) var(--s-2);
+}
+.cmdk-heading {
+  padding: var(--s-2) var(--s-2) var(--s-1);
+  color: var(--fg-mute);
+  font-size: var(--text-11);
+  font-weight: 500;
+}
+.cmdk-item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: 7px var(--s-2);
+  border-radius: var(--r-md);
+  color: var(--fg-soft);
+  font-size: var(--text-13);
+  cursor: pointer;
+}
+.cmdk-item[aria-selected="true"] {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.cmdk-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmdk-hint {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-mute);
+  font-size: var(--text-12);
+}
+.cmdk-detail {
+  flex-shrink: 0;
+  color: var(--fg-mute);
+  font-family: var(--mono);
+  font-size: var(--text-11);
+}
+.cmdk-empty {
+  padding: var(--s-4);
+  color: var(--fg-mute);
+  font-size: var(--text-13);
+  text-align: center;
+}
+.cmdk-foot {
+  display: flex;
+  gap: var(--s-4);
+  padding: var(--s-2) var(--s-4);
+  border-top: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+  color: var(--fg-mute);
+  font-size: var(--text-11);
+}
+.cmdk-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.cmdk-kbd {
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  border-radius: var(--r-sm);
+  color: var(--fg-mute);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+}
+
+/* Page search entry points open the ⌘K palette (one search surface). */
+.palette-search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: var(--ctl-h);
+  padding: 0 var(--s-2) 0 10px;
+  border: 1px solid var(--ctl-line);
+  border-radius: var(--ctl-radius);
+  background: transparent;
+  color: var(--fg-mute);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+.palette-search-btn:hover {
+  color: var(--fg-soft);
+  border-color: var(--ctl-line-hover);
+  background: var(--bg-2);
+}
+.palette-search-btn:focus-visible {
+  outline: none;
+  border-color: var(--ctl-ring);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.palette-search-btn.compact {
+  width: var(--ctl-h);
+  justify-content: center;
+  padding: 0;
+}
+.palette-search-label {
+  flex: 1;
+  text-align: left;
+}
+.palette-search-kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
+  font-family: var(--mono);
+  font-size: var(--text-2xs, 10px);
+  line-height: 16px;
+}
+
+/* Artifact inspector title: file name first, folder path muted before it. */
+.artifact-inspector-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+}
+.artifact-inspector-folder {
+  color: var(--fg-mute);
+  font-weight: 400;
+}
+
+
+/* ── Controls ────────────────────────────────────────────────────────────────
+   One shape for every compact control: composer chips, toolbar selects and
+   buttons, header actions. 26px tall, 6px radius, sans 12px, one caret.
+   `ctl-quiet` sits in context (no edge until hover); `ctl-outline` sits in a
+   toolbar (hairline edge). Selects get the caret from the global `select` rule
+   wrapper so native selects and custom chips draw the same chevron. */
+:root {
+  --ctl-h: 26px;
+  --ctl-radius: var(--r-md);
+  --ctl-line: color-mix(in oklch, var(--fg) 10%, transparent);
+  --ctl-line-hover: color-mix(in oklch, var(--fg) 18%, transparent);
+  --ctl-ring: color-mix(in oklch, var(--accent) 55%, transparent);
+  --ctl-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1h);
+  height: var(--ctl-h);
+  padding: 0 var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--ctl-radius);
+  background-color: transparent;
+  color: var(--fg-soft);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition:
+    color var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.ctl:hover,
+.ctl[aria-expanded="true"] {
+  background-color: var(--bg-3);
+  color: var(--fg);
+}
+.ctl-outline {
+  border-color: var(--ctl-line);
+}
+.ctl-outline:hover,
+.ctl-outline[aria-expanded="true"] {
+  background-color: var(--bg-2);
+  border-color: var(--ctl-line-hover);
+}
+/* Keyboard focus: a soft halo instead of a hard 2px outline. */
+.ctl:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+  border-color: var(--ctl-ring);
+}
+.ctl:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+select.ctl {
+  width: auto;
+  min-width: 0;
+  padding-right: calc(var(--s-2) + 14px);
+  text-overflow: ellipsis;
+}
+select.ctl.ctl-field {
+  width: 100%;
+}
+/* Buttons that open a menu draw the same caret as native selects. */
+.ctl-caret {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  background-color: var(--fg-mute);
+  -webkit-mask: var(--ctl-caret) center / contain no-repeat;
+  mask: var(--ctl-caret) center / contain no-repeat;
+  pointer-events: none;
+}
+/* Form-row size of the same control (Settings, editors, dialogs). */
+.ctl-field {
+  height: 32px;
+  padding-left: 10px;
+  font-size: var(--text-13);
+}
+.ctl[aria-expanded="true"] .ctl-caret {
+  transform: rotate(180deg);
+}
+.ctl-caret { display: inline-block; }
+
+/* ── Depth: content sheet on a canvas ───────────────────────────────────────
+   The titlebar and rail sit on the darker canvas; the routed page is a sheet
+   resting on it — inset from the window edge, rounded, with a lit top edge
+   and a soft shadow. Floating side panels then read as a third, nearer layer.
+   Inside the sheet `--bg` is the sheet tone, so page backgrounds follow. */
+.app-sheet {
+  --color-bg: #0c0c0c;
+  --bg: var(--color-bg);
+  margin: 0 6px 6px 0;
+  border: 1px solid color-mix(in oklch, var(--fg) 7%, transparent);
+  border-radius: var(--r-lg);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, var(--fg) 5%, transparent) inset,
+    0 0 0 1px rgba(0, 0, 0, 0.4),
+    0 18px 40px -24px rgba(0, 0, 0, 0.9);
+}
+.light .app-sheet {
+  --color-bg: #fbf8f1;
+  --bg: var(--color-bg);
+  border-color: color-mix(in oklch, var(--fg) 10%, transparent);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 1px 2px rgba(68, 52, 31, 0.08),
+    0 18px 40px -26px rgba(68, 52, 31, 0.35);
+}
+
+
+/* ── Typeface pairings ──────────────────────────────────────────────────────
+   Four roles, used the same way on every surface:
+     --font-sans    UI: controls, labels, titles, short text
+     --font-prose   reading text: chat replies, descriptions, artifacts
+     --font-serif   display: page titles and the wordmark family
+     --font-mono    data: IDs, code, paths, counts
+   html[data-type] picks a pairing (Settings → Appearance → Typeface). */
+:root,
+[data-type="editorial"] {
+  --font-sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
+  --font-prose: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-serif: "Instrument Serif", "Newsreader", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --font-features: normal;
+  --prose-size: 15px;
+  --prose-leading: 1.6;
+  --display-tracking: -0.01em;
+}
+[data-type="technical"] {
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --font-prose: "IBM Plex Sans", system-ui, sans-serif;
+  --font-serif: "IBM Plex Serif", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  --font-features: normal;
+  --prose-size: 14px;
+  --prose-leading: 1.65;
+  --display-tracking: -0.02em;
+}
+[data-type="humanist"] {
+  --font-sans: "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
+  --font-prose: "Literata", Georgia, serif;
+  --font-serif: "Fraunces", Georgia, serif;
+  --font-mono: "Spline Sans Mono", ui-monospace, "SF Mono", monospace;
+  --font-features: normal;
+  --prose-size: 14px;
+  --prose-leading: 1.65;
+  --display-tracking: -0.02em;
+}
+[data-type="classic"] {
+  --font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --font-prose: "Geist", system-ui, sans-serif;
+  --font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --font-features: "ss01", "cv11";
+  --prose-size: 13px;
+  --prose-leading: 1.6;
+  --display-tracking: -0.025em;
+}
+
+[data-type="atelier"] {
+  --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-prose: "DM Serif Text", Georgia, serif;
+  --font-serif: "DM Serif Display", Georgia, serif;
+  --font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
+  --font-features: normal;
+  --prose-size: 15px;
+  --prose-leading: 1.6;
+  --display-tracking: -0.01em;
+}
+[data-type="terminal"] {
+  --font-sans: "Space Grotesk", system-ui, -apple-system, sans-serif;
+  --font-prose: "Space Grotesk", system-ui, sans-serif;
+  --font-serif: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, "SF Mono", monospace;
+  --font-features: normal;
+  --prose-size: 14px;
+  --prose-leading: 1.6;
+  --display-tracking: -0.03em;
+}
+[data-type="gazette"] {
+  --font-sans: "Public Sans", system-ui, -apple-system, sans-serif;
+  --font-prose: "Source Serif 4", Georgia, serif;
+  --font-serif: "Playfair Display", Georgia, serif;
+  --font-mono: "Source Code Pro", ui-monospace, "SF Mono", monospace;
+  --font-features: normal;
+  --prose-size: 15px;
+  --prose-leading: 1.6;
+  --display-tracking: -0.015em;
+}
+[data-type="modernist"] {
+  --font-sans: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
+  --font-prose: "Hanken Grotesk", system-ui, sans-serif;
+  --font-serif: "Syne", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --font-features: normal;
+  --prose-size: 14px;
+  --prose-leading: 1.65;
+  --display-tracking: -0.02em;
+}
+[data-type="soft"] {
+  --font-sans: "Onest", system-ui, -apple-system, sans-serif;
+  --font-prose: "Lora", Georgia, serif;
+  --font-serif: "Young Serif", Georgia, serif;
+  --font-mono: "Fira Code", ui-monospace, "SF Mono", monospace;
+  --font-features: normal;
+  --prose-size: 15px;
+  --prose-leading: 1.62;
+  --display-tracking: -0.01em;
+}
+
+/* Typeface preview cards (Settings → Appearance). Each card carries its own
+   data-type, so it renders in its pairing regardless of the active one. */
+.type-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--s-2);
+}
+.type-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--ctl-line);
+  border-radius: var(--r-lg);
+  background-color: color-mix(in oklch, var(--fg) 2%, transparent);
+  color: var(--fg-soft);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.type-card:hover {
+  border-color: var(--ctl-line-hover);
+  background-color: color-mix(in oklch, var(--fg) 4%, transparent);
+}
+.type-card[aria-checked="true"] {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
+}
+.type-card:focus-visible {
+  outline: none;
+  border-color: var(--ctl-ring);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.type-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.type-card-display {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 1.1;
+  letter-spacing: var(--display-tracking);
+  color: var(--fg);
+}
+.type-card-name {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-mute);
+}
+.type-card-prose {
+  font-family: var(--font-prose);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.type-card-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Type roles ─────────────────────────────────────────────────────────────
+   Shared text styles so chat, inspectors, task detail, settings and pages
+   speak the same type. Section labels are sentence-case UI text, never
+   tracked caps; mono is for data only. */
+.t-label {
+  font-family: var(--font-sans);
+  font-size: var(--text-12);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  line-height: 1.4;
+}
+.t-meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  letter-spacing: 0;
+}
+.t-prose {
+  font-family: var(--font-prose);
+  font-size: var(--prose-size);
+  line-height: var(--prose-leading);
+}
+
+/* Reading text uses the prose face wherever markdown renders. */
+.markdown-content {
+  font-family: var(--font-prose);
+}
+.markdown-content p,
+.markdown-content li {
+  font-size: var(--prose-size);
+  line-height: var(--prose-leading);
+}
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4 {
+  font-family: var(--font-sans);
+  letter-spacing: -0.005em;
+}
+.markdown-content code,
+.markdown-content pre {
+  font-family: var(--font-mono);
+}
+
+/* Legacy global eyebrow → section label. */
+.eyebrow {
+  font-family: var(--font-sans);
+  font-size: var(--text-12);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* Every native single-line select draws the same caret, whichever component
+   renders it, so Settings, editors and the composer cannot drift apart. */
+:root {
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8780' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+.light {
+  --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2376705f' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+@layer base {
+  select:not([multiple]):not([size]) {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: var(--select-caret);
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    background-size: 10px 10px;
+    padding-right: 24px;
+  }
+}
+
+/* Number fields use the shared −/+ steppers instead of platform spinners. */
+input.no-spin::-webkit-outer-spin-button,
+input.no-spin::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input.no-spin {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* ── Split layouts (nav column + content) ───────────────────────────────────
+   Settings-style pages: the nav column is recessed into the sheet (darker,
+   with an inner shadow along its edge) and the selected item is a raised
+   tab, so the content pane reads as the surface in front. */
+.split-nav {
+  position: relative;
+  background-color: color-mix(in oklch, var(--color-canvas) 80%, var(--color-bg));
+  box-shadow:
+    inset -1px 0 0 color-mix(in oklch, var(--fg) 7%, transparent),
+    inset -26px 0 30px -24px rgba(0, 0, 0, 0.75);
+}
+.light .split-nav {
+  box-shadow:
+    inset -1px 0 0 color-mix(in oklch, var(--fg) 9%, transparent),
+    inset -26px 0 30px -24px rgba(68, 52, 31, 0.28);
+}
+.split-nav nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.split-nav-title {
+  margin: 0 0 var(--s-3);
+  padding: 0 var(--s-3);
+  font-family: var(--font-serif);
+  font-size: 20px;
+  letter-spacing: var(--display-tracking, -0.01em);
+  color: var(--fg);
+}
+.split-nav-item {
+  width: 100%;
+  min-height: 34px;
+  padding: 0 var(--s-3);
+  border-radius: var(--r-md);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  color: var(--fg-soft);
+  transition:
+    background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.split-nav-item:hover {
+  background-color: color-mix(in oklch, var(--fg) 4%, transparent);
+  color: var(--fg);
+}
+.split-nav-item[aria-current="page"] {
+  background-color: var(--color-bg);
+  color: var(--fg);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, var(--fg) 7%, transparent) inset,
+    0 0 0 1px color-mix(in oklch, var(--fg) 7%, transparent),
+    0 4px 10px -6px rgba(0, 0, 0, 0.6);
+}
+.light .split-nav-item[aria-current="page"] {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 0 0 1px color-mix(in oklch, var(--fg) 9%, transparent),
+    0 4px 10px -6px rgba(68, 52, 31, 0.3);
+}
+.split-nav-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+/* Activity (notifications) trigger: a quiet header control with a bell; an
+   unread count rides as a small accent badge instead of a boxed "N new". */
+.notifications-trigger {
+  height: 26px;
+  padding: 0 7px;
+  gap: 5px;
+  color: var(--fg-mute);
+}
+.notifications-trigger[data-unread] {
+  color: var(--fg-soft);
+}
+.notifications-trigger-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background-color: color-mix(in oklch, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Dropdown: a `.ctl` trigger opening the shared menu surface (`.ovf-menu`),
+   so pickers open like the ⋯ menu instead of the platform popup. */
+.dd {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.dd-field {
+  display: flex;
+  width: 100%;
+}
+.dd-field .dd-trigger {
+  width: 100%;
+  justify-content: space-between;
+}
+.dd-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dd-menu {
+  left: 0;
+  right: auto;
+  min-width: max(100%, 10rem);
+  max-height: 18rem;
+  overflow-y: auto;
+  margin: 0;
+  list-style: none;
+  outline: none;
+  z-index: 80;
+  background-color: var(--bg-2);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, var(--fg) 6%, transparent) inset,
+    0 12px 32px -8px rgba(0, 0, 0, 0.55);
+}
+.light .dd-menu {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 12px 32px -10px rgba(68, 52, 31, 0.3);
+}
+.dd-menu.end {
+  left: auto;
+  right: 0;
+}
+.dd-menu.up {
+  top: auto;
+  bottom: calc(100% + var(--s-1));
+}
+.dd-item[data-active] {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.dd-item[aria-selected="true"] {
+  color: var(--fg);
+}
+.dd-item[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.dd-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--fg) 16%, transparent);
+}
+.dd-field .dd-trigger .dd-swatch + .dd-value {
+  margin-right: auto;
+}
+.dd-check {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+/* ── Daemons page ── */
+.daemons-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.daemons-search {
+  flex: 1;
+  min-width: 12rem;
+  max-width: 22rem;
+  margin-left: auto;
+}
+.daemons-search input {
+  height: var(--ctl-h);
+  font-size: var(--text-12);
+}
+.daemon-register {
+  flex-shrink: 0;
+}
+.daemon-row {
+  display: grid;
+  /* dot · name/meta · status · capabilities · concurrency · last seen */
+  grid-template-columns: 8px minmax(0, 1fr) 120px 150px 110px 90px;
+  width: 100%;
+  align-items: center;
+  column-gap: var(--s-3);
+  padding: 10px var(--s-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background-color: color-mix(in oklch, var(--fg) 2.5%, transparent);
+  text-align: left;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.daemon-row:hover {
+  background-color: color-mix(in oklch, var(--fg) 5%, transparent);
+  border-color: var(--ctl-line);
+}
+.daemon-row[aria-pressed="true"] {
+  background-color: var(--bg-2);
+  border-color: var(--ctl-line-hover);
+  box-shadow: 0 1px 0 color-mix(in oklch, var(--fg) 6%, transparent) inset;
+}
+.daemon-row:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.daemon-row-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+.daemon-row[data-status="active"] .daemon-row-dot {
+  background: var(--ok);
+}
+.daemon-row[data-status="pending"] .daemon-row-dot {
+  background: var(--warn);
+}
+.daemon-row[data-status="revoked"] .daemon-row-dot,
+.daemon-row[data-status="removed"] .daemon-row-dot {
+  background: var(--fg-ghost, var(--fg-faint));
+}
+.daemon-row-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.daemon-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  margin-top: 2px;
+  font-family: var(--font-sans);
+  font-size: var(--text-12);
+  color: var(--fg-mute);
+}
+.daemon-row-meta > span + span::before {
+  content: "·";
+  margin: 0 6px;
+  color: var(--fg-faint);
+}
+.daemon-row-body {
+  min-width: 0;
+}
+.daemon-row-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  color: var(--fg-mute);
+}
+.daemon-row-health {
+  color: var(--warn);
+}
+.daemon-col,
+.daemon-col-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-12);
+  color: var(--fg-mute);
+}
+.daemon-col-seen {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* Column labels over the fleet, on the same grid as .daemon-row. */
+.daemon-list-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px 150px 110px 90px;
+  column-gap: var(--s-3);
+  padding: 0 calc(var(--s-3) + 1px) var(--s-2)
+    calc(var(--s-3) + 1px + 8px + var(--s-3));
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+@media (max-width: 980px) {
+  .daemon-row {
+    grid-template-columns: 8px minmax(0, 1fr) 120px 90px;
+  }
+  .daemon-row > .daemon-col:not(.daemon-col-seen) {
+    display: none;
+  }
+  .daemon-list-head {
+    grid-template-columns: minmax(0, 1fr) 120px 90px;
+  }
+  .daemon-list-head > span:nth-child(3),
+  .daemon-list-head > span:nth-child(4) {
+    display: none;
+  }
+}
+
+/* Tasks View menu trigger: lit when a view option is on. */
+.tasks-view-trigger.on {
+  color: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 35%, transparent);
+}
+.tasks-v2 .scope-secondary .ovf-menu {
+  z-index: 80;
+}
+
+/* Daemon status groups replace the status filter bar: each status is a
+   collapsible heading with its count. */
+.daemons-search {
+  margin-left: 0;
+  max-width: 28rem;
+}
+.daemons-toolbar .daemon-register {
+  margin-left: auto;
+}
+.daemon-group-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--s-1h);
+  padding: 4px var(--s-1);
+  border-radius: var(--r-sm);
+  color: var(--fg-soft);
+  text-align: left;
+  cursor: pointer;
+}
+.daemon-group-head:hover {
+  color: var(--fg);
+  background-color: color-mix(in oklch, var(--fg) 3%, transparent);
+}
+.daemon-group-head:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+.daemon-group-head h2 {
+  font-family: var(--font-sans);
+  font-size: var(--text-12);
+  font-weight: 600;
+}
+.daemon-group-chev {
+  width: 12px;
+  height: 12px;
+  color: var(--fg-mute);
+  transition: transform var(--t-fast) var(--ease);
+}
+.daemon-group-head[aria-expanded="true"] .daemon-group-chev {
+  transform: rotate(90deg);
+}
+.daemon-group-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background-color: color-mix(in oklch, var(--fg) 7%, transparent);
+  color: var(--fg-mute);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.dd-trigger[aria-invalid="true"] {
+  border-color: var(--err);
+}
+
+/* Settings tree: grouped pages, the current page expanded to its sections. */
+.split-nav nav.settings-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.settings-tree ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-tree-group-label {
+  margin: 0 0 var(--s-1);
+  padding: 0 var(--s-3);
+  font-family: var(--font-sans);
+  font-size: var(--text-11);
+  font-weight: 600;
+  color: var(--fg-faint);
+}
+.settings-tree-sections {
+  position: relative;
+  margin: 2px 0 var(--s-1) var(--s-3) !important;
+  padding-left: var(--s-2) !important;
+  border-left: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+}
+.settings-tree-section {
+  display: block;
+  width: 100%;
+  padding: 4px var(--s-2);
+  border-radius: var(--r-sm);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  text-align: left;
+  color: var(--fg-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    color var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease);
+}
+.settings-tree-section[data-depth="2"] {
+  padding-left: calc(var(--s-2) + 12px);
+  font-size: 12px;
+}
+.settings-tree-section:hover {
+  color: var(--fg);
+  background-color: color-mix(in oklch, var(--fg) 4%, transparent);
+}
+.settings-tree-section[aria-current="location"] {
+  color: var(--fg);
+}
+.settings-tree-section[aria-current="location"]::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  width: 2px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.settings-tree-section:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+/* Settings › Appearance › Accent: one swatch per accent. Each button carries
+   data-accent, so its chip shows that accent (ACCENTS below). */
+.accent-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px;
+}
+.accent-swatch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-1);
+  color: var(--color-fg-soft);
+  font-size: 13px;
+  text-align: left;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.accent-swatch:hover {
+  border-color: var(--color-line-strong);
+}
+.accent-swatch[aria-checked="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-wash);
+  color: var(--color-fg);
+}
+.accent-swatch:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.accent-swatch-chip {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--color-accent);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.18);
+}
+
+/* =============================================================================
+   ACCENTS — html[data-accent] (uiStore.accent, set by useTheme); any element
+   with data-accent (e.g. a Settings swatch) takes that accent locally. Every value
+   is oklch with its chroma held inside sRGB, so the accent looks the same on
+   standard and HDR/wide-gamut displays; the color-gamut: p3 block below lifts
+   chroma (≤1.3×) where the screen can show it. Generated: the lightness and
+   chroma steps per role are fixed, only hue and the chroma cap vary.
+   ============================================================================= */
+[data-accent="orchid"] {
+  --color-accent: oklch(0.78 0.11 345);
+  --color-accent-deep: oklch(0.85 0.083 345);
+  --color-accent-mute: oklch(0.69 0.099 345);
+  --color-accent-wash: oklch(0.27 0.031 345);
+  --color-accent-glow: oklch(0.78 0.11 345 / 0.08);
+  --color-primary-pressed: oklch(0.69 0.099 345);
+  --color-text-selection: oklch(0.78 0.11 345 / 0.3);
+}
+.light[data-accent="orchid"],
+.light [data-accent="orchid"] {
+  --color-accent: oklch(0.48 0.11 345);
+  --color-accent-deep: oklch(0.42 0.11 345);
+  --color-accent-mute: oklch(0.48 0.11 345);
+  --color-accent-wash: oklch(0.945 0.024 345);
+  --color-accent-glow: oklch(0.48 0.11 345 / 0.08);
+  --color-primary-pressed: oklch(0.35 0.099 345);
+  --color-text-selection: oklch(0.48 0.11 345 / 0.2);
+}
+[data-accent="ember"] {
+  --color-accent: oklch(0.76 0.12 40);
+  --color-accent-deep: oklch(0.83 0.09 40);
+  --color-accent-mute: oklch(0.67 0.108 40);
+  --color-accent-wash: oklch(0.27 0.034 40);
+  --color-accent-glow: oklch(0.76 0.12 40 / 0.08);
+  --color-primary-pressed: oklch(0.67 0.108 40);
+  --color-text-selection: oklch(0.76 0.12 40 / 0.3);
+}
+.light[data-accent="ember"],
+.light [data-accent="ember"] {
+  --color-accent: oklch(0.52 0.12 40);
+  --color-accent-deep: oklch(0.46 0.12 40);
+  --color-accent-mute: oklch(0.52 0.12 40);
+  --color-accent-wash: oklch(0.945 0.026 40);
+  --color-accent-glow: oklch(0.52 0.12 40 / 0.08);
+  --color-primary-pressed: oklch(0.39 0.108 40);
+  --color-text-selection: oklch(0.52 0.12 40 / 0.2);
+}
+[data-accent="jade"] {
+  --color-accent: oklch(0.8 0.11 168);
+  --color-accent-deep: oklch(0.87 0.083 168);
+  --color-accent-mute: oklch(0.71 0.099 168);
+  --color-accent-wash: oklch(0.27 0.031 168);
+  --color-accent-glow: oklch(0.8 0.11 168 / 0.08);
+  --color-primary-pressed: oklch(0.71 0.099 168);
+  --color-text-selection: oklch(0.8 0.11 168 / 0.3);
+}
+.light[data-accent="jade"],
+.light [data-accent="jade"] {
+  --color-accent: oklch(0.5 0.078 168);
+  --color-accent-deep: oklch(0.44 0.078 168);
+  --color-accent-mute: oklch(0.5 0.078 168);
+  --color-accent-wash: oklch(0.945 0.017 168);
+  --color-accent-glow: oklch(0.5 0.078 168 / 0.08);
+  --color-primary-pressed: oklch(0.37 0.07 168);
+  --color-text-selection: oklch(0.5 0.078 168 / 0.2);
+}
+[data-accent="lagoon"] {
+  --color-accent: oklch(0.79 0.1 215);
+  --color-accent-deep: oklch(0.86 0.075 215);
+  --color-accent-mute: oklch(0.7 0.09 215);
+  --color-accent-wash: oklch(0.27 0.028 215);
+  --color-accent-glow: oklch(0.79 0.1 215 / 0.08);
+  --color-primary-pressed: oklch(0.7 0.09 215);
+  --color-text-selection: oklch(0.79 0.1 215 / 0.3);
+}
+.light[data-accent="lagoon"],
+.light [data-accent="lagoon"] {
+  --color-accent: oklch(0.5 0.068 215);
+  --color-accent-deep: oklch(0.44 0.068 215);
+  --color-accent-mute: oklch(0.5 0.068 215);
+  --color-accent-wash: oklch(0.945 0.015 215);
+  --color-accent-glow: oklch(0.5 0.068 215 / 0.08);
+  --color-primary-pressed: oklch(0.37 0.061 215);
+  --color-text-selection: oklch(0.5 0.068 215 / 0.2);
+}
+[data-accent="cobalt"] {
+  --color-accent: oklch(0.72 0.13 262);
+  --color-accent-deep: oklch(0.79 0.098 262);
+  --color-accent-mute: oklch(0.63 0.117 262);
+  --color-accent-wash: oklch(0.27 0.036 262);
+  --color-accent-glow: oklch(0.72 0.13 262 / 0.08);
+  --color-primary-pressed: oklch(0.63 0.117 262);
+  --color-text-selection: oklch(0.72 0.13 262 / 0.3);
+}
+.light[data-accent="cobalt"],
+.light [data-accent="cobalt"] {
+  --color-accent: oklch(0.48 0.112 262);
+  --color-accent-deep: oklch(0.42 0.112 262);
+  --color-accent-mute: oklch(0.48 0.112 262);
+  --color-accent-wash: oklch(0.945 0.025 262);
+  --color-accent-glow: oklch(0.48 0.112 262 / 0.08);
+  --color-primary-pressed: oklch(0.35 0.101 262);
+  --color-text-selection: oklch(0.48 0.112 262 / 0.2);
+}
+[data-accent="iris"] {
+  --color-accent: oklch(0.74 0.13 300);
+  --color-accent-deep: oklch(0.81 0.098 300);
+  --color-accent-mute: oklch(0.65 0.117 300);
+  --color-accent-wash: oklch(0.27 0.036 300);
+  --color-accent-glow: oklch(0.74 0.13 300 / 0.08);
+  --color-primary-pressed: oklch(0.65 0.117 300);
+  --color-text-selection: oklch(0.74 0.13 300 / 0.3);
+}
+.light[data-accent="iris"],
+.light [data-accent="iris"] {
+  --color-accent: oklch(0.48 0.13 300);
+  --color-accent-deep: oklch(0.42 0.13 300);
+  --color-accent-mute: oklch(0.48 0.13 300);
+  --color-accent-wash: oklch(0.945 0.029 300);
+  --color-accent-glow: oklch(0.48 0.13 300 / 0.08);
+  --color-primary-pressed: oklch(0.35 0.117 300);
+  --color-text-selection: oklch(0.48 0.13 300 / 0.2);
+}
+
+/* Wide-gamut screens: richer accents and status/step hues. The base values
+   above are the sRGB-safe versions of the same colours. */
+@media (color-gamut: p3) {
+  :root:not(.light) {
+    --color-warn-wash: oklch(0.32 0.079 70);
+    --color-err: oklch(0.72 0.18 25);
+    --color-info-wash: oklch(0.32 0.077 220);
+    --color-step-llm: oklch(0.72 0.16 285);
+    --color-step-llm-fg: oklch(0.82 0.102 285);
+    --color-step-structured-wash: oklch(0.32 0.072 200);
+    --color-step-route-wash: oklch(0.32 0.109 135);
+    --color-step-human-wash: oklch(0.32 0.079 70);
+    --color-step-human-fg: oklch(0.85 0.14 70);
+  }
+  :root.light {
+    --color-warn: oklch(0.55 0.136 70);
+    --color-warn-wash: oklch(0.93 0.06 75);
+    --color-err-wash: oklch(0.93 0.046 25);
+    --color-info: oklch(0.48 0.115 220);
+    --color-warn-fg: oklch(0.48 0.119 70);
+    --color-step-llm-wash: oklch(0.93 0.038 285);
+    --color-step-structured: oklch(0.52 0.118 200);
+    --color-step-structured-fg: oklch(0.4 0.091 200);
+    --color-step-route: oklch(0.55 0.18 135);
+    --color-step-route-fg: oklch(0.45 0.154 135);
+    --color-step-human: oklch(0.55 0.136 70);
+    --color-step-human-wash: oklch(0.93 0.06 75);
+    --color-step-human-fg: oklch(0.45 0.111 70);
+    --color-step-finish-fg: oklch(0.45 0.15 145);
+  }
+  [data-accent="orchid"] {
+    --color-accent: oklch(0.78 0.143 345);
+    --color-accent-deep: oklch(0.85 0.107 345);
+    --color-accent-mute: oklch(0.69 0.129 345);
+    --color-accent-wash: oklch(0.27 0.04 345);
+    --color-accent-glow: oklch(0.78 0.143 345 / 0.08);
+    --color-primary-pressed: oklch(0.69 0.129 345);
+    --color-text-selection: oklch(0.78 0.143 345 / 0.3);
+  }
+  .light[data-accent="orchid"],
+  .light [data-accent="orchid"] {
+    --color-accent: oklch(0.48 0.143 345);
+    --color-accent-deep: oklch(0.42 0.143 345);
+    --color-accent-mute: oklch(0.48 0.143 345);
+    --color-accent-wash: oklch(0.945 0.031 345);
+    --color-accent-glow: oklch(0.48 0.143 345 / 0.08);
+    --color-primary-pressed: oklch(0.35 0.129 345);
+    --color-text-selection: oklch(0.48 0.143 345 / 0.2);
+  }
+  [data-accent="ember"] {
+    --color-accent: oklch(0.76 0.156 40);
+    --color-accent-deep: oklch(0.83 0.117 40);
+    --color-accent-mute: oklch(0.67 0.14 40);
+    --color-accent-wash: oklch(0.27 0.044 40);
+    --color-accent-glow: oklch(0.76 0.156 40 / 0.08);
+    --color-primary-pressed: oklch(0.67 0.14 40);
+    --color-text-selection: oklch(0.76 0.156 40 / 0.3);
+  }
+  .light[data-accent="ember"],
+  .light [data-accent="ember"] {
+    --color-accent: oklch(0.52 0.144 40);
+    --color-accent-deep: oklch(0.46 0.144 40);
+    --color-accent-mute: oklch(0.52 0.144 40);
+    --color-accent-wash: oklch(0.945 0.032 40);
+    --color-accent-glow: oklch(0.52 0.144 40 / 0.08);
+    --color-primary-pressed: oklch(0.39 0.13 40);
+    --color-text-selection: oklch(0.52 0.144 40 / 0.2);
+  }
+  [data-accent="jade"] {
+    --color-accent: oklch(0.8 0.143 168);
+    --color-accent-deep: oklch(0.87 0.107 168);
+    --color-accent-mute: oklch(0.71 0.129 168);
+    --color-accent-wash: oklch(0.27 0.04 168);
+    --color-accent-glow: oklch(0.8 0.143 168 / 0.08);
+    --color-primary-pressed: oklch(0.71 0.129 168);
+    --color-text-selection: oklch(0.8 0.143 168 / 0.3);
+  }
+  .light[data-accent="jade"],
+  .light [data-accent="jade"] {
+    --color-accent: oklch(0.5 0.102 168);
+    --color-accent-deep: oklch(0.44 0.102 168);
+    --color-accent-mute: oklch(0.5 0.102 168);
+    --color-accent-wash: oklch(0.945 0.022 168);
+    --color-accent-glow: oklch(0.5 0.102 168 / 0.08);
+    --color-primary-pressed: oklch(0.37 0.092 168);
+    --color-text-selection: oklch(0.5 0.102 168 / 0.2);
+  }
+  [data-accent="lagoon"] {
+    --color-accent: oklch(0.79 0.13 215);
+    --color-accent-deep: oklch(0.86 0.098 215);
+    --color-accent-mute: oklch(0.7 0.117 215);
+    --color-accent-wash: oklch(0.27 0.036 215);
+    --color-accent-glow: oklch(0.79 0.13 215 / 0.08);
+    --color-primary-pressed: oklch(0.7 0.117 215);
+    --color-text-selection: oklch(0.79 0.13 215 / 0.3);
+  }
+  .light[data-accent="lagoon"],
+  .light [data-accent="lagoon"] {
+    --color-accent: oklch(0.5 0.089 215);
+    --color-accent-deep: oklch(0.44 0.089 215);
+    --color-accent-mute: oklch(0.5 0.089 215);
+    --color-accent-wash: oklch(0.945 0.02 215);
+    --color-accent-glow: oklch(0.5 0.089 215 / 0.08);
+    --color-primary-pressed: oklch(0.37 0.08 215);
+    --color-text-selection: oklch(0.5 0.089 215 / 0.2);
+  }
+  [data-accent="cobalt"] {
+    --color-accent: oklch(0.72 0.145 262);
+    --color-accent-deep: oklch(0.79 0.109 262);
+    --color-accent-mute: oklch(0.63 0.13 262);
+    --color-accent-wash: oklch(0.27 0.041 262);
+    --color-accent-glow: oklch(0.72 0.145 262 / 0.08);
+    --color-primary-pressed: oklch(0.63 0.13 262);
+    --color-text-selection: oklch(0.72 0.145 262 / 0.3);
+  }
+  .light[data-accent="cobalt"],
+  .light [data-accent="cobalt"] {
+    --color-accent: oklch(0.48 0.123 262);
+    --color-accent-deep: oklch(0.42 0.123 262);
+    --color-accent-mute: oklch(0.48 0.123 262);
+    --color-accent-wash: oklch(0.945 0.027 262);
+    --color-accent-glow: oklch(0.48 0.123 262 / 0.08);
+    --color-primary-pressed: oklch(0.35 0.111 262);
+    --color-text-selection: oklch(0.48 0.123 262 / 0.2);
+  }
+  [data-accent="iris"] {
+    --color-accent: oklch(0.74 0.155 300);
+    --color-accent-deep: oklch(0.81 0.116 300);
+    --color-accent-mute: oklch(0.65 0.139 300);
+    --color-accent-wash: oklch(0.27 0.043 300);
+    --color-accent-glow: oklch(0.74 0.155 300 / 0.08);
+    --color-primary-pressed: oklch(0.65 0.139 300);
+    --color-text-selection: oklch(0.74 0.155 300 / 0.3);
+  }
+  .light[data-accent="iris"],
+  .light [data-accent="iris"] {
+    --color-accent: oklch(0.48 0.146 300);
+    --color-accent-deep: oklch(0.42 0.146 300);
+    --color-accent-mute: oklch(0.48 0.146 300);
+    --color-accent-wash: oklch(0.945 0.032 300);
+    --color-accent-glow: oklch(0.48 0.146 300 / 0.08);
+    --color-primary-pressed: oklch(0.35 0.131 300);
+    --color-text-selection: oklch(0.48 0.146 300 / 0.2);
+  }
+}
+
+/* Fixed accent colours, independent of the chosen app accent (e.g. the
+   Settings › Code › Inline code text choices). Same values as each accent's
+   --color-accent above. */
+:root {
+  --accent-orchid: oklch(0.78 0.11 345);
+  --accent-ember: oklch(0.76 0.12 40);
+  --accent-jade: oklch(0.8 0.11 168);
+  --accent-lagoon: oklch(0.79 0.1 215);
+  --accent-cobalt: oklch(0.72 0.13 262);
+  --accent-iris: oklch(0.74 0.13 300);
+}
+:root.light {
+  --accent-orchid: oklch(0.48 0.11 345);
+  --accent-ember: oklch(0.52 0.12 40);
+  --accent-jade: oklch(0.5 0.078 168);
+  --accent-lagoon: oklch(0.5 0.068 215);
+  --accent-cobalt: oklch(0.48 0.112 262);
+  --accent-iris: oklch(0.48 0.13 300);
+}
+@media (color-gamut: p3) {
+  :root:not(.light) {
+    --accent-orchid: oklch(0.78 0.143 345);
+    --accent-ember: oklch(0.76 0.156 40);
+    --accent-jade: oklch(0.8 0.143 168);
+    --accent-lagoon: oklch(0.79 0.13 215);
+    --accent-cobalt: oklch(0.72 0.145 262);
+    --accent-iris: oklch(0.74 0.155 300);
+  }
+  :root.light {
+    --accent-orchid: oklch(0.48 0.143 345);
+    --accent-ember: oklch(0.52 0.144 40);
+    --accent-jade: oklch(0.5 0.102 168);
+    --accent-lagoon: oklch(0.5 0.089 215);
+    --accent-cobalt: oklch(0.48 0.123 262);
+    --accent-iris: oklch(0.48 0.146 300);
+  }
+}
+
+/* Artifacts list: name column grows with the window; type, size and
+   updated sit in fixed columns at the right edge, headed by .artifact-list-head. */
+.artifact-list-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  /* Match the tree rows: tree padding + row padding on the right; on the
+     left, also the chevron and icon, so "Name" sits over the labels. */
+  padding: 0 4px 0 calc(var(--s-2) + 8px + 24px + 6px);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.artifact-list-head > span:first-child {
+  flex: 1;
+}
+.artifact-cols {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.artifact-list-head .artifact-cols {
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.artifact-col-type {
+  width: 120px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-mute);
+}
+.artifact-col-type[data-kind]::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--fg-faint);
+}
+.artifact-col-type[data-kind="markdown"]::before {
+  background: var(--info);
+}
+.artifact-col-type[data-kind="json"]::before {
+  background: var(--warn);
+}
+.artifact-col-type[data-kind="conversation"]::before {
+  background: var(--accent);
+}
+.artifact-col-type[data-kind="statechart"]::before,
+.artifact-col-type[data-kind="flow"]::before {
+  background: var(--color-step-llm);
+}
+.artifact-col-size,
+.artifact-col-when {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-mute);
+}
+.artifact-col-size {
+  width: 80px;
+}
+.artifact-col-when {
+  width: 88px;
+}
+.artifact-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--fg-faint);
+}
+.artifact-icon.folder {
+  color: var(--fg-mute);
 }

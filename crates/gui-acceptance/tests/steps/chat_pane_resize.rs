@@ -78,8 +78,12 @@ async fn split_chat_geometry(world: &mut GuiWorld) {
     gui_acceptance::click_when_ready(&client, expand_button, "expand chat").await;
 
     for count in [2, 3] {
-        let split_button = Locator::Css("button[aria-label='Split chat pane']");
-        gui_acceptance::click_when_ready(&client, split_button, "split chat").await;
+        gui_acceptance::click_pane_action(
+            &client,
+            "button[aria-label='Split chat pane']",
+            "split chat",
+        )
+        .await;
 
         let pane_count_args = vec![json!(count)];
         let measurement_timeout = Duration::from_secs(10);

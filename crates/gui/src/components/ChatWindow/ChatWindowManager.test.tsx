@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { clickPaneControl, getPaneControl } from "../../test/paneControls";
 import {
   render,
   screen,
@@ -945,7 +946,7 @@ describe("ChatWindowManager", () => {
       "400"
     );
 
-    await user.click(screen.getByLabelText("Split chat pane"));
+    await clickPaneControl(user, "Split chat pane");
 
     await waitFor(() => {
       expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
@@ -1108,7 +1109,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(screen.getByTitle("Clear messages"));
+    await clickPaneControl(user, "Clear messages");
 
     expect(loadPersistedLocalChatSession(id)).toBeNull();
     expect(useChatStore.getState().sessions[id].messages).toEqual([]);
@@ -1206,7 +1207,7 @@ describe("ChatWindowManager", () => {
     });
 
     await user.click(screen.getByLabelText("Widen chat panel"));
-    await user.click(screen.getByLabelText("Start fresh local chat"));
+    await clickPaneControl(user, "Start fresh local chat");
 
     await waitFor(() => {
       expect(useChatStore.getState().activeSessionId).not.toBe(stale);
@@ -1576,7 +1577,7 @@ describe("ChatWindowManager", () => {
     expect(history).toHaveClass("hc-mini-history");
     expect(history).toHaveStyle({ width: "400px" });
 
-    await user.click(screen.getByLabelText("Split chat pane"));
+    await clickPaneControl(user, "Split chat pane");
     await waitFor(() => {
       expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
     });
@@ -1896,7 +1897,7 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
-    await user.click(screen.getByLabelText("Split chat pane"));
+    await clickPaneControl(user, "Split chat pane");
 
     await waitFor(() => {
       expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
@@ -1952,10 +1953,8 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
     for (let targetPaneCount = 2; targetPaneCount <= 3; targetPaneCount += 1) {
-      const splitButtons = screen
-        .getAllByLabelText("Split chat pane")
-        .filter((button) => !(button as HTMLButtonElement).disabled);
-      await user.click(splitButtons[splitButtons.length - 1]);
+      const panes = screen.getAllByTestId("chat-pane");
+      await clickPaneControl(user, "Split chat pane", panes[panes.length - 1]);
       await waitFor(() => {
         expect(screen.getAllByTestId("chat-pane")).toHaveLength(
           targetPaneCount
@@ -1982,7 +1981,7 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
-    const splitButton = screen.getByLabelText("Split chat pane");
+    const splitButton = getPaneControl("Split chat pane");
     expect(splitButton).toBeDisabled();
     await user.click(splitButton);
 
@@ -2588,7 +2587,7 @@ describe("ChatWindowManager", () => {
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
     const secondPane = screen.getAllByTestId("chat-pane")[1];
-    await user.click(within(secondPane).getByLabelText("Close this pane"));
+    await clickPaneControl(user, "Close this pane", secondPane);
 
     expect(screen.getAllByTestId("chat-pane")).toHaveLength(1);
     expect(useChatStore.getState().sessions[second]).toMatchObject({

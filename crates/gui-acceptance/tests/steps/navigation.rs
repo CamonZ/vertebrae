@@ -59,9 +59,9 @@ async fn gui_on_kanban_board(world: &mut GuiWorld) {
     client
         .wait()
         .at_most(std::time::Duration::from_secs(10))
-        .for_element(Locator::Css("[data-testid='board-task-search-input']"))
+        .for_element(Locator::Css("[data-testid='board-task-search-button']"))
         .await
-        .expect("the Atlas Board view should show the board search input");
+        .expect("the Atlas Board view should show the board search button");
     world.screenshot(&client, "nav-board").await;
 }
 
@@ -989,9 +989,10 @@ async fn click_element_with_title(world: &mut GuiWorld, title: String) {
         .clone();
     let client = wd.lock().await;
 
-    gui_acceptance::click_when_ready(
+    // Secondary pane actions sit in the pane's overflow menu.
+    gui_acceptance::click_pane_action(
         &client,
-        Locator::Css(&format!("[title=\"{}\"]", title)),
+        &format!("[title=\"{}\"]", title),
         &format!("element with title '{title}'"),
     )
     .await;
@@ -1316,6 +1317,51 @@ async fn gui_should_not_show_element_with_test_id_within(
 
         tokio::time::sleep(poll_interval).await;
     }
+}
+
+/// Labels of the ⌘K palette's result rows (task titles, pages, actions…).
+const PALETTE_LABELS_SCRIPT: &str = r#"const [label, expected] = arguments;
+    const labels = [...document.querySelectorAll(
+        '[data-testid="command-palette"] [role="option"] .cmdk-label'
+    )].map((row) => row.textContent.trim());
+    return labels.includes(label) === expected;"#;
+
+#[then(expr = "the command palette should list {string} within {int} seconds")]
+async fn command_palette_should_list(world: &mut GuiWorld, label: String, timeout: u64) {
+    assert_command_palette_lists(world, label, true, timeout).await;
+}
+
+#[then(expr = "the command palette should not list {string} within {int} seconds")]
+async fn command_palette_should_not_list(world: &mut GuiWorld, label: String, timeout: u64) {
+    assert_command_palette_lists(world, label, false, timeout).await;
+}
+
+async fn assert_command_palette_lists(
+    world: &mut GuiWorld,
+    label: String,
+    expected: bool,
+    timeout: u64,
+) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    gui_acceptance::wait_for_js(
+        &client,
+        &format!(
+            "command palette {} '{label}'",
+            if expected { "listing" } else { "not listing" }
+        ),
+        PALETTE_LABELS_SCRIPT,
+        vec![label.clone().into(), expected.into()],
+        std::time::Duration::from_secs(timeout),
+    )
+    .await;
+    world
+        .screenshot(&client, &format!("after-assert-palette-{expected}-{label}"))
+        .await;
 }
 
 #[when(expr = "I type {string} into the element with test id {string}")]

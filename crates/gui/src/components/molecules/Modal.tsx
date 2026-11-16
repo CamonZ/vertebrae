@@ -97,7 +97,7 @@ export function Modal(props: ModalProps) {
       >
         {(title || showClose) && (
           <div className="flex items-center justify-between gap-3 border-b border-[var(--color-line)] px-5 py-3.5">
-            <div className="min-w-0 flex-1 truncate font-serif text-lg text-[var(--color-fg)]">
+            <div className="min-w-0 flex-1 truncate font-sans text-base font-semibold text-[var(--color-fg)]">
               {title}
             </div>
             {showClose && (

@@ -32,12 +32,57 @@
   --md-step-stop: var(--color-step-stop);
   --md-step-finish: var(--color-step-finish);
 
+  /* Secondary text (jobs, notes, rail labels). The state role --md-dim is
+     tuned for strokes and lamps; as text it falls below a readable contrast
+     once the diagram is zoomed out, so text gets its own, brighter step. */
+  --md-text-dim: color-mix(in oklab, var(--color-fg-soft) 50%, var(--color-fg-mute));
+  /* Names: a step under full ink. Pure ink on the dark canvas blooms and
+     reads a weight heavier than it is; lamps and strokes keep --md-ink. */
+  --md-text-ink: color-mix(in oklab, var(--color-fg) 72%, var(--color-fg-soft));
+
   font-family: var(--font-mono);
 }
 
+/* Diagram text is laid out on a fixed 0.6 em monospace advance (see
+   flow/measure.ts) and drawn at whatever scale the viewport zooms to:
+   - ligatures and contextual alternates off, so identifiers such as
+     `retry->merge` or `!=` keep one glyph per character;
+   - geometric precision, so glyphs scale smoothly instead of snapping to
+     hinted sizes between zoom steps;
+   - weight follows zoom (below), and ink against the muted text step
+     carries most of the name/description contrast. */
 .md-root text {
   font-family: var(--font-mono);
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0, "liga" 0;
+  font-kerning: none;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
   user-select: text;
+}
+/* Weight by zoom (see weightBand): medium names over regular details when
+   far out, stepping down to light for both at reading zoom, where colour
+   alone separates a name from its description. Every pairing's monospace
+   face loads 300-500, so no weight is synthesized. */
+.md-root {
+  --md-name-weight: 400;
+  --md-detail-weight: 300;
+}
+[data-weight="far"] .md-root {
+  --md-name-weight: 500;
+  --md-detail-weight: 400;
+}
+[data-weight="near"] .md-root {
+  --md-name-weight: 300;
+  --md-detail-weight: 300;
+}
+.md-root text,
+.md-root tspan[font-weight="400"] {
+  font-weight: var(--md-detail-weight);
+}
+.md-root text[font-weight="600"],
+.md-root tspan[font-weight="600"] {
+  font-weight: var(--md-name-weight);
 }
 
 /* Rails reuse the shared .gedge path vocabulary at the rail weight (VL-05). */
@@ -132,7 +177,8 @@
   stroke-width: 4;
   opacity: 0;
 }
-.md-part[role="button"]:hover .md-part-ring {
+.md-part[role="button"]:hover .md-part-ring,
+.md-part[data-pointed="true"] .md-part-ring {
   opacity: 0.45;
   stroke-dasharray: 10 8;
 }

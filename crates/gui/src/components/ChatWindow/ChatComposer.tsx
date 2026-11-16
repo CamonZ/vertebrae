@@ -18,6 +18,8 @@ import {
   LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE,
   LOCAL_CHAT_UNAVAILABLE_MESSAGE,
 } from "./chatHelpers";
+import { Dropdown } from "../molecules/Dropdown";
+import { Select } from "../atoms/Select";
 
 type PermissionModeOption = {
   value: PermissionMode;
@@ -174,7 +176,7 @@ interface ChatComposerProps {
     event: React.ChangeEvent<HTMLSelectElement>
   ) => void;
   onSpeedTierChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
-  onPermissionModeChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
+  onPermissionModeChange: (value: string) => void;
 }
 
 export function ChatComposer({
@@ -222,6 +224,19 @@ export function ChatComposer({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
   const commentsAccessoryRef = useRef<HTMLDivElement | null>(null);
+  const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
+  const modelSettingsRef = useRef<HTMLDivElement | null>(null);
+  const modelSettingsTriggerRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!modelSettingsOpen) return;
+    const dismiss = (event: PointerEvent | MouseEvent) => {
+      if (!modelSettingsRef.current?.contains(event.target as Node)) {
+        setModelSettingsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", dismiss);
+    return () => document.removeEventListener("mousedown", dismiss);
+  }, [modelSettingsOpen]);
   useEffect(() => {
     if (
       pinnedCommentId &&
@@ -274,6 +289,38 @@ export function ChatComposer({
   );
   const defaultSpeedTierId =
     speedTiers.find((tier) => tier.is_default)?.id ?? speedTiers[0]?.id ?? "";
+  const modelSummary = (() => {
+    if (!visibleHarness || !picker) return null;
+    const selectedModel = (visibleHarness.models ?? []).find(
+      (model) => model.id === session.selectedModelId
+    );
+    const modelLabel =
+      selectedModel?.label ??
+      (session.selectedModelId && session.selectedModelId !== "default"
+        ? session.selectedModelId
+        : picker.modelDefaultLabel);
+    const selectedEffort = availableReasoningEfforts.find(
+      (effort) => effort.id === session.selectedReasoningEffort
+    );
+    const selectedTier = speedTiers.find(
+      (tier) => tier.id === session.selectedSpeedTier
+    );
+    const parts = [modelLabel];
+    if (selectedEffort) parts.push(selectedEffort.label);
+    if (selectedTier && selectedTier.id !== defaultSpeedTierId) {
+      parts.push(selectedTier.label);
+    }
+    return {
+      providerLabel:
+        providerOptions.find(({ provider }) => provider.id === selectedProviderId)
+          ?.provider.label ?? visibleHarness.label,
+      text: parts.join(" · "),
+      needsAttention:
+        picker.selectedModelUnsupported ||
+        picker.selectedReasoningEffortUnsupported ||
+        picker.selectedSpeedTierUnsupported,
+    };
+  })();
   const hasReadyComments =
     pendingComments.length > 0 &&
     pendingComments.every((comment) => comment.body.trim().length > 0);
@@ -602,151 +649,214 @@ export function ChatComposer({
           inputAccessory={commentsAccessory}
           footerLeft={
             <div className="hc-chat-controls">
-              {harnessCatalog && (
-                <label className="hc-provider-picker">
-                  <select
-                    aria-label="Local chat provider"
-                    data-testid="local-chat-provider-picker"
-                    value={selectedProviderId}
-                    onChange={onHarnessChange}
-                    disabled={isBusy || isActive || lockedHarness}
-                  >
-                    {providerOptions.map(({ provider }) => (
-                      <option key={provider.id} value={provider.id}>
-                        {provider.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              <label className="hc-permission-picker">
-                <select
+              <span className="hc-permission-picker">
+                <Dropdown
+                  variant="quiet"
+                  placement="up"
                   aria-label="Local chat permission mode"
                   data-testid="local-chat-permission-mode-picker"
                   value={session.permissionMode ?? "default"}
                   onChange={onPermissionModeChange}
-                >
-                  {availablePermissionModes.map((mode) => (
-                    <option key={mode.value} value={mode.value}>
-                      {mode.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  options={availablePermissionModes.map((mode) => ({
+                    value: mode.value,
+                    label: mode.label,
+                  }))}
+                />
+              </span>
             </div>
           }
           footerRight={
-            visibleHarness && picker ? (
-              <div className="hc-chat-controls right">
-                <label className="hc-model-picker">
-                  <select
-                    aria-label={`${visibleHarness.label} model`}
-                    data-testid="local-chat-model-picker"
-                    value={
-                      selectedProviderId === "openai" && session.selectedModelId === "default"
-                        ? ""
-                        : session.selectedModelId ?? ""
+            <div className="hc-chat-controls right">
+              {picker?.selectedModelUnsupported && !picker.hasConversation && (
+                <span role="alert" className="hc-composer-alert">
+                  Choose an available model or reset to Default model to start this chat.
+                </span>
+              )}
+              {picker?.unavailableMessage && (
+                <span
+                  className="hc-provider-unavailable"
+                  data-testid="local-chat-provider-unavailable"
+                >
+                  {picker.unavailableMessage}
+                </span>
+              )}
+              {(visibleHarness && picker) || harnessCatalog ? (
+                <div className="hc-model-settings" ref={modelSettingsRef}>
+                  <button
+                    ref={modelSettingsTriggerRef}
+                    type="button"
+                    className={`ctl ctl-quiet hc-model-chip${modelSummary?.needsAttention ? " attention" : ""}`}
+                    aria-label={`Model settings: ${modelSummary ? `${modelSummary.providerLabel} · ${modelSummary.text}` : "provider"}`}
+                    aria-haspopup="dialog"
+                    aria-expanded={modelSettingsOpen}
+                    data-testid="local-chat-model-settings"
+                    title={
+                      modelSummary
+                        ? `${modelSummary.providerLabel} · ${modelSummary.text}`
+                        : "Choose a provider"
                     }
-                    onChange={onModelChange}
-                    disabled={picker.modelPickerDisabled}
+                    onClick={() => setModelSettingsOpen((open) => !open)}
                   >
-                    <option value="">{picker.modelDefaultLabel}</option>
-                    {picker.selectedModelUnsupported && (
-                      <option value={session.selectedModelId ?? ""}>
-                        Unsupported: {session.selectedModelId}
-                      </option>
+                    <span className="hc-model-chip-provider">
+                      {modelSummary?.providerLabel ?? "Provider"}
+                    </span>
+                    {modelSummary && (
+                      <span className="hc-model-chip-text">
+                        {modelSummary.text}
+                      </span>
                     )}
-                    {(visibleHarness.models ?? [])
-                      .filter(
-                        (model) =>
-                          !(
-                            selectedProviderId === "openai" &&
-                            model.id === "default"
-                          )
-                      )
-                      .map((model) => (
-                        <option key={model.id} value={model.id}>
-                          {model.label}
-                          {model.id === visibleHarness.default_model_id
-                            ? " (default)"
-                            : ""}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                {picker.selectedModelUnsupported && !picker.hasConversation && (
-                  <span role="alert">
-                    Choose an available model or reset to Default model to start this chat.
-                  </span>
-                )}
-                {availableReasoningEfforts.length > 0 && (
-                  <label className="hc-effort-picker">
-                    <select
-                      aria-label={`${visibleHarness.label} reasoning effort`}
-                      data-testid="local-chat-effort-picker"
-                      value={session.selectedReasoningEffort ?? ""}
-                      onChange={onReasoningEffortChange}
-                      disabled={picker.effortPickerDisabled}
+                    <span aria-hidden="true" className="ctl-caret" />
+                  </button>
+                  {modelSettingsOpen && (
+                    <div
+                      className="hc-model-pop"
+                      role="dialog"
+                      aria-label="Model settings"
+                      data-testid="local-chat-model-settings-popover"
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setModelSettingsOpen(false);
+                          modelSettingsTriggerRef.current?.focus();
+                        }
+                      }}
                     >
-                      <option value="">{picker.effortDefaultLabel}</option>
-                      {picker.selectedReasoningEffortUnsupported && (
-                        <option value={session.selectedReasoningEffort ?? ""}>
-                          Unsupported: {session.selectedReasoningEffort}
-                        </option>
+                      {harnessCatalog && (
+                        <div className="hc-model-row hc-provider-picker">
+                          <span>Provider</span>
+                          <Select
+                            aria-label="Local chat provider"
+                            data-testid="local-chat-provider-picker"
+                            value={selectedProviderId}
+                            onChange={onHarnessChange}
+                            disabled={isBusy || isActive || lockedHarness}
+                            options={providerOptions.map(({ provider }) => ({
+                              value: provider.id,
+                              label: provider.label,
+                            }))}
+                          />
+                        </div>
                       )}
-                      {availableReasoningEfforts.map((effort) => (
-                        <option key={effort.id} value={effort.id}>
-                          {effort.label}
-                          {effort.id === visibleHarness.default_reasoning_effort
-                            ? " (default)"
-                            : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                {(speedTiers.length > 1 ||
-                  picker.selectedSpeedTierUnsupported) && (
-                  <label
-                    className="hc-speed-picker"
-                    title={picker.speedPickerDisabledReason}
-                  >
-                    <select
-                      aria-label={`${visibleHarness.label} speed tier`}
-                      data-testid="local-chat-speed-tier-picker"
-                      value={
-                        session.selectedSpeedTier ??
-                        (picker.hasConversation ? "" : defaultSpeedTierId)
-                      }
-                      onChange={onSpeedTierChange}
-                      disabled={picker.speedPickerDisabled}
-                    >
-                      {picker.hasConversation && (
-                        <option value="">Current tier</option>
+                      {visibleHarness && picker && (
+                        <>
+                          <div className="hc-model-row hc-model-picker">
+                            <span>Model</span>
+                            <Select
+                              aria-label={`${visibleHarness.label} model`}
+                              data-testid="local-chat-model-picker"
+                              value={
+                                selectedProviderId === "openai" &&
+                                session.selectedModelId === "default"
+                                  ? ""
+                                  : session.selectedModelId ?? ""
+                              }
+                              onChange={onModelChange}
+                              disabled={picker.modelPickerDisabled}
+                              options={[
+                                { value: "", label: picker.modelDefaultLabel },
+                                ...(picker.selectedModelUnsupported
+                                  ? [
+                                      {
+                                        value: session.selectedModelId ?? "",
+                                        label: `Unsupported: ${session.selectedModelId}`,
+                                      },
+                                    ]
+                                  : []),
+                                ...(visibleHarness.models ?? [])
+                                  .filter(
+                                    (model) =>
+                                      !(
+                                        selectedProviderId === "openai" &&
+                                        model.id === "default"
+                                      )
+                                  )
+                                  .map((model) => ({
+                                    value: model.id,
+                                    label:
+                                      model.label +
+                                      (model.id === visibleHarness.default_model_id
+                                        ? " (default)"
+                                        : ""),
+                                  })),
+                              ]}
+                            />
+                          </div>
+                          {availableReasoningEfforts.length > 0 && (
+                            <div className="hc-model-row hc-effort-picker">
+                              <span>Effort</span>
+                              <Select
+                                aria-label={`${visibleHarness.label} reasoning effort`}
+                                data-testid="local-chat-effort-picker"
+                                value={session.selectedReasoningEffort ?? ""}
+                                onChange={onReasoningEffortChange}
+                                disabled={picker.effortPickerDisabled}
+                                options={[
+                                  { value: "", label: picker.effortDefaultLabel },
+                                  ...(picker.selectedReasoningEffortUnsupported
+                                    ? [
+                                        {
+                                          value: session.selectedReasoningEffort ?? "",
+                                          label: `Unsupported: ${session.selectedReasoningEffort}`,
+                                        },
+                                      ]
+                                    : []),
+                                  ...availableReasoningEfforts.map((effort) => ({
+                                    value: effort.id,
+                                    label:
+                                      effort.label +
+                                      (effort.id ===
+                                      visibleHarness.default_reasoning_effort
+                                        ? " (default)"
+                                        : ""),
+                                  })),
+                                ]}
+                              />
+                            </div>
+                          )}
+                          {(speedTiers.length > 1 ||
+                            picker.selectedSpeedTierUnsupported) && (
+                            <div
+                              className="hc-model-row hc-speed-picker"
+                              title={picker.speedPickerDisabledReason}
+                            >
+                              <span>Speed</span>
+                              <Select
+                                aria-label={`${visibleHarness.label} speed tier`}
+                                data-testid="local-chat-speed-tier-picker"
+                                value={
+                                  session.selectedSpeedTier ??
+                                  (picker.hasConversation ? "" : defaultSpeedTierId)
+                                }
+                                onChange={onSpeedTierChange}
+                                disabled={picker.speedPickerDisabled}
+                                options={[
+                                  ...(picker.hasConversation
+                                    ? [{ value: "", label: "Current tier" }]
+                                    : []),
+                                  ...(picker.selectedSpeedTierUnsupported
+                                    ? [
+                                        {
+                                          value: session.selectedSpeedTier ?? "",
+                                          label: `Unsupported: ${session.selectedSpeedTier}`,
+                                        },
+                                      ]
+                                    : []),
+                                  ...speedTiers.map((tier) => ({
+                                    value: tier.id,
+                                    label: tier.label,
+                                  })),
+                                ]}
+                              />
+                            </div>
+                          )}
+                        </>
                       )}
-                      {picker.selectedSpeedTierUnsupported && (
-                        <option value={session.selectedSpeedTier ?? ""}>
-                          Unsupported: {session.selectedSpeedTier}
-                        </option>
-                      )}
-                      {speedTiers.map((tier) => (
-                        <option key={tier.id} value={tier.id}>
-                          {tier.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                {picker.unavailableMessage && (
-                  <span
-                    className="hc-provider-unavailable"
-                    data-testid="local-chat-provider-unavailable"
-                  >
-                    {picker.unavailableMessage}
-                  </span>
-                )}
-              </div>
-            ) : null
+                    </div>
+                  )}
+                </div>
+              ) : null}
+            </div>
           }
         />
       </div>

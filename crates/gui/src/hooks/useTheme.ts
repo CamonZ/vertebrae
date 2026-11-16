@@ -16,6 +16,16 @@ import { useUIStore } from "../stores/uiStore";
  */
 export function useTheme() {
   const theme = useUIStore((state) => state.theme);
+  const typePairing = useUIStore((state) => state.typePairing);
+  const accent = useUIStore((state) => state.accent);
+
+  useEffect(() => {
+    document.documentElement.dataset.type = typePairing;
+  }, [typePairing]);
+
+  useEffect(() => {
+    document.documentElement.dataset.accent = accent;
+  }, [accent]);
 
   useEffect(() => {
     const root = document.documentElement;

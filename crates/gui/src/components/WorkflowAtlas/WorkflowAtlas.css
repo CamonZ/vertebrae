@@ -936,7 +936,7 @@
 /* ── Header ── */
 .wfd-hd {
   flex-shrink: 0;
-  padding: var(--s-3) var(--s-3h) var(--s-3);
+  padding: var(--s-3) var(--s-4) var(--s-3);
   border-bottom: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
 }
 .wfd-hd-top {
@@ -949,11 +949,10 @@
   align-items: center;
   gap: var(--s-1h);
   white-space: nowrap;
-  font-family: var(--mono);
-  font-size: var(--text-9);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--fg-faint);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 500;
+  color: var(--fg-mute);
 }
 .wfd-eyebrow .dot {
   width: 6px;
@@ -1008,8 +1007,12 @@
 /* Positioning wrapper for the shared IconButton close control — pins it to the
    right edge of the inspector header (rightmost when a status badge precedes
    it). The button's own visual style comes from the shared IconButton. */
+/* The eyebrow takes the free space so header actions sit beside close. */
+.wfd-hd-top > .wfd-eyebrow {
+  margin-right: auto;
+}
 .wfd-close {
-  margin-left: auto;
+  margin-left: 0;
   flex-shrink: 0;
   display: inline-flex;
 }
@@ -1056,7 +1059,7 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--s-3h);
+  padding: var(--s-3h) var(--s-4) var(--s-4);
 }
 .wfd-body::-webkit-scrollbar {
   width: 5px;
@@ -1074,39 +1077,67 @@
   padding-top: var(--s-3h);
   border-top: 1px solid color-mix(in oklch, var(--fg) 9%, transparent);
 }
+/* Section headings: sentence-case sans, one level above the row labels.
+   Mono stays for data (names, IDs, counts, prompts). */
 .wfd-lbl {
   display: flex;
   align-items: center;
   gap: var(--s-2);
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--fg-faint);
-  margin-bottom: var(--s-2h);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 600;
+  color: var(--fg-soft);
+  margin-bottom: var(--s-2);
 }
 .wfd-lbl .n {
-  color: var(--fg-ghost);
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  font-weight: 400;
+  color: var(--fg-faint);
+}
+/* An empty section collapses to a single row: heading left, "none" right. */
+.wfd-sec:has(> .wfd-lbl + .wfd-placeholder:last-child) {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+}
+.wfd-sec:has(> .wfd-lbl + .wfd-placeholder:last-child) > .wfd-lbl {
+  margin-bottom: 0;
+  font-weight: 500;
+  color: var(--fg-mute);
+}
+.wfd-sec:has(> .wfd-lbl + .wfd-placeholder:last-child) > .wfd-placeholder {
+  margin-left: auto;
+  text-align: right;
 }
 .wfd-lbl-actions {
   justify-content: space-between;
 }
+/* Header actions are quiet until hovered; destructive ones live in ⋯. */
 .wfd-action {
   flex-shrink: 0;
-  padding: 2px var(--s-1h);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-xs);
-  background: color-mix(in oklch, var(--bg) 30%, transparent);
+  padding: 2px var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
   color: var(--fg-mute);
-  font-family: var(--mono);
-  font-size: var(--text-9);
+  font-family: var(--sans);
+  font-size: var(--text-12);
   cursor: pointer;
 }
-.wfd-action:hover {
+.wfd-action:hover,
+.wfd-action[aria-expanded="true"] {
   color: var(--fg);
-  border-color: var(--accent);
+  background: var(--bg-3);
+}
+.wfd-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .wfd-action.danger {
+  color: var(--fg-mute);
+}
+.wfd-action.danger:hover {
   color: var(--err);
 }
 .wfd-editor {
@@ -1122,11 +1153,9 @@
 .wfd-editor label {
   display: grid;
   gap: var(--s-1);
-  color: var(--fg-faint);
-  font-family: var(--mono);
-  font-size: var(--text-9);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--fg-mute);
+  font-family: var(--sans);
+  font-size: var(--text-12);
 }
 .wfd-editor input,
 .wfd-editor select,
@@ -1136,7 +1165,7 @@
   padding: var(--s-1h) var(--s-2);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-xs);
-  background: var(--bg-2);
+  background-color: var(--bg-2);
   color: var(--fg);
   font: var(--text-11) var(--sans);
   letter-spacing: normal;
@@ -1199,16 +1228,19 @@
   padding: var(--s-2) var(--s-2h);
 }
 .wfd-stat .k {
-  font-family: var(--mono);
-  font-size: var(--text-8);
-  letter-spacing: 0.16em;
+  font-family: var(--sans);
+  font-size: var(--text-11);
+  color: var(--fg-mute);
+}
+.wfd-stat .k::first-letter {
   text-transform: uppercase;
-  color: var(--fg-faint);
 }
 .wfd-stat .v {
   margin-top: 2px;
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: var(--text-16);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--fg);
   white-space: nowrap;
 }
@@ -1371,16 +1403,14 @@
 }
 
 .wfd-empty {
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  color: var(--fg-ghost);
-  font-style: italic;
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  color: var(--fg-faint);
 }
 .wfd-placeholder {
   font-family: var(--sans);
-  font-size: var(--text-11);
-  color: var(--fg-ghost);
-  font-style: italic;
+  font-size: var(--text-12);
+  color: var(--fg-faint);
 }
 
 /* ── Step-config header (number + name + hash) ── */
@@ -1449,17 +1479,15 @@
   border-top: 1px solid color-mix(in oklch, var(--fg) 6%, transparent);
 }
 .wfd-row .rk {
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--fg-faint);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  color: var(--fg-mute);
   white-space: nowrap;
 }
 .wfd-row .rv {
   margin-left: auto;
   font-family: var(--sans);
-  font-size: var(--text-11);
+  font-size: var(--text-12);
   color: var(--fg-soft);
 }
 .wfd-row .wfd-pill,
@@ -1562,9 +1590,19 @@
 }
 
 /* Internal machine Graph shares the Atlas camera controls and docked console. */
-.uv-machine-canvas {
+/* The Graph: the level index (one row per element the level draws) beside
+   the machine scene. The index sits on the page background; the scene keeps
+   the canvas. */
+.uv-machine-graph {
   position: absolute;
   inset: 0;
+  display: grid;
+  grid-template-columns: clamp(220px, 22vw, 280px) minmax(0, 1fr);
+  overflow: hidden;
+}
+.uv-machine-canvas {
+  position: relative;
+  min-width: 0;
   overflow: hidden;
 }
 .uv-machine-scene {
@@ -1650,6 +1688,17 @@
   [data-port]
   text {
   opacity: 0;
+}
+
+/* A station's parked/active count shows with its hover label: when the
+   station is hovered, focused, traced or selected. */
+.uv-machine-scene [data-scene-part] .md-live-count {
+  opacity: 0;
+  transition: opacity var(--t-fast, 150ms) var(--ease, ease);
+}
+.uv-machine-scene [data-scene-part]:is([data-traced], [data-selected]) .md-live-count,
+.uv-machine-scene [data-scene-part]:has(.md-part:is(:hover, :focus-visible)) .md-live-count {
+  opacity: 1;
 }
 
 /* Connections of the hovered element, in words. */

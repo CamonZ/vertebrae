@@ -1,4 +1,5 @@
-import { Select, type SelectOption } from "./atoms/Select";
+import type { SelectOption } from "./atoms/Select";
+import { Dropdown } from "./molecules/Dropdown";
 import {
   factoryNames,
   hasNoFactory,
@@ -50,12 +51,12 @@ export function FactoryFilter({
 
   return (
     <div className="scope-level factory-filter">
-      <Select
+      <Dropdown
         id={id}
         options={options}
         value={selectedValue}
-        onChange={(event) => {
-          const selectedValue = event.target.value;
+        align="end"
+        onChange={(selectedValue) => {
           onChange(
             selectedValue === NO_FACTORY_OPTION_VALUE
               ? NO_FACTORY_SCOPE

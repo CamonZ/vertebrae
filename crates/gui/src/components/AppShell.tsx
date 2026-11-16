@@ -5,6 +5,7 @@ import { ContentArea } from "./ContentArea";
 import { ChatWindowManager, FloatingChatLauncher } from "./ChatWindow";
 import { NotificationsPanel } from "./Notifications";
 import { GlobalEntityPanelHost } from "./GlobalEntityPanelHost";
+import { CommandPalette } from "./CommandPalette";
 
 interface AppShellProps {
   children: ReactNode;
@@ -12,7 +13,7 @@ interface AppShellProps {
 
 export function AppShell({ children }: AppShellProps) {
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--color-bg)]">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--color-canvas)]">
       <Header />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <Sidebar />
@@ -24,6 +25,7 @@ export function AppShell({ children }: AppShellProps) {
       <FloatingChatLauncher />
       <NotificationsPanel />
       <GlobalEntityPanelHost />
+      <CommandPalette />
     </div>
   );
 }

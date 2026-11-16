@@ -564,10 +564,10 @@ export function useChatSession(sessionId: string) {
     [harnessCatalog, sessionId, setSessionHarness]
   );
   const handlePermissionModeChange = useCallback(
-    (event: React.ChangeEvent<HTMLSelectElement>) => {
+    (value: string) => {
       setSessionPermissionMode(
         sessionId,
-        (event.target.value || "default") as PermissionMode
+        (value || "default") as PermissionMode
       );
     },
     [sessionId, setSessionPermissionMode]

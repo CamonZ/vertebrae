@@ -27,22 +27,22 @@ function ruleFor(selector) {
   return match[1];
 }
 
-test("dark selection uses the neutral selected surface with readable text", () => {
+test("dark selection uses the accent text-selection tint with readable text", () => {
   const darkSelection = ruleFor("::selection");
 
   assert.match(
     darkSelection,
-    /background-color:\s*var\(--color-selection\);/
+    /background-color:\s*var\(--color-text-selection\);/
   );
   assert.match(darkSelection, /color:\s*var\(--color-fg\);/);
 });
 
-test("light selection uses the neutral selected surface with readable foreground text", () => {
+test("light selection uses the accent text-selection tint with readable foreground text", () => {
   const lightSelection = ruleFor("html.light ::selection");
 
   assert.match(
     lightSelection,
-    /background-color:\s*var\(--color-selection\);/
+    /background-color:\s*var\(--color-text-selection\);/
   );
   assert.match(lightSelection, /color:\s*var\(--color-fg\);/);
 });
@@ -83,10 +83,6 @@ test("entity detail chrome uses the neutral panel border", () => {
   assert.match(
     stylesheet,
     /\.tasks-v2-detail-shell \.t-detail-head::after\s*\{[\s\S]*?background:\s*linear-gradient\(90deg, var\(--panel-border\),/
-  );
-  assert.match(
-    stylesheet,
-    /\.tasks-v2-detail-shell \.t-detail-hero \.hero-status\s*\{[\s\S]*?border-left-color:\s*var\(--panel-border\);/
   );
   for (const selector of [
     "\\.wfd-badge",

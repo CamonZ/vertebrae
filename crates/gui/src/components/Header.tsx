@@ -1,6 +1,7 @@
 import { useShellStore } from "../stores/shellStore";
 import { useCurrentProject } from "../hooks/useCurrentProject";
 import { NotificationsTrigger } from "./Notifications";
+import appIcon from "../assets/app-icon.png";
 
 /**
  * On macOS the window uses an overlay title bar (tauri.conf.json
@@ -13,12 +14,15 @@ const IS_MACOS =
 
 function BrandMark() {
   return (
-    <span
+    <img
       data-testid="topbar-brand"
-      className="pointer-events-none flex shrink-0 items-center gap-[5px] font-serif text-base italic leading-none tracking-tight text-[var(--color-fg)]"
-    >
-      Vertebrae
-    </span>
+      src={appIcon}
+      alt="Vertebrae"
+      width={20}
+      height={20}
+      draggable={false}
+      className="pointer-events-none block h-5 w-5 shrink-0 select-none rounded-[5px]"
+    />
   );
 }
 
@@ -55,7 +59,7 @@ function Breadcrumb({
       )}
       <span
         data-testid="topbar-breadcrumb-page"
-        className="truncate pl-0.5 font-serif text-base italic tracking-tight text-[var(--color-fg)]"
+        className="truncate pl-0.5 font-sans text-[13px] font-medium text-[var(--color-fg)]"
       >
         {page}
       </span>
@@ -93,7 +97,7 @@ export function Header() {
       data-tauri-drag-region
       className={[
         "titlebar relative flex h-[38px] shrink-0 items-center gap-4",
-        "border-b border-[var(--color-line)] bg-[var(--color-bg)] pr-4",
+        "bg-[var(--color-canvas)] pr-4",
         IS_MACOS ? "pl-[78px]" : "pl-4",
         "font-mono text-eyebrow tracking-[0.04em] text-[var(--color-fg-mute)]",
       ].join(" ")}

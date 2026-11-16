@@ -325,23 +325,24 @@ async fn open_registered_daemon_inspector(world: &mut GuiWorld) {
         .await;
 }
 
-#[then(expr = "the daemon status filter {string} should be selected within {int} seconds")]
-async fn daemon_status_filter_selected(world: &mut GuiWorld, status: String, timeout: u64) {
-    assert_daemon_status_filter(world, &status, true, timeout).await;
+#[then(expr = "the daemon group {string} should be expanded within {int} seconds")]
+async fn daemon_group_expanded(world: &mut GuiWorld, status: String, timeout: u64) {
+    assert_daemon_group_expanded(world, &status, true, timeout).await;
 }
 
-#[then(expr = "the daemon status filter {string} should not be selected within {int} seconds")]
-async fn daemon_status_filter_not_selected(world: &mut GuiWorld, status: String, timeout: u64) {
-    assert_daemon_status_filter(world, &status, false, timeout).await;
+#[then(expr = "the daemon group {string} should be collapsed within {int} seconds")]
+async fn daemon_group_collapsed(world: &mut GuiWorld, status: String, timeout: u64) {
+    assert_daemon_group_expanded(world, &status, false, timeout).await;
 }
 
-async fn assert_daemon_status_filter(
+/// The fleet groups daemons by status; each group header toggles its rows.
+async fn assert_daemon_group_expanded(
     world: &mut GuiWorld,
     status: &str,
     expected: bool,
     timeout: u64,
 ) {
-    let test_id = format!("daemon-status-filter-{status}");
+    let test_id = format!("daemon-group-toggle-{status}");
     let wd = world
         .webdriver
         .as_ref()
@@ -353,18 +354,23 @@ async fn assert_daemon_status_filter(
         if let Ok(element) = client
             .find(Locator::Css(&format!("[data-testid='{test_id}']")))
             .await
-            && element.attr("aria-pressed").await.ok().flatten().as_deref()
+            && element
+                .attr("aria-expanded")
+                .await
+                .ok()
+                .flatten()
+                .as_deref()
                 == Some(if expected { "true" } else { "false" })
         {
             world
-                .screenshot(&client, &format!("assert-filter-{status}-{expected}"))
+                .screenshot(&client, &format!("assert-group-{status}-{expected}"))
                 .await;
             return;
         }
         if tokio::time::Instant::now() >= deadline {
             panic!(
-                "daemon status filter '{status}' did not become {} within {timeout} seconds",
-                if expected { "selected" } else { "unselected" }
+                "daemon group '{status}' did not become {} within {timeout} seconds",
+                if expected { "expanded" } else { "collapsed" }
             );
         }
         tokio::time::sleep(Duration::from_millis(250)).await;

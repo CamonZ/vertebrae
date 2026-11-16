@@ -76,7 +76,7 @@ export function PermissionRequestTurn({
 
   return (
     <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-bg-2)] p-3">
-      <p className="mb-2 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+      <p className="mb-2 t-label text-[var(--color-fg-mute)]">
         Permission required
       </p>
       <div className="space-y-3">

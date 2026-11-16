@@ -821,3 +821,77 @@ it("starts no worker in the factories Map, even during search", async () => {
     v.container.querySelectorAll(".factory-overview-workflows .al-cond").length
   ).toBeGreaterThan(0);
 });
+
+it("lists each Graph level's elements beside it, traced both ways, and drills down from the list", async () => {
+  act(() => useFactoryFilterStore.getState().reset());
+  input.summary.workflows.push({
+    ...workflow("other-wf", [step("other-step", "execute", 0)]),
+    factory_name: "other",
+  });
+  const v = render(<WorkflowAtlas />);
+  const index = () => v.getByTestId("atlas-level-index");
+  const rows = () =>
+    [...index().querySelectorAll(".factory-index-name")].map(
+      (el) => el.textContent
+    );
+  const traced = (id: string) =>
+    v.container
+      .querySelector(`[data-scene-part="${id}"]`)!
+      .hasAttribute("data-traced");
+
+  // Between factories: one row per factory station.
+  await reply(0);
+  await waitFor(() => expect(factoryScene(v)).not.toBeNull());
+  expect(index()).toHaveAttribute("data-level", "factories");
+  expect(rows()).toEqual(expect.arrayContaining(["factory", "other"]));
+  expect(rows()).toHaveLength(2);
+
+  // Pointing at a row traces its station and shows its hover labels.
+  const otherStation = machineId("factory", "other");
+  fireEvent.mouseEnter(v.getByTestId("atlas-level-row-other"));
+  expect(traced(otherStation)).toBe(true);
+  expect(partEl(v, otherStation)).toHaveAttribute("data-pointed", "true");
+  fireEvent.mouseLeave(v.getByTestId("atlas-level-row-other"));
+  expect(traced(otherStation)).toBe(false);
+
+  // Pointing at a station lights its row.
+  fireEvent.focus(partEl(v, otherStation)!);
+  await waitFor(() =>
+    expect(v.getByTestId("atlas-level-row-other")).toHaveClass("is-hot")
+  );
+  fireEvent.blur(partEl(v, otherStation)!);
+
+  // A factory row opens its workflows; stubs are not listed.
+  fireEvent.click(v.getByTestId("atlas-level-row-factory"));
+  expect(useFactoryFilterStore.getState().factoryName).toBe("factory");
+  await reply(transport.requests.length - 1);
+  await waitFor(() => expect(scene(v)).not.toBeNull());
+  expect(index()).toHaveAttribute("data-level", "workflows");
+  expect(rows()).toEqual(["a", "empty", "b"]);
+
+  // A workflow row opens its steps, listed once each in step order.
+  fireEvent.click(v.getByTestId("atlas-level-row-a"));
+  await reply(transport.requests.length - 1);
+  await waitFor(() => expect(stepScene(v)).not.toBeNull());
+  expect(index()).toHaveAttribute("data-level", "steps");
+  expect(rows()).toEqual([
+    "llm",
+    "typed",
+    "script",
+    "choose",
+    "approve",
+    "join",
+    "pause",
+    "done",
+  ]);
+  fireEvent.mouseEnter(v.getByTestId("atlas-level-row-choose"));
+  expect(traced(machineId("step", "a", "choose"))).toBe(true);
+
+  // A step row inspects the step.
+  fireEvent.click(v.getByTestId("atlas-level-row-choose"));
+  expect(useEntityPanelStore.getState().selection).toMatchObject({
+    type: "step",
+    stepId: "choose",
+    workflowId: "a",
+  });
+}, 30_000);

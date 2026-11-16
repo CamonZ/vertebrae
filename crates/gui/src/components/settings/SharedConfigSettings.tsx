@@ -11,6 +11,7 @@ import { Button } from "../atoms/Button";
 import { Modal } from "../molecules/Modal";
 
 import { TextField, Choice, SecretField, Notice } from "./SettingsFields";
+import { Toggle } from "../Toggle";
 import {
   draftFor,
   providerDraft,
@@ -286,7 +287,9 @@ export function SharedConfigSettings({
               )}
               {draft.section === "typesafe" && (
                 <div className={`${card} space-y-5`}>
-                  <h2 className="font-serif text-2xl">TypeSafe</h2>
+                  <h2 className="font-serif text-2xl" data-settings-anchor>
+                    TypeSafe
+                  </h2>
                   <TextField
                     label="System One endpoint"
                     hint="Leave blank to use the built-in endpoint."
@@ -323,22 +326,16 @@ export function SharedConfigSettings({
               {draft.section === "observability" && (
                 <div className={`${card} space-y-5`}>
                   <h2 className="font-serif text-2xl">Telemetry collection</h2>
-                  <label className="flex items-center gap-3">
-                    <input
-                      type="checkbox"
-                      checked={draft.settings.enabled}
-                      onChange={(e) =>
-                        change({
-                          ...draft,
-                          settings: {
-                            ...draft.settings,
-                            enabled: e.target.checked,
-                          },
-                        })
-                      }
-                    />
-                    Enable telemetry
-                  </label>
+                  <ToggleRow
+                    label="Enable telemetry"
+                    checked={draft.settings.enabled}
+                    onChange={(enabled) =>
+                      change({
+                        ...draft,
+                        settings: { ...draft.settings, enabled },
+                      })
+                    }
+                  />
                   <TextField
                     label="Collector endpoint"
                     value={draft.settings.endpoint}
@@ -387,48 +384,35 @@ export function SharedConfigSettings({
                         {key === "signals" ? "Signals" : "Subsystems"}
                       </legend>
                       {values.map((v) => (
-                        <label
-                          className="flex items-center gap-3 text-sm"
+                        <ToggleRow
                           key={v}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={draft.settings[key].includes(v)}
-                            onChange={(e) =>
-                              change({
-                                ...draft,
-                                settings: {
-                                  ...draft.settings,
-                                  [key]: e.target.checked
-                                    ? [...draft.settings[key], v]
-                                    : draft.settings[key].filter(
-                                        (x) => x !== v
-                                      ),
-                                },
-                              })
-                            }
-                          />
-                          {v.replace(/_/g, " ")}
-                        </label>
+                          label={v.replace(/_/g, " ")}
+                          checked={draft.settings[key].includes(v)}
+                          onChange={(checked) =>
+                            change({
+                              ...draft,
+                              settings: {
+                                ...draft.settings,
+                                [key]: checked
+                                  ? [...draft.settings[key], v]
+                                  : draft.settings[key].filter((x) => x !== v),
+                              },
+                            })
+                          }
+                        />
                       ))}
                     </fieldset>
                   ))}
-                  <label className="flex items-center gap-3 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={draft.settings.capture_message_content}
-                      onChange={(e) =>
-                        change({
-                          ...draft,
-                          settings: {
-                            ...draft.settings,
-                            capture_message_content: e.target.checked,
-                          },
-                        })
-                      }
-                    />
-                    Include message content
-                  </label>
+                  <ToggleRow
+                    label="Include message content"
+                    checked={draft.settings.capture_message_content}
+                    onChange={(capture_message_content) =>
+                      change({
+                        ...draft,
+                        settings: { ...draft.settings, capture_message_content },
+                      })
+                    }
+                  />
                   <Notice>
                     Message-content capture sends chat text to your collector.
                     Keep it off to collect metadata only. Saved telemetry
@@ -530,6 +514,24 @@ export function SharedConfigSettings({
           </Button>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/** A settings switch row: label left, the shared chat Toggle right. */
+function ToggleRow({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-sm">
+      <span className="first-letter:uppercase">{label}</span>
+      <Toggle label={label} checked={checked} onChange={onChange} />
     </div>
   );
 }

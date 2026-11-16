@@ -1,25 +1,18 @@
 import { memo, useCallback, useMemo } from "react";
-import type { Task, TaskRun, TaskRunStatus } from "../../bindings";
+import type { Task, TaskRun } from "../../bindings";
 import type { TaskTreeNode as TaskTreeNodeType } from "../../types/ui";
 import type { useExpandedNodes } from "../../hooks/useExpandedNodes";
 import type { useSummaryExpanded } from "../../hooks/useSummaryExpanded";
 import { computeVisibleChildren } from "../../utils/computeVisibleChildren";
 import { formatRelative } from "../../utils/formatRelative";
 import { getPriorityIndicator } from "../../utils/taskPriority";
+import { formatStepName } from "../../utils/formatStepName";
 import {
   deriveHearthStateBreakdown,
   deriveRunStateChip,
-  hasHearthStateBreakdown,
   isActiveRunStatus,
 } from "../../utils/runState";
-import {
-  Glyph,
-  IdChip,
-  Pipeline,
-  RunChip,
-  StateBreakdown,
-} from "../shared/HearthPrimitives";
-import type { PipelineSegment } from "../shared/HearthPrimitives";
+import { Glyph, IdChip, RunChip } from "../shared/HearthPrimitives";
 
 import { activeRunsFromTasks } from "../../hooks/useTaskRuns";
 
@@ -37,35 +30,39 @@ interface TaskTreeNodeProps {
 }
 
 /**
- * Terminal-run completion marker shown in the row's chip slot when there is no
- * active run. Mirrors the reference (docs/design/lib/tasks-app.jsx
- * `CompletionMark`): done → green ✓, stopped → muted ⊘, failed → error ⊘.
- * Active runs are handled by the RunChip instead, and never-run tasks render
- * nothing.
- *
- * `done` is driven purely by `completed_at`: any task with a completion
- * timestamp shows the ✓, whether or not it has a run. The ⊘ stays keyed off
- * the concrete terminal run `status` (a stopped/failed run that never
- * completed).
+ * The row's status, one slot for every state the scope chips count: an active
+ * run shows its Hearth run chip; otherwise a dependency-blocked task shows
+ * "Blocked" and a completed task a quiet "Done". Idle, never-run tasks show
+ * nothing. Terminal run history (stopped/failed) is not list state.
  */
-function CompletionMark({
-  done,
-  status,
+function RowStatus({
+  task,
+  runChip,
 }: {
-  done: boolean;
-  status: TaskRunStatus | null;
+  task: Task;
+  runChip: ReturnType<typeof deriveRunStateChip>;
 }) {
-  if (done) {
+  if (runChip) {
+    return (
+      <RunChip
+        status={runChip.status}
+        label={runChip.label}
+        small
+        data-testid="task-tree-node-run-chip"
+        data-run-status={runChip.status ?? undefined}
+      />
+    );
+  }
+  if (task.completed_at) {
     return (
       <span
-        className="done-mark"
-        title="Completed"
+        className="t-status done"
         aria-label="Completed"
         data-testid="task-tree-node-done-mark"
       >
         <svg
-          width="11"
-          height="11"
+          width="10"
+          height="10"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -74,26 +71,61 @@ function CompletionMark({
         >
           <polyline points="20 6 9 17 4 12" />
         </svg>
+        Done
       </span>
     );
   }
-  if (status === "stopped" || status === "failed") {
-    const failed = status === "failed";
+  if (task.run_controls?.disabled_reason_code === "blocked") {
     return (
-      <span
-        className={["cancel-mark", failed ? "failed" : ""]
-          .filter(Boolean)
-          .join(" ")}
-        title={failed ? "Failed" : "Stopped"}
-        aria-label={failed ? "Failed" : "Stopped"}
-        data-testid="task-tree-node-cancel-mark"
-        data-run-status={status}
-      >
-        ⊘
+      <span className="t-status blocked" data-testid="task-tree-node-blocked">
+        Blocked
       </span>
     );
   }
   return null;
+}
+
+/**
+ * Children progress for parents: a bar segmented by child state (done,
+ * running, waiting, open) and "16 of 20 tickets done", with live counts
+ * appended when children are running or waiting.
+ */
+function ChildProgress({
+  breakdown,
+  total,
+  noun,
+}: {
+  breakdown: ReturnType<typeof deriveHearthStateBreakdown>;
+  total: number;
+  noun: string;
+}) {
+  const { done, running, waiting } = breakdown;
+  const pct = (value: number) => `${(value / total) * 100}%`;
+  return (
+    <span
+      className="t-progress"
+      data-testid="task-tree-node-child-summary"
+    >
+      <span className="t-progress-bar" aria-hidden>
+        <span className="seg done" style={{ width: pct(done) }} />
+        <span className="seg running" style={{ width: pct(running) }} />
+        <span className="seg waiting" style={{ width: pct(waiting) }} />
+      </span>
+      <span className="tabular-nums">
+        {done} of {total} {noun} done
+      </span>
+      {running > 0 && (
+        <span className="t-progress-live running tabular-nums">
+          {" "}· {running} running
+        </span>
+      )}
+      {waiting > 0 && (
+        <span className="t-progress-live waiting tabular-nums">
+          {" "}· {waiting} waiting
+        </span>
+      )}
+    </span>
+  );
 }
 
 /**
@@ -146,16 +178,8 @@ export function SummaryRow({
   );
 }
 
-/**
- * Pluralized child-level summary for the metadata line. The label reflects the
- * level *of the children* (one below this node), e.g. an epic with four tickets
- * reads "4 tickets". Falls back to the generic "items" when the child level is
- * unknown.
- */
-function childSummary(node: TaskTreeNodeType): string | null {
-  const count = node.children.length;
-  if (count === 0) return null;
-
+/** Plural noun for this node's children, by the children's level. */
+function childNoun(node: TaskTreeNodeType): string {
   const childLevel = node.children[0]?.task.level ?? null;
   const noun =
     childLevel === "epic"
@@ -165,8 +189,10 @@ function childSummary(node: TaskTreeNodeType): string | null {
         : childLevel === "task"
           ? "task"
           : "item";
-  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+  return node.children.length === 1 ? noun : `${noun}s`;
 }
+
+const MAX_TAGS = 3;
 
 function levelClass(level: Task["level"]): "l0" | "l1" | "l2" {
   if (level === "epic") return "l0";
@@ -240,7 +266,15 @@ export const TaskTreeNode = memo(function TaskTreeNodeRow({
     expandedNodes?.toggleNode(task.id);
   }, [expandedNodes, task.id]);
 
-  const priority = getPriorityIndicator(task.priority);
+  // Only priorities that ask for attention get a mark; medium/low stay quiet.
+  const urgent =
+    task.priority === "critical" || task.priority === "high";
+  const priority = urgent
+    ? {
+        ...getPriorityIndicator(task.priority)!,
+        short: task.priority === "critical" ? "Critical" : "High",
+      }
+    : null;
   // List tasks already carry run state. An unrelated task's run must not
   // invalidate this row through a newly allocated, list-wide map.
   const localRuns = useMemo(
@@ -256,7 +290,12 @@ export const TaskTreeNode = memo(function TaskTreeNodeRow({
   const runChip = deriveRunStateChip(activeRun);
   const activeRunStatus = activeRun?.status ?? null;
   const tags = task.tags ?? [];
-  const childLine = task.level === "task" ? null : childSummary(node);
+  const showProgress = hasChildren && task.level !== "task";
+  // Step names are labels, shown only while a run is moving the task.
+  const stepLabel =
+    runChip?.isActive && task.step_name
+      ? formatStepName(task.step_name, "")
+      : null;
   const breakdown = useMemo(
     () =>
       deriveHearthStateBreakdown(
@@ -265,13 +304,6 @@ export const TaskTreeNode = memo(function TaskTreeNodeRow({
       ),
     [localRuns, node.children]
   );
-  const hasBreakdown = hasHearthStateBreakdown(breakdown);
-
-  // Workflow pipeline segments for the meta line. Not yet sourced for the list
-  // view — the per-task step-state data isn't loaded here, so this stays empty
-  // and the <Pipeline> renders nothing until that wiring lands.
-  const pipeline: PipelineSegment[] = [];
-
   const chevron = hasChildren ? (isExpanded ? "▾" : "▸") : "";
 
   const summaryExpandedIds = summaryExpanded?.summaryExpandedIds;
@@ -354,66 +386,40 @@ export const TaskTreeNode = memo(function TaskTreeNodeRow({
               className="t-id"
               testId="task-tree-node-id"
             />
-            {childLine && (
-              <>
-                <span className="sep">·</span>
-                <span
-                  className="tabular-nums"
-                  data-testid="task-tree-node-child-summary"
-                >
-                  {childLine}
-                </span>
-              </>
+            {showProgress && (
+              <ChildProgress
+                breakdown={breakdown}
+                total={node.children.length}
+                noun={childNoun(node)}
+              />
             )}
-            {tags.length > 0 && (
-              <>
-                <span className="sep">·</span>
-                {tags.slice(0, 3).map((tag) => (
-                  <span
-                    key={tag}
-                    data-testid="task-tree-node-tag"
-                    className="tag"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </>
-            )}
-            {pipeline.length > 0 && (
-              <>
-                <span className="sep">·</span>
-                <Pipeline segments={pipeline} width={120} />
-              </>
-            )}
-            {hasBreakdown && (
-              <>
-                <span className="sep">·</span>
-                <StateBreakdown {...breakdown} />
-              </>
+            {stepLabel && (
+              <span className="t-step" data-testid="task-tree-node-step">
+                {stepLabel}
+              </span>
             )}
           </div>
         </div>
-        <div className="t-right">
-          <span className="chip-slot">
-            {runChip ? (
-              <RunChip
-                status={runChip.status}
-                label={runChip.label}
-                data-testid="task-tree-node-run-chip"
-                data-run-status={runChip.status ?? undefined}
-              />
-            ) : (
-              <CompletionMark
-                done={Boolean(task.completed_at)}
-                status={activeRunStatus}
-              />
-            )}
-          </span>
-          {task.updated_at && (
-            <span className="when">{formatRelative(task.updated_at)}</span>
+        <span className="t-tags">
+          {tags.slice(0, MAX_TAGS).map((tag) => (
+            <span
+              key={tag}
+              data-testid="task-tree-node-tag"
+              className="tag"
+            >
+              {tag}
+            </span>
+          ))}
+          {tags.length > MAX_TAGS && (
+            <span className="tag-more" title={tags.slice(MAX_TAGS).join(", ")}>
+              +{tags.length - MAX_TAGS}
+            </span>
           )}
-        </div>
-        <div className="t-pri-col" aria-hidden={!priority || undefined}>
+        </span>
+        <span className="t-status-col">
+          <RowStatus task={task} runChip={runChip} />
+        </span>
+        <span className="t-pri-col">
           {priority && (
             <span
               className={`t-pri ${task.priority ?? ""}`}
@@ -422,10 +428,13 @@ export const TaskTreeNode = memo(function TaskTreeNodeRow({
               data-testid="task-tree-node-priority"
               data-priority={task.priority}
             >
-              {priority.glyph}
+              {priority.glyph} {priority.short}
             </span>
           )}
-        </div>
+        </span>
+        <span className="t-when">
+          {task.updated_at ? formatRelative(task.updated_at) : null}
+        </span>
       </div>
 
       {hasChildren && isExpanded && (
