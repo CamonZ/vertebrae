@@ -1282,6 +1282,19 @@ describe("ChatComposer", () => {
         expect(screen.getByTestId("local-chat-comment-editor")).toHaveFocus();
       });
 
+      it("shows key hints for keyboard focus only, so a clicked card keeps its layout", () => {
+        render(<Harness initial={comments} />);
+        fireEvent.pointerDown(chip(2));
+        act(() => chip(2).focus());
+        fireEvent.click(chip(2));
+        expect(screen.getByTestId("local-chat-comment-popover")).toBeVisible();
+        expect(screen.queryByTestId("local-chat-comment-keys")).toBeNull();
+
+        act(() => chip(2).blur());
+        act(() => chip(2).focus());
+        expect(screen.getByTestId("local-chat-comment-keys")).toBeVisible();
+      });
+
       it("removes with Backspace, focusing the next chip and then the input", async () => {
         render(<Harness initial={comments.slice(0, 2)} />);
         chip(1).focus();

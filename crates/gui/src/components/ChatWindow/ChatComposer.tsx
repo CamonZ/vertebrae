@@ -248,6 +248,7 @@ export function ChatComposer({
   const [chipFocusIndex, setChipFocusIndex] = useState<number | null>(null);
   const [keyboardChipId, setKeyboardChipId] = useState<string | null>(null);
   const chipRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const pointerFocusRef = useRef(false);
   const commentsAccessoryRef = useRef<HTMLDivElement | null>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const modelSettingsRef = useRef<HTMLDivElement | null>(null);
@@ -534,9 +535,16 @@ export function ChatComposer({
               }}
               tabIndex={index === rovingIndex ? 0 : -1}
               onKeyDown={(event) => handleChipKeyDown(event, comment, index)}
+              onPointerDown={() => {
+                pointerFocusRef.current = true;
+              }}
               onFocus={() => {
                 setChipFocusIndex(index);
-                setKeyboardChipId(comment.id);
+                // Key hints are for keyboard focus only. After a click the
+                // hint would vanish on the next press elsewhere in the card,
+                // shifting the card under the pointer mid-click.
+                if (!pointerFocusRef.current) setKeyboardChipId(comment.id);
+                pointerFocusRef.current = false;
               }}
               onBlur={() =>
                 setKeyboardChipId((current) =>
