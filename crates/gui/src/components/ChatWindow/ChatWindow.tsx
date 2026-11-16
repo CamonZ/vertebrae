@@ -51,9 +51,14 @@ import { GateDraftProgress } from "./GateDraftProgress";
 import { GateSteering } from "./GateSteering";
 import { useHumanInputDraft } from "../../hooks/useHumanInputDraft";
 import { localChatSessionProjectDisplayName } from "../../utils/localChatSessionGroups";
+import {
+  usePendingComments,
+  usePendingCommentsStore,
+} from "../../stores/pendingCommentsStore";
 import type {
   PendingComment,
   PendingDiffComment,
+  PendingTextComment,
   TextSelectionAnchor,
 } from "./assistantTextComments";
 import {
@@ -77,7 +82,6 @@ const prepareToolChain = (
 ) => buildToolChain(task.annotations);
 
 const NO_CHAIN: never[] = [];
-const NO_COMMENTS: PendingComment[] = [];
 
 interface ChatWindowProps {
   registerChangesToggle?: (toggle: (() => void) | null) => void;
@@ -143,15 +147,16 @@ export function ChatWindow({
   const [leaving, setLeaving] = useState<string[] | null>(null);
   const [leaveBusy, setLeaveBusy] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const [pendingCommentState, setPendingCommentState] = useState<{
-    sessionId: string;
-    comments: PendingComment[];
-  }>(() => ({ sessionId, comments: [] }));
   // The All Changes patch as last loaded, kept after the Changes view closes
   // so its comments can still be placed on the conversation's tool calls.
   const [worktreeState, setWorktreeState] = useState<{
     sessionId: string;
     snapshot: WorktreeSnapshot;
+  } | null>(null);
+  // The composer chip being hovered or pinned; its target is highlighted.
+  const [activeCommentState, setActiveCommentState] = useState<{
+    sessionId: string;
+    id: string | null;
   } | null>(null);
   const [focusState, setFocusState] = useState<{
     sessionId: string;
@@ -172,21 +177,19 @@ export function ChatWindow({
     (state) => state.loadOlderReplayMessages
   );
   const scopeId = `${sessionId}:${association.record?.worktreePath ?? ""}`;
-  const pendingComments =
-    pendingCommentState.sessionId === scopeId
-      ? pendingCommentState.comments
-      : NO_COMMENTS;
+  // Staged comments outlive this window, so closing the panel keeps them.
+  const pendingComments = usePendingComments(scopeId);
+  const updateScopedComments = usePendingCommentsStore((state) => state.update);
   const updatePendingComments = useCallback(
-    (update: (comments: PendingComment[]) => PendingComment[]) => {
-      setPendingCommentState((current) => {
-        const comments = current.sessionId === scopeId ? current.comments : [];
-        const updatedComments = update(comments);
-
-        return { sessionId: scopeId, comments: updatedComments };
-      });
-    },
-    [scopeId]
+    (update: (comments: PendingComment[]) => PendingComment[]) =>
+      updateScopedComments(scopeId, update),
+    [scopeId, updateScopedComments]
   );
+  // After adding or editing a comment the user keeps writing the reply. Wait
+  // a frame so the closing editor does not take focus back.
+  const focusComposer = useCallback(() => {
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
   const handleAddComment = useCallback(
     (anchor: TextSelectionAnchor, body: string) => {
       updatePendingComments((comments) => [
@@ -198,8 +201,9 @@ export function ChatWindow({
           body,
         },
       ]);
+      focusComposer();
     },
-    [updatePendingComments]
+    [updatePendingComments, focusComposer]
   );
   const handleAddDiffComment = useCallback(
     (input: NewDiffComment) => {
@@ -208,8 +212,9 @@ export function ChatWindow({
         id: `local-comment-${nextPendingCommentId++}`,
       });
       if (comment) updatePendingComments((comments) => [...comments, comment]);
+      focusComposer();
     },
-    [updatePendingComments]
+    [updatePendingComments, focusComposer]
   );
   const handleWorktreeLoaded = useCallback(
     (snapshot: WorktreeSnapshot) => {
@@ -230,8 +235,9 @@ export function ChatWindow({
           comment.id === id ? { ...comment, body } : comment
         )
       );
+      focusComposer();
     },
-    [updatePendingComments]
+    [updatePendingComments, focusComposer]
   );
   const handleRemoveComment = useCallback(
     (id: string) => {
@@ -285,6 +291,19 @@ export function ChatWindow({
     [pendingComments, toolChain, worktreeSnapshot]
   );
   const focus = focusState?.sessionId === sessionId ? focusState.focus : null;
+  const activeCommentId =
+    activeCommentState?.sessionId === sessionId ? activeCommentState.id : null;
+  const handleActiveCommentChange = useCallback(
+    (id: string | null) => setActiveCommentState({ sessionId, id }),
+    [sessionId]
+  );
+  const textComments = useMemo(
+    () =>
+      pendingComments.filter(
+        (comment): comment is PendingTextComment => comment.kind === "text"
+      ),
+    [pendingComments]
+  );
   const diffReview = useMemo<DiffReviewValue>(
     () => ({
       comments: pendingComments.filter(
@@ -294,6 +313,7 @@ export function ChatWindow({
       chain: toolChain,
       worktree: worktreeSnapshot,
       focus,
+      activeCommentId,
       addComment: handleAddDiffComment,
       updateComment: handleUpdateComment,
       removeComment: handleRemoveComment,
@@ -304,6 +324,7 @@ export function ChatWindow({
       toolChain,
       worktreeSnapshot,
       focus,
+      activeCommentId,
       handleAddDiffComment,
       handleUpdateComment,
       handleRemoveComment,
@@ -373,11 +394,13 @@ export function ChatWindow({
   const handleNavigateComment = useCallback(
     (id: string) => {
       const comment = pendingComments.find((candidate) => candidate.id === id);
-      if (comment?.kind !== "diff") return;
+      if (!comment) return;
       setFocusState({
         sessionId,
         focus: { commentId: id, nonce: nextFocusNonce++ },
       });
+      // A text comment scrolls its quote into view in the transcript.
+      if (comment.kind !== "diff") return;
       if (comment.home.kind === "worktree") {
         if (!ownWorktreePath) return;
         activate(ownWorktreePath, null);
@@ -677,6 +700,9 @@ export function ChatWindow({
                 replayError={chat.session.providerReplay?.error ?? null}
                 onLoadOlderMessages={() => loadOlderReplayMessages(sessionId)}
                 onAddComment={handleAddComment}
+                textComments={textComments}
+                activeCommentId={activeCommentId}
+                commentFocus={focus}
                 footer={
                   gate && gateStatus && gateDraft ? (
                     <GateSteering
@@ -726,6 +752,7 @@ export function ChatWindow({
               onUpdateComment={handleUpdateComment}
               onRemoveComment={handleRemoveComment}
               onNavigateComment={handleNavigateComment}
+              onActiveCommentChange={handleActiveCommentChange}
               onSend={handleSend}
               onStartSession={handleStartSession}
               onHarnessChange={chat.handleHarnessChange}

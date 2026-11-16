@@ -1,6 +1,7 @@
 import { materializeLiveAssistantMessages } from "./liveAssistantMessages";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { doStartSession } from "../hooks/useLocalChat";
+import { usePendingCommentsStore } from "./pendingCommentsStore";
 import { useChatStore, type ChatMessage } from "./chatStore";
 import {
   clearPersistedLocalChatSessions,
@@ -2454,8 +2455,27 @@ describe("chatStore", () => {
         .getState()
         .startFreshSession("Remove", "/repo");
       useChatStore.getState().setProviderResumeId(remove, "conv-remove");
+      const staged = (id: string) => ({
+        kind: "text" as const,
+        id,
+        responseId: "r",
+        itemId: null,
+        quote: "q",
+        contextBefore: "",
+        contextAfter: "",
+        body: "b",
+      });
+      const { update } = usePendingCommentsStore.getState();
+      update(`${remove}:/repo`, () => [staged("gone")]);
+      update(`${remove}:/moved`, () => [staged("gone too")]);
+      update(`${keep}:/repo`, () => [staged("kept")]);
 
       await useChatStore.getState().deleteLocalSession(remove);
+
+      // Deleting a conversation clears its staged comments in every worktree.
+      expect(usePendingCommentsStore.getState().byScope).toEqual({
+        [`${keep}:/repo`]: [staged("kept")],
+      });
 
       expect(loadPersistedLocalChatSession(remove)).toBeNull();
       expect(loadPersistedLocalChatSession(keep)?.id).toBe(keep);

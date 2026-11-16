@@ -16,6 +16,9 @@ import {
   type ReactNode,
 } from "react";
 import { ChatWindow } from "./ChatWindow";
+import * as hegel from "@hegeldev/hegel";
+import * as gs from "@hegeldev/hegel/generators";
+import { usePendingCommentsStore } from "../../stores/pendingCommentsStore";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession } from "../../stores/chatStore";
 import { commands } from "../../bindings";
@@ -1102,6 +1105,166 @@ describe("ChatWindow diff review comments", () => {
     }
   );
 
+  it("returns focus to the chat input after adding and editing a comment", async () => {
+    seedSession();
+    render(<ChatWindow sessionId="test-session" />);
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "gutter file diff" })
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "New diff comment" }),
+      { target: { value: "Why X?" } }
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send to main chat" }));
+    const composer = screen.getByTestId("local-chat-composer");
+    await waitFor(() => expect(composer).toHaveFocus());
+
+    fireEvent.mouseEnter(screen.getByTestId("local-chat-pending-comment"));
+    fireEvent.click(screen.getByRole("button", { name: "Edit comment 1" }));
+    const editor = screen.getByTestId("local-chat-comment-editor");
+    expect(editor).toHaveFocus();
+    fireEvent.change(editor, { target: { value: "Why X here?" } });
+    fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+
+    await waitFor(() => expect(composer).toHaveFocus());
+    fireEvent.mouseEnter(screen.getByTestId("local-chat-pending-comment"));
+    expect(screen.getByTestId("local-chat-comment-body")).toHaveTextContent(
+      "Why X here?"
+    );
+  });
+
+  it("keeps staged comments when the chat window is closed and reopened", async () => {
+    seedSession();
+    const view = render(<ChatWindow sessionId="test-session" />);
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "gutter file diff" })
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "New diff comment" }),
+      { target: { value: "Why X?" } }
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send to main chat" }));
+    expect(screen.getAllByTestId("local-chat-pending-comment")).toHaveLength(1);
+
+    view.unmount();
+    render(<ChatWindow sessionId="test-session" />);
+    expect(screen.getAllByTestId("local-chat-pending-comment")).toHaveLength(1);
+  });
+
+  /*
+   * Staged comments belong to a conversation and worktree, not to the chat
+   * window (ticket 3845ab6b). Model: a list per session. Closing, reopening
+   * and switching windows never change it; only an accepted send clears the
+   * sending session's list, and only that one.
+   */
+  it("keeps staged comments per conversation through close, reopen and switch until sent", async () => {
+    const SESSIONS = ["s1", "s2"];
+    const scope = (id: string) => `${id}:/worktree`;
+    await hegel.testAsync(
+      async (tc) => {
+        useChatStore.setState({
+          sessions: Object.fromEntries(
+            SESSIONS.map((id) => [id, createSession({ id, association })])
+          ),
+          activeSessionId: "s1",
+          panelOpen: true,
+        });
+        usePendingCommentsStore.setState({ byScope: {} });
+        const model = new Map(SESSIONS.map((id) => [id, [] as string[]]));
+        let next = 0;
+        type Open = { id: string; view: ReturnType<typeof render> };
+        let open = null as Open | null;
+        const show = (id: string) => {
+          open?.view.unmount();
+          open = { id, view: render(<ChatWindow sessionId={id} />) };
+        };
+        const chips = () =>
+          screen
+            .queryAllByTestId("local-chat-pending-comment")
+            .map((chip) => chip.textContent ?? "");
+        const check = () => {
+          for (const id of SESSIONS)
+            expect(
+              (usePendingCommentsStore.getState().byScope[scope(id)] ?? []).map(
+                (comment) => comment.id
+              )
+            ).toEqual(model.get(id));
+          if (!open) return expect(chips()).toEqual([]);
+          const staged = model.get(open.id)!;
+          expect(chips()).toHaveLength(staged.length);
+          staged.forEach((id, index) => expect(chips()[index]).toContain(id));
+        };
+
+        try {
+          const steps = tc.draw(gs.integers({ minValue: 1, maxValue: 12 }));
+          for (let step = 0; step < steps; step++) {
+            const action = tc.draw(
+              gs.sampledFrom(["stage", "open", "close", "remove"])
+            );
+            const session = tc.draw(gs.sampledFrom(SESSIONS));
+            if (action === "stage") {
+              // As "Send to main chat" or another pane would stage it.
+              const id = `q${next++}`;
+              act(() =>
+                usePendingCommentsStore
+                  .getState()
+                  .update(scope(session), (c) => [
+                    ...c,
+                    {
+                      kind: "text",
+                      id,
+                      responseId: "r",
+                      itemId: null,
+                      quote: id,
+                      contextBefore: "",
+                      contextAfter: "",
+                      body: `about ${id}`,
+                    },
+                  ])
+              );
+              model.get(session)!.push(id);
+            }
+            if (action === "open") act(() => show(session));
+            if (action === "close" && open) {
+              act(() => open!.view.unmount());
+              open = null;
+            }
+            if (action === "remove" && open && model.get(open.id)!.length) {
+              const staged = model.get(open.id)!;
+              const at = tc.draw(
+                gs.integers({ minValue: 0, maxValue: staged.length - 1 })
+              );
+              fireEvent.mouseEnter(
+                screen.getAllByTestId("local-chat-pending-comment")[at]
+              );
+              fireEvent.click(
+                screen.getByRole("button", { name: `Remove comment ${at + 1}` })
+              );
+              staged.splice(at, 1);
+            }
+            check();
+          }
+
+          // Sending from one conversation clears only its comments.
+          const sender = tc.draw(gs.sampledFrom(SESSIONS));
+          tc.assume(model.get(sender)!.length > 0);
+          act(() => show(sender));
+          fireEvent.click(screen.getByTitle("Start session"));
+          await waitFor(() => expect(chips()).toEqual([]));
+          model.set(sender, []);
+          check();
+        } finally {
+          open?.view.unmount();
+        }
+      },
+      { testCases: 25 }
+    );
+  }, 120_000);
+
   it("shares a tool-call comment with All Changes, then sends and clears it", async () => {
     seedSession();
     render(<ChatWindow sessionId="test-session" />);
@@ -1140,7 +1303,7 @@ describe("ChatWindow diff review comments", () => {
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
         expect.objectContaining({
           initial_prompt: expect.stringContaining(
-            '1. Tool call Edit f.ts · f.ts:6 (new)\n   ```diff\n   @@ -3,6 +3,7 @@\n    l3\n    l4\n    l5\n   +X\n   ```\n   Selected code snapshot: "X"\n   Comment: Why X?'
+            "1. Tool call Edit f.ts · f.ts:6 (new)\n   ```diff\n   @@ -3,3 +3,4 @@\n    l3\n    l4\n    l5\n   +X\n   ```\n\n   Why X?"
           ),
         })
       )

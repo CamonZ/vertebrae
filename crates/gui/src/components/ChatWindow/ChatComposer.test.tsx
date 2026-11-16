@@ -5,7 +5,17 @@ import {
   openModelSettings,
 } from "../../test/composerControls";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  within,
+  waitFor,
+} from "@testing-library/react";
+import { useRef, useState } from "react";
+import * as hegel from "@hegeldev/hegel";
+import * as gs from "@hegeldev/hegel/generators";
 import { ChatComposer } from "./ChatComposer";
 import type { ChatSession } from "../../stores/chatStore";
 import type {
@@ -13,6 +23,7 @@ import type {
   LocalChatHarnessInfo,
 } from "../../bindings";
 import type {
+  PendingComment,
   PendingDiffComment,
   PendingTextComment,
 } from "./assistantTextComments";
@@ -975,7 +986,7 @@ describe("ChatComposer", () => {
     fireEvent.click(commentIcon);
     expect(commentIcon).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("local-chat-comment-popover")).toHaveClass(
-      "w-96"
+      "chat-comment-card"
     );
     expect(
       screen.getByTestId("local-chat-comment-popover")
@@ -1007,10 +1018,14 @@ describe("ChatComposer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(onSend).toHaveBeenCalledWith(
-      "Comments on the previous response:\n\n" +
-        "1. Selected text:\n> Please update this parser.\n" +
-        "Nearby context: First, ⟦selection⟧ Then rerun tests.\n" +
-        "Comment: Explain which parser."
+      [
+        "Comments on the previous response:",
+        "",
+        "1. Selected text:",
+        "   > First, **Please update this parser.** Then rerun tests.",
+        "",
+        "   Explain which parser.",
+      ].join("\n")
     );
   });
 
@@ -1098,7 +1113,7 @@ describe("ChatComposer", () => {
       expect(onRemoveComment).toHaveBeenCalledWith("diff-1");
     });
 
-    it("navigates to a diff comment when its chip is clicked, but not a text comment", () => {
+    it("navigates to a comment when its chip is pinned, but not when it is unpinned", () => {
       const onNavigateComment = vi.fn();
       render(
         <ChatComposer
@@ -1109,9 +1124,478 @@ describe("ChatComposer", () => {
         />
       );
       fireEvent.click(screen.getByTestId("local-chat-comment-icon-1"));
-      expect(onNavigateComment).not.toHaveBeenCalled();
+      expect(onNavigateComment).toHaveBeenCalledExactlyOnceWith(
+        pendingComment.id
+      );
+      fireEvent.click(screen.getByTestId("local-chat-comment-icon-1"));
       fireEvent.click(screen.getByTestId("local-chat-comment-icon-2"));
-      expect(onNavigateComment).toHaveBeenCalledExactlyOnceWith("diff-1");
+      expect(onNavigateComment).toHaveBeenCalledTimes(2);
+      expect(onNavigateComment).toHaveBeenLastCalledWith("diff-1");
+    });
+
+    it("sends a code attachment without its own text when a follow-up asks the question", () => {
+      const onSend = vi.fn<(message?: string) => boolean>(() => true);
+      const attachment: PendingDiffComment = {
+        ...diffComment,
+        body: "",
+        outdated: false,
+        selectionCode: "a\nb",
+      };
+      const props = defaultProps({
+        pendingComments: [attachment],
+        canSendMessage: true,
+        isActive: true,
+        submitLabel: "Send message",
+        onSend,
+      });
+      const { rerender } = render(<ChatComposer {...props} />);
+      const send = screen.getByRole("button", { name: "Send message" });
+      expect(send).toBeDisabled();
+
+      rerender(<ChatComposer {...props} inputValue="Why remove these?" />);
+      fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+      const message = onSend.mock.calls[0][0];
+      expect(message).toContain("Follow-up:\nWhy remove these?");
+      expect(message).not.toContain("Selected code snapshot");
+      expect(message).not.toContain("Comment:");
+    });
+
+    it("saves an edited comment with Cmd+Return and cancels with Escape", () => {
+      const onUpdateComment = vi.fn();
+      render(
+        <ChatComposer
+          {...defaultProps({ pendingComments: [diffComment], onUpdateComment })}
+        />
+      );
+      fireEvent.mouseEnter(screen.getByTestId("local-chat-pending-comment"));
+      fireEvent.click(screen.getByRole("button", { name: "Edit comment 1" }));
+      const editor = screen.getByTestId("local-chat-comment-editor");
+      fireEvent.change(editor, { target: { value: "Changed." } });
+      fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+      expect(onUpdateComment).toHaveBeenCalledExactlyOnceWith(
+        "diff-1",
+        "Changed."
+      );
+      expect(screen.queryByTestId("local-chat-comment-editor")).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Edit comment 1" }));
+      fireEvent.keyDown(screen.getByTestId("local-chat-comment-editor"), {
+        key: "Escape",
+      });
+      expect(screen.queryByTestId("local-chat-comment-editor")).toBeNull();
+      expect(onUpdateComment).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports the hovered comment so its target can be highlighted", () => {
+      const onActiveCommentChange = vi.fn();
+      render(
+        <ChatComposer
+          {...defaultProps({
+            pendingComments: [pendingComment],
+            onActiveCommentChange,
+          })}
+        />
+      );
+      const chip = screen.getByTestId("local-chat-pending-comment");
+      fireEvent.mouseEnter(chip);
+      expect(onActiveCommentChange).toHaveBeenLastCalledWith("comment-1");
+      fireEvent.mouseLeave(chip);
+      expect(onActiveCommentChange).toHaveBeenLastCalledWith(null);
+    });
+
+    describe("keyboard navigation", () => {
+      const comments: PendingComment[] = [
+        { ...pendingComment, id: "c1" },
+        { ...pendingComment, id: "c2", quote: "second" },
+        { ...pendingComment, id: "c3", quote: "third" },
+      ];
+
+      function Harness({ initial }: { initial: PendingComment[] }) {
+        const [pending, setPending] = useState(initial);
+        return (
+          <ChatComposer
+            {...defaultProps({
+              pendingComments: pending,
+              onRemoveComment: (id: string) =>
+                setPending((current) => current.filter((c) => c.id !== id)),
+              onUpdateComment: vi.fn(),
+            })}
+          />
+        );
+      }
+      const chip = (n: number) =>
+        screen.getByTestId(`local-chat-comment-icon-${n}`);
+      const input = () => screen.getByTestId("local-chat-composer");
+
+      it("enters with ⌘⌥↑ only, moves with arrows/Home/End and leaves with Esc or ⌘⌥↓", () => {
+        render(<Harness initial={comments} />);
+        input().focus();
+        fireEvent.keyDown(input(), { key: "ArrowUp" });
+        expect(input()).toHaveFocus();
+
+        fireEvent.keyDown(input(), {
+          key: "ArrowUp",
+          metaKey: true,
+          altKey: true,
+        });
+        expect(chip(3)).toHaveFocus();
+        expect(screen.getByTestId("local-chat-comment-keys")).toBeVisible();
+        expect(chip(1)).toHaveAttribute("tabindex", "-1");
+
+        fireEvent.keyDown(chip(3), { key: "ArrowLeft" });
+        expect(chip(2)).toHaveFocus();
+        fireEvent.keyDown(chip(2), { key: "Home" });
+        expect(chip(1)).toHaveFocus();
+        fireEvent.keyDown(chip(1), { key: "ArrowLeft" });
+        expect(chip(1)).toHaveFocus();
+        fireEvent.keyDown(chip(1), { key: "End" });
+        expect(chip(3)).toHaveFocus();
+
+        fireEvent.keyDown(chip(3), { key: "Escape" });
+        expect(input()).toHaveFocus();
+        expect(screen.queryByTestId("local-chat-comment-popover")).toBeNull();
+
+        fireEvent.keyDown(input(), {
+          key: "ArrowUp",
+          metaKey: true,
+          altKey: true,
+        });
+        expect(chip(3)).toHaveFocus();
+        fireEvent.keyDown(chip(3), {
+          key: "ArrowDown",
+          metaKey: true,
+          altKey: true,
+        });
+        expect(input()).toHaveFocus();
+      });
+
+      it("edits the focused comment with Enter or E and returns to the chip on cancel", async () => {
+        render(<Harness initial={comments} />);
+        chip(2).focus();
+        fireEvent.keyDown(chip(2), { key: "Enter" });
+        const editor = screen.getByTestId("local-chat-comment-editor");
+        expect(editor).toHaveFocus();
+        fireEvent.keyDown(editor, { key: "Escape" });
+        await waitFor(() => expect(chip(2)).toHaveFocus());
+
+        fireEvent.keyDown(chip(2), { key: "e" });
+        expect(screen.getByTestId("local-chat-comment-editor")).toHaveFocus();
+      });
+
+      it("shows key hints for keyboard focus only, so a clicked card keeps its layout", () => {
+        render(<Harness initial={comments} />);
+        fireEvent.pointerDown(chip(2));
+        act(() => chip(2).focus());
+        fireEvent.click(chip(2));
+        expect(screen.getByTestId("local-chat-comment-popover")).toBeVisible();
+        expect(screen.queryByTestId("local-chat-comment-keys")).toBeNull();
+
+        act(() => chip(2).blur());
+        act(() => chip(2).focus());
+        expect(screen.getByTestId("local-chat-comment-keys")).toBeVisible();
+      });
+
+      it("removes with Backspace, focusing the next chip and then the input", async () => {
+        render(<Harness initial={comments.slice(0, 2)} />);
+        chip(1).focus();
+        fireEvent.keyDown(chip(1), { key: "Backspace" });
+        await waitFor(() => expect(chip(1)).toHaveFocus());
+        expect(chip(1)).toHaveTextContent("second");
+
+        fireEvent.keyDown(chip(1), { key: "Delete" });
+        expect(screen.queryByTestId("local-chat-pending-comments")).toBeNull();
+        expect(input()).toHaveFocus();
+      });
+    });
+
+    /*
+     * Model of the staged-comment row (ticket 3845ab6b). Invariants:
+     * - focus is where the model says: the input, or chip i;
+     * - the row is one Tab stop: exactly one chip has tabindex 0;
+     * - the key hint shows exactly while a chip has keyboard focus;
+     * - Send is enabled exactly when every comment has text or is a code
+     *   attachment, and the follow-up or some comment has text;
+     * - sending carries every comment and the follow-up.
+     */
+    describe("generated keyboard and send sequences", () => {
+      interface Staged {
+        id: string;
+        attachment: boolean;
+        body: string;
+      }
+      interface Model {
+        comments: Staged[];
+        focus: "input" | number;
+        lastChip: number | null;
+        input: string;
+        next: number;
+        sent: string[];
+      }
+      const controls: {
+        setPending: (
+          update: (current: PendingComment[]) => PendingComment[]
+        ) => void;
+        setInput: (value: string) => void;
+      } = { setPending: () => {}, setInput: () => {} };
+      const toPending = (staged: Staged): PendingComment =>
+        staged.attachment
+          ? {
+              ...diffComment,
+              id: staged.id,
+              body: staged.body,
+              outdated: false,
+              selectionCode: "ctx",
+            }
+          : { ...pendingComment, id: staged.id, body: staged.body };
+
+      function ModelHarness({ onSend }: { onSend: (m?: string) => boolean }) {
+        const [pending, setPending] = useState<PendingComment[]>([]);
+        const [input, setInput] = useState("");
+        const inputRef = useRef<HTMLTextAreaElement | null>(null);
+        controls.setPending = setPending;
+        controls.setInput = setInput;
+        return (
+          <ChatComposer
+            {...defaultProps({
+              pendingComments: pending,
+              inputValue: input,
+              setInputValue: setInput,
+              inputRef,
+              canSendMessage: true,
+              isActive: true,
+              submitLabel: "Send message",
+              onSend: (message?: string) => {
+                const accepted = onSend(message);
+                // ChatWindow's contract: clear on an accepted send.
+                if (accepted) {
+                  setPending([]);
+                  setInput("");
+                }
+                return accepted;
+              },
+              onRemoveComment: (id: string) =>
+                setPending((current) => current.filter((c) => c.id !== id)),
+              onUpdateComment: (id: string, body: string) => {
+                setPending((current) =>
+                  current.map((c) => (c.id === id ? { ...c, body } : c))
+                );
+                // ChatWindow's contract: the input takes focus after a save.
+                requestAnimationFrame(() => inputRef.current?.focus());
+              },
+            })}
+          />
+        );
+      }
+
+      const chip = (n: number) =>
+        screen.getByTestId(`local-chat-comment-icon-${n}`);
+      const input = () => screen.getByTestId("local-chat-composer");
+      const flush = () =>
+        act(() => {
+          vi.runOnlyPendingTimers();
+        });
+      const key = (target: Element, init: Record<string, unknown>) => {
+        fireEvent.keyDown(target, init);
+        flush();
+      };
+      const focused = (model: Model) =>
+        model.focus === "input" ? input() : chip(model.focus + 1);
+      const roving = (model: Model) =>
+        Math.min(
+          model.lastChip ?? model.comments.length - 1,
+          model.comments.length - 1
+        );
+      const moveTo = (model: Model, index: number) => {
+        const target = Math.max(0, Math.min(index, model.comments.length - 1));
+        model.focus = target;
+        model.lastChip = target;
+      };
+      const ready = (model: Model) =>
+        model.comments.every((c) => c.body.trim() || c.attachment) &&
+        (model.input.trim() !== "" ||
+          model.comments.some((c) => c.body.trim()));
+      const onChip = (tc: hegel.TestCase, model: Model) => {
+        tc.assume(model.focus !== "input");
+        return model.focus as number;
+      };
+      const BODIES = ["", "  ", "Why?", "Line one\nline two"];
+
+      const machine: hegel.stateful.StateMachine<Model> = {
+        rules: {
+          stage: (tc, model) => {
+            const staged = {
+              id: `k${model.next++}`,
+              attachment: tc.draw(gs.booleans()),
+              body: tc.draw(gs.sampledFrom(BODIES)),
+            };
+            model.comments.push(staged);
+            act(() =>
+              controls.setPending((current) => [...current, toPending(staged)])
+            );
+            flush();
+          },
+          type: (tc, model) => {
+            model.input = tc.draw(gs.sampledFrom(["", " ", "Follow"]));
+            act(() => controls.setInput(model.input));
+          },
+          historyUp: (tc, model) => {
+            tc.assume(model.focus === "input");
+            key(input(), { key: "ArrowUp" });
+          },
+          enter: (tc, model) => {
+            tc.assume(model.focus === "input");
+            key(input(), { key: "ArrowUp", metaKey: true, altKey: true });
+            if (model.comments.length) moveTo(model, roving(model));
+          },
+          move: (tc, model) => {
+            const at = onChip(tc, model);
+            const step = tc.draw(
+              gs.sampledFrom(["ArrowLeft", "ArrowRight", "Home", "End"])
+            );
+            key(chip(at + 1), { key: step });
+            moveTo(
+              model,
+              step === "ArrowLeft"
+                ? at - 1
+                : step === "ArrowRight"
+                  ? at + 1
+                  : step === "Home"
+                    ? 0
+                    : model.comments.length - 1
+            );
+          },
+          leave: (tc, model) => {
+            const at = onChip(tc, model);
+            const how = tc.draw(gs.booleans());
+            key(
+              chip(at + 1),
+              how
+                ? { key: "Escape" }
+                : { key: "ArrowDown", metaKey: true, altKey: true }
+            );
+            model.focus = "input";
+          },
+          remove: (tc, model) => {
+            const at = onChip(tc, model);
+            key(chip(at + 1), {
+              key: tc.draw(gs.sampledFrom(["Backspace", "Delete"])),
+            });
+            model.comments.splice(at, 1);
+            if (model.comments.length) moveTo(model, at);
+            else {
+              // An emptied row starts from the last chip next time.
+              model.focus = "input";
+              model.lastChip = null;
+            }
+          },
+          edit: (tc, model) => {
+            const at = onChip(tc, model);
+            key(chip(at + 1), {
+              key: tc.draw(gs.sampledFrom(["Enter", "e", "E"])),
+            });
+            const editor = screen.getByTestId("local-chat-comment-editor");
+            expect(editor).toHaveFocus();
+            const body = tc.draw(gs.sampledFrom(BODIES));
+            const staged = model.comments[at];
+            if (tc.draw(gs.booleans())) {
+              fireEvent.change(editor, { target: { value: body } });
+              key(editor, { key: "Enter", metaKey: true });
+              if (body.trim() || staged.attachment) {
+                staged.body = body.trim();
+                model.focus = "input";
+                return;
+              }
+              // An empty save is refused; the editor stays open.
+              expect(screen.getByTestId("local-chat-comment-editor")).toBe(
+                editor
+              );
+            }
+            key(screen.getByTestId("local-chat-comment-editor"), {
+              key: "Escape",
+            });
+          },
+          send: (tc, model) => {
+            tc.assume(model.focus === "input" && model.comments.length > 0);
+            tc.assume(ready(model));
+            fireEvent.click(
+              screen.getByRole("button", { name: "Send message" })
+            );
+            flush();
+            const message = model.sent.at(-1)!;
+            for (const staged of model.comments)
+              if (staged.body.trim())
+                expect(message).toContain(staged.body.trim().split("\n")[0]);
+            if (model.input.trim())
+              expect(message).toContain(`Follow-up:\n${model.input.trim()}`);
+            model.comments = [];
+            model.input = "";
+            model.lastChip = null;
+          },
+        },
+        invariants: {
+          focusAndTabStop: {
+            alwaysCheck: true,
+            check: (_tc, model) => {
+              if (
+                model.focus !== "input" ||
+                document.activeElement !== document.body
+              )
+                expect(focused(model)).toHaveFocus();
+              const chips = model.comments.map((_, index) => chip(index + 1));
+              const stops = chips.filter(
+                (element) => element.getAttribute("tabindex") === "0"
+              );
+              expect(stops).toEqual(chips.length ? [chips[roving(model)]] : []);
+              expect(
+                screen.queryByTestId("local-chat-comment-keys") !== null
+              ).toBe(model.focus !== "input");
+            },
+          },
+          sendReadiness: {
+            alwaysCheck: true,
+            check: (_tc, model) => {
+              if (!model.comments.length) return;
+              const send = screen.getByRole("button", { name: "Send message" });
+              expect(send.hasAttribute("disabled")).toBe(!ready(model));
+            },
+          },
+        },
+      };
+
+      it("keeps focus, the tab stop and Send readiness in step with the model", () => {
+        vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+        try {
+          hegel.test(
+            (tc) => {
+              const model: Model = {
+                comments: [],
+                focus: "input",
+                lastChip: null,
+                input: "",
+                next: 0,
+                sent: [],
+              };
+              const view = render(
+                <ModelHarness
+                  onSend={(message) => {
+                    model.sent.push(message ?? "");
+                    return true;
+                  }}
+                />
+              );
+              try {
+                input().focus();
+                hegel.stateful.run(tc, machine, model, { stepCount: 20 });
+              } finally {
+                view.unmount();
+              }
+            },
+            { testCases: 25 }
+          );
+        } finally {
+          vi.useRealTimers();
+        }
+      }, 120_000);
     });
 
     it("sends diff comments in the review message format", () => {
@@ -1139,7 +1623,8 @@ describe("ChatComposer", () => {
           "   -a",
           "   -b",
           "   ```",
-          "   Comment: Why was this removed?",
+          "",
+          "   Why was this removed?",
         ].join("\n")
       );
     });

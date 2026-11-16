@@ -34,6 +34,8 @@ export interface DiffReviewValue {
   /** The All Changes patch as last loaded. */
   worktree: WorktreeSnapshot | null;
   focus: DiffReviewFocus | null;
+  /** The comment whose composer chip is hovered or pinned. */
+  activeCommentId?: string | null;
   addComment(comment: NewDiffComment): void;
   updateComment(id: string, body: string): void;
   removeComment(id: string): void;

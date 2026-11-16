@@ -44,6 +44,10 @@ export const CHAT_SHORTCUT_SECTIONS = [
       },
       { keys: ["⌘", "⇧", "⌥", "H"], label: "History for active pane" },
       { keys: ["Enter"], label: "Send message" },
+      {
+        keys: ["⌘", "⌥", "↑ / ↓"],
+        label: "Focus pending comments / back to input",
+      },
       { keys: ["⇧", "Enter"], label: "New line" },
     ],
   },

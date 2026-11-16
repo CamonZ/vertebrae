@@ -73,6 +73,7 @@ import type {
   UserQuestion,
 } from "../bindings";
 import { commands } from "../bindings";
+import { usePendingCommentsStore } from "./pendingCommentsStore";
 import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
 import {
   gateChatLabel,
@@ -3321,6 +3322,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         if (deleted.has(id)) return;
         deleted.add(id);
         markLocalChatSessionCleared(id);
+        usePendingCommentsStore.getState().clearSession(id);
         if (typeof commands.deleteLocalChatAnnotations === "function")
           cleanup.push(
             commands.deleteLocalChatAnnotations(id).then((result) => {

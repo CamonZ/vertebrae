@@ -102,9 +102,10 @@ describe("selection context oracle", () => {
       expect(message).toContain(
         `${fixture.expected.path}:${fixture.expected.startLine}${fixture.expected.endLine === fixture.expected.startLine ? "" : `-${fixture.expected.endLine}`} (${fixture.expected.side})`
       );
-      expect(message).toContain(
-        `Selected code snapshot: ${JSON.stringify(fixture.expected.code)}`
-      );
+      // The selected lines reach the agent once, inside the diff block.
+      for (const line of fixture.expected.code.split("\n"))
+        if (line.trim()) expect(message).toContain(line);
+      expect(message).not.toContain("Selected code snapshot");
       expect(message).toContain("My question");
     });
 });
