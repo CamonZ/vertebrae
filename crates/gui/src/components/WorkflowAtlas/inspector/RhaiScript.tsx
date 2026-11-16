@@ -1,41 +1,4 @@
-import type { CSSProperties } from "react";
-import { PrismLight as SyntaxHighlighter } from "react-syntax-highlighter";
-import {
-  vs,
-  vscDarkPlus,
-} from "react-syntax-highlighter/dist/esm/styles/prism";
-import { useIsLightTheme } from "../../../hooks/useTheme";
-
-type Refractor = { languages: Record<string, unknown> };
-const rhai = Object.assign(
-  (prism: Refractor) => {
-    prism.languages.rhai = {
-      comment: [
-        { pattern: /\/\*[\s\S]*?\*\//, greedy: true },
-        { pattern: /\/\/[^\n]*/ },
-      ],
-      string: [
-        { pattern: /`(?:\\[\s\S]|[^`\\])*`/, greedy: true },
-        {
-          pattern: /"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/,
-          greedy: true,
-        },
-      ],
-      keyword:
-        /\b(?:as|break|catch|continue|do|else|export|fn|for|if|import|in|let|loop|module|private|return|static|throw|try|type|until|while)\b/,
-      boolean: /\b(?:true|false)\b/,
-      number:
-        /\b(?:0[xX][\da-fA-F_]+|0[bB][01_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d[\d_]*)?)\b/,
-      function: /\b[a-zA-Z_]\w*(?=\s*\()/,
-      operator:
-        /(?:\?\?|&&|\|\||==|!=|<=|>=|\+=|-=|\*=|\/=|%=|<<|>>>?|->|=>|[+*/%=<>!&|^~-])/,
-      punctuation: /(?:[{};,.:]|\[|\]|\(|\))/,
-    };
-  },
-  { displayName: "rhai" }
-);
-
-SyntaxHighlighter.registerLanguage("rhai", rhai);
+import { PanelCode } from "../../shared/PanelCode";
 
 /** Format block layout and indentation while preserving Rhai tokens and literals. */
 export function formatRhaiScript(source: string): string {
@@ -136,51 +99,15 @@ export function formatRhaiScript(source: string): string {
   return result.trim();
 }
 
-const style: CSSProperties = {
-  margin: 0,
-  padding: "0.75rem",
-  background: "transparent",
-  fontSize: "var(--text-13)",
-  lineHeight: 1.6,
-  overflow: "auto",
-  maxHeight: "32rem",
-  whiteSpace: "pre",
-};
-
-interface RhaiScriptProps {
-  source: string;
-}
-
-/** Read-only Rhai source view; formatted for display without changing saved code. */
-export function RhaiScript({ source }: RhaiScriptProps) {
-  const isLightTheme = useIsLightTheme();
-  const syntaxTheme = isLightTheme ? vs : vscDarkPlus;
-  const formatted = formatRhaiScript(source);
+/** Read-only formatting never enters the editor or saved source. */
+export function RhaiScript({ source }: { source: string }) {
   return (
-    <div className="max-h-[32rem] overflow-auto rounded-md border border-border bg-bg font-mono text-xs">
-      <SyntaxHighlighter
+    <div data-testid="rhai-script-highlighted">
+      <PanelCode
+        source={formatRhaiScript(source)}
         language="rhai"
-        style={
-          {
-            ...syntaxTheme,
-            'pre[class*="language-"]': {
-              ...(syntaxTheme['pre[class*="language-"]'] as CSSProperties),
-              background: "transparent",
-              margin: 0,
-            },
-            'code[class*="language-"]': {
-              ...(syntaxTheme['code[class*="language-"]'] as CSSProperties),
-              background: "none",
-            },
-          } as { [key: string]: CSSProperties }
-        }
-        PreTag="div"
-        customStyle={style}
-        codeTagProps={{ className: "font-mono language-rhai" }}
-        data-testid="rhai-script-highlighted"
-      >
-        {formatted}
-      </SyntaxHighlighter>
+        label="Rhai script"
+      />
     </div>
   );
 }

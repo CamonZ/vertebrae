@@ -20,6 +20,29 @@ import { StepInspector } from "./StepInspector";
 import { WorkflowInspector } from "./WorkflowInspector";
 import type { AtlasSelection } from "./selection";
 
+// Save/validation integration tests use a native input adapter; real Pierre
+// shadow-DOM behavior is exercised separately in PanelCode/browser checks.
+vi.mock("../../shared/PanelCode", () => ({
+  PanelCode: ({
+    source,
+    language,
+    label,
+    onChange,
+    error,
+  }: import("../../shared/PanelCode").PanelCodeProps) =>
+    onChange ? (
+      <textarea
+        aria-label={label}
+        value={source}
+        onChange={(event) => onChange(event.target.value)}
+        aria-invalid={!!error}
+        aria-describedby={error ? "step-editor-error" : undefined}
+      />
+    ) : (
+      <pre data-language={language}>{source}</pre>
+    ),
+}));
+
 /* `useStep` (from the hooks barrel) hits the Tauri bridge — mock it. */
 vi.mock("../../../hooks", () => ({ useStep: vi.fn(), useSteps: vi.fn() }));
 vi.mock("../../../bindings", () => ({
@@ -1389,8 +1412,8 @@ describe("StepInspector", () => {
       /let result = 42; #\{\s*"result": result\s*\}/
     );
     expect(
-      screen.getByTestId("rhai-script-highlighted").querySelector("code")
-    ).toHaveClass("language-rhai");
+      screen.getByTestId("rhai-script-highlighted").querySelector("pre")
+    ).toHaveAttribute("data-language", "rhai");
     expect(screen.getByText("Output schema")).toBeInTheDocument();
     expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
     expect(screen.queryByText("Harness")).not.toBeInTheDocument();
@@ -1478,5 +1501,41 @@ describe("entity UUID chips", () => {
       screen.getByRole("button", { name: "Copy full workflow ID" })
     );
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(workflowId));
+  });
+  it("retains failed-save prompt drafts through refetch and resets on entity changes", async () => {
+    const props = {
+      model: MODEL,
+      workflowId: "wf-build",
+      stepId: "s1",
+      onSelect: vi.fn(),
+      onClose: vi.fn(),
+    };
+    const { rerender } = render(<StepInspector {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const source = "Draft\n{{- task.name -}}";
+    fireEvent.change(screen.getByLabelText("Prompt"), {
+      target: { value: source },
+    });
+    vi.mocked(commands.updateStep).mockRejectedValueOnce(
+      new Error("Save failed")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+    await screen.findByText("Save failed");
+    mockUseStep(stepFixture({ goal: "Server refetch" }));
+    rerender(<StepInspector {...props} />);
+    expect(screen.getByLabelText("Prompt")).toHaveValue(source);
+    mockUseStep(
+      stepFixture({
+        id: "s2",
+        name: "Execute",
+        goal: "Other step",
+      })
+    );
+    rerender(<StepInspector {...props} stepId="s2" />);
+    expect(screen.queryByTestId("step-editor")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Prompt")).toHaveValue(
+      "Plan for {{ task.title }}"
+    );
   });
 });

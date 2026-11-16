@@ -24,7 +24,7 @@ function snippetLanguage(language: string): SupportedLanguages {
  * load a grammar first and rejects unknown ones, so on the fallback engine
  * an unknown language renders as text.
  */
-function useResolvedLanguage(language: string): SupportedLanguages {
+export function useResolvedLanguage(language: string): SupportedLanguages {
   const candidate = snippetLanguage(language);
   const ready =
     CODE_HIGHLIGHTER === "highlights" ||

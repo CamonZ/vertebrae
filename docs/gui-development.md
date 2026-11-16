@@ -1107,3 +1107,10 @@ The shared Thread renderer groups consecutive normalized tool calls with
 syntax-derived activity summaries and lazy raw disclosure. See
 [Tool activity summaries](tool-activity-summaries.md) for supported syntax,
 evidence limits, local evaluation and the compiled benchmark fixture.
+
+### Panel source viewers and editors
+
+Artifact JSON and workflow source/configuration panels use the lazy shared
+`PanelCode` surface. See [Panel code surfaces](panel-code-surfaces.md) for its
+draft/reset contract, language policy, migrated inventory and ranked follow-up
+candidates.

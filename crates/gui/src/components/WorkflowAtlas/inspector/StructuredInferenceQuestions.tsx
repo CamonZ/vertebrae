@@ -1,12 +1,15 @@
 /* ──────────────────────────────────────────────────────────────────
    Workflow Atlas — structured_inference config editor.
    ────────────────────────────────────────────────────────────────── */
+import { PanelCode } from "../../shared/PanelCode";
 import type { StructuredInferenceInput } from "../../../utils/stepConfig";
 
 export function StructuredInferenceQuestions({
   value,
   onChange,
+  error,
 }: {
+  error?: string | null;
   value: StructuredInferenceInput;
   onChange: (value: StructuredInferenceInput) => void;
 }) {
@@ -31,17 +34,22 @@ export function StructuredInferenceQuestions({
       <label>
         State{" "}
         <span className="wfd-help">JSON or {"{{ dotted.path }}"} template</span>
-        <textarea
-          value={value.state}
-          onChange={(e) => set("state")(e.target.value)}
+        <PanelCode
+          label="State"
+          language={/[{][{%]/.test(value.state) ? "liquid" : "json"}
+          source={value.state}
+          onChange={set("state")}
+          error={error?.toLowerCase().includes("state") ? error : undefined}
         />
       </label>
       <label>
         Questions
-        <textarea
-          value={value.questions}
-          onChange={(e) => set("questions")(e.target.value)}
-          placeholder="System One questions JSON"
+        <PanelCode
+          label="Questions"
+          language="json"
+          source={value.questions}
+          onChange={set("questions")}
+          error={error?.toLowerCase().includes("questions") ? error : undefined}
         />
       </label>
     </>
