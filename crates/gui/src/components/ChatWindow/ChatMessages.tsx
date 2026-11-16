@@ -36,8 +36,13 @@ import {
 } from "./chatShortcuts";
 import {
   textSelectionToAnchor,
+  type PendingTextComment,
   type TextSelectionAnchor,
 } from "./assistantTextComments";
+import type { DiffReviewFocus } from "../thread/toolChange/DiffReviewContext";
+import { useCommentHighlights } from "./commentHighlight";
+import { CommentShortcutHint } from "./CommentShortcutHint";
+import "./chatComments.css";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const BOTTOM_SCROLL_TOLERANCE_PX = 24;
@@ -45,7 +50,87 @@ const HISTORY_LOAD_THRESHOLD_PX = 240;
 // Stay inside WebKit's signed scrolling range; MAX_SAFE_INTEGER wraps to zero.
 const BOTTOM_SCROLL_TARGET_PX = 1_000_000_000;
 const COMMENT_EDITOR_MAX_WIDTH_PX = 384;
-const COMMENT_EDITOR_VIEWPORT_GUTTER_PX = 8;
+const COMMENT_EDITOR_HEIGHT_PX = 230;
+const COMMENT_TRIGGER_WIDTH_PX = 96;
+const COMMENT_TRIGGER_HEIGHT_PX = 28;
+const VIEWPORT_GUTTER_PX = 8;
+
+interface SelectionAction {
+  anchor: TextSelectionAnchor;
+  /** The live selected range; it follows the transcript as it scrolls. */
+  range: Range;
+  /** The selection was made from its end towards its start. */
+  backward: boolean;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(value, max));
+}
+
+/** The line box where the selection ended, which is where the pointer is. */
+function selectionEdge(action: SelectionAction): DOMRect | null {
+  const range = action.range;
+  const rects =
+    typeof range.getClientRects === "function"
+      ? [...range.getClientRects()].filter((rect) => rect.width || rect.height)
+      : [];
+  if (rects.length) return action.backward ? rects[0] : rects[rects.length - 1];
+  return typeof range.getBoundingClientRect === "function"
+    ? range.getBoundingClientRect()
+    : null;
+}
+
+/**
+ * The Comment pill sits just past where the selection ended: below its last
+ * line when dragged forward, above its first line when dragged backward, so
+ * it never covers the text the user selected.
+ */
+function triggerPosition(action: SelectionAction) {
+  const edge = selectionEdge(action) ?? new DOMRect();
+  const top = action.backward
+    ? edge.top - COMMENT_TRIGGER_HEIGHT_PX - 6
+    : edge.bottom + 6;
+  const left = action.backward
+    ? edge.left
+    : edge.right - COMMENT_TRIGGER_WIDTH_PX / 2;
+  return {
+    top: clamp(top, VIEWPORT_GUTTER_PX, window.innerHeight - 40),
+    left: clamp(
+      left,
+      VIEWPORT_GUTTER_PX,
+      window.innerWidth - COMMENT_TRIGGER_WIDTH_PX - VIEWPORT_GUTTER_PX
+    ),
+  };
+}
+
+function editorPosition(action: SelectionAction) {
+  const edge = selectionEdge(action) ?? new DOMRect();
+  return {
+    top: clamp(
+      edge.bottom + 6,
+      VIEWPORT_GUTTER_PX,
+      window.innerHeight - COMMENT_EDITOR_HEIGHT_PX
+    ),
+    left: clamp(
+      edge.left,
+      VIEWPORT_GUTTER_PX,
+      window.innerWidth - COMMENT_EDITOR_MAX_WIDTH_PX - VIEWPORT_GUTTER_PX
+    ),
+  };
+}
+
+function isBackward(selection: Selection): boolean {
+  const { anchorNode, focusNode } = selection;
+  if (!anchorNode || !focusNode) return false;
+  if (anchorNode === focusNode)
+    return selection.focusOffset < selection.anchorOffset;
+  return !!(
+    anchorNode.compareDocumentPosition(focusNode) &
+    Node.DOCUMENT_POSITION_PRECEDING
+  );
+}
+
+const NO_TEXT_COMMENTS: readonly PendingTextComment[] = [];
 
 interface ChatEmptyStateProps {
   notice?: ReactNode;
@@ -407,6 +492,12 @@ interface ChatMessagesProps {
   replayError?: string | null;
   onLoadOlderMessages?: () => Promise<boolean>;
   onAddComment?: (anchor: TextSelectionAnchor, body: string) => void;
+  /** Pending text comments, highlighted in the transcript. */
+  textComments?: readonly PendingTextComment[];
+  /** The comment whose composer chip is hovered or pinned. */
+  activeCommentId?: string | null;
+  /** A request to scroll a comment's quote into view. */
+  commentFocus?: DiffReviewFocus | null;
   /** Rendered inline after the last message, such as gate steering. */
   footer?: ReactNode;
 }
@@ -431,6 +522,9 @@ export function ChatMessages({
   replayError = null,
   onLoadOlderMessages,
   onAddComment = () => undefined,
+  textComments = NO_TEXT_COMMENTS,
+  activeCommentId = null,
+  commentFocus = null,
   footer = null,
 }: ChatMessagesProps) {
   const retryHistory = useChatStore(
@@ -505,15 +599,17 @@ export function ChatMessages({
   const [projectRoots, setProjectRoots] = useState<readonly string[]>(
     projectPath ? [projectPath] : []
   );
-  const [selectionAction, setSelectionAction] = useState<{
-    anchor: TextSelectionAnchor;
-    top: number;
-    left: number;
-  } | null>(null);
+  const [selectionAction, setSelectionAction] =
+    useState<SelectionAction | null>(null);
   const [commentEditorOpen, setCommentEditorOpen] = useState(false);
   const [commentDraft, setCommentDraft] = useState("");
+  // Re-render on transcript scroll so the pill and editor follow the text.
+  const [, setLayoutTick] = useState(0);
+  // The pill waits until a pointer selection is finished; shown mid-drag it
+  // would sit under the pointer and get in the way of the selection.
+  const pointerSelectingRef = useRef(false);
   const updateTextSelection = useCallback(() => {
-    if (commentEditorOpen) {
+    if (commentEditorOpen || pointerSelectingRef.current) {
       return;
     }
     const transcript = messagesContainerRef.current;
@@ -529,17 +625,61 @@ export function ChatMessages({
       return;
     }
 
-    const range = selection.getRangeAt(0);
-    const rect =
-      typeof range.getBoundingClientRect === "function"
-        ? range.getBoundingClientRect()
-        : new DOMRect();
     setSelectionAction({
       anchor,
-      top: Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - 230)),
-      left: Math.max(8, Math.min(rect.left, window.innerWidth - 312)),
+      range: selection.getRangeAt(0).cloneRange(),
+      backward: isBackward(selection),
     });
   }, [commentEditorOpen]);
+  useEffect(() => {
+    const begin = (event: PointerEvent) => {
+      if (
+        event.button > 0 ||
+        !(event.target instanceof Node) ||
+        !messagesContainerRef.current?.contains(event.target)
+      )
+        return;
+      pointerSelectingRef.current = true;
+      if (!commentEditorOpen) setSelectionAction(null);
+    };
+    const end = () => {
+      if (!pointerSelectingRef.current) return;
+      pointerSelectingRef.current = false;
+      // Double and triple clicks extend the selection after pointerup.
+      setTimeout(updateTextSelection, 0);
+    };
+    document.addEventListener("pointerdown", begin, true);
+    document.addEventListener("pointerup", end, true);
+    document.addEventListener("pointercancel", end, true);
+    return () => {
+      document.removeEventListener("pointerdown", begin, true);
+      document.removeEventListener("pointerup", end, true);
+      document.removeEventListener("pointercancel", end, true);
+    };
+  }, [updateTextSelection, commentEditorOpen]);
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!selectionAction || !container) return;
+    let frame = 0;
+    const follow = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => setLayoutTick((tick) => tick + 1));
+    };
+    container.addEventListener("scroll", follow, { passive: true });
+    window.addEventListener("resize", follow);
+    return () => {
+      cancelAnimationFrame(frame);
+      container.removeEventListener("scroll", follow);
+      window.removeEventListener("resize", follow);
+    };
+  }, [selectionAction]);
+  useCommentHighlights(
+    messagesContainerRef,
+    textComments,
+    activeCommentId,
+    commentFocus,
+    [messages, streamingAssistant]
+  );
   // Tool calls with file changes render as diffs; warm Pierre ahead of them.
   useEffect(preloadDiffRenderer, []);
   useEffect(() => {
@@ -558,6 +698,7 @@ export function ChatMessages({
     if (!selectionAction || !body) return;
 
     onAddComment(selectionAction.anchor, body);
+    setCommentDraft("");
     setCommentEditorOpen(false);
     setSelectionAction(null);
     window.getSelection()?.removeAllRanges();
@@ -983,14 +1124,11 @@ export function ChatMessages({
             ? createPortal(
                 <button
                   type="button"
-                  className="fixed z-[80] flex h-9 w-9 items-center justify-center rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] text-[var(--color-fg)] shadow-lg transition-colors hover:bg-[var(--color-bg-2)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                  className="chat-comment-trigger"
                   data-testid="local-chat-add-comment"
                   aria-label="Add comment"
-                  title="Add comment"
-                  style={{
-                    top: selectionAction.top,
-                    left: selectionAction.left,
-                  }}
+                  title="Comment on the selected text"
+                  style={triggerPosition(selectionAction)}
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => {
                     setCommentDraft("");
@@ -999,17 +1137,19 @@ export function ChatMessages({
                 >
                   <svg
                     aria-hidden="true"
-                    className="h-4 w-4"
+                    width="14"
+                    height="14"
                     fill="none"
                     stroke="currentColor"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    strokeWidth={1.8}
+                    strokeWidth={1.5}
                     viewBox="0 0 24 24"
                   >
                     <path d="M20.5 11.5a8.5 8.5 0 0 1-8.5 8.5 8.6 8.6 0 0 1-4-.95L3 20l.95-4.55A8.5 8.5 0 1 1 20.5 11.5Z" />
                     <path d="M12 8.5v6M9 11.5h6" />
                   </svg>
+                  Comment
                 </button>,
                 document.body
               )
@@ -1017,47 +1157,53 @@ export function ChatMessages({
           {selectionAction && commentEditorOpen
             ? createPortal(
                 <div
-                  className="fixed z-[80] w-96 max-w-[calc(100vw-1rem)] rounded-lg border border-[var(--color-line)] bg-[var(--color-bg)] p-3 shadow-xl"
+                  className="chat-comment-card chat-comment-card-fixed"
+                  data-owns-escape=""
                   role="group"
                   aria-label="Add a comment to selected text"
-                  style={{
-                    top: selectionAction.top,
-                    left: Math.max(
-                      COMMENT_EDITOR_VIEWPORT_GUTTER_PX,
-                      Math.min(
-                        selectionAction.left,
-                        window.innerWidth -
-                          COMMENT_EDITOR_MAX_WIDTH_PX -
-                          COMMENT_EDITOR_VIEWPORT_GUTTER_PX
-                      )
-                    ),
+                  style={editorPosition(selectionAction)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Escape") return;
+                    event.preventDefault();
+                    setCommentEditorOpen(false);
                   }}
                 >
-                  <label
-                    htmlFor="local-chat-comment-draft"
-                    className="mb-1 block text-xs font-medium text-[var(--color-fg)]"
-                  >
+                  <div className="chat-comment-card-header">
+                    <span className="chat-comment-card-title">
+                      Comment on selection
+                    </span>
+                  </div>
+                  <blockquote className="chat-comment-quote">
+                    <mark>{selectionAction.anchor.quote.trim()}</mark>
+                  </blockquote>
+                  <label htmlFor="local-chat-comment-draft" className="sr-only">
                     Comment on selected text
                   </label>
                   <textarea
                     id="local-chat-comment-draft"
                     data-testid="local-chat-comment-draft"
                     aria-label="Comment on selected text"
+                    className="chat-comment-textarea"
+                    placeholder="Add your comment…"
                     value={commentDraft}
                     onChange={(event) => setCommentDraft(event.target.value)}
                     onKeyDown={(event) => {
-                      if (event.key !== "Enter" || !event.metaKey) return;
+                      if (
+                        event.key !== "Enter" ||
+                        !(event.metaKey || event.ctrlKey)
+                      )
+                        return;
                       event.preventDefault();
                       submitCommentDraft();
                     }}
                     autoFocus
                     rows={3}
-                    className="w-full resize-y rounded-md border border-[var(--color-line)] bg-[var(--color-bg)] p-2 text-sm text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
                   />
-                  <div className="mt-2 flex justify-end gap-2">
+                  <div className="chat-comment-card-footer">
+                    <CommentShortcutHint action="add" />
                     <button
                       type="button"
-                      className="rounded-md px-2 py-1 text-xs text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-hover)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                      className="chat-comment-button"
                       onClick={() => setCommentEditorOpen(false)}
                     >
                       Cancel
@@ -1065,7 +1211,8 @@ export function ChatMessages({
                     <button
                       type="button"
                       data-testid="local-chat-save-comment"
-                      className="action-primary rounded-md px-2 py-1 text-xs font-medium"
+                      className="chat-comment-button"
+                      data-primary=""
                       disabled={!commentDraft.trim()}
                       onClick={submitCommentDraft}
                     >

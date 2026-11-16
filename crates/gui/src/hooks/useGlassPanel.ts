@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef } from "react";
 import { usePanelFocusStore } from "../stores/panelFocusStore";
 
+/** Mark a container whose focused content handles Escape itself. */
+export const OWNS_ESCAPE_ATTRIBUTE = "data-owns-escape";
+const OWNS_ESCAPE_SELECTOR = `[${OWNS_ESCAPE_ATTRIBUTE}]`;
+
 interface UseGlassPanelOptions {
   /** Stable identifier for this panel (e.g. "chat", "task-detail"). */
   id: string;
@@ -68,7 +72,11 @@ export function useGlassPanel({
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       // A modal/dialog owns Escape while it is up.
-      if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return;
+      if (document.querySelector('[role="dialog"], [aria-modal="true"]'))
+        return;
+      // UI that handles its own Escape (an inline editor, a chip row) gets it
+      // instead of the whole panel closing under the user.
+      if (document.activeElement?.closest(OWNS_ESCAPE_SELECTOR)) return;
       if (guardRef.current && guardRef.current() === false) return;
       event.preventDefault();
       onCloseRef.current();

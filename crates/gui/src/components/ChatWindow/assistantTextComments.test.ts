@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatTextCommentsForReply,
+  replyHunk,
   textSelectionToAnchor,
   type PendingDiffComment,
   type PendingTextComment,
@@ -118,13 +119,19 @@ describe("assistant text comments", () => {
     ];
 
     expect(formatTextCommentsForReply(comments, "")).toBe(
-      "Comments on the previous response:\n\n" +
-        "1. Selected text:\n> carefully\n" +
-        "Nearby context: Read this ⟦selection⟧, then update the parser.\n" +
-        "Comment: Please explain this word.\n\n" +
-        "2. Selected text:\n> update the parser\n" +
-        "Nearby context: Read this carefully, then ⟦selection⟧.\n" +
-        "Comment: Which parser?"
+      [
+        "Comments on the previous response:",
+        "",
+        "1. Selected text:",
+        "   > Read this **carefully**, then update the parser.",
+        "",
+        "   Please explain this word.",
+        "",
+        "2. Selected text:",
+        "   > Read this carefully, then **update the parser**.",
+        "",
+        "   Which parser?",
+      ].join("\n")
     );
     expect(
       formatTextCommentsForReply(comments.slice(0, 1), "And check the tests.")
@@ -179,7 +186,8 @@ describe("assistant text comments", () => {
           "   -old",
           "   +new",
           "   ```",
-          "   Comment: Rename this.",
+          "",
+          "   Rename this.",
         ].join("\n")
       );
     });
@@ -191,13 +199,14 @@ describe("assistant text comments", () => {
           "",
           "1. Tool call Edit src/b.ts · src/b.ts:4-6 (old) [outdated]",
           "   ```diff",
-          "   @@ -3,4 +3,2 @@",
+          "   @@ -3,4 +3,1 @@",
           "    ctx",
           "   -a",
           "   -b",
           "   -c",
           "   ```",
-          "   Comment: Why removed?",
+          "",
+          "   Why removed?",
           "   Explain.",
         ].join("\n")
       );
@@ -213,8 +222,9 @@ describe("assistant text comments", () => {
           "Comments on the previous response and on the worktree changes:",
           "",
           "1. Selected text:",
-          "> x",
-          "Comment: What is x?",
+          "   > **x**",
+          "",
+          "   What is x?",
           "",
           "2. All Changes · src/a.ts:12 (new)",
           "   ```diff",
@@ -223,7 +233,8 @@ describe("assistant text comments", () => {
           "   -old",
           "   +new",
           "   ```",
-          "   Comment: Rename this.",
+          "",
+          "   Rename this.",
           "",
           "Follow-up:",
           "Thanks.",
@@ -251,8 +262,146 @@ describe("assistant text comments", () => {
 
     it("keeps text-only messages unchanged", () => {
       expect(formatTextCommentsForReply([textComment], "")).toBe(
-        "Comments on the previous response:\n\n1. Selected text:\n> x\nComment: What is x?"
+        "Comments on the previous response:\n\n1. Selected text:\n   > **x**\n\n   What is x?"
       );
+    });
+
+    it("trims the diff block to the selection and three rows before it", () => {
+      const hunk = [
+        "@@ -1,8 +1,9 @@ fn main",
+        " one",
+        " two",
+        " three",
+        " four",
+        " five",
+        "+six",
+        "+seven",
+      ].join("\n");
+      const message = formatTextCommentsForReply(
+        [
+          {
+            ...worktreeComment,
+            body: "",
+            selectionCode: "six\nseven",
+            startLine: 6,
+            endLine: 7,
+            hunk,
+          },
+        ],
+        "Why?"
+      );
+      expect(message).toBe(
+        [
+          "Review comments on the worktree changes:",
+          "",
+          "1. All Changes · src/a.ts:6-7 (new)",
+          "   ```diff",
+          "   @@ -3,3 +3,5 @@ fn main",
+          "    three",
+          "    four",
+          "    five",
+          "   +six",
+          "   +seven",
+          "   ```",
+          "",
+          "Follow-up:",
+          "Why?",
+        ].join("\n")
+      );
+      expect(message).not.toContain("Selected code snapshot");
+    });
+
+    it("keeps an empty side's header valid in a new file", () => {
+      const hunk = ["@@ -0,0 +1,6 @@", "+a", "+b", "+c", "+d", "+e"].join("\n");
+      expect(
+        replyHunk({ ...worktreeComment, startLine: 5, endLine: 5, hunk })
+      ).toBe(["@@ -0,0 +2,4 @@", "+b", "+c", "+d", "+e"].join("\n"));
+    });
+
+    it("keeps the hunk unchanged when the selection is not in it", () => {
+      expect(
+        replyHunk({ ...worktreeComment, startLine: 99, endLine: 99 })
+      ).toBe(worktreeComment.hunk);
+    });
+  });
+
+  describe("text comment quoting", () => {
+    const base: PendingTextComment = {
+      kind: "text",
+      id: "t",
+      responseId: "r",
+      itemId: null,
+      quote: "",
+      contextBefore: "",
+      contextAfter: "",
+      body: "",
+    };
+
+    it("quotes every line of a multi-line selection and its context", () => {
+      const message = formatTextCommentsForReply(
+        [
+          {
+            ...base,
+            quote: "First point.\n\nSecond point.\n",
+            contextBefore: "Intro line\n\n",
+            contextAfter: "\nNext\nheading",
+            body: "These two conflict.\nPick one.",
+          },
+        ],
+        ""
+      );
+      expect(message).toBe(
+        [
+          "Comments on the previous response:",
+          "",
+          "1. Selected text:",
+          "   > Intro line **First point.**",
+          "   >",
+          "   > **Second point.** Next heading",
+          "",
+          "   These two conflict.",
+          "   Pick one.",
+        ].join("\n")
+      );
+    });
+
+    it("keeps bold parseable when a selection edge is punctuation inside a word", () => {
+      const quoted = (
+        quote: string,
+        contextBefore: string,
+        contextAfter: string
+      ) =>
+        formatTextCommentsForReply(
+          [{ ...base, quote, contextBefore, contextAfter, body: "?" }],
+          ""
+        ).split("\n")[3];
+      expect(quoted("(", "call ", "a) now")).toBe("   > call **(** a) now");
+      expect(quoted("x.", "fi", "y")).toBe("   > fi**x.** y");
+      // Word characters on both sides, or whitespace, need no gap.
+      expect(quoted("ars", "p", "er")).toBe("   > p**ars**er");
+      expect(quoted("(a)", "see ", " here")).toBe("   > see **(a)** here");
+    });
+
+    it("drops words the fixed-length context capture cut and marks the cut", () => {
+      const before = `${"x".repeat(5)} ${"word ".repeat(15)}`.slice(-80);
+      const after = ` ${"next ".repeat(16)}`.slice(0, 80);
+      const message = formatTextCommentsForReply(
+        [
+          {
+            ...base,
+            quote: "selected",
+            contextBefore: before,
+            contextAfter: after,
+            body: "Hm",
+          },
+        ],
+        ""
+      );
+      const quoteLine = message.split("\n")[3];
+      expect(quoteLine.startsWith("   > …")).toBe(true);
+      expect(quoteLine.endsWith("…")).toBe(true);
+      expect(quoteLine).toContain("**selected**");
+      expect(quoteLine).not.toMatch(/\s\S{1,3}…$/);
     });
   });
 });

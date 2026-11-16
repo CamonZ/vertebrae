@@ -56,6 +56,7 @@ export interface PendingDiffComment {
 export type PendingComment = PendingTextComment | PendingDiffComment;
 
 const CONTEXT_LENGTH = 80;
+const ENTRY_INDENT = "   ";
 
 function elementFor(node: Node): Element | null {
   return node.nodeType === Node.ELEMENT_NODE
@@ -137,22 +138,98 @@ export function textSelectionToAnchor(
   };
 }
 
-function quoteLines(quote: string): string {
-  return quote
-    .replace(/\r\n/g, "\n")
+/** Collapse whitespace so nearby context reads as one line. */
+function flatten(text: string): string {
+  return text.replace(/\s+/g, " ");
+}
+
+/**
+ * Context before a selection with whitespace collapsed, dropping a first word
+ * the fixed-length capture may have cut.
+ */
+function leadingContext(text: string): string {
+  const flat = flatten(text);
+  if (!flat.trim()) return "";
+  const cut = flat.indexOf(" ");
+  // Context is captured at a fixed length, so its first word may be partial.
+  return flat.length >= CONTEXT_LENGTH && cut >= 0
+    ? `…${flat.slice(cut + 1)}`
+    : flat.trimStart();
+}
+
+/** Context after a selection, dropping a cut last word. */
+function trailingContext(text: string): string {
+  const flat = flatten(text);
+  if (!flat.trim()) return "";
+  const cut = flat.lastIndexOf(" ");
+  return flat.length >= CONTEXT_LENGTH && cut >= 0
+    ? `${flat.slice(0, cut)}…`
+    : flat.trimEnd();
+}
+
+/** Bold one line of the selection, keeping surrounding spaces outside. */
+function emphasize(line: string): string {
+  const core = line.trim();
+  if (!core || core.includes("**")) return line;
+  const lead = line.slice(0, line.indexOf(core));
+  const tail = line.slice(lead.length + core.length);
+  return `${lead}**${core}**${tail}`;
+}
+
+const PUNCTUATION = /[\p{P}\p{S}]/u;
+const isPunctuation = (char: string | undefined) =>
+  char !== undefined && PUNCTUATION.test(char);
+const isWordChar = (char: string | undefined) =>
+  char !== undefined && !/\s/.test(char) && !isPunctuation(char);
+
+/**
+ * `**` between a letter and punctuation does not open or close bold in
+ * CommonMark (selecting "(" in "(a)" would send `**(**a)` literally). A
+ * selection edge cut mid-word next to punctuation gets a space instead.
+ */
+function joinAtSelectionEdge(left: string, right: string): string {
+  const opens = right.startsWith("**") && isPunctuation(right[2]);
+  const closes = left.endsWith("**") && isPunctuation(left.at(-3));
+  const gap =
+    (opens && isWordChar(left.at(-1))) || (closes && isWordChar(right[0]));
+  return gap ? `${left} ${right}` : `${left}${right}`;
+}
+
+/** Context before + bolded selection + context after, as quoted lines. */
+function quotedSelection(comment: PendingTextComment): string[] {
+  const lines = comment.quote
+    .replace(/\r\n?/g, "\n")
+    .replace(/^\n+|\n+$/g, "")
     .split("\n")
-    .map((line) => `> ${line}`)
-    .join("\n");
+    .map(emphasize);
+  const last = lines.length - 1;
+  lines[0] = joinAtSelectionEdge(
+    leadingContext(comment.contextBefore),
+    lines[0]
+  );
+  lines[last] = joinAtSelectionEdge(
+    lines[last],
+    trailingContext(comment.contextAfter)
+  );
+  return lines.map((line) => (line.trim() ? `> ${line}` : ">"));
+}
+
+/** Indent a block so it stays inside its numbered list item. */
+function indent(lines: readonly string[]): string[] {
+  return lines.map((line) => (line ? `${ENTRY_INDENT}${line}` : ""));
+}
+
+/** The reply after a quote or diff: plain text, separated by a blank line. */
+function replyLines(body: string): string[] {
+  const reply = body.trim();
+  return reply ? ["", ...reply.split("\n")] : [];
 }
 
 function textCommentEntry(comment: PendingTextComment, number: number): string {
-  const context = `${comment.contextBefore}⟦selection⟧${comment.contextAfter}`;
-  const lines = [`${number}. Selected text:`, quoteLines(comment.quote)];
-  if (comment.contextBefore || comment.contextAfter) {
-    lines.push(`Nearby context: ${context}`);
-  }
-  lines.push(`Comment: ${comment.body.trim()}`);
-  return lines.join("\n");
+  return [
+    `${number}. Selected text:`,
+    ...indent([...quotedSelection(comment), ...replyLines(comment.body)]),
+  ].join("\n");
 }
 
 /** The label a message and a chip give the patch a diff comment lives on. */
@@ -173,31 +250,82 @@ export function diffCommentLocation(comment: PendingDiffComment): string {
   return `${comment.path}:${range}`;
 }
 
-const ENTRY_INDENT = "   ";
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
+/** Rows of unselected context kept before the selection in a reply. */
+const REPLY_CONTEXT_ROWS = 3;
+
+/**
+ * The captured hunk cut down to the selected rows and a few rows before
+ * them, with a header recomputed for that slice. The stored hunk runs from
+ * the `@@` header, which can be far above the selection.
+ */
+export function replyHunk(comment: PendingDiffComment): string {
+  const [header, ...rest] = comment.hunk.split("\n");
+  const match = HUNK_HEADER.exec(header);
+  if (!match) return comment.hunk;
+
+  // An empty side names the line before it, as in unified diff.
+  let oldLine = Number(match[1]) + (match[2] === "0" ? 1 : 0);
+  let newLine = Number(match[3]) + (match[4] === "0" ? 1 : 0);
+  const rows = rest.map((text) => {
+    const sign = text[0];
+    const row = { text, oldLine, newLine, counts: sign !== "\\" };
+    if (sign === " " || sign === "-") oldLine++;
+    if (sign === " " || sign === "+") newLine++;
+    return row;
+  });
+  const first = rows.findIndex(
+    (row) =>
+      row.counts &&
+      (comment.side === "old" ? row.text[0] !== "+" : row.text[0] !== "-") &&
+      (comment.side === "old" ? row.oldLine : row.newLine) === comment.startLine
+  );
+  if (first < 0) return comment.hunk;
+
+  let from = first;
+  for (let kept = 0; from > 0 && kept < REPLY_CONTEXT_ROWS; ) {
+    from--;
+    if (rows[from].counts) kept++;
+  }
+  // A "no newline" marker belongs to the row above it.
+  while (from > 0 && !rows[from].counts) from--;
+  const slice = rows.slice(from);
+  const oldCount = slice.filter(
+    (row) => row.counts && row.text[0] !== "+"
+  ).length;
+  const newCount = slice.filter(
+    (row) => row.counts && row.text[0] !== "-"
+  ).length;
+  const range = (start: number, count: number) =>
+    `${count === 0 ? start - 1 : start},${count}`;
+
+  return [
+    `@@ -${range(slice[0].oldLine, oldCount)} +${range(slice[0].newLine, newCount)} @@${match[5]}`,
+    ...slice.map((row) => row.text),
+  ].join("\n");
+}
 
 function diffCommentEntry(comment: PendingDiffComment, number: number): string {
+  const hunk = replyHunk(comment);
   const longestRun = Math.max(
     0,
-    ...(comment.hunk.match(/`+/g) ?? []).map((run) => run.length)
+    ...(hunk.match(/`+/g) ?? []).map((run) => run.length)
   );
   const fence = "`".repeat(Math.max(3, longestRun + 1));
   const heading = [
     `${number}. ${diffCommentHomeLabel(comment)} · ${diffCommentLocation(comment)} (${comment.side})`,
     comment.outdated ? " [outdated]" : "",
   ].join("");
-  const selectedCode =
-    comment.selectionCode === undefined
-      ? []
-      : [`Selected code snapshot: ${JSON.stringify(comment.selectionCode)}`];
 
-  const lines = [
-    `${fence}diff`,
-    ...comment.hunk.split("\n"),
-    fence,
-    ...selectedCode,
-    `Comment: ${comment.body.trim()}`,
-  ].flatMap((line) => line.split("\n"));
-  return [heading, ...lines.map((line) => `${ENTRY_INDENT}${line}`)].join("\n");
+  return [
+    heading,
+    ...indent([
+      `${fence}diff`,
+      ...hunk.split("\n"),
+      fence,
+      ...replyLines(comment.body),
+    ]),
+  ].join("\n");
 }
 
 function commentsHeading(comments: readonly PendingComment[]): string {

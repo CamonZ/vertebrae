@@ -1,0 +1,294 @@
+/*
+ * Comments on assistant text and the composer's pending-comment chips.
+ * Inline cards sit on bg-2 with a hairline, 12px radius; controls 8px.
+ * Accent marks one thing per cluster: the quote bar / the primary action.
+ */
+
+/* Quotes of pending text comments in the transcript. */
+::highlight(vtb-comment) {
+  background-color: var(--color-accent-wash);
+}
+::highlight(vtb-comment-active) {
+  background-color: color-mix(in oklch, var(--color-accent) 35%, transparent);
+  color: var(--color-fg);
+}
+
+/* Floating "Comment" pill shown after a selection is finished. */
+.chat-comment-trigger {
+  position: fixed;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 999px;
+  background: var(--color-bg-2);
+  color: var(--color-fg-soft);
+  font: 500 12px/1 var(--font-sans);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.28);
+  cursor: pointer;
+  animation: chat-comment-in 120ms ease-out;
+}
+.chat-comment-trigger:hover {
+  background: var(--color-bg-3);
+  color: var(--color-fg);
+}
+.chat-comment-trigger:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.chat-comment-trigger kbd {
+  margin-left: 2px;
+}
+
+/* Card shared by the add-comment popup and the composer chip popover. */
+.chat-comment-card {
+  width: 384px;
+  max-width: calc(100vw - 1rem);
+  border: 1px solid var(--color-line);
+  border-radius: 12px;
+  background: var(--color-bg-2);
+  color: var(--color-fg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.32);
+  font: 400 13px/1.5 var(--font-sans);
+  text-align: left;
+  animation: chat-comment-in 120ms ease-out;
+}
+.chat-comment-card-fixed {
+  position: fixed;
+  z-index: 80;
+}
+.chat-comment-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 6px 0 12px;
+  color: var(--color-fg-mute);
+  font-size: 11px;
+}
+.chat-comment-card-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-comment-card-title .mono {
+  font-family: var(--font-mono);
+}
+.chat-comment-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-fg-mute);
+  cursor: pointer;
+}
+.chat-comment-icon-button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg);
+}
+.chat-comment-icon-button[data-tone="danger"]:hover {
+  background: var(--color-err-wash);
+  color: var(--color-err);
+}
+.chat-comment-icon-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+
+/* The commented text: accent bar, muted context, the selection emphasised. */
+.chat-comment-quote {
+  margin: 6px 12px 0;
+  max-height: 6rem;
+  overflow-y: auto;
+  border-left: 2px solid var(--color-accent);
+  padding: 2px 0 2px 10px;
+  color: var(--color-fg-mute);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-comment-quote mark {
+  background: transparent;
+  color: var(--color-fg);
+  font-weight: 500;
+}
+.chat-comment-quote-code {
+  white-space: pre;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.chat-comment-body {
+  margin: 8px 12px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.chat-comment-body[data-empty] {
+  color: var(--color-fg-faint);
+  font-style: italic;
+}
+
+.chat-comment-textarea {
+  display: block;
+  width: calc(100% - 16px);
+  min-height: 64px;
+  margin: 8px 8px 0;
+  resize: vertical;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--color-bg-1);
+  padding: 8px;
+  color: var(--color-fg);
+  font: inherit;
+}
+.chat-comment-textarea:focus {
+  outline: none;
+  border-color: var(--color-line-strong);
+}
+.chat-comment-textarea::placeholder {
+  color: var(--color-fg-faint);
+}
+
+.chat-comment-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+}
+.chat-comment-hint {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 4px;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+}
+.chat-comment-button {
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-fg-soft);
+  font: 500 12px/1 var(--font-sans);
+  cursor: pointer;
+}
+.chat-comment-button:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-fg);
+}
+.chat-comment-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+}
+.chat-comment-button[data-primary] {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.chat-comment-button[data-primary]:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+  color: var(--color-on-primary);
+}
+.chat-comment-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chat-comment-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-bg-1);
+  color: var(--color-fg-mute);
+  font: 500 10px/1 var(--font-mono);
+}
+
+/* Composer chips: one per pending comment. */
+.chat-comment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+}
+.chat-comment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 26px;
+  padding: 0 8px 0 6px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-bg-2);
+  color: var(--color-fg-soft);
+  font: 400 12px/1 var(--font-sans);
+  cursor: pointer;
+  transition:
+    background-color 120ms,
+    border-color 120ms,
+    color 120ms;
+}
+.chat-comment-chip:hover,
+.chat-comment-chip[aria-expanded="true"] {
+  border-color: var(--color-line-strong);
+  background: var(--color-bg-3);
+  color: var(--color-fg);
+}
+.chat-comment-chip[aria-pressed="true"] {
+  border-color: var(--color-accent);
+}
+.chat-comment-chip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.chat-comment-chip-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--color-accent-wash);
+  color: var(--color-accent);
+  font: 600 10px/1 var(--font-mono);
+}
+.chat-comment-chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-comment-chip-label[data-mono] {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+@keyframes chat-comment-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-comment-trigger,
+  .chat-comment-card {
+    animation: none;
+  }
+}

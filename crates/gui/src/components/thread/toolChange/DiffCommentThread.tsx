@@ -40,6 +40,7 @@ function CommentCard({
       data-testid="diff-comment"
       data-diff-comment-id={comment.id}
       data-focused={focus ? "" : undefined}
+      data-active={review?.activeCommentId === comment.id ? "" : undefined}
     >
       <div className="diff-comment-meta">
         <span className="diff-comment-where">
@@ -132,6 +133,9 @@ function CommentEditor({
         }}
       />
       <div className="diff-comment-editor-actions">
+        <span className="diff-comment-editor-hint" aria-hidden="true">
+          <kbd>⌘↵</kbd> {submitLabel.toLowerCase()} · <kbd>esc</kbd> cancel
+        </span>
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
@@ -184,7 +188,7 @@ export function DiffCommentThread({
   };
 
   return (
-    <div className="diff-comment-thread">
+    <div className="diff-comment-thread" data-owns-escape="">
       {annotation.threadIds?.map((id) => (
         <InlineSelectionDiscussion key={id} threadId={id} />
       ))}

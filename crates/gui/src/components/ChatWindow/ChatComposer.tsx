@@ -12,8 +12,27 @@ import {
   diffCommentHomeLabel,
   diffCommentLocation,
   formatTextCommentsForReply,
+  replyHunk,
   type PendingComment,
+  type PendingDiffComment,
 } from "./assistantTextComments";
+import { CommentShortcutHint } from "./CommentShortcutHint";
+import "./chatComments.css";
+
+/** A code selection sent to the main chat; its own text is optional. */
+function isAttachment(comment: PendingComment): boolean {
+  return comment.kind === "diff" && comment.selectionCode !== undefined;
+}
+
+/** `file.ts:12-14` for a chip; the full path is in the popover. */
+function chipDiffLabel(comment: PendingDiffComment): string {
+  const name = comment.path.split("/").pop() || comment.path;
+  const range =
+    comment.endLine === comment.startLine
+      ? `${comment.startLine}`
+      : `${comment.startLine}-${comment.endLine}`;
+  return `${name}:${range}`;
+}
 import {
   LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE,
   LOCAL_CHAT_UNAVAILABLE_MESSAGE,
@@ -168,6 +187,8 @@ interface ChatComposerProps {
   onRemoveComment?: (id: string) => void;
   /** Bring a diff comment into view in the diff it was written on. */
   onNavigateComment?: (id: string) => void;
+  /** The hovered or pinned comment, whose target is highlighted. */
+  onActiveCommentChange?: (id: string | null) => void;
   onSend: (message?: string) => boolean | void;
   onStartSession: (initialPrompt?: string) => boolean | void;
   onHarnessChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -211,6 +232,7 @@ export function ChatComposer({
   onUpdateComment,
   onRemoveComment,
   onNavigateComment,
+  onActiveCommentChange,
   onSend,
   onStartSession,
   onHarnessChange,
@@ -223,6 +245,9 @@ export function ChatComposer({
   const [pinnedCommentId, setPinnedCommentId] = useState<string | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editingCommentBody, setEditingCommentBody] = useState("");
+  const [chipFocusIndex, setChipFocusIndex] = useState<number | null>(null);
+  const [keyboardChipId, setKeyboardChipId] = useState<string | null>(null);
+  const chipRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const commentsAccessoryRef = useRef<HTMLDivElement | null>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const modelSettingsRef = useRef<HTMLDivElement | null>(null);
@@ -312,8 +337,9 @@ export function ChatComposer({
     }
     return {
       providerLabel:
-        providerOptions.find(({ provider }) => provider.id === selectedProviderId)
-          ?.provider.label ?? visibleHarness.label,
+        providerOptions.find(
+          ({ provider }) => provider.id === selectedProviderId
+        )?.provider.label ?? visibleHarness.label,
       text: parts.join(" · "),
       needsAttention:
         picker.selectedModelUnsupported ||
@@ -321,9 +347,15 @@ export function ChatComposer({
         picker.selectedSpeedTierUnsupported,
     };
   })();
+  // A code attachment ("Send to main chat") may go without its own text: the
+  // follow-up or another comment carries the question.
   const hasReadyComments =
     pendingComments.length > 0 &&
-    pendingComments.every((comment) => comment.body.trim().length > 0);
+    pendingComments.every(
+      (comment) => comment.body.trim().length > 0 || isAttachment(comment)
+    ) &&
+    (inputValue.trim().length > 0 ||
+      pendingComments.some((comment) => comment.body.trim().length > 0));
   const canSubmitComments =
     hasReadyComments && (canSendMessage || shouldStartOrResume);
   const submit = () => {
@@ -339,10 +371,113 @@ export function ChatComposer({
     if (canSendMessage) onSend(message);
     else onStartSession(message);
   };
+  const shownCommentId = pinnedCommentId ?? activeCommentId;
+  useEffect(() => {
+    onActiveCommentChange?.(shownCommentId);
+  }, [shownCommentId, onActiveCommentChange]);
+  const closeCommentPopover = () => {
+    setPinnedCommentId(null);
+    setActiveCommentId(null);
+    setEditingCommentId(null);
+  };
+  const saveEditedComment = (comment: PendingComment) => {
+    const body = editingCommentBody.trim();
+    if (!body && !isAttachment(comment)) return;
+    onUpdateComment?.(comment.id, body);
+    setEditingCommentId(null);
+  };
+
+  // Keyboard navigation: the chip row is one Tab stop (roving tabindex);
+  // ⌘⌥↑ from the input enters it, since plain ↑/↓ belong to message history.
+  const rovingIndex = Math.min(
+    chipFocusIndex ?? pendingComments.length - 1,
+    pendingComments.length - 1
+  );
+  // A new set of comments starts from the last chip again.
+  if (!pendingComments.length && chipFocusIndex !== null)
+    setChipFocusIndex(null);
+  const focusChip = (index: number) => {
+    const target = Math.max(0, Math.min(index, pendingComments.length - 1));
+    setChipFocusIndex(target);
+    chipRefs.current[target]?.focus();
+  };
+  const leaveChips = () => {
+    closeCommentPopover();
+    inputRef.current?.focus();
+  };
+  const startEditing = (comment: PendingComment) => {
+    setPinnedCommentId(comment.id);
+    setActiveCommentId(comment.id);
+    setEditingCommentId(comment.id);
+    setEditingCommentBody(comment.body);
+  };
+  const stopEditing = (index: number) => {
+    setEditingCommentId(null);
+    // The editor unmounts; keep the keyboard user on the chip they edited.
+    requestAnimationFrame(() => chipRefs.current[index]?.focus());
+  };
+  const removeFromKeyboard = (index: number) => {
+    onRemoveComment?.(pendingComments[index].id);
+    closeCommentPopover();
+    if (pendingComments.length === 1) {
+      inputRef.current?.focus();
+      return;
+    }
+    // After removal the following chip takes this index.
+    const next = Math.min(index, pendingComments.length - 2);
+    setChipFocusIndex(next);
+    requestAnimationFrame(() => chipRefs.current[next]?.focus());
+  };
+  const handleChipKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    comment: PendingComment,
+    index: number
+  ) => {
+    const plain = !event.metaKey && !event.ctrlKey && !event.altKey;
+    switch (event.key) {
+      case "ArrowLeft":
+        if (!plain) return;
+        focusChip(index - 1);
+        break;
+      case "ArrowRight":
+        if (!plain) return;
+        focusChip(index + 1);
+        break;
+      case "Home":
+        focusChip(0);
+        break;
+      case "End":
+        focusChip(pendingComments.length - 1);
+        break;
+      case "Enter":
+      case "e":
+      case "E":
+        if (!plain) return;
+        startEditing(comment);
+        break;
+      case "Backspace":
+      case "Delete":
+        removeFromKeyboard(index);
+        break;
+      case "Escape":
+        leaveChips();
+        break;
+      case "ArrowDown":
+        if (!(event.metaKey && event.altKey)) return;
+        leaveChips();
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   const commentsAccessory = pendingComments.length ? (
     <div
       ref={commentsAccessoryRef}
-      className="flex max-w-full flex-wrap items-center gap-1"
+      className="chat-comment-chips"
+      data-owns-escape=""
       data-testid="local-chat-pending-comments"
       aria-label={`${pendingComments.length} comments queued for your reply`}
     >
@@ -394,7 +529,21 @@ export function ChatComposer({
           >
             <button
               type="button"
-              className="relative inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--color-line)] bg-[var(--color-bg-1)] text-[var(--color-fg-soft)] transition-colors hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+              ref={(element) => {
+                chipRefs.current[index] = element;
+              }}
+              tabIndex={index === rovingIndex ? 0 : -1}
+              onKeyDown={(event) => handleChipKeyDown(event, comment, index)}
+              onFocus={() => {
+                setChipFocusIndex(index);
+                setKeyboardChipId(comment.id);
+              }}
+              onBlur={() =>
+                setKeyboardChipId((current) =>
+                  current === comment.id ? null : current
+                )
+              }
+              className="chat-comment-chip"
               data-testid={`local-chat-comment-icon-${commentNumber}`}
               aria-label={`Comment ${commentNumber} details`}
               aria-controls={popoverId}
@@ -403,162 +552,101 @@ export function ChatComposer({
               title={`Click to ${isPinned ? "close" : "keep open"} comment ${commentNumber}`}
               onClick={() => {
                 if (isPinned) {
-                  setPinnedCommentId(null);
-                  setActiveCommentId(null);
+                  closeCommentPopover();
                 } else {
                   setPinnedCommentId(comment.id);
                   setActiveCommentId(comment.id);
-                  if (comment.kind === "diff") onNavigateComment?.(comment.id);
+                  onNavigateComment?.(comment.id);
                 }
               }}
             >
-              {comment.kind === "diff" &&
-                comment.selectionCode !== undefined && (
-                  <span className="selection-chip-label">
-                    {diffCommentLocation(comment)}
-                  </span>
-                )}
-              <svg
-                aria-hidden="true"
-                className="h-4 w-4"
-                fill="none"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.8}
-                viewBox="0 0 24 24"
-              >
-                <path d="M20.5 11.5a8.5 8.5 0 0 1-8.5 8.5 8.6 8.6 0 0 1-4-.95L3 20l.95-4.55A8.5 8.5 0 1 1 20.5 11.5Z" />
-                <path d="M8 11.5h8" />
-              </svg>
-              <span
-                aria-hidden="true"
-                className="absolute -right-1 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full border border-[var(--color-bg)] bg-[var(--color-accent)] px-0.5 text-[9px] font-semibold leading-none text-on-primary"
-              >
+              <span className="chat-comment-chip-number" aria-hidden="true">
                 {commentNumber}
               </span>
+              {comment.kind === "diff" ? (
+                <span className="chat-comment-chip-label" data-mono="">
+                  {comment.selectionCode !== undefined && (
+                    <span className="selection-chip-label sr-only">
+                      {diffCommentLocation(comment)}
+                    </span>
+                  )}
+                  {chipDiffLabel(comment)}
+                </span>
+              ) : (
+                <span className="chat-comment-chip-label">
+                  “{comment.quote.replace(/\s+/g, " ").trim()}”
+                </span>
+              )}
             </button>
             {isActive ? (
               <div
                 id={popoverId}
-                className="absolute bottom-full left-0 z-[90] mb-2 w-96 max-w-[min(24rem,calc(100vw-2rem))] rounded-lg border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] p-3 text-left shadow-xl"
+                className="chat-comment-card absolute bottom-full left-0 z-[90] mb-2"
                 role="group"
                 aria-label={`Comment ${commentNumber} details`}
                 data-testid="local-chat-comment-popover"
                 onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    setPinnedCommentId(null);
-                    setActiveCommentId(null);
-                  }
+                  if (event.key === "Escape") closeCommentPopover();
                 }}
               >
-                <div className="mb-1 flex min-w-0 items-center justify-between gap-3">
-                  <p className="min-w-0 flex-1 text-[11px] font-medium text-[var(--color-fg-mute)]">
-                    {comment.kind === "diff"
-                      ? `${diffCommentHomeLabel(comment)} · ${diffCommentLocation(comment)} (${comment.side})${comment.outdated ? " · outdated" : ""}`
-                      : "Selected text and nearby context"}
-                  </p>
-                  <div className="flex shrink-0 items-center gap-1">
-                    {isEditing ? (
+                <div className="chat-comment-card-header">
+                  <span className="chat-comment-card-title">
+                    {comment.kind === "diff" ? (
                       <>
-                        <button
-                          type="button"
-                          aria-label={`Save comment ${commentNumber}`}
-                          title={`Save comment ${commentNumber}`}
-                          data-testid="local-chat-save-edited-comment"
-                          disabled={!editingCommentBody.trim()}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
-                          onClick={() => {
-                            onUpdateComment?.(
-                              comment.id,
-                              editingCommentBody.trim()
-                            );
-                            setEditingCommentId(null);
-                          }}
-                        >
-                          <svg
-                            aria-hidden="true"
-                            className="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            viewBox="0 0 24 24"
-                          >
-                            <path d="m5 12.5 4.5 4.5L19 7" />
-                          </svg>
-                        </button>
-                        <button
-                          type="button"
-                          aria-label={`Cancel editing comment ${commentNumber}`}
-                          title={`Cancel editing comment ${commentNumber}`}
-                          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                          onClick={() => setEditingCommentId(null)}
-                        >
-                          <svg
-                            aria-hidden="true"
-                            className="h-4 w-4"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={1.8}
-                            viewBox="0 0 24 24"
-                          >
-                            <path d="m6 6 12 12M18 6 6 18" />
-                          </svg>
-                        </button>
+                        {diffCommentHomeLabel(comment)} ·{" "}
+                        <span className="mono">
+                          {diffCommentLocation(comment)}
+                        </span>{" "}
+                        ({comment.side}){comment.outdated ? " · outdated" : ""}
                       </>
                     ) : (
+                      "Selected text"
+                    )}
+                  </span>
+                  {!isEditing ? (
+                    <>
                       <button
                         type="button"
                         aria-label={`Edit comment ${commentNumber}`}
                         title={`Edit comment ${commentNumber}`}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-4)] hover:text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                        onClick={() => {
-                          setEditingCommentId(comment.id);
-                          setEditingCommentBody(comment.body);
-                        }}
+                        className="chat-comment-icon-button"
+                        onClick={() => startEditing(comment)}
                       >
                         <svg
                           aria-hidden="true"
-                          className="h-4 w-4"
+                          width="14"
+                          height="14"
                           fill="none"
                           stroke="currentColor"
                           strokeLinecap="round"
                           strokeLinejoin="round"
-                          strokeWidth={1.8}
+                          strokeWidth={1.5}
                           viewBox="0 0 24 24"
                         >
                           <path d="M12 20h9" />
                           <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
                         </svg>
                       </button>
-                    )}
-                    {!isEditing ? (
                       <button
                         type="button"
                         aria-label={`Remove comment ${commentNumber}`}
                         title={`Remove comment ${commentNumber}`}
-                        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-err-wash)] hover:text-[var(--color-err)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
+                        className="chat-comment-icon-button"
+                        data-tone="danger"
                         onClick={() => {
                           onRemoveComment?.(comment.id);
-                          setEditingCommentId((current) =>
-                            current === comment.id ? null : current
-                          );
-                          setPinnedCommentId(null);
-                          setActiveCommentId(null);
+                          closeCommentPopover();
                         }}
                       >
                         <svg
                           aria-hidden="true"
-                          className="h-4 w-4"
+                          width="14"
+                          height="14"
                           fill="none"
                           stroke="currentColor"
                           strokeLinecap="round"
                           strokeLinejoin="round"
-                          strokeWidth={1.8}
+                          strokeWidth={1.5}
                           viewBox="0 0 24 24"
                         >
                           <path d="M3 6h18" />
@@ -567,50 +655,109 @@ export function ChatComposer({
                           <path d="M10 11v5M14 11v5" />
                         </svg>
                       </button>
+                    </>
+                  ) : null}
+                </div>
+                {comment.kind === "diff" ? (
+                  <pre
+                    className="chat-comment-quote chat-comment-quote-code"
+                    data-testid="local-chat-comment-hunk"
+                  >
+                    {replyHunk(comment)}
+                  </pre>
+                ) : (
+                  <blockquote className="chat-comment-quote">
+                    {comment.contextBefore ? (
+                      <span>{comment.contextBefore}</span>
                     ) : null}
-                  </div>
-                </div>
-                <div className="mb-2 w-full">
-                  {comment.kind === "diff" ? (
-                    <pre
-                      className="max-h-24 w-full overflow-auto whitespace-pre border-l-2 border-[var(--color-accent)] pl-2 font-mono text-xs leading-relaxed text-[var(--color-fg-soft)]"
-                      data-testid="local-chat-comment-hunk"
-                    >
-                      {comment.hunk}
-                    </pre>
-                  ) : (
-                    <blockquote className="max-h-24 w-full overflow-y-auto whitespace-pre-wrap break-words border-l-2 border-[var(--color-accent)] pl-2 text-xs leading-relaxed text-[var(--color-fg-soft)]">
-                      {comment.contextBefore ? (
-                        <span>{comment.contextBefore}</span>
-                      ) : null}
-                      <mark className="bg-[var(--color-accent)]/20 text-[var(--color-fg)]">
-                        {comment.quote}
-                      </mark>
-                      {comment.contextAfter ? (
-                        <span>{comment.contextAfter}</span>
-                      ) : null}
-                    </blockquote>
-                  )}
-                </div>
+                    <mark>{comment.quote}</mark>
+                    {comment.contextAfter ? (
+                      <span>{comment.contextAfter}</span>
+                    ) : null}
+                  </blockquote>
+                )}
                 {isEditing ? (
-                  <textarea
-                    aria-label={`Edit comment ${commentNumber}`}
-                    data-testid="local-chat-comment-editor"
-                    value={editingCommentBody}
-                    onChange={(event) =>
-                      setEditingCommentBody(event.target.value)
-                    }
-                    rows={2}
-                    className="w-full resize-y rounded-md border border-[var(--color-line)] bg-[var(--color-bg)] p-2 text-xs text-[var(--color-fg)] focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]"
-                  />
+                  <>
+                    <textarea
+                      aria-label={`Edit comment ${commentNumber}`}
+                      data-testid="local-chat-comment-editor"
+                      className="chat-comment-textarea"
+                      value={editingCommentBody}
+                      autoFocus
+                      // Continue the existing text rather than prepend to it.
+                      onFocus={(event) => {
+                        const end = event.currentTarget.value.length;
+                        event.currentTarget.setSelectionRange(end, end);
+                      }}
+                      onChange={(event) =>
+                        setEditingCommentBody(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          stopEditing(index);
+                        } else if (
+                          event.key === "Enter" &&
+                          (event.metaKey || event.ctrlKey)
+                        ) {
+                          event.preventDefault();
+                          saveEditedComment(comment);
+                        }
+                      }}
+                      rows={3}
+                    />
+                    <div className="chat-comment-card-footer">
+                      <CommentShortcutHint action="save" />
+                      <button
+                        type="button"
+                        className="chat-comment-button"
+                        aria-label={`Cancel editing comment ${commentNumber}`}
+                        title={`Cancel editing comment ${commentNumber}`}
+                        onClick={() => stopEditing(index)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="chat-comment-button"
+                        data-primary=""
+                        aria-label={`Save comment ${commentNumber}`}
+                        title={`Save comment ${commentNumber}`}
+                        data-testid="local-chat-save-edited-comment"
+                        disabled={
+                          !editingCommentBody.trim() && !isAttachment(comment)
+                        }
+                        onClick={() => saveEditedComment(comment)}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </>
                 ) : (
                   <p
-                    className="whitespace-pre-wrap break-words text-xs text-[var(--color-fg)]"
+                    className="chat-comment-body"
                     data-testid="local-chat-comment-body"
+                    data-empty={comment.body.trim() ? undefined : ""}
                   >
-                    {comment.body}
+                    {comment.body.trim()
+                      ? comment.body
+                      : "No comment — attached as context"}
                   </p>
                 )}
+                {keyboardChipId === comment.id && !isEditing ? (
+                  <div
+                    className="chat-comment-card-footer"
+                    data-testid="local-chat-comment-keys"
+                  >
+                    <span className="chat-comment-hint" aria-hidden="true">
+                      <kbd className="chat-comment-kbd">←→</kbd> move ·
+                      <kbd className="chat-comment-kbd">↵</kbd> edit ·
+                      <kbd className="chat-comment-kbd">⌫</kbd> remove ·
+                      <kbd className="chat-comment-kbd">esc</kbd> back
+                    </span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -620,7 +767,22 @@ export function ChatComposer({
   ) : null;
 
   return (
-    <div className="hc-foot">
+    <div
+      className="hc-foot"
+      onKeyDown={(event) => {
+        if (
+          event.target !== inputRef.current ||
+          event.key !== "ArrowUp" ||
+          !event.metaKey ||
+          !event.altKey ||
+          event.shiftKey ||
+          !pendingComments.length
+        )
+          return;
+        event.preventDefault();
+        focusChip(rovingIndex);
+      }}
+    >
       <div className="hc-ctx">
         <div
           className="hc-ctx-fill"
@@ -669,7 +831,8 @@ export function ChatComposer({
             <div className="hc-chat-controls right">
               {picker?.selectedModelUnsupported && !picker.hasConversation && (
                 <span role="alert" className="hc-composer-alert">
-                  Choose an available model or reset to Default model to start this chat.
+                  Choose an available model or reset to Default model to start
+                  this chat.
                 </span>
               )}
               {picker?.unavailableMessage && (
@@ -749,7 +912,7 @@ export function ChatComposer({
                                 selectedProviderId === "openai" &&
                                 session.selectedModelId === "default"
                                   ? ""
-                                  : session.selectedModelId ?? ""
+                                  : (session.selectedModelId ?? "")
                               }
                               onChange={onModelChange}
                               disabled={picker.modelPickerDisabled}
@@ -775,7 +938,8 @@ export function ChatComposer({
                                     value: model.id,
                                     label:
                                       model.label +
-                                      (model.id === visibleHarness.default_model_id
+                                      (model.id ===
+                                      visibleHarness.default_model_id
                                         ? " (default)"
                                         : ""),
                                   })),
@@ -792,24 +956,31 @@ export function ChatComposer({
                                 onChange={onReasoningEffortChange}
                                 disabled={picker.effortPickerDisabled}
                                 options={[
-                                  { value: "", label: picker.effortDefaultLabel },
+                                  {
+                                    value: "",
+                                    label: picker.effortDefaultLabel,
+                                  },
                                   ...(picker.selectedReasoningEffortUnsupported
                                     ? [
                                         {
-                                          value: session.selectedReasoningEffort ?? "",
+                                          value:
+                                            session.selectedReasoningEffort ??
+                                            "",
                                           label: `Unsupported: ${session.selectedReasoningEffort}`,
                                         },
                                       ]
                                     : []),
-                                  ...availableReasoningEfforts.map((effort) => ({
-                                    value: effort.id,
-                                    label:
-                                      effort.label +
-                                      (effort.id ===
-                                      visibleHarness.default_reasoning_effort
-                                        ? " (default)"
-                                        : ""),
-                                  })),
+                                  ...availableReasoningEfforts.map(
+                                    (effort) => ({
+                                      value: effort.id,
+                                      label:
+                                        effort.label +
+                                        (effort.id ===
+                                        visibleHarness.default_reasoning_effort
+                                          ? " (default)"
+                                          : ""),
+                                    })
+                                  ),
                                 ]}
                               />
                             </div>
@@ -826,7 +997,9 @@ export function ChatComposer({
                                 data-testid="local-chat-speed-tier-picker"
                                 value={
                                   session.selectedSpeedTier ??
-                                  (picker.hasConversation ? "" : defaultSpeedTierId)
+                                  (picker.hasConversation
+                                    ? ""
+                                    : defaultSpeedTierId)
                                 }
                                 onChange={onSpeedTierChange}
                                 disabled={picker.speedPickerDisabled}
@@ -837,7 +1010,8 @@ export function ChatComposer({
                                   ...(picker.selectedSpeedTierUnsupported
                                     ? [
                                         {
-                                          value: session.selectedSpeedTier ?? "",
+                                          value:
+                                            session.selectedSpeedTier ?? "",
                                           label: `Unsupported: ${session.selectedSpeedTier}`,
                                         },
                                       ]

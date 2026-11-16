@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 import { queryClient } from "../query/queryClient";
+import { usePendingCommentsStore } from "../stores/pendingCommentsStore";
 
 const createStorageMock = (): Storage => {
   let store: Record<string, string> = {};
@@ -79,6 +80,7 @@ afterEach(() => {
   cleanup();
   queryClient.clear();
   localStorage.clear();
+  usePendingCommentsStore.setState({ byScope: {} });
 });
 
 // Mock Tauri APIs

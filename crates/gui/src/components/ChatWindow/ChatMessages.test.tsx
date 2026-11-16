@@ -2,6 +2,8 @@ import type { ComponentProps } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import * as hegel from "@hegeldev/hegel";
+import * as gs from "@hegeldev/hegel/generators";
 import { ChatEmptyState, ChatMessages } from "./ChatMessages";
 import { useChatStore, type ChatMessage } from "../../stores/chatStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
@@ -259,6 +261,157 @@ describe("ChatMessages", () => {
     selection?.removeAllRanges();
   });
 
+  it("offers the comment pill only once a pointer selection is finished, and adds with Cmd+Return", async () => {
+    const onAddComment = vi.fn();
+    const messages: ChatMessage[] = [
+      {
+        kind: "assistant",
+        itemId: "assistant-item-7",
+        text: "Read this carefully, then update the parser.",
+        timestamp: "2024-01-01T12:00:01Z",
+      },
+    ];
+    const { container } = render(
+      <ChatMessages
+        {...defaultProps({ messages, isEmpty: false, onAddComment })}
+      />
+    );
+    const textNode = container.querySelector(
+      '[data-local-chat-assistant-item-id="assistant-item-7"] p'
+    )?.firstChild as Text;
+    const transcript = screen.getByTestId("chat-messages-scroll");
+
+    fireEvent.pointerDown(textNode.parentElement!, { button: 0 });
+    const range = document.createRange();
+    range.setStart(textNode, 10);
+    range.setEnd(textNode, 19);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    fireEvent(document, new Event("selectionchange"));
+    expect(
+      screen.queryByRole("button", { name: "Add comment" })
+    ).not.toBeInTheDocument();
+
+    fireEvent.pointerUp(transcript, { button: 0 });
+    fireEvent.click(await screen.findByRole("button", { name: "Add comment" }));
+    const draft = screen.getByRole("textbox", {
+      name: "Comment on selected text",
+    });
+    fireEvent.change(draft, { target: { value: "Why carefully?" } });
+    fireEvent.keyDown(draft, { key: "Enter", metaKey: true });
+
+    expect(onAddComment).toHaveBeenCalledWith(
+      expect.objectContaining({ quote: "carefully" }),
+      "Why carefully?"
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "Comment on selected text" })
+    ).not.toBeInTheDocument();
+    selection?.removeAllRanges();
+  });
+
+  /*
+   * The comment pill never appears under a pointer that is still selecting
+   * (ticket 3845ab6b). Model: a press inside the transcript hides it until
+   * release; outside a press, it shows exactly when the selection is
+   * non-empty assistant text. Keyboard selection needs no pointer.
+   */
+  it("shows the comment pill exactly when an unpressed selection is assistant text", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout"] });
+    try {
+      hegel.test(
+        (tc) => {
+          const messages: ChatMessage[] = [
+            {
+              kind: "user",
+              text: "A user phrase.",
+              timestamp: "2024-01-01T12:00:00Z",
+            },
+            {
+              kind: "assistant",
+              itemId: "a1",
+              text: "Read this carefully, then update the parser.",
+              timestamp: "2024-01-01T12:00:01Z",
+            },
+          ];
+          const view = render(
+            <ChatMessages {...defaultProps({ messages, isEmpty: false })} />
+          );
+          const assistant = view.container.querySelector(
+            '[data-local-chat-assistant-item-id="a1"] p'
+          )!.firstChild as Text;
+          const user = view.container.querySelector(".evrow--user p")!
+            .firstChild as Text;
+          const transcript = screen.getByTestId("chat-messages-scroll");
+          const selection = window.getSelection()!;
+          let pressed = false;
+          let selected: "none" | "assistant" | "user" = "none";
+          let shown = false;
+          try {
+            const steps = tc.draw(gs.integers({ minValue: 1, maxValue: 20 }));
+            for (let step = 0; step < steps; step++) {
+              const action = tc.draw(
+                gs.sampledFrom(["down", "up", "select", "clear"])
+              );
+              if (action === "down") {
+                const inside = tc.draw(gs.booleans());
+                const button = tc.draw(gs.sampledFrom([0, 2]));
+                fireEvent.pointerDown(
+                  inside ? assistant.parentElement! : document.body,
+                  { button }
+                );
+                if (inside && button === 0) {
+                  pressed = true;
+                  shown = false;
+                }
+              }
+              if (action === "up") {
+                fireEvent.pointerUp(transcript, { button: 0 });
+                act(() => {
+                  vi.runOnlyPendingTimers();
+                });
+                if (pressed) shown = selected === "assistant";
+                pressed = false;
+              }
+              if (action === "select") {
+                selected = tc.draw(gs.sampledFrom(["assistant", "user"]));
+                const node = selected === "assistant" ? assistant : user;
+                const start = tc.draw(
+                  gs.integers({ minValue: 0, maxValue: node.length - 2 })
+                );
+                const range = document.createRange();
+                range.setStart(node, start);
+                range.setEnd(node, node.length);
+                selection.removeAllRanges();
+                selection.addRange(range);
+                // Whitespace-only selections are not comments.
+                if (!range.toString().trim()) selected = "none";
+                fireEvent(document, new Event("selectionchange"));
+                if (!pressed) shown = selected === "assistant";
+              }
+              if (action === "clear") {
+                selection.removeAllRanges();
+                selected = "none";
+                fireEvent(document, new Event("selectionchange"));
+                if (!pressed) shown = false;
+              }
+              expect(
+                screen.queryByRole("button", { name: "Add comment" }) !== null
+              ).toBe(shown);
+            }
+          } finally {
+            selection.removeAllRanges();
+            view.unmount();
+          }
+        },
+        { testCases: 80 }
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  }, 60_000);
+
   it("does not offer comments for a selected user message", () => {
     const messages: ChatMessage[] = [
       {
@@ -278,7 +431,7 @@ describe("ChatMessages", () => {
     selection?.removeAllRanges();
     selection?.addRange(range);
 
-    fireEvent.mouseUp(screen.getByTestId("chat-messages-scroll"));
+    fireEvent(document, new Event("selectionchange"));
     expect(
       screen.queryByRole("button", { name: "Add comment" })
     ).not.toBeInTheDocument();
