@@ -10,6 +10,7 @@ import {
 } from "./SharedConfigSettings";
 import { SettingsPage } from "../../pages/SettingsPage";
 import { commands, type SharedSettings } from "../../bindings";
+import { chooseDropdownValue, getDropdownOption } from "../../test/dropdown";
 
 vi.mock("../../bindings", () => ({
   commands: {
@@ -214,10 +215,7 @@ describe("shared configuration forms", () => {
       "true"
     );
     await user.click(screen.getByRole("button", { name: "Discard" }));
-    await user.selectOptions(
-      screen.getByLabelText("Provider API key"),
-      "replace"
-    );
+    chooseDropdownValue(screen.getByLabelText("Provider API key"), "replace");
     await user.type(
       screen.getByLabelText("New provider api key"),
       "new-secret"
@@ -324,10 +322,7 @@ describe("shared configuration forms", () => {
     });
     const user = userEvent.setup();
     mount("providers");
-    await user.selectOptions(
-      await screen.findByLabelText("TypeSafe API key"),
-      "clear"
-    );
+    chooseDropdownValue(await screen.findByLabelText("TypeSafe API key"), "clear");
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "safe replacement endpoint"
@@ -380,10 +375,7 @@ describe("shared configuration forms", () => {
   it("moves legacy keys to the OS store without exposing them in the form", async () => {
     const user = userEvent.setup();
     mount("providers");
-    await user.selectOptions(
-      await screen.findByLabelText("TypeSafe API key"),
-      "migrate"
-    );
+    chooseDropdownValue(await screen.findByLabelText("TypeSafe API key"), "migrate");
     expect(
       screen.queryByLabelText("New typesafe api key")
     ).not.toBeInTheDocument();
@@ -399,10 +391,7 @@ describe("shared configuration forms", () => {
   it("retains entered keys when the OS store is locked and displays cleanup warnings after saving", async () => {
     const user = userEvent.setup();
     mount("providers");
-    await user.selectOptions(
-      await screen.findByLabelText("TypeSafe API key"),
-      "replace"
-    );
+    chooseDropdownValue(await screen.findByLabelText("TypeSafe API key"), "replace");
     await user.type(screen.getByLabelText("New typesafe api key"), "retry-key");
     vi.mocked(commands.saveSharedSettings).mockResolvedValueOnce({
       status: "error",
@@ -429,10 +418,7 @@ describe("shared configuration forms", () => {
   it("refreshes provider pickers only after a confirmed save and shows live-apply feedback", async () => {
     const user = userEvent.setup();
     mount("providers");
-    await user.selectOptions(
-      await screen.findByLabelText("TypeSafe API key"),
-      "replace"
-    );
+    chooseDropdownValue(await screen.findByLabelText("TypeSafe API key"), "replace");
     await user.type(screen.getByLabelText("New typesafe api key"), "new-key");
     vi.mocked(commands.saveSharedSettings).mockResolvedValueOnce({
       status: "error",
@@ -474,19 +460,19 @@ describe("decision model configuration", () => {
         ],
       }),
     });
-    const user = userEvent.setup();
     mount("decision_model");
-    await user.selectOptions(
-      await screen.findByLabelText("Decision provider"),
-      "openai"
+    chooseDropdownValue(await screen.findByLabelText("Decision provider"), "openai");
+    await waitFor(() =>
+      expect(
+        getDropdownOption(screen.getByLabelText("Decision model"), "GPT-5")
+      ).not.toBeNull()
     );
-    expect(await screen.findByRole("option", { name: "GPT-5" })).toBeVisible();
     expect(
-      screen.queryByRole("option", { name: "Default" })
-    ).not.toBeInTheDocument();
+      getDropdownOption(screen.getByLabelText("Decision model"), "Default")
+    ).toBeNull();
     expect(screen.getByText("Codex is not installed")).toBeVisible();
-    await user.selectOptions(screen.getByLabelText("Decision model"), "gpt-5");
-    expect(screen.getByLabelText("Decision model")).toHaveValue("gpt-5");
+    chooseDropdownValue(screen.getByLabelText("Decision model"), "gpt-5");
+    expect(screen.getByLabelText("Decision model")).toHaveAttribute("data-value", "gpt-5");
   });
 
   it("saves a configured provider/model independently of chat defaults", async () => {
@@ -508,19 +494,10 @@ describe("decision model configuration", () => {
     });
     mount("decision_model");
     await screen.findByLabelText("Decision model status");
-    await user.selectOptions(
-      screen.getByLabelText("Decision model status"),
-      "enabled"
-    );
+    chooseDropdownValue(screen.getByLabelText("Decision model status"), "enabled");
     expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
-    await user.selectOptions(
-      screen.getByLabelText("Decision provider"),
-      "custom"
-    );
-    await user.selectOptions(
-      screen.getByLabelText("Decision model"),
-      "model-a"
-    );
+    chooseDropdownValue(screen.getByLabelText("Decision provider"), "custom");
+    chooseDropdownValue(screen.getByLabelText("Decision model"), "model-a");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(commands.saveSharedSettings).toHaveBeenCalledWith("revision-1", {
@@ -541,10 +518,7 @@ describe("decision model configuration", () => {
     expect(
       screen.queryByLabelText("New provider api key")
     ).not.toBeInTheDocument();
-    await user.selectOptions(
-      screen.getByLabelText("Decision provider"),
-      "openai"
-    );
+    chooseDropdownValue(screen.getByLabelText("Decision provider"), "openai");
     expect(screen.getByLabelText("Decision model")).toHaveValue("");
   });
 
@@ -563,15 +537,10 @@ describe("decision model configuration", () => {
     });
     const user = userEvent.setup();
     mount("decision_model");
-    expect(await screen.findByLabelText("Decision provider")).toHaveValue(
-      "removed"
-    );
+    expect(await screen.findByLabelText("Decision provider")).toHaveAttribute("data-value", "removed");
     expect(screen.getByLabelText("Decision model")).toHaveValue("old-model");
     expect(screen.getByText("Provider is no longer configured.")).toBeVisible();
-    await user.selectOptions(
-      screen.getByLabelText("Decision model status"),
-      "disabled"
-    );
+    chooseDropdownValue(screen.getByLabelText("Decision model status"), "disabled");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() =>
       expect(commands.saveSharedSettings).toHaveBeenCalledWith("revision-1", {

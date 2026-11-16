@@ -16,6 +16,14 @@ function renderHeader(overrides: Record<string, unknown> = {}) {
   return { props, ...render(<ChatHeader {...props} />) };
 }
 
+function openPaneMenu() {
+  fireEvent.click(screen.getByRole("button", { name: "More pane actions" }));
+}
+
+function menuItem(name: string) {
+  return screen.getByRole("menuitem", { name });
+}
+
 describe("ChatHeader", () => {
   it("hides project context for a single pane", () => {
     renderHeader({ projectLabel: "project" });
@@ -40,19 +48,12 @@ describe("ChatHeader", () => {
     const titleButton = screen.getByRole("button", {
       name: "Rename chat: My Project Chat",
     });
-    const regenerateButton = screen.getByRole("button", {
-      name: "Regenerate chat title",
-    });
     const projectContext = screen.getByRole("note", {
       name: "Project: a-very-long-project-name",
     });
 
     expect(
-      titleButton.compareDocumentPosition(regenerateButton) &
-        Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    expect(
-      regenerateButton.compareDocumentPosition(projectContext) &
+      titleButton.compareDocumentPosition(projectContext) &
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
     expect(projectContext).toHaveAttribute(
@@ -136,10 +137,8 @@ describe("ChatHeader", () => {
     const onTitleRegenerate = vi.fn();
     renderHeader({ onTitleRegenerate });
 
-    const button = screen.getByRole("button", {
-      name: "Regenerate chat title",
-    });
-    fireEvent.click(button);
+    openPaneMenu();
+    fireEvent.click(menuItem("Regenerate chat title"));
 
     expect(onTitleRegenerate).toHaveBeenCalledTimes(1);
   });
@@ -151,13 +150,13 @@ describe("ChatHeader", () => {
       isTitleRegenerating: true,
     });
 
-    const regenerateButton = screen.getByRole("button", {
-      name: "Regenerating chat title",
-    });
-    expect(regenerateButton).toBeDisabled();
     expect(
-      regenerateButton.querySelector("svg.animate-spin")
+      screen
+        .getByRole("status", { name: "Regenerating chat title" })
+        .querySelector("svg.animate-spin")
     ).toBeInTheDocument();
+    openPaneMenu();
+    expect(menuItem("Regenerating chat title")).toBeDisabled();
     expect(
       screen.getByRole("button", { name: "Rename chat: Test Chat" })
     ).toBeDisabled();
@@ -196,8 +195,8 @@ describe("ChatHeader", () => {
     const onClearMessages = vi.fn();
     renderHeader({ onClearMessages });
 
-    const btn = screen.getByRole("button", { name: "Clear messages" });
-    fireEvent.click(btn);
+    openPaneMenu();
+    fireEvent.click(menuItem("Clear messages"));
     expect(onClearMessages).toHaveBeenCalledTimes(1);
   });
 
@@ -232,9 +231,8 @@ describe("ChatHeader", () => {
 
   it("disables clear messages while closing", () => {
     renderHeader({ isClosing: true });
-    expect(
-      screen.getByRole("button", { name: "Clear messages" })
-    ).toBeDisabled();
+    openPaneMenu();
+    expect(menuItem("Clear messages")).toBeDisabled();
   });
 
   // --- Conditional actions ---
@@ -243,9 +241,8 @@ describe("ChatHeader", () => {
     const onStartFresh = vi.fn();
     renderHeader({ onStartFresh });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Start fresh local chat" })
-    );
+    openPaneMenu();
+    fireEvent.click(menuItem("Start fresh local chat"));
     expect(onStartFresh).toHaveBeenCalledTimes(1);
   });
 
@@ -260,9 +257,8 @@ describe("ChatHeader", () => {
     const onToggleHistory = vi.fn();
     renderHeader({ onToggleHistory, isWide: false });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle chat history" })
-    );
+    openPaneMenu();
+    fireEvent.click(menuItem("Toggle chat history"));
     expect(onToggleHistory).toHaveBeenCalledTimes(1);
   });
 
@@ -296,25 +292,23 @@ describe("ChatHeader", () => {
     const onSplitPane = vi.fn();
     renderHeader({ onSplitPane, canSplitPane: true });
 
-    const btn = screen.getByRole("button", { name: "Split chat pane" });
-    fireEvent.click(btn);
+    openPaneMenu();
+    fireEvent.click(menuItem("Split chat pane"));
     expect(onSplitPane).toHaveBeenCalledTimes(1);
   });
 
   it("disables split pane button when canSplitPane is false", () => {
     renderHeader({ onSplitPane: vi.fn(), canSplitPane: false });
-    expect(
-      screen.getByRole("button", { name: "Split chat pane" })
-    ).toBeDisabled();
+    openPaneMenu();
+    expect(menuItem("Split chat pane")).toBeDisabled();
   });
 
   it("shows unsplit panes button when onUnsplitPanes is provided", () => {
     const onUnsplitPanes = vi.fn();
     renderHeader({ onUnsplitPanes });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Keep only this pane" })
-    );
+    openPaneMenu();
+    fireEvent.click(menuItem("Keep only this pane"));
     expect(onUnsplitPanes).toHaveBeenCalledTimes(1);
   });
 
@@ -322,7 +316,8 @@ describe("ChatHeader", () => {
     const onClosePane = vi.fn();
     renderHeader({ onClosePane });
 
-    fireEvent.click(screen.getByRole("button", { name: "Close this pane" }));
+    openPaneMenu();
+    fireEvent.click(menuItem("Close this pane"));
     expect(onClosePane).toHaveBeenCalledTimes(1);
   });
 
@@ -336,9 +331,9 @@ describe("ChatHeader", () => {
 
   it("does not render any optional buttons when no callbacks are provided", () => {
     renderHeader();
-    // Title, clear, and stop are always-rendered.
+    // Title, overflow trigger (holding clear), and stop are always-rendered.
     const buttons = screen.getAllByRole("button");
-    expect(buttons).toHaveLength(3); // title + clear + stop
+    expect(buttons).toHaveLength(3); // title + overflow + stop
   });
 
   // --- Mutation-killing tests: conditional visibility ---
@@ -381,9 +376,11 @@ describe("ChatHeader", () => {
       onClosePane: vi.fn(),
       onClosePanel: vi.fn(),
     });
-    const buttons = screen.getAllByRole("button");
-    // Title + 7 optional + 2 always (clear + stop) = 10
-    expect(buttons).toHaveLength(10);
+    // Inline: title + widen + stop + overflow + close panel.
+    expect(screen.getAllByRole("button")).toHaveLength(5);
+    openPaneMenu();
+    // Menu: start fresh, history, split, keep only, close pane, clear.
+    expect(screen.getAllByRole("menuitem")).toHaveLength(6);
   });
 
   it("applies danger class to stop generation button", () => {
@@ -392,9 +389,44 @@ describe("ChatHeader", () => {
     expect(stopBtn.className).toContain("danger");
   });
 
-  it("does not apply danger class to clear button", () => {
+  it("marks clear messages as a destructive menu item", () => {
     renderHeader();
-    const clearBtn = screen.getByRole("button", { name: "Clear messages" });
-    expect(clearBtn.className).not.toContain("danger");
+    openPaneMenu();
+    expect(menuItem("Clear messages").className).toContain("danger");
+  });
+
+  it("keeps changes and background inline while they are open or busy", () => {
+    renderHeader({
+      onToggleChanges: vi.fn(),
+      changesOpen: true,
+      onToggleBackground: vi.fn(),
+      backgroundRunning: 2,
+    });
+    expect(screen.getByTestId("local-chat-view-changes")).toHaveAttribute(
+      "aria-pressed",
+      "true"
+    );
+    expect(
+      screen.getByRole("button", { name: "Background tasks, 2 running" })
+    ).toBeInTheDocument();
+  });
+
+  it("moves idle changes and background toggles into the overflow menu", () => {
+    const onToggleChanges = vi.fn();
+    renderHeader({ onToggleChanges, onToggleBackground: vi.fn() });
+    expect(screen.queryByTestId("local-chat-view-changes")).toBeNull();
+    openPaneMenu();
+    fireEvent.click(menuItem("Changes"));
+    expect(onToggleChanges).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the overflow menu on Escape and returns focus to the trigger", () => {
+    renderHeader({ onStartFresh: vi.fn() });
+    openPaneMenu();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "More pane actions" })
+    ).toHaveFocus();
   });
 });

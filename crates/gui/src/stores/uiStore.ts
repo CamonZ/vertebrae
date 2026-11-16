@@ -18,6 +18,72 @@ import {
 
 type Theme = "light" | "dark" | "system";
 
+export { ACCENTS, type Accent } from "../utils/accents";
+import type { Accent } from "../utils/accents";
+
+/** Typeface pairing applied as `html[data-type]` (see index.css). */
+export type TypePairing =
+  | "editorial"
+  | "atelier"
+  | "gazette"
+  | "humanist"
+  | "soft"
+  | "technical"
+  | "terminal"
+  | "modernist"
+  | "classic";
+export const TYPE_PAIRINGS: ReadonlyArray<{
+  value: TypePairing;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "editorial",
+    label: "Editorial",
+    description: "Instrument Sans · Newsreader replies · Instrument Serif titles",
+  },
+  {
+    value: "atelier",
+    label: "Atelier",
+    description: "DM Sans · DM Serif Text replies · DM Serif Display titles · DM Mono",
+  },
+  {
+    value: "gazette",
+    label: "Gazette",
+    description: "Public Sans · Source Serif replies · Playfair Display titles",
+  },
+  {
+    value: "humanist",
+    label: "Humanist",
+    description: "Bricolage Grotesque · Literata replies · Fraunces titles",
+  },
+  {
+    value: "soft",
+    label: "Soft",
+    description: "Onest · Lora replies · Young Serif titles · Fira Code",
+  },
+  {
+    value: "technical",
+    label: "Technical",
+    description: "IBM Plex Sans · Plex Serif titles · Plex Mono",
+  },
+  {
+    value: "terminal",
+    label: "Terminal",
+    description: "Space Grotesk throughout · Space Mono",
+  },
+  {
+    value: "modernist",
+    label: "Modernist",
+    description: "Hanken Grotesk · Syne titles · JetBrains Mono",
+  },
+  {
+    value: "classic",
+    label: "Classic",
+    description: "Geist · Newsreader titles · JetBrains Mono",
+  },
+];
+
 /** Visual treatment for the assistant waiting-state indicator. */
 export type ThinkingIndicatorStyle = "classic" | "futuristic";
 
@@ -34,6 +100,10 @@ interface UIState {
   inlineDiscussionPreference: InlineDiscussionPreference;
   /** Current theme preference */
   theme: Theme;
+  /** Typeface pairing */
+  typePairing: TypePairing;
+  /** Accent hue */
+  accent: Accent;
   /** Current assistant thinking indicator style */
   thinkingIndicatorStyle: ThinkingIndicatorStyle;
   /** Current density preference */
@@ -60,6 +130,10 @@ interface UIActions {
   ) => void;
   /** Set the theme preference */
   setTheme: (theme: Theme) => void;
+  /** Set the typeface pairing */
+  setTypePairing: (typePairing: TypePairing) => void;
+  /** Set the accent hue */
+  setAccent: (accent: Accent) => void;
   /** Set the assistant thinking indicator style */
   setThinkingIndicatorStyle: (style: ThinkingIndicatorStyle) => void;
   /** Set the density preference */
@@ -92,6 +166,10 @@ export const useUIStore = create<UIStore>()(
         set({ inlineDiscussionPreference }),
       theme: "system",
       setTheme: (theme) => set({ theme }),
+      typePairing: "editorial",
+      setTypePairing: (typePairing) => set({ typePairing }),
+      accent: "orchid",
+      setAccent: (accent) => set({ accent }),
       thinkingIndicatorStyle: "classic",
       setThinkingIndicatorStyle: (thinkingIndicatorStyle) =>
         set({ thinkingIndicatorStyle }),
@@ -130,6 +208,8 @@ export const useUIStore = create<UIStore>()(
       partialize: (state) => ({
         inlineDiscussionPreference: state.inlineDiscussionPreference,
         theme: state.theme,
+        typePairing: state.typePairing,
+        accent: state.accent,
         thinkingIndicatorStyle: state.thinkingIndicatorStyle,
         density: state.density,
         externalEditor: state.externalEditor,

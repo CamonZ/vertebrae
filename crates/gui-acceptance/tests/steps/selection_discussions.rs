@@ -246,9 +246,9 @@ async fn fixture(world: &mut GuiWorld) {
         std::fs::write(path, "").unwrap();
     }
 
-    gui_acceptance::click_when_ready(
+    gui_acceptance::click_pane_action(
         &client,
-        Locator::Css("[data-testid=local-chat-view-changes]"),
+        "[data-testid=local-chat-view-changes]",
         "open Changes alongside chat",
     )
     .await;
@@ -1006,9 +1006,9 @@ async fn dedicated_model(world: &mut GuiWorld) {
     )
     .await;
     let catalog_loaded_script = r#"
-        const option = document.querySelector('[aria-label="Inline discussion mode"] option[value=dedicated]');
+        const mode = document.querySelector('[aria-label="Inline discussion mode"]');
 
-        return option?.disabled === false;
+        return !!mode && !mode.disabled;
     "#;
 
     gui_acceptance::wait_for_js(
@@ -1069,7 +1069,8 @@ async fn dedicated_model(world: &mut GuiWorld) {
 
         const effort = document.querySelector('[aria-label="Inline discussion reasoning effort"]');
         const speed = document.querySelector('[aria-label="Inline discussion speed tier"]');
-        return picker?.value === 'claude-opus-5-5' && effort?.value === 'high' && speed?.value === 'fast';
+        const value = (el) => el?.getAttribute('data-value') ?? el?.value;
+        return value(picker) === 'claude-opus-5-5' && value(effort) === 'high' && value(speed) === 'fast';
     "#;
 
     gui_acceptance::wait_for_js(

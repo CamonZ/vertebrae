@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { ACCENTS } from "./accents";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CODE_THEMES,
@@ -74,6 +77,22 @@ describe("codeAppearance", () => {
     expect(inlineCodeColorValue(INLINE_CODE_FOREGROUNDS, "info")).toBe(
       "var(--color-info)"
     );
+  });
+
+  it("offers every accent as a fixed inline color", () => {
+    for (const accent of ACCENTS) {
+      expect(
+        inlineCodeColorValue(INLINE_CODE_FOREGROUNDS, `accent-${accent.value}`)
+      ).toBe(`var(--accent-${accent.value})`);
+    }
+  });
+
+  it("declares a fixed token for every accent in each theme", () => {
+    const css = readFileSync(resolve(__dirname, "../index.css"), "utf8");
+    const fixed = css.slice(css.indexOf("Fixed accent colours"));
+    for (const accent of ACCENTS) {
+      expect(fixed.match(new RegExp(`--accent-${accent.value}:`, "g"))).toHaveLength(4);
+    }
   });
 
   it("detects WebAssembly SIMD for Highlights", () => {

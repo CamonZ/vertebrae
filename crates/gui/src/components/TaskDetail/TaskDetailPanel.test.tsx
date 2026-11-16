@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { act, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import {
   render,
   createMockTask,
@@ -374,12 +374,12 @@ describe("TaskDetailPanel - Restructured Layout", () => {
   });
 
   describe("Header", () => {
-    it("shows the current step in the hero status", () => {
+    it("shows the workflow location in the header crumb", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
-      // The workflow name is no longer surfaced in the panel; the step appears
-      // in the hero status band (formatStepName("in_progress") -> "In progress").
-      expect(screen.getAllByText("In progress").length).toBeGreaterThan(0);
+      expect(screen.getByTestId("task-detail-location")).toHaveTextContent(
+        "In progress"
+      );
     });
 
     it("renders the task side panel ID as an eight-character short ID", () => {
@@ -623,6 +623,26 @@ describe("TaskDetailPanel - Restructured Layout", () => {
   });
 
   describe("Collapsible sections", () => {
+    it("orders sections: spec, criteria, children, dependencies, code, attachments, details", () => {
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+
+      const order = [
+        "spec-section-wrapper",
+        "criteria-section",
+        "children-section",
+        "dependencies-section",
+        "code-section",
+        "attachments-section",
+        "details-section",
+      ].map((id) => screen.getByTestId(id));
+      order.slice(1).forEach((section, index) => {
+        expect(
+          order[index].compareDocumentPosition(section) &
+            Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
+      });
+    });
+
     it("renders Spec collapsible section", () => {
       render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
 
@@ -891,12 +911,14 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       const concurrencyInput = screen.getByTestId(
         "task-detail-max-concurrency"
       );
-      expect(concurrencyInput.closest('[data-testid="task-detail-hero"]')).toBe(
-        screen.getByTestId("task-detail-hero")
-      );
+      expect(
+        within(screen.getByTestId("details-section")).getByTestId(
+          "task-detail-max-concurrency"
+        )
+      ).toBe(concurrencyInput);
       expect(
         screen.getByTestId("task-detail-max-concurrency-label")
-      ).toHaveTextContent("max concurrency:");
+      ).toHaveTextContent("Max concurrency");
       fireEvent.change(concurrencyInput, {
         target: { value: "4" },
       });
@@ -1092,39 +1114,23 @@ describe("TaskDetailPanel - Restructured Layout", () => {
       ).toBeInTheDocument();
     });
 
-    it("renders the Hearth detail hero as idle when no run is active", () => {
+    it("has no run hero and shows no run chip while idle", () => {
       renderWithTaskOverrides({ run_controls: runnableControls() });
 
-      const hero = screen.getByTestId("task-detail-hero");
-      expect(hero).toHaveAttribute("data-hero-state", "idle");
-      expect(
-        screen.getByTestId("task-detail-hero-idle-label")
-      ).toHaveTextContent("No active run");
+      expect(screen.queryByTestId("task-detail-hero")).toBeNull();
+      expect(screen.queryByText("No active run")).toBeNull();
+      expect(screen.queryByTestId("task-detail-run-status")).toBeNull();
     });
 
-    it("renders the Hearth detail hero with the active run state", () => {
+    it("shows the active run state as a chip in the header", () => {
       renderWithTaskOverrides(
         { run_controls: activeRunControls() },
         activeRun()
       );
 
-      const hero = screen.getByTestId("task-detail-hero");
-      expect(hero).toHaveAttribute("data-hero-state", "executing");
-      expect(hero).toHaveTextContent("Running");
-      expect(hero).toHaveTextContent("In progress");
-    });
-
-    it("derives the Hearth detail hero kind from step_type", () => {
-      renderWithTaskOverrides({
-        step_name: "pending_review",
-        step_type: "human_input",
-      });
-
-      const heroStatus = screen
-        .getByTestId("task-detail-hero")
-        .querySelector(".hero-status");
-      expect(heroStatus).toHaveAttribute("data-step-kind", "human");
-      expect(heroStatus).toHaveTextContent("Pending review");
+      const chip = screen.getByTestId("task-detail-run-status");
+      expect(chip).toHaveAttribute("data-run-status", "executing");
+      expect(chip).toHaveTextContent("Running");
     });
   });
 

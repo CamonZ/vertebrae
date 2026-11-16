@@ -11,7 +11,7 @@ Feature: Real-time step detail panel updates
     And I open workflow "Step Panel Workflow" in the Graph
     Then the GUI should show an element with test id "step-node-Original Step Name" within 5 seconds
     When I click on the element with test id "step-node-Original Step Name"
-    Then the GUI should show "Step Configuration" within 5 seconds
+    Then the GUI should show "Step configuration" within 5 seconds
     When I update the step name to "Updated Step Name" via the CLI
     Then the GUI should show "Updated Step Name" within 10 seconds
 
@@ -24,7 +24,7 @@ Feature: Real-time step detail panel updates
     And I open workflow "Human Input Step Panel Workflow" in the Graph
     Then the GUI should show an element with test id "step-node-Approval Gate" within 10 seconds
     When I click on the element with test id "step-node-Approval Gate"
-    Then the GUI should show "Step Configuration" within 5 seconds
+    Then the GUI should show "Step configuration" within 5 seconds
     And the GUI element with test id "step-type-badge" should have text "human_input" within 5 seconds
 
   Scenario: Execute step type renders its Rhai script and output schema in the detail panel
@@ -36,12 +36,12 @@ Feature: Real-time step detail panel updates
     And I open workflow "Execute Step Panel Workflow" in the Graph
     Then the GUI should show an element with test id "step-node-Rhai Transform" within 10 seconds
     When I click on the element with test id "step-node-Rhai Transform"
-    Then the GUI should show "Step Configuration" within 5 seconds
+    Then the GUI should show "Step configuration" within 5 seconds
     And the GUI element with test id "step-type-badge" should have text "execute" within 5 seconds
     And the GUI should show an element with test id "execute-script-section" within 5 seconds
     And the GUI should show an element with test id "rhai-script-highlighted" within 5 seconds
     And the GUI element with test id "rhai-script-highlighted" should contain text "result" within 5 seconds
-    And the GUI should show "Output Schema" within 5 seconds
+    And the GUI should show "Output schema" within 5 seconds
 
   Scenario: Harness selected in the GUI step editor is saved and displayed
     Given I create a workflow with:
@@ -50,7 +50,7 @@ Feature: Real-time step detail panel updates
     And I select factory "No Factory"
     Then the GUI should show an element with test id "workflow-station-Step Harness Panel Workflow" within 5 seconds
     When I click on the element with test id "workflow-station-Step Harness Panel Workflow"
-    Then the GUI should show "Workflow Details" within 5 seconds
+    Then the GUI should show "Workflow details" within 5 seconds
     When I create a step "Harness Panel Step" with harness "codex" in the open workflow panel
     Then the GUI element with test id "step-harness-value" should have text "codex" within 10 seconds
     When I set the selected step harness to "typesafe"

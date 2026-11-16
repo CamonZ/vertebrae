@@ -1,4 +1,5 @@
 import { useDocumentStore } from "./workspace/documentStore";
+import { firePaneControl } from "../../test/paneControls";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   act,
@@ -900,7 +901,7 @@ describe("ChatWindow diff review comments", () => {
             request.worktree === worktree
           )
             expectedScrollCount++;
-          fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+          firePaneControl("Changes");
         } else if (action === "session") {
           session = session === "a" ? "b" : "a";
           worktree = worktrees[session];
@@ -1121,7 +1122,7 @@ describe("ChatWindow diff review comments", () => {
       "1 comments queued for your reply"
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     await waitFor(() => expect(seen.items).toHaveLength(1));
     await waitFor(() =>
       expect(seen.items[0].annotations).toEqual([
@@ -1133,7 +1134,7 @@ describe("ChatWindow diff review comments", () => {
       ])
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     fireEvent.click(screen.getByTitle("Start session"));
     await waitFor(() =>
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
@@ -1154,7 +1155,7 @@ describe("ChatWindow diff review comments", () => {
     render(<ChatWindow sessionId="test-session" />);
     fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
     fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     await waitFor(() => expect(seen.items).toHaveLength(1));
     expect(seen.items[0].annotations).toEqual([]);
 
@@ -1170,7 +1171,7 @@ describe("ChatWindow diff review comments", () => {
 
     expect(seen.items[0].annotations).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     await waitFor(() =>
       expect(
         (seen.fileDiff as unknown as { lineAnnotations: Annotated[] })
@@ -1187,10 +1188,8 @@ describe("ChatWindow diff review comments", () => {
     expect(screen.getByText("Rename X")).toBeTruthy();
 
     // The chip leads back to the All Changes comment.
-    expect(screen.getByRole("button", { name: "Changes" })).toHaveAttribute(
-      "aria-pressed",
-      "false"
-    );
+    // Changes is closed, so its toggle sits in the overflow menu.
+    expect(screen.queryByTestId("local-chat-view-changes")).toBeNull();
     fireEvent.click(screen.getByTestId("local-chat-comment-icon-1"));
     expect(screen.getByRole("button", { name: "Changes" })).toHaveAttribute(
       "aria-pressed",
@@ -1203,7 +1202,7 @@ describe("ChatWindow diff review comments", () => {
     render(<ChatWindow sessionId="test-session" />);
     fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
     fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     await waitFor(() => expect(seen.items).toHaveLength(1));
     fireEvent.click(
       await screen.findByRole("button", { name: "gutter code view" })
@@ -1249,7 +1248,7 @@ describe("ChatWindow diff review comments", () => {
     await waitFor(() =>
       expect(screen.getByText("outdated")).toBeInTheDocument()
     );
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     fireEvent.click(screen.getByTestId("local-chat-comment-icon-1"));
 
     expect(screen.getByTestId("local-chat-comment-popover")).toHaveTextContent(
@@ -1262,7 +1261,7 @@ describe("ChatWindow diff review comments", () => {
     render(<ChatWindow sessionId="test-session" />);
     fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
     fireEvent.click(screen.getByRole("button", { name: /Raw arguments/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     await waitFor(() => expect(seen.items).toHaveLength(1));
     fireEvent.click(
       await screen.findByRole("button", { name: "gutter code view" })
@@ -1272,7 +1271,7 @@ describe("ChatWindow diff review comments", () => {
       { target: { value: "Rename X" } }
     );
     fireEvent.click(screen.getByRole("button", { name: "Send to main chat" }));
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
 
     expect(seen.fileDiff).toBeNull();
 

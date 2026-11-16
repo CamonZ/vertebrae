@@ -11,6 +11,7 @@ import {
   type GateDraftValues,
   type GateFormInput,
 } from "../../utils/gateDraft";
+import { NumberInput } from "../atoms/NumberInput";
 
 interface GateAnswerFormProps {
   /** Fields to answer, in schema order. */
@@ -241,14 +242,13 @@ function GateFieldInput({
     case "number":
     case "integer":
       body = (
-        <Input
+        <NumberInput
           id={id}
           data-testid={inputTestId}
-          type="number"
-          step={control === "integer" ? 1 : "any"}
+          allowDecimals={control !== "integer"}
           value={typeof input === "string" ? input : ""}
           invalid={error !== null}
-          onChange={(event) => onChange(event.target.value)}
+          onValueChange={onChange}
         />
       );
       break;

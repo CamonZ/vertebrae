@@ -208,51 +208,39 @@ describe("DaemonsPage", () => {
     }
   );
 
-  it("shows status counts and groups all fleet statuses", () => {
+  it("groups daemons by status under collapsible headings with counts", async () => {
+    const user = userEvent.setup();
     renderPage();
 
     expect(screen.getByTestId("daemon-group-active")).toBeInTheDocument();
     expect(screen.getByTestId("daemon-group-pending")).toBeInTheDocument();
     expect(screen.getByTestId("daemon-group-unknown")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("daemon-status-filter-all")
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId("daemon-status-filter-active")).toHaveTextContent(
-      /Active\s*1/
+    expect(screen.getByTestId("daemon-group-count-active")).toHaveTextContent(
+      "1"
     );
-    expect(
-      screen.getByTestId("daemon-status-filter-pending")
-    ).toHaveTextContent(/Pending\s*1/);
-    expect(
-      screen.getByTestId("daemon-status-filter-revoked")
-    ).toHaveTextContent(/Revoked\s*0/);
-    expect(
-      screen.getByTestId("daemon-status-filter-removed")
-    ).toHaveTextContent(/Removed\s*0/);
-    expect(
-      screen.queryByTestId("daemon-status-filter-unknown")
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("daemon-status-filters")).toBeNull();
+
+    const toggle = screen.getByTestId("daemon-group-toggle-active");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByTestId("daemon-row-active-1")).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(screen.getByTestId("daemon-row-active-1")).toBeInTheDocument();
   });
 
-  it("intersects search and status filters", async () => {
+  it("search narrows the groups and reveals matches in collapsed groups", async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(screen.getByTestId("daemon-status-filter-active"));
-    expect(screen.getByTestId("daemon-row-active-1")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("daemon-row-pending-1")
-    ).not.toBeInTheDocument();
-
-    await user.click(screen.getByTestId("daemon-status-filter-active"));
-    expect(screen.getByTestId("daemon-row-pending-1")).toBeInTheDocument();
+    await user.click(screen.getByTestId("daemon-group-toggle-active"));
+    expect(screen.queryByTestId("daemon-row-active-1")).not.toBeInTheDocument();
 
     const search = screen.getByRole("searchbox", { name: "Search daemons" });
-    await user.clear(search);
     await user.type(search, "alpha-host");
     expect(screen.getByTestId("daemon-row-active-1")).toBeInTheDocument();
     expect(
-      screen.queryByTestId("daemon-fleet-no-matches")
+      screen.queryByTestId("daemon-row-pending-1")
     ).not.toBeInTheDocument();
   });
 

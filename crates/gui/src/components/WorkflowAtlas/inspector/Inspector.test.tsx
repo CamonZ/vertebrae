@@ -630,7 +630,7 @@ describe("StepInspector", () => {
         onClose={vi.fn()}
       />
     );
-    expect(screen.getByText("Output Schema")).toBeInTheDocument();
+    expect(screen.getByText("Output schema")).toBeInTheDocument();
     expect(screen.getByTestId("schema-tree")).toBeInTheDocument();
     expect(screen.getByTestId("schema-node-verdict")).toBeInTheDocument();
   });
@@ -1189,7 +1189,7 @@ describe("StepInspector", () => {
         onClose={vi.fn()}
       />
     );
-    expect(screen.queryByText("Output Schema")).not.toBeInTheDocument();
+    expect(screen.queryByText("Output schema")).not.toBeInTheDocument();
   });
 
   it("keeps the type fixed while editing", async () => {
@@ -1391,7 +1391,7 @@ describe("StepInspector", () => {
     expect(
       screen.getByTestId("rhai-script-highlighted").querySelector("code")
     ).toHaveClass("language-rhai");
-    expect(screen.getByText("Output Schema")).toBeInTheDocument();
+    expect(screen.getByText("Output schema")).toBeInTheDocument();
     expect(screen.queryByText("Prompt")).not.toBeInTheDocument();
     expect(screen.queryByText("Harness")).not.toBeInTheDocument();
     expect(screen.queryByText("Agents")).not.toBeInTheDocument();

@@ -4,7 +4,7 @@ import {
   SharedConfigSettings,
   type ConfigSection,
 } from "../components/settings/SharedConfigSettings";
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   commands,
@@ -19,7 +19,6 @@ import { Icon } from "../components/atoms/Icon";
 import { Badge } from "../components/atoms/Badge";
 import { Button } from "../components/atoms/Button";
 import { Modal } from "../components/molecules/Modal";
-import { Input } from "../components/atoms/Input";
 import { Select } from "../components/atoms/Select";
 import { MarkdownContent } from "../components/shared/MarkdownContent";
 import {
@@ -44,7 +43,13 @@ import {
   refreshLocalBackendUpdateState,
   relaunchGuiApplication,
 } from "../update";
-import { useUIStore, type ThinkingIndicatorStyle } from "../stores/uiStore";
+import { NumberInput } from "../components/atoms/NumberInput";
+import {
+  ACCENTS,
+  TYPE_PAIRINGS,
+  useUIStore,
+  type ThinkingIndicatorStyle,
+} from "../stores/uiStore";
 import { useIsLightTheme } from "../hooks/useTheme";
 import type { GateSteeringThresholds } from "../utils/gateDraft";
 import {
@@ -75,6 +80,8 @@ import {
   speedTiersForModel,
   useLocalChatDefaultsStore,
 } from "../utils/localChatDefaults";
+import { useShellHeader } from "../hooks/useShellHeader";
+import { SettingsNavTree } from "../components/settings/SettingsNavTree";
 
 function modelLabel(
   info: LocalChatHarnessInfo,
@@ -110,15 +117,23 @@ function SettingRow({
   label,
   description,
   children,
+  anchor = false,
 }: {
   label: string;
   description: string;
   children: ReactNode;
+  /** List this row as a section in the settings tree. */
+  anchor?: boolean;
 }) {
   return (
     <div className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(220px,320px)] sm:items-center sm:gap-8">
       <div>
-        <p className="text-sm font-medium text-[var(--color-fg)]">{label}</p>
+        <p
+          className="text-sm font-medium text-[var(--color-fg)]"
+          data-settings-anchor={anchor ? "" : undefined}
+        >
+          {label}
+        </p>
         <p className="mt-1 text-sm leading-5 text-[var(--color-fg-soft)]">
           {description}
         </p>
@@ -167,18 +182,17 @@ function TurnCountInput({
 }) {
   const [text, setText] = useState(String(value));
   return (
-    <Input
-      type="number"
+    <NumberInput
       min={1}
       step={1}
       aria-label={label}
       data-testid={testId}
       value={text}
       invalid={!/^[1-9]\d*$/.test(text)}
-      onChange={(event) => {
-        setText(event.target.value);
-        if (/^[1-9]\d*$/.test(event.target.value)) {
-          onCommit(Number(event.target.value));
+      onValueChange={(next) => {
+        setText(next);
+        if (/^[1-9]\d*$/.test(next)) {
+          onCommit(Number(next));
         }
       }}
       onBlur={() => setText(String(value))}
@@ -191,7 +205,7 @@ function GateSteeringSettings({ onSaved }: { onSaved: () => void }) {
   const setThresholds = useUIStore((state) => state.setGateSteeringThresholds);
   return (
     <div className="mt-8 border-t border-[var(--color-line)]">
-      <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+      <p className="pt-5 t-label text-[var(--color-fg-mute)]" data-settings-anchor>
         Gate chats
       </p>
       {GATE_STEERING_TIERS.map((tier) => (
@@ -307,10 +321,22 @@ const DIFF_TOGGLE_ROWS: {
   },
 ];
 
-function inlineColorOptions(options: readonly { id: string; label: string }[]) {
+function inlineColorOptions(
+  options: readonly { id: string; label: string; value: string }[],
+  defaultLabel = "Hearth default",
+  showSwatches = false
+) {
   return [
-    { value: "", label: "Hearth default" },
-    ...options.map((option) => ({ value: option.id, label: option.label })),
+    {
+      value: "",
+      label: defaultLabel,
+      swatch: showSwatches ? "var(--color-accent)" : undefined,
+    },
+    ...options.map((option) => ({
+      value: option.id,
+      label: option.label,
+      swatch: showSwatches ? option.value : undefined,
+    })),
   ];
 }
 
@@ -346,7 +372,7 @@ function CodeAppearanceSettings({ onSaved }: { onSaved: () => void }) {
 
   return (
     <div className="mt-8 border-t border-[var(--color-line)]">
-      <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+      <p className="pt-5 t-label text-[var(--color-fg-mute)]" data-settings-anchor>
         Code
       </p>
       <SettingRow
@@ -381,7 +407,11 @@ function CodeAppearanceSettings({ onSaved }: { onSaved: () => void }) {
             setForeground(event.target.value || null);
             onSaved();
           }}
-          options={inlineColorOptions(INLINE_CODE_FOREGROUNDS)}
+          options={inlineColorOptions(
+            INLINE_CODE_FOREGROUNDS,
+            "App accent (default)",
+            true
+          )}
         />
       </SettingRow>
       <SettingRow
@@ -439,7 +469,7 @@ function DiffSettings({ onSaved }: { onSaved: () => void }) {
   return (
     <div className="mt-8 border-t border-[var(--color-line)]">
       <div className="flex items-center justify-between pt-5">
-        <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+        <p className="t-label text-[var(--color-fg-mute)]" data-settings-anchor>
           Diffs
         </p>
         <Button
@@ -642,7 +672,11 @@ function HarnessDefaultsSection({
     >
       <div className="flex items-center justify-between gap-4 pt-7">
         <div className="flex items-center gap-2">
-          <h2 className="font-serif text-xl text-[var(--color-fg)]">
+          <h2
+            className="font-serif text-xl text-[var(--color-fg)]"
+            data-settings-anchor
+            data-settings-anchor-depth="2"
+          >
             {info.label}
           </h2>
           <span
@@ -1151,7 +1185,7 @@ function UpdateApplyStatus({ apply }: { apply: GuiUpdateApplyState }) {
       }
       role={failed ? "alert" : "status"}
     >
-      <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+      <p className="t-label text-[var(--color-fg-mute)]">
         {failed ? "Update needs attention" : "Update complete"}
       </p>
       <p className="mt-2 text-sm leading-6 text-[var(--color-fg-soft)]">
@@ -1312,7 +1346,7 @@ function LocalBackendAdoptionSection({
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-warn)]">
+          <p className="t-label text-[var(--color-warn)]">
             Existing local backend detected
           </p>
           <h3 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
@@ -1525,7 +1559,7 @@ function LocalBackendUpdateSection({
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]">
+          <p className="t-label text-[var(--color-accent)]">
             Local backend update available
           </p>
           <h2 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
@@ -1590,7 +1624,7 @@ function UpdateComponents({ update }: { update: GuiUpdateInfo }) {
       <div className="flex items-baseline justify-between gap-3">
         <h3
           id="settings-update-components-heading"
-          className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]"
+          className="t-label text-[var(--color-fg-mute)]"
         >
           Components
         </h3>
@@ -1706,7 +1740,7 @@ function ReviewUpdateDialog({
         >
           <h3
             id="settings-update-preflight-heading"
-            className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]"
+            className="t-label text-[var(--color-fg-mute)]"
           >
             Preflight and verification
           </h3>
@@ -1825,6 +1859,7 @@ function FrontendUpdatesSection({
     >
       <h2
         id="settings-frontend-updates-heading"
+        data-settings-anchor
         className="font-serif text-2xl text-[var(--color-fg)]"
       >
         Frontend
@@ -1876,7 +1911,7 @@ function FrontendUpdatesSection({
           >
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <p className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-accent)]">
+                <p className="t-label text-[var(--color-accent)]">
                   Frontend release available
                 </p>
                 <h3 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
@@ -1928,7 +1963,7 @@ function FrontendUpdatesSection({
             >
               <h3
                 id="settings-release-notes-heading"
-                className="font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]"
+                className="t-label text-[var(--color-fg-mute)]"
               >
                 Release notes
               </h3>
@@ -1990,6 +2025,7 @@ function BackendUpdatesSection({
     >
       <h2
         id="settings-backend-updates-heading"
+        data-settings-anchor
         className="font-serif text-2xl text-[var(--color-fg)]"
       >
         Backend
@@ -2144,6 +2180,8 @@ export function SettingsPage({
   onApproveUpdate,
   onApproveLocalBackendUpdate,
 }: SettingsPageProps = {}) {
+  useShellHeader("Settings");
+  const settingsContentRef = useRef<HTMLElement>(null);
   const providerSettingsRevision = useProviderSettingsStore(
     (state) => state.revision
   );
@@ -2183,6 +2221,10 @@ export function SettingsPage({
   );
   const theme = useUIStore((state) => state.theme);
   const setTheme = useUIStore((state) => state.setTheme);
+  const typePairing = useUIStore((state) => state.typePairing);
+  const setTypePairing = useUIStore((state) => state.setTypePairing);
+  const accent = useUIStore((state) => state.accent);
+  const setAccent = useUIStore((state) => state.setAccent);
   const thinkingIndicatorStyle = useUIStore(
     (state) => state.thinkingIndicatorStyle
   );
@@ -2344,7 +2386,7 @@ export function SettingsPage({
 
   const fileLinkSettings = (
     <div className="mt-8 border-t border-[var(--color-line)]">
-      <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+      <p className="pt-5 t-label text-[var(--color-fg-mute)]" data-settings-anchor>
         File links
       </p>
       <SettingRow
@@ -2383,97 +2425,83 @@ export function SettingsPage({
       data-testid="settings-page"
     >
       <aside
-        className="shrink-0 border-b border-[var(--color-line)] px-4 py-5 lg:w-52 lg:border-b-0 lg:border-r lg:px-5 lg:py-8"
+        className="split-nav shrink-0 px-3 py-5 lg:w-60 lg:px-3 lg:py-8"
         aria-label="Settings sections"
       >
-        <p className="mb-3 px-3 font-mono text-[length:var(--text-9)] uppercase tracking-[0.16em] text-[var(--color-fg-mute)]">
-          Settings
-        </p>
-        <nav>
-          <button
-            type="button"
-            onClick={() => selectSection("chat")}
-            className={`w-full rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${
-              activeSection === "chat"
-                ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]"
-                : "border-transparent text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)]"
-            }`}
-            aria-current={activeSection === "chat" ? "page" : undefined}
-            data-testid="settings-nav-chat"
-          >
-            Chat
-          </button>
-          <button
-            type="button"
-            onClick={() => selectSection("appearance")}
-            className={`mt-1 w-full rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${
-              activeSection === "appearance"
-                ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]"
-                : "border-transparent text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)]"
-            }`}
-            aria-current={activeSection === "appearance" ? "page" : undefined}
-            data-testid="settings-nav-appearance"
-          >
-            Appearance
-          </button>
-          <button
-            type="button"
-            onClick={() => selectSection("code_editor")}
-            className={`mt-1 w-full rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${
-              activeSection === "code_editor"
-                ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]"
-                : "border-transparent text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)]"
-            }`}
-            aria-current={activeSection === "code_editor" ? "page" : undefined}
-            data-testid="settings-nav-code-editor"
-          >
-            Diffs &amp; code editor
-          </button>
-          <button
-            type="button"
-            onClick={() => selectSection("updates")}
-            className={`mt-1 flex w-full items-center justify-between gap-2 rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${
-              activeSection === "updates"
-                ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]"
-                : "border-transparent text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)]"
-            }`}
-            aria-current={activeSection === "updates" ? "page" : undefined}
-            data-testid="settings-nav-updates"
-          >
-            <span>Updates</span>
-            {updateIsAvailable && (
-              <span aria-label="1 update available">
-                <Badge
-                  count={1}
-                  intent="accent"
-                  testId="settings-nav-updates-badge"
-                />
-              </span>
-            )}
-          </button>
-          {(
-            [
-              ["providers", "Providers & Models"],
-              ["decision_model", "Decision Model"],
-              ["connection", "Connection"],
-              ["observability", "Observability"],
-            ] as const
-          ).map(([section, label]) => (
-            <button
-              key={section}
-              type="button"
-              onClick={() => selectSection(section)}
-              className={`mt-1 w-full rounded-[var(--radius-sm)] border-l-2 px-3 py-2 text-left font-serif text-lg ${activeSection === section ? "border-[var(--color-accent)] bg-[var(--color-bg-1)] text-[var(--color-fg)]" : "border-transparent text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-1)]"}`}
-              aria-current={activeSection === section ? "page" : undefined}
-              data-testid={`settings-nav-${section}`}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
+        <p className="split-nav-title">Settings</p>
+        <SettingsNavTree<SettingsSection>
+          activeSection={activeSection}
+          onSelect={selectSection}
+          contentRef={settingsContentRef}
+          groups={[
+            {
+              label: "General",
+              items: [
+                { section: "chat", label: "Chat", testId: "settings-nav-chat" },
+                {
+                  section: "appearance",
+                  label: "Appearance",
+                  testId: "settings-nav-appearance",
+                },
+                {
+                  section: "code_editor",
+                  label: "Diffs & code editor",
+                  testId: "settings-nav-code-editor",
+                },
+              ],
+            },
+            {
+              label: "Models",
+              items: [
+                {
+                  section: "providers",
+                  label: "Providers & Models",
+                  testId: "settings-nav-providers",
+                },
+                {
+                  section: "decision_model",
+                  label: "Decision Model",
+                  testId: "settings-nav-decision_model",
+                },
+              ],
+            },
+            {
+              label: "System",
+              items: [
+                {
+                  section: "connection",
+                  label: "Connection",
+                  testId: "settings-nav-connection",
+                },
+                {
+                  section: "updates",
+                  label: "Updates",
+                  testId: "settings-nav-updates",
+                  trailing: updateIsAvailable ? (
+                    <span aria-label="1 update available">
+                      <Badge
+                        count={1}
+                        intent="accent"
+                        testId="settings-nav-updates-badge"
+                      />
+                    </span>
+                  ) : undefined,
+                },
+                {
+                  section: "observability",
+                  label: "Observability",
+                  testId: "settings-nav-observability",
+                },
+              ],
+            },
+          ]}
+        />
       </aside>
 
-      <section className="min-w-0 flex-1 overflow-y-auto px-6 py-8 lg:px-12 lg:py-10">
+      <section
+        ref={settingsContentRef}
+        className="split-main min-w-0 flex-1 overflow-y-auto px-6 py-8 lg:px-12 lg:py-10"
+      >
         <div className="mx-auto max-w-4xl">
           <header className="flex items-start justify-between gap-4 border-b border-[var(--color-line)] pb-7">
             <div className="max-w-2xl">
@@ -2535,6 +2563,7 @@ export function SettingsPage({
           {activeSection === "appearance" ? (
             <div className="mt-8 border-t border-[var(--color-line)]">
               <SettingRow
+                anchor
                 label="Theme"
                 description="Choose whether Vertebrae follows the system, light, or dark appearance."
               >
@@ -2553,6 +2582,84 @@ export function SettingsPage({
                   ]}
                 />
               </SettingRow>
+              <div className="border-b border-[var(--color-line)] py-5">
+                <p className="text-sm font-medium text-[var(--color-fg)]" data-settings-anchor>
+                  Accent
+                </p>
+                <p className="mb-3 mt-1 text-sm text-[var(--color-fg-mute)]">
+                  Marks selection, focus and primary actions. Each accent is
+                  tuned to look the same on standard and HDR displays.
+                </p>
+                <div
+                  className="accent-swatches"
+                  role="radiogroup"
+                  aria-label="Accent"
+                  data-testid="settings-accent"
+                >
+                  {ACCENTS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={accent === option.value}
+                      aria-label={option.label}
+                      title={option.description}
+                      className="accent-swatch"
+                      data-accent={option.value}
+                      onClick={() => {
+                        setAccent(option.value);
+                        setSavedFeedback(true);
+                      }}
+                    >
+                      <span aria-hidden="true" className="accent-swatch-chip" />
+                      <span className="accent-swatch-label">{option.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="border-b border-[var(--color-line)] py-5">
+                <p className="text-sm font-medium text-[var(--color-fg)]" data-settings-anchor>
+                  Typeface
+                </p>
+                <p className="mb-3 mt-1 text-sm text-[var(--color-fg-mute)]">
+                  Each pairing sets the UI, reading text (chat replies,
+                  descriptions), titles and code.
+                </p>
+                <div
+                  className="type-cards"
+                  role="radiogroup"
+                  aria-label="Typeface"
+                  data-testid="settings-typeface"
+                >
+                  {TYPE_PAIRINGS.map((pairing) => (
+                    <button
+                      key={pairing.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={typePairing === pairing.value}
+                      aria-label={pairing.label}
+                      title={pairing.description}
+                      className="type-card"
+                      data-type={pairing.value}
+                      onClick={() => {
+                        setTypePairing(pairing.value);
+                        setSavedFeedback(true);
+                      }}
+                    >
+                      <span className="type-card-head">
+                        <span className="type-card-display">
+                          {pairing.label}
+                        </span>
+                        <span className="type-card-name">Aa</span>
+                      </span>
+                      <span className="type-card-prose">
+                        The run paused at review; two findings need a decision.
+                      </span>
+                      <span className="type-card-meta">df875b15 · step 3/10</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : activeSection === "code_editor" ? (
             <>
@@ -2602,7 +2709,7 @@ export function SettingsPage({
           ) : activeSection === "chat" ? (
             <>
               <div className="mt-8 border-t border-[var(--color-line)]">
-                <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+                <p className="pt-5 t-label text-[var(--color-fg-mute)]" data-settings-anchor>
                   Waiting state
                 </p>
                 <SettingRow
@@ -2653,7 +2760,7 @@ export function SettingsPage({
               ) : (
                 <div className="mt-8">
                   <div className="border-t border-[var(--color-line)]">
-                    <p className="pt-5 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+                    <p className="pt-5 t-label text-[var(--color-fg-mute)]" data-settings-anchor>
                       New sessions
                     </p>
                     <SettingRow
@@ -2689,7 +2796,7 @@ export function SettingsPage({
                   </div>
 
                   <div className="mt-5">
-                    <p className="mb-2 font-mono text-xs uppercase tracking-[0.14em] text-[var(--color-fg-mute)]">
+                    <p className="mb-2 t-label text-[var(--color-fg-mute)]" data-settings-anchor>
                       Harness defaults
                     </p>
                     <div className="space-y-7">

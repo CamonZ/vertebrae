@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StopIcon } from "../panels";
+import { OverflowMenu } from "../molecules/OverflowMenu";
 import type { LocalChatLifecycle } from "../../stores/chatStore";
 import { FALLBACK_CHAT_PROJECT_LABEL } from "../../utils/localChatSessionGroups";
 
@@ -45,6 +46,12 @@ export interface HeaderAction {
   pressed?: boolean;
   badge?: number;
   icon: React.ReactNode;
+  /** Render inside the pane's `⋯` overflow menu instead of inline. */
+  menu?: boolean;
+  /** Visible menu text; defaults to `title`. */
+  menuLabel?: string;
+  /** Draw a divider above this item in the overflow menu. */
+  menuGroupStart?: boolean;
 }
 
 export function SvgIcon({
@@ -122,6 +129,9 @@ function buildPaneActions({
       onClick: onSplitPane!,
       show: !!onSplitPane,
       disabled: !canSplitPane,
+      menu: true,
+      menuLabel: "Split pane",
+      menuGroupStart: true,
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
           <path
@@ -139,6 +149,7 @@ function buildPaneActions({
       ariaLabel: "Keep only this pane",
       onClick: onUnsplitPanes!,
       show: !!onUnsplitPanes,
+      menu: true,
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
           <path
@@ -156,6 +167,7 @@ function buildPaneActions({
       ariaLabel: "Close this pane",
       onClick: onClosePane!,
       show: !!onClosePane,
+      menu: true,
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
           <path
@@ -188,34 +200,64 @@ function buildPaneActions({
 }
 
 export function HeaderActionButtons({ actions }: { actions: HeaderAction[] }) {
+  const shown = actions.filter((action) => action.show);
+  const inline = shown.filter((action) => !action.menu);
+  const menu = shown.filter((action) => action.menu);
+  // The overflow trigger sits before the trailing close control so "close"
+  // stays in the corner users expect.
+  const trailing =
+    inline.length > 0 && inline[inline.length - 1]?.key === "closePanel"
+      ? inline.slice(-1)
+      : [];
+  const leading = trailing.length ? inline.slice(0, -1) : inline;
+  const renderInline = (action: HeaderAction) => (
+    <button
+      key={action.key}
+      className={`hc-ctrl${action.className ? ` ${action.className}` : ""}`}
+      onClick={action.onClick}
+      disabled={action.disabled}
+      title={action.title}
+      aria-label={action.ariaLabel}
+      data-testid={action.testId}
+      aria-pressed={action.pressed}
+      aria-expanded={
+        action.key === "changes" || action.key === "background"
+          ? action.pressed
+          : undefined
+      }
+    >
+      {action.icon}
+      {!!action.badge && (
+        <span className="hc-ctrl-badge" aria-hidden>
+          {action.badge}
+        </span>
+      )}
+    </button>
+  );
   return (
     <div className="hc-ctrls">
-      {actions
-        .filter((action) => action.show)
-        .map((action) => (
-          <button
-            key={action.key}
-            className={`hc-ctrl${action.className ? ` ${action.className}` : ""}`}
-            onClick={action.onClick}
-            disabled={action.disabled}
-            title={action.title}
-            aria-label={action.ariaLabel}
-            data-testid={action.testId}
-            aria-pressed={action.pressed}
-            aria-expanded={
-              action.key === "changes" || action.key === "background"
-                ? action.pressed
-                : undefined
-            }
-          >
-            {action.icon}
-            {!!action.badge && (
-              <span className="hc-ctrl-badge" aria-hidden>
-                {action.badge}
-              </span>
-            )}
-          </button>
-        ))}
+      {leading.map(renderInline)}
+      {menu.length > 0 && (
+        <OverflowMenu
+          label="More pane actions"
+          testId="pane-overflow-menu"
+          items={menu.map((action) => ({
+            key: action.key,
+            label: action.menuLabel ?? action.title,
+            ariaLabel: action.ariaLabel,
+            title: action.title,
+            onSelect: action.onClick,
+            disabled: action.disabled,
+            danger: action.className?.includes("danger"),
+            pressed: action.pressed,
+            badge: action.badge,
+            icon: action.icon,
+            testId: action.testId,
+            separatorBefore: action.menuGroupStart,
+          }))}
+        />
+      )}
+      {trailing.map(renderInline)}
     </div>
   );
 }
@@ -357,6 +399,8 @@ export function ChatHeader({
       onClick: onToggleChanges!,
       show: !!onToggleChanges,
       pressed: changesOpen,
+      menu: !changesOpen,
+      menuLabel: "Changes",
       testId: "local-chat-view-changes",
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
@@ -377,6 +421,8 @@ export function ChatHeader({
       onClick: onToggleBackground!,
       show: !!onToggleBackground,
       pressed: backgroundOpen,
+      menu: !backgroundOpen && backgroundRunning === 0,
+      menuLabel: "Background tasks",
       badge: backgroundRunning,
       testId: "local-chat-view-background",
       icon: (
@@ -392,6 +438,8 @@ export function ChatHeader({
       ariaLabel: "Start fresh local chat",
       onClick: onStartFresh!,
       show: !!onStartFresh,
+      menu: true,
+      menuLabel: "New chat",
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
           <path
@@ -409,6 +457,8 @@ export function ChatHeader({
       ariaLabel: "Toggle chat history",
       onClick: onToggleHistory!,
       show: !!onToggleHistory && !isWide,
+      menu: true,
+      menuLabel: "Chat history",
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
           <path
@@ -422,12 +472,39 @@ export function ChatHeader({
     },
     ...paneActions.slice(0, -1),
     {
+      key: "regenerateTitle",
+      title: "Regenerate chat title",
+      ariaLabel: isTitleRegenerating
+        ? "Regenerating chat title"
+        : "Regenerate chat title",
+      onClick: onTitleRegenerate!,
+      show: !!onTitleRegenerate,
+      disabled: isTitleRegenerating || isSavingTitle,
+      menu: true,
+      menuLabel: "Regenerate title",
+      menuGroupStart: true,
+      testId: "local-chat-title-regenerate",
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 4v5h5M20 20v-5h-5M5.5 15a7 7 0 0011.8 1.2L20 15M4 9a7 7 0 0111.8-1.2L20 9"
+          />
+        </SvgIcon>
+      ),
+    },
+    {
       key: "clear",
       title: "Clear messages",
       ariaLabel: "Clear messages",
       onClick: onClearMessages,
       show: true,
       disabled: isClosing,
+      className: "danger",
+      menu: true,
+      menuGroupStart: true,
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
           <path
@@ -512,24 +589,14 @@ export function ChatHeader({
               >
                 {label}
               </button>
-              {onTitleRegenerate && (
-                <button
-                  type="button"
-                  className="hc-ctrl hc-title-regenerate"
-                  onClick={onTitleRegenerate}
-                  disabled={isTitleRegenerating || isSavingTitle}
-                  title="Regenerate chat title"
-                  aria-label={
-                    isTitleRegenerating
-                      ? "Regenerating chat title"
-                      : "Regenerate chat title"
-                  }
-                  data-testid="local-chat-title-regenerate"
+              {isTitleRegenerating && (
+                <span
+                  className="hc-title-spinner"
+                  role="status"
+                  aria-label="Regenerating chat title"
+                  data-testid="local-chat-title-regenerating"
                 >
-                  <SvgIcon
-                    size="h-3.5 w-3.5"
-                    className={isTitleRegenerating ? "animate-spin" : undefined}
-                  >
+                  <SvgIcon size="h-3.5 w-3.5" className="animate-spin">
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -537,7 +604,7 @@ export function ChatHeader({
                       d="M4 4v5h5M20 20v-5h-5M5.5 15a7 7 0 0011.8 1.2L20 15M4 9a7 7 0 0111.8-1.2L20 9"
                     />
                   </SvgIcon>
-                </button>
+                </span>
               )}
             </>
           )}

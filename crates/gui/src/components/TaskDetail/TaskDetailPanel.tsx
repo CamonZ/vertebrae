@@ -25,9 +25,7 @@ import {
   deriveRunControlsState,
   deriveHearthStateBreakdown,
   hasHearthStateBreakdown,
-  hearthBreakdownVariantForTask,
   isActiveRunStatus,
-  runStatusLabel,
 } from "../../utils/runState";
 import { formatStepName } from "../../utils/formatStepName";
 import { getPriorityIndicator } from "../../utils/taskPriority";
@@ -47,17 +45,13 @@ import {
 import { SectionGroup } from "../molecules/SectionGroup";
 import { SegmentedControl } from "../molecules/SegmentedControl";
 import { StatusBadge } from "../molecules/StatusBadge";
-import {
-  HeroStatus,
-  IdChip,
-  StateBreakdown,
-  StepDot,
-} from "../shared/HearthPrimitives";
+import { IdChip, RunChip, StateBreakdown } from "../shared/HearthPrimitives";
 import {
   taskLocationStepLabel,
   taskLocationWorkflowLabel,
 } from "../../utils/taskLocation";
 import { upsertTaskRunInQueryCache } from "../../query";
+import { NumberInput } from "../atoms/NumberInput";
 
 /** Canonical uppercase mono eyebrow used for every collapsible section header.
  * Muted (not accent), matching the reference `.acc-hd .name` (var(--fg-mute)) —
@@ -136,7 +130,7 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between py-2">
-      <span className="font-mono text-2xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+      <span className="t-label text-[var(--color-fg-mute)]">
         {label}
       </span>
       <span className="font-mono text-xs text-[var(--color-fg)]">
@@ -605,8 +599,6 @@ export function TaskDetailPanel({
     taskData?.run_controls ?? null,
     { hasWorkflow: Boolean(taskLocation.workflowId), activeRun }
   );
-  const heroStatus = activeRun?.status ?? null;
-  const heroLabel = heroStatus ? runStatusLabel(heroStatus) : "No active run";
   const childBreakdown = deriveHearthStateBreakdown(children, childActiveRuns);
   const hasChildBreakdown = hasHearthStateBreakdown(childBreakdown);
   const runWorkflowDisabled =
@@ -746,7 +738,7 @@ export function TaskDetailPanel({
           onBlur={() => handleFieldSave("title")}
           autoFocus
           disabled={isSubmitting}
-          className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 font-serif text-lg leading-snug text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:opacity-50"
+          className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 font-sans text-base font-semibold leading-snug text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:opacity-50"
           placeholder="Enter title"
         />
         {fieldError && (
@@ -757,14 +749,15 @@ export function TaskDetailPanel({
       </div>
     ) : (
       <h3
+        data-panel-title
         onClick={() => handleFieldClick("title")}
-        className="cursor-pointer rounded-[var(--radius-sm)] font-serif text-lg leading-snug text-[var(--color-fg)] hover:bg-[var(--color-bg-1)]"
+        className="cursor-pointer rounded-[var(--radius-sm)] font-sans text-base font-semibold leading-snug text-[var(--color-fg)] hover:bg-[var(--color-bg-1)]"
       >
         {taskData.title}
       </h3>
     )
   ) : (
-    <span className="font-mono text-xs uppercase tracking-wider text-[var(--color-fg-mute)]">
+    <span className="t-label text-[var(--color-fg-mute)]">
       Task Details
     </span>
   );
@@ -823,6 +816,31 @@ export function TaskDetailPanel({
           {priorityIndicator.glyph}
         </span>
       )}
+      {taskLocation.status !== "unassigned" && (
+        <>
+          <span
+            aria-hidden
+            className="font-mono text-2xs text-[var(--color-fg-faint)]"
+          >
+            ·
+          </span>
+          <span
+            data-testid="task-detail-location"
+            className="font-mono text-2xs text-[var(--color-fg-mute)]"
+          >
+            {taskLocationWorkflowLabel(taskLocation)} ›{" "}
+            {formatStepName(taskLocationStepLabel(taskLocation), "Unavailable")}
+          </span>
+        </>
+      )}
+      {activeRun && (
+        <RunChip
+          status={activeRun.status}
+          small
+          data-testid="task-detail-run-status"
+          data-run-status={activeRun.status}
+        />
+      )}
     </>
   ) : null;
 
@@ -839,102 +857,6 @@ export function TaskDetailPanel({
           className="t-detail-head-bar"
         />
 
-        {taskData && !isLoading && !error && (
-          <div
-            className="t-detail-hero"
-            data-testid="task-detail-hero"
-            data-hero-state={heroStatus ?? "idle"}
-          >
-            <HeroStatus
-              status={heroStatus}
-              label={
-                heroStatus ? (
-                  heroLabel
-                ) : (
-                  <span data-testid="task-detail-hero-idle-label">
-                    No active run
-                  </span>
-                )
-              }
-              step={{
-                kind: taskLocation.stepType,
-                label: formatStepName(
-                  taskLocationStepLabel(taskLocation),
-                  "Unavailable"
-                ),
-              }}
-              finished={
-                taskData.completed_at
-                  ? `completed ${formatDateTime(taskData.completed_at)}`
-                  : undefined
-              }
-              right={
-                activeRun || children.length > 0 || showMaxConcurrencyInput ? (
-                  <span className="flex items-center gap-2 font-mono text-2xs text-[var(--color-fg-faint)]">
-                    {activeRun && (
-                      <span data-testid="task-detail-run-max-concurrency">
-                        max concurrency: {activeRun.max_concurrency ?? "global"}
-                      </span>
-                    )}
-                    {showMaxConcurrencyInput && (
-                      <label
-                        htmlFor="task-detail-max-concurrency"
-                        className="flex items-center gap-1 font-mono text-[length:var(--text-9)] uppercase tracking-wider text-[var(--color-fg-mute)]"
-                        title="Leave blank to use Sacrum's global execution limit"
-                      >
-                        <span data-testid="task-detail-max-concurrency-label">
-                          max concurrency:
-                        </span>
-                        <input
-                          id="task-detail-max-concurrency"
-                          data-testid="task-detail-max-concurrency"
-                          type="number"
-                          min={1}
-                          max={2147483647}
-                          step={1}
-                          inputMode="numeric"
-                          value={maxConcurrencyInput}
-                          onChange={(event) =>
-                            setMaxConcurrencyInput(event.target.value)
-                          }
-                          placeholder="∞"
-                          aria-label="Maximum concurrency"
-                          className="h-7 w-14 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-1.5 text-center font-mono text-2xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] focus:border-[var(--color-accent)] focus:outline-none"
-                          disabled={runWorkflowDisabled}
-                        />
-                      </label>
-                    )}
-                    {children.length > 0 && (
-                      <span>
-                        {children.length} child{children.length === 1 ? "" : "ren"}
-                      </span>
-                    )}
-                  </span>
-                ) : null
-              }
-            >
-              {hasChildBreakdown && (
-                <div className="mt-2">
-                  <StateBreakdown {...childBreakdown} />
-                </div>
-              )}
-              {children.length > 0 && (
-                <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                  {children.slice(0, 18).map((childTask) => (
-                    <span key={childTask.id} title={childTask.title}>
-                      <StepDot
-                        variant={hearthBreakdownVariantForTask(
-                          childTask,
-                          childActiveRuns.get(childTask.id)
-                        )}
-                      />
-                    </span>
-                  ))}
-                </div>
-              )}
-            </HeroStatus>
-          </div>
-        )}
       </div>
 
       {deleteConfirmation}
@@ -1010,48 +932,6 @@ export function TaskDetailPanel({
 
           <SectionGroup
             className="accordion"
-            label={<SectionLabel>Attachments</SectionLabel>}
-            defaultOpen={artifacts.length > 0}
-            testId="attachments-section"
-            ariaLabel="Toggle Attachments section"
-            count={artifacts.length}
-          >
-            {artifactsLoading ? (
-              <p className="py-2 text-xs text-[var(--color-fg-mute)]">
-                Loading attachments…
-              </p>
-            ) : artifactsError ? (
-              <p role="alert" className="py-2 text-xs text-[var(--color-err)]">
-                {artifactsError}
-              </p>
-            ) : artifacts.length === 0 ? (
-              <p className="py-2 text-xs italic text-[var(--color-fg-mute)]">
-                No attachments
-              </p>
-            ) : (
-              <div className="space-y-1 py-2">
-                {artifacts.map((artifact) => (
-                  <button
-                    key={artifact.id}
-                    type="button"
-                    data-testid={`task-artifact-${artifact.id}`}
-                    onClick={() => setSelectedArtifactId(artifact.id)}
-                    className="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left hover:bg-[var(--color-bg-2)]"
-                  >
-                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-fg-soft)]">
-                      {artifact.logical_name ?? artifact.filename}
-                    </span>
-                    <span className="font-mono text-2xs uppercase text-[var(--color-fg-mute)]">
-                      {artifact.metadata?.content_kind ?? "raw"}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </SectionGroup>
-
-          <SectionGroup
-            className="accordion"
             label={<SectionLabel>Spec</SectionLabel>}
             defaultOpen
             testId="spec-section-wrapper"
@@ -1088,6 +968,11 @@ export function TaskDetailPanel({
             ariaLabel="Toggle Children section"
             count={children.length}
           >
+            {hasChildBreakdown && (
+              <div className="pt-2" data-testid="task-detail-child-breakdown">
+                <StateBreakdown {...childBreakdown} />
+              </div>
+            )}
             {children.length === 0 ? (
               <p className="py-2 text-xs italic text-[var(--color-fg-mute)]">
                 No child tasks
@@ -1156,13 +1041,97 @@ export function TaskDetailPanel({
 
           <SectionGroup
             className="accordion"
+            label={<SectionLabel>Attachments</SectionLabel>}
+            defaultOpen={artifacts.length > 0}
+            testId="attachments-section"
+            ariaLabel="Toggle Attachments section"
+            count={artifacts.length}
+          >
+            {artifactsLoading ? (
+              <p className="py-2 text-xs text-[var(--color-fg-mute)]">
+                Loading attachments…
+              </p>
+            ) : artifactsError ? (
+              <p role="alert" className="py-2 text-xs text-[var(--color-err)]">
+                {artifactsError}
+              </p>
+            ) : artifacts.length === 0 ? (
+              <p className="py-2 text-xs italic text-[var(--color-fg-mute)]">
+                No attachments
+              </p>
+            ) : (
+              <div className="space-y-1 py-2">
+                {artifacts.map((artifact) => (
+                  <button
+                    key={artifact.id}
+                    type="button"
+                    data-testid={`task-artifact-${artifact.id}`}
+                    onClick={() => setSelectedArtifactId(artifact.id)}
+                    className="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left hover:bg-[var(--color-bg-2)]"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-fg-soft)]">
+                      {artifact.logical_name ?? artifact.filename}
+                    </span>
+                    <span className="font-mono text-2xs uppercase text-[var(--color-fg-mute)]">
+                      {artifact.metadata?.content_kind ?? "raw"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </SectionGroup>
+
+          <SectionGroup
+            className="accordion"
             label={<SectionLabel>Details</SectionLabel>}
             testId="details-section"
             ariaLabel="Toggle Details section"
           >
             <div className="divide-y divide-[var(--color-line)] py-2">
+              {(activeRun || showMaxConcurrencyInput) && (
+                <div className="py-3">
+                  <h4 className="mb-1 t-label text-[var(--color-fg-mute)]">
+                    Run settings
+                  </h4>
+                  <div className="space-y-1">
+                    {activeRun && (
+                      <DetailRow label="Max concurrency">
+                        <span data-testid="task-detail-run-max-concurrency">
+                          {activeRun.max_concurrency ?? "global"}
+                        </span>
+                      </DetailRow>
+                    )}
+                    {showMaxConcurrencyInput && (
+                      <div className="flex items-center justify-between py-2">
+                        <label
+                          htmlFor="task-detail-max-concurrency"
+                          className="t-label text-[var(--color-fg-mute)]"
+                          title="Leave blank to use Sacrum's global execution limit"
+                          data-testid="task-detail-max-concurrency-label"
+                        >
+                          Max concurrency
+                        </label>
+                        <NumberInput
+                          id="task-detail-max-concurrency"
+                          data-testid="task-detail-max-concurrency"
+                          size="compact"
+                          min={1}
+                          max={2147483647}
+                          value={maxConcurrencyInput}
+                          onValueChange={setMaxConcurrencyInput}
+                          placeholder="∞"
+                          aria-label="Maximum concurrency"
+                          className="font-mono"
+                          disabled={runWorkflowDisabled}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 t-label text-[var(--color-fg-mute)]">
                   Priority
                 </h4>
                 {editingField === "priority" ? (
@@ -1201,7 +1170,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 t-label text-[var(--color-fg-mute)]">
                   Level
                 </h4>
                 {editingField === "level" ? (
@@ -1246,7 +1215,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 t-label text-[var(--color-fg-mute)]">
                   Tags
                 </h4>
                 <InlineEditField
@@ -1263,7 +1232,7 @@ export function TaskDetailPanel({
               </div>
 
               <div className="py-3">
-                <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <h4 className="mb-1 t-label text-[var(--color-fg-mute)]">
                   Timeline
                 </h4>
                 <div className="space-y-1">
@@ -1288,7 +1257,7 @@ export function TaskDetailPanel({
 
               {taskData.worktree && (
                 <div className="py-3">
-                  <h4 className="mb-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+                  <h4 className="mb-1 t-label text-[var(--color-fg-mute)]">
                     Worktree
                   </h4>
                   <p className="break-all font-mono text-xs text-[var(--color-fg-soft)]">

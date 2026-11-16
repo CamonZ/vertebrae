@@ -100,7 +100,7 @@ export function NotificationsPanel() {
               Activity
             </h2>
             <span
-              className="font-mono text-2xs uppercase tracking-[0.12em] text-[var(--color-fg-mute)]"
+              className="t-label text-[var(--color-fg-mute)]"
               data-testid="notifications-unread-count"
             >
               {unreadCount} unread
@@ -111,7 +111,7 @@ export function NotificationsPanel() {
               type="button"
               onClick={() => markNotificationsRead(notifications)}
               disabled={unreadCount === 0}
-              className="rounded-[var(--radius-sm)] px-2 py-1 font-mono text-2xs uppercase tracking-[0.1em] text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] disabled:cursor-default disabled:opacity-50"
+              className="rounded-[var(--radius-sm)] px-2 py-1 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] disabled:cursor-default disabled:opacity-50"
             >
               Mark all read
             </button>
@@ -147,7 +147,7 @@ export function NotificationsPanel() {
           )}
         </div>
 
-        <footer className="flex shrink-0 items-center border-t border-[var(--color-line)] px-4 py-3 font-mono text-2xs uppercase tracking-[0.12em] text-[var(--color-fg-mute)]">
+        <footer className="flex shrink-0 items-center border-t border-[var(--color-line)] px-4 py-3 t-label text-[var(--color-fg-mute)]">
           {notifications.length}{" "}
           {notifications.length === 1 ? "notice" : "notices"}
         </footer>
@@ -199,11 +199,11 @@ function NotificationItem({
               />
             )}
             <span
-              className={`font-mono text-2xs uppercase tracking-[0.12em] ${config.colorClass}`}
+              className={`t-label ${config.colorClass}`}
             >
               {durable ? durableLabels[notification.type] : config.label}
             </span>
-            <span className="font-mono text-2xs uppercase tracking-[0.1em] text-[var(--color-fg-mute)]">
+            <span className="t-label text-[var(--color-fg-mute)]">
               {notification.entity}
             </span>
             <span className="ml-auto shrink-0 font-mono text-2xs text-[var(--color-fg-mute)]">
@@ -244,7 +244,7 @@ function NotificationItem({
                   type="button"
                   onClick={onMarkRead}
                   aria-label="Mark notification read"
-                  className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-2xs uppercase tracking-[0.1em] text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:visible:outline-none focus:visible:ring-1 focus:visible:ring-[var(--color-accent)] group-hover:visible"
+                  className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:visible:outline-none focus:visible:ring-1 focus:visible:ring-[var(--color-accent)] group-hover:visible"
                 >
                   Mark read
                 </button>
@@ -253,7 +253,7 @@ function NotificationItem({
                 type="button"
                 onClick={onDismiss}
                 aria-label={`Dismiss ${notification.message}`}
-                className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 font-mono text-2xs uppercase tracking-[0.1em] text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:visible:outline-none focus:visible:ring-1 focus:visible:ring-[var(--color-accent)] group-hover:visible"
+                className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:visible:outline-none focus:visible:ring-1 focus:visible:ring-[var(--color-accent)] group-hover:visible"
               >
                 Dismiss
               </button>

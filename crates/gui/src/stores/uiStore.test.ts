@@ -127,6 +127,8 @@ describe("uiStore", () => {
       expect(persisted.state).toEqual({
         inlineDiscussionPreference: { mode: "follow" },
         theme: "system",
+        typePairing: "editorial",
+        accent: "orchid",
         thinkingIndicatorStyle: "futuristic",
         density: "auto",
         externalEditor: "",

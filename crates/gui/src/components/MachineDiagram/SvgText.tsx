@@ -27,6 +27,16 @@ export interface SvgTextProps {
   letterSpacing?: number;
 }
 
+/**
+ * Text colour for a role. Neutral text uses its own steps: muted text a
+ * brighter grey, ink a touch under full ink. State colours stay as they are.
+ */
+function textColor(role: Role): string {
+  if (role === "dim") return "var(--md-text-dim)";
+  if (role === "ink") return "var(--md-text-ink)";
+  return roleColor(role);
+}
+
 /** Real, selectable SVG text in the app's monospace font. Hidden when labels are off. */
 export function SvgText({
   x,
@@ -54,7 +64,7 @@ export function SvgText({
       xmlSpace="preserve"
     >
       {runs.map(([text, weight = 400, role = "ink"], i) => (
-        <tspan key={i} fontWeight={weight} fill={roleColor(role)}>
+        <tspan key={i} fontWeight={weight} fill={textColor(role)}>
           {text}
         </tspan>
       ))}

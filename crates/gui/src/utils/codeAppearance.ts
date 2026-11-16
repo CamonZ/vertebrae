@@ -3,6 +3,8 @@
  * and inline code. Kept free of Pierre imports so the main chunk can read it.
  */
 
+import { ACCENTS } from "./accents";
+
 export type ColorScheme = "dark" | "light";
 
 /** A bundled syntax theme and the appearance it was designed for. */
@@ -315,6 +317,14 @@ export const INLINE_CODE_FOREGROUNDS: readonly InlineCodeColor[] = [
   { id: "warn", label: "Amber", value: "var(--color-warn)" },
   { id: "err", label: "Red", value: "var(--color-err)" },
   { id: "violet", label: "Violet", value: "var(--color-step-llm)" },
+  { id: "teal", label: "Teal", value: "var(--color-step-structured)" },
+  { id: "lime", label: "Lime", value: "var(--color-step-route)" },
+  // Fixed accents: keep their colour whichever app accent is chosen.
+  ...ACCENTS.map((accent) => ({
+    id: `accent-${accent.value}`,
+    label: `${accent.label} accent`,
+    value: `var(--accent-${accent.value})`,
+  })),
 ];
 
 export const INLINE_CODE_BACKGROUNDS: readonly InlineCodeColor[] = [

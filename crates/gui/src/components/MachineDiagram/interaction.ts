@@ -24,6 +24,11 @@ export interface DiagramInteraction {
   readonly onActivateCard?: (id: string) => void;
   /** Part drawn as selected (pinned in the inspector). */
   readonly activePart?: string | null;
+  /**
+   * Part drawn as hovered from outside the diagram (a list beside it): it
+   * shows its ring and hover labels as if the pointer were on it.
+   */
+  readonly pointedPart?: string | null;
   /** Card drawn highlighted wherever it is; other cards dim. */
   readonly followedCard?: string | null;
 }

@@ -31,7 +31,7 @@ export function PanelHeader({
         .join(" ")}
     >
       <div className="flex items-start gap-3">
-        <div className="min-w-0 flex-1 font-serif text-lg leading-snug text-[var(--color-fg)]">
+        <div data-panel-title className="min-w-0 flex-1 font-sans text-base font-semibold leading-snug text-[var(--color-fg)]">
           {title}
         </div>
         {controls && (

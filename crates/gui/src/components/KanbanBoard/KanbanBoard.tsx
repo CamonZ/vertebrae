@@ -1,5 +1,4 @@
-import type { ChangeEvent } from "react";
-import { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo } from "react";
 import type {
   Task,
   TaskLevel,
@@ -14,8 +13,8 @@ import {
   filterByFactory,
   type FactoryFilterValue,
 } from "../../utils/workflowFactory";
-import { SearchInput } from "../molecules/SearchInput";
-import { Select } from "../atoms/Select";
+import { PaletteSearchButton } from "../molecules/PaletteSearchButton";
+import { Dropdown } from "../molecules/Dropdown";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 
 const UNASSIGNED_COLUMN = "Unassigned";
@@ -160,18 +159,6 @@ const TASK_FILTER: TaskFilterOptions = {
   step_id: null,
 };
 
-function matchesTaskSearch(task: Task, normalizedSearch: string): boolean {
-  if (!normalizedSearch) return true;
-
-  const taskId = task.id.toLowerCase();
-  return (
-    task.title.toLowerCase().includes(normalizedSearch) ||
-    task.description?.toLowerCase().includes(normalizedSearch) ||
-    taskId === normalizedSearch ||
-    taskId.slice(0, 8) === normalizedSearch
-  );
-}
-
 /** A concrete factory scope: a factory name or the synthetic No Factory scope. */
 export type KanbanFactoryScope = Exclude<FactoryFilterValue, null>;
 
@@ -192,29 +179,6 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
     state.selection?.type === "task" ? state.selection.taskId : null
   );
   const [levelFilter, setLevelFilter] = useState<TaskLevel | "">("");
-  const [search, setSearch] = useState("");
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
-  // Focus the search box on "/" (unless already typing in a field), and clear
-  // it on Escape — mirrors the canonical board keyboard affordances.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      const typing =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.isContentEditable;
-      if (event.key === "/" && !typing) {
-        event.preventDefault();
-        searchInputRef.current?.focus();
-      } else if (event.key === "Escape" && target === searchInputRef.current) {
-        searchInputRef.current?.blur();
-        setSearch("");
-      }
-    }
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   const {
     tasks,
@@ -256,17 +220,12 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
     [openTask]
   );
 
-  const handleLevelChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    setLevelFilter(event.target.value as TaskLevel | "");
-  };
-
-  const handleSearchChange = (value: string) => {
-    setSearch(value);
+  const handleLevelChange = (value: string) => {
+    setLevelFilter(value as TaskLevel | "");
   };
 
   const handleClearFilters = () => {
     setLevelFilter("");
-    setSearch("");
   };
 
   // Build a map from workflow_id to kanban_column, and collect all known columns
@@ -293,7 +252,7 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
     [allKanbanColumns, scopedTransitions, workflowColumnMap]
   );
 
-  // Keep the factory's tasks, filter by level and search, then group by
+  // Keep the factory's tasks, filter by level, then group by
   // kanban_column
   const { columns, columnOrder, totalFiltered } = useMemo(() => {
     let filtered = tasks.filter(
@@ -303,11 +262,6 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
 
     if (levelFilter) {
       filtered = filtered.filter((t) => t.level === levelFilter);
-    }
-
-    const normalizedSearch = search.trim().toLowerCase();
-    if (normalizedSearch) {
-      filtered = filtered.filter((t) => matchesTaskSearch(t, normalizedSearch));
     }
 
     // Seed with all known columns so empty ones still appear
@@ -352,7 +306,6 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
     tasks,
     scopedWorkflowIds,
     levelFilter,
-    search,
     workflowColumnMap,
     allKanbanColumns,
     sortedColumns,
@@ -360,7 +313,7 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
 
   const isLoading = tasksLoading || workflowsLoading;
   const error = tasksError || workflowsError;
-  const hasActiveFilters = levelFilter !== "" || search !== "";
+  const hasActiveFilters = levelFilter !== "";
 
   return (
     <div className="flex min-h-0 flex-1" data-testid="kanban-board">
@@ -368,24 +321,17 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
         {/* Filters bar. The factory scope comes from the Atlas header. */}
         <div className="relative flex h-12 items-center gap-4 border-b border-border bg-bg px-6">
           <div className="relative flex flex-1 items-center gap-3">
-            {/* Search input */}
-            <div className="min-w-48 flex-1">
-              <SearchInput
-                ref={searchInputRef}
-                value={search}
-                onChange={handleSearchChange}
-                debounceMs={0}
-                hint="/"
-                placeholder="Search tasks by title or id…"
-                aria-label="Search tasks by title or ID"
-                data-testid="board-task-search-input"
-              />
-            </div>
+            {/* Finding a task goes through the ⌘K palette. */}
+            <PaletteSearchButton
+              label="Search tasks"
+              className="min-w-48 flex-1"
+              data-testid="board-task-search-button"
+            />
 
             {/* Level filter — same Select atom + scope-level chip styling as
                 the Tasks page. */}
             <div className="scope-level">
-              <Select
+              <Dropdown
                 id="board-level-filter"
                 options={LEVEL_SELECT_OPTIONS}
                 value={levelFilter}

@@ -786,6 +786,48 @@ describe("msgsToThread — CHAT variant", () => {
 });
 
 describe("conversationEventsToThread", () => {
+  function backgroundDone(progress: string | null, error: string | null = null) {
+    return conversationEventsToThread([
+      {
+        kind: "background_work",
+        timestamp: "2026-08-02T00:00:03Z",
+        update: {
+          eventId: "bg-1",
+          workId: "work-1",
+          generation: 1,
+          kind: "command",
+          providerKind: null,
+          status: error ? "failed" : "completed",
+          description: "Wait for page load",
+          progress,
+          launchToolId: null,
+          startedAt: null,
+          finishedAt: null,
+          error,
+          observedAt: "2026-08-02T00:00:03Z",
+          turnId: null,
+          threadId: null,
+        },
+      },
+    ]).turns[0].messages[0] as { text: string; label: string };
+  }
+
+  it("omits background progress that only repeats the description", () => {
+    expect(backgroundDone("Wait for page load")).toMatchObject({
+      label: "Background command",
+      text: "Wait for page load · completed",
+    });
+  });
+
+  it("keeps background detail that adds information", () => {
+    expect(backgroundDone("loaded 3 pages").text).toBe(
+      "Wait for page load · completed · loaded 3 pages"
+    );
+    expect(backgroundDone(null, "exit 1").text).toBe(
+      "Wait for page load · failed · exit 1"
+    );
+  });
+
   it("preserves completed assistant item identity without an explicit lifecycle", () => {
     const thread = conversationEventsToThread([
       {

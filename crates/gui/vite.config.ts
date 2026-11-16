@@ -29,7 +29,10 @@ export default defineConfig({
   // which the dev dependency scan misses; discovering it at runtime triggers a
   // full page reload.
   optimizeDeps: {
-    include: ["@pierre/diffs/worker/worker.js"],
+    // Pre-bundle deps first imported from workers. Discovered late, they make
+    // Vite re-optimize and reload mid-session, which leaves the open page on a
+    // second React copy ("dispatcher.useContext" on null).
+    include: ["@pierre/diffs/worker/worker.js", "web-tree-sitter"],
   },
   build: {
     // Tauri expects the frontend to be in ../dist relative to src-tauri

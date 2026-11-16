@@ -197,6 +197,10 @@ export function MachinePart({
       ? `translate(${x} ${y})${scale !== 1 ? ` scale(${scale})` : ""}`
       : undefined;
 
+  const pointed =
+    hovered ||
+    focused ||
+    (id !== undefined && interaction?.pointedPart === id);
   const reveal =
     labelPlacement?.title === "hover" || labelPlacement?.subtitle === "hover";
   const handlers =
@@ -224,7 +228,7 @@ export function MachinePart({
               changeNote,
             })
           )
-            .filter((l) => l.hover === hover && (!hover || hovered || focused))
+            .filter((l) => l.hover === hover && (!hover || pointed))
             .map((l) => (
               <g key={l.key}>
                 {hover && (
@@ -288,6 +292,9 @@ export function MachinePart({
         data-active={
           interactive && interaction?.activePart === id ? "true" : undefined
         }
+        data-pointed={
+          interactive && interaction?.pointedPart === id ? "true" : undefined
+        }
       >
         {turned(
           <>
@@ -350,7 +357,7 @@ export function MachinePart({
         <ChangeMark mark={change} bb={flatBb} tab={flatTab} morph={markMorph} />
         {(interactive || reveal) && turned(<PartRing bb={bb} />)}
         {labelLines(false)}
-        {(hovered || focused) &&
+        {pointed &&
           (layer
             ? createPortal(
                 <g transform={transform}>{labelLines(true)}</g>,

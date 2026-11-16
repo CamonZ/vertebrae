@@ -8,14 +8,14 @@ import { Spinner } from "../components/Spinner";
 import { DaemonInspector } from "../components/Daemons/DaemonInspector";
 import { DaemonEnrollmentModal } from "../components/Daemons/DaemonEnrollmentModal";
 import {
-  countDaemonsByStatus,
   daemonFieldValue,
   daemonRequiresReenrollment,
   daemonStatusIntent,
   daemonStatusLabel,
   filterDaemons,
+  formatDaemonCapabilityReadiness,
+  formatDaemonHeartbeatAge,
   groupDaemonsByStatus,
-  type DaemonStatusFilter,
 } from "../daemons/filters";
 import {
   useDaemonDetail,
@@ -27,13 +27,10 @@ import { useShellHeader } from "../hooks/useShellHeader";
 import { useWebSocketStatus } from "../hooks/useWebSocketStatus";
 import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
 import type { DaemonLifecycleAction } from "../components/Daemons/DaemonLifecycleStatus";
+import { normalizedDaemonStatus } from "../daemons/filters";
 
-const FILTER_ORDER: DaemonStatusFilter[] = [
-  "active",
-  "pending",
-  "revoked",
-  "removed",
-];
+/** Status groups that start collapsed: history rarely needs to be open. */
+const INITIALLY_COLLAPSED = ["removed"];
 
 const NOOP_RESET = () => {};
 
@@ -45,7 +42,9 @@ export function DaemonsPage() {
   const fleet = useDaemonFleet();
   const websocketStatus = useWebSocketStatus();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<DaemonStatusFilter>("all");
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(
+    () => new Set(INITIALLY_COLLAPSED)
+  );
   const [selectedDaemonId, setSelectedDaemonId] = useState<string | null>(null);
   const [enrollmentOpen, setEnrollmentOpen] = useState(false);
   const [enrollmentBootstrap, setEnrollmentBootstrap] =
@@ -59,18 +58,33 @@ export function DaemonsPage() {
   const previousConnectionId = useRef<string | null | undefined>(undefined);
   const rowRefs = useRef<Record<string, HTMLButtonElement | null>>({});
 
-  const counts = useMemo(
-    () => countDaemonsByStatus(fleet.daemons),
-    [fleet.daemons]
-  );
   const filteredDaemons = useMemo(
-    () => filterDaemons(fleet.daemons, search, statusFilter),
-    [fleet.daemons, search, statusFilter]
+    () => filterDaemons(fleet.daemons, search, "all"),
+    [fleet.daemons, search]
   );
   const groups = useMemo(
     () => groupDaemonsByStatus(filteredDaemons),
     [filteredDaemons]
   );
+  // A search reveals matches even inside collapsed groups.
+  const isGroupCollapsed = useCallback(
+    (status: string) => !search.trim() && collapsedGroups.has(status),
+    [collapsedGroups, search]
+  );
+  const visibleDaemons = useMemo(
+    () =>
+      groups.flatMap((group) =>
+        isGroupCollapsed(group.status) ? [] : group.daemons
+      ),
+    [groups, isGroupCollapsed]
+  );
+  const toggleGroup = (status: string) =>
+    setCollapsedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
   const selectedFleetDaemon = useMemo(
     () =>
       fleet.daemons.find((daemon) => daemon.id === selectedDaemonId) ?? null,
@@ -207,32 +221,24 @@ export function DaemonsPage() {
 
   const selectAdjacentDaemon = useCallback(
     (daemonId: string, direction: 1 | -1) => {
-      const currentIndex = filteredDaemons.findIndex(
+      const currentIndex = visibleDaemons.findIndex(
         (daemon) => daemon.id === daemonId
       );
       if (currentIndex < 0) return;
       const nextIndex = Math.max(
         0,
-        Math.min(filteredDaemons.length - 1, currentIndex + direction)
+        Math.min(visibleDaemons.length - 1, currentIndex + direction)
       );
-      const next = filteredDaemons[nextIndex];
+      const next = visibleDaemons[nextIndex];
       if (!next || next.id === daemonId) return;
       setSelectedDaemonId(next.id);
       window.requestAnimationFrame(() => rowRefs.current[next.id]?.focus());
     },
-    [filteredDaemons]
+    [visibleDaemons]
   );
 
-  useShellHeader(
-    "Daemons",
-    <span
-      className="text-eyebrow text-[var(--color-fg-mute)]"
-      data-testid="daemons-header-count"
-    >
-      <b className="font-semibold text-[var(--color-fg)]">{counts.all}</b>{" "}
-      daemon{counts.all === 1 ? "" : "s"}
-    </span>
-  );
+  useShellHeader("Daemons");
+
 
   return (
     <div
@@ -241,64 +247,35 @@ export function DaemonsPage() {
     >
       <main className="flex min-w-0 flex-1 flex-col" aria-label="Daemon fleet">
         <h1 className="sr-only">Daemons</h1>
-        <div className="flex shrink-0 flex-col gap-3 border-b border-[var(--color-line)] px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div
-              className="daemons-status-filters"
-              role="group"
-              aria-label="Filter daemons by status"
-              data-testid="daemon-status-filters"
-            >
-              {FILTER_ORDER.map((status) => {
-                const selected = statusFilter === status;
-                return (
-                  <button
-                    key={status}
-                    type="button"
-                    className={["scope-chip", selected ? "active" : ""]
-                      .filter(Boolean)
-                      .join(" ")}
-                    aria-pressed={selected}
-                    data-testid={`daemon-status-filter-${status}`}
-                    onClick={() =>
-                      setStatusFilter((current) =>
-                        current === status ? "all" : status
-                      )
-                    }
-                  >
-                    <span>{daemonStatusLabel(status)}</span>
-                    <Badge
-                      count={counts[status]}
-                      intent={selected ? "accent" : "neutral"}
-                    />
-                  </button>
-                );
-              })}
-            </div>
+        <div className="daemons-toolbar">
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="daemons-search" htmlFor="daemon-search">
+              <span className="sr-only">Search daemons</span>
+              <Input
+                id="daemon-search"
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search name, host, OS or ID"
+                aria-label="Search daemons"
+                data-testid="daemons-search"
+              />
+            </label>
             <button
               type="button"
-              className="daemon-register-button focus:outline-none focus:ring-2 focus:ring-accent/20"
+              className="ctl ctl-outline daemon-register"
               onClick={() => {
                 setEnrollmentBootstrap(null);
                 setEnrollmentOpen(true);
               }}
               data-testid="daemon-register"
             >
-              + Register daemon
+              <svg aria-hidden="true" viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Register daemon
             </button>
           </div>
-          <label className="block" htmlFor="daemon-search">
-            <span className="sr-only">Search daemons</span>
-            <Input
-              id="daemon-search"
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name, ID, host, OS, architecture, or harness…"
-              aria-label="Search daemons"
-              data-testid="daemons-search"
-            />
-          </label>
           {(fleet.isRefreshing || fleet.error) && (
             <div className="flex items-center gap-2 text-xs text-[var(--color-fg-mute)]">
               {fleet.isRefreshing && (
@@ -385,27 +362,42 @@ export function DaemonsPage() {
                   />
                 </div>
               ) : (
-                groups.map((group) => (
+                <>
+                <div className="daemon-list-head" aria-hidden>
+                  <span>Daemon</span>
+                  <span>Status</span>
+                  <span>Capabilities</span>
+                  <span>Concurrency</span>
+                  <span className="daemon-col-seen">Last seen</span>
+                </div>
+                {groups.map((group) => (
                   <section
                     key={group.status}
                     className="mb-5 last:mb-0"
                     aria-labelledby={`daemon-group-${group.status}`}
                     data-testid={`daemon-group-${group.status}`}
                   >
-                    <div className="mb-2 flex items-center gap-2 px-1">
-                      <h2
-                        id={`daemon-group-${group.status}`}
-                        className="font-mono text-2xs uppercase tracking-[0.12em] text-[var(--color-fg-mute)]"
-                      >
+                    <button
+                      type="button"
+                      className="daemon-group-head"
+                      aria-expanded={!isGroupCollapsed(group.status)}
+                      onClick={() => toggleGroup(group.status)}
+                      data-testid={`daemon-group-toggle-${group.status}`}
+                    >
+                      <svg aria-hidden="true" viewBox="0 0 24 24" className="daemon-group-chev" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="m9 6 6 6-6 6" />
+                      </svg>
+                      <h2 id={`daemon-group-${group.status}`}>
                         {daemonStatusLabel(group.status)}
                       </h2>
                       <span
-                        className="font-mono text-2xs text-[var(--color-fg-faint)]"
+                        className="daemon-group-count"
                         data-testid={`daemon-group-count-${group.status}`}
                       >
                         {group.daemons.length}
                       </span>
-                    </div>
+                    </button>
+                    {!isGroupCollapsed(group.status) && (
                     <div className="space-y-1">
                       {group.daemons.map((daemon) => {
                         const label = daemonLabel(daemon);
@@ -423,7 +415,9 @@ export function DaemonsPage() {
                                 rowRefs.current[daemon.id] = element;
                               }}
                               type="button"
-                              className="flex w-full items-center gap-3 rounded-[var(--radius-md)] border border-transparent bg-[var(--color-bg-1)] px-3 py-2.5 text-left transition-colors hover:border-[var(--color-line-strong)] hover:bg-[var(--color-bg-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                              className="daemon-row"
+                              data-status={normalizedDaemonStatus(daemon.status)}
+                              data-connection={daemon.connection_status ?? undefined}
                               aria-label={`${label}, ${daemonStatusLabel(daemon.status)}`}
                               aria-pressed={selectedDaemonId === daemon.id}
                               data-testid={`daemon-row-${daemon.id}`}
@@ -437,7 +431,7 @@ export function DaemonsPage() {
                                   selectAdjacentDaemon(daemon.id, -1);
                                 } else if (event.key === "Home") {
                                   event.preventDefault();
-                                  const first = filteredDaemons[0];
+                                  const first = visibleDaemons[0];
                                   if (first) {
                                     setSelectedDaemonId(first.id);
                                     rowRefs.current[first.id]?.focus();
@@ -445,7 +439,7 @@ export function DaemonsPage() {
                                 } else if (event.key === "End") {
                                   event.preventDefault();
                                   const last =
-                                    filteredDaemons[filteredDaemons.length - 1];
+                                    visibleDaemons[visibleDaemons.length - 1];
                                   if (last) {
                                     setSelectedDaemonId(last.id);
                                     rowRefs.current[last.id]?.focus();
@@ -453,31 +447,71 @@ export function DaemonsPage() {
                                 }
                               }}
                             >
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-sm text-[var(--color-fg)]">
-                                  {label}
-                                </span>
-                                <span className="mt-1 flex flex-wrap gap-x-2 gap-y-1 font-mono text-2xs text-[var(--color-fg-mute)]">
-                                  <span>{daemon.id}</span>
-                                  {host && <span>{host}</span>}
-                                  <span aria-hidden>·</span>
-                                  <span>row {index + 1}</span>
+                              <span className="daemon-row-dot" aria-hidden />
+                              <span className="daemon-row-body">
+                                <span className="daemon-row-name">{label}</span>
+                                <span className="daemon-row-meta">
+                                  <span
+                                    className="daemon-row-id"
+                                    title={daemon.id}
+                                    data-row-index={index + 1}
+                                  >
+                                    {daemon.id.slice(0, 8)}
+                                  </span>
+                                  {[
+                                    host,
+                                    [daemon.os, daemon.architecture]
+                                      .filter(Boolean)
+                                      .join(" · ") || null,
+                                    daemon.daemon_version
+                                      ? `v${daemon.daemon_version}`
+                                      : null,
+                                  ]
+                                    .filter(Boolean)
+                                    .map((part) => (
+                                      <span key={part}>{part}</span>
+                                    ))}
+                                  {daemon.health_reason &&
+                                    daemon.health !== "healthy" && (
+                                      <span className="daemon-row-health">
+                                        {daemon.health_reason}
+                                      </span>
+                                    )}
                                 </span>
                               </span>
-                              <Badge
-                                intent={daemonStatusIntent(daemon.status)}
-                                dot
-                                testId={`daemon-row-status-${daemon.id}`}
-                              >
-                                {daemonStatusLabel(daemon.status)}
-                              </Badge>
+                              <span className="daemon-col-status">
+                                <Badge
+                                  intent={daemonStatusIntent(daemon.status)}
+                                  dot
+                                  testId={`daemon-row-status-${daemon.id}`}
+                                >
+                                  {daemonStatusLabel(daemon.status)}
+                                </Badge>
+                              </span>
+                              <span className="daemon-col">
+                                {formatDaemonCapabilityReadiness(
+                                  daemon.capabilities
+                                )}
+                              </span>
+                              <span className="daemon-col">
+                                {daemon.max_concurrency == null
+                                  ? "No limit"
+                                  : `${daemon.max_concurrency} at once`}
+                              </span>
+                              <span className="daemon-col daemon-col-seen">
+                                {daemon.last_seen_at
+                                  ? formatDaemonHeartbeatAge(daemon.last_seen_at)
+                                  : "—"}
+                              </span>
                             </button>
                           </div>
                         );
                       })}
                     </div>
+                    )}
                   </section>
-                ))
+                ))}
+                </>
               )}
             </>
           )}

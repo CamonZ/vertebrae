@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import {
   FlowScene,
@@ -13,6 +14,8 @@ export function AtlasMachineScene({
   query,
   panelHost,
   onOpen,
+  pointed = null,
+  onTrace,
   ...scene
 }: Omit<FlowSceneProps, "interaction" | "presentation"> & {
   /** Opens the level a station or stub leads to. */
@@ -21,13 +24,19 @@ export function AtlasMachineScene({
   query?: string;
   /** Where the connections list of a hovered element goes (outside the camera). */
   panelHost?: HTMLElement | null;
+  /** A part pointed at from outside the scene; it traces like a hover. */
+  pointed?: string | null;
+  /** Reports the part (or region) the trace is on, for a list beside it. */
+  onTrace?: (id: string | null) => void;
 }) {
-  const { trace, tracing, ...live } = useAtlasPresentation(
+  const { trace, traceId, tracing, ...live } = useAtlasPresentation(
     model,
     scene.diagram,
     query,
-    onOpen
+    onOpen,
+    pointed
   );
+  useEffect(() => onTrace?.(traceId), [onTrace, traceId]);
   return (
     <div className="uv-machine-layer" data-tracing={tracing || undefined}>
       <FlowScene {...scene} {...live} />

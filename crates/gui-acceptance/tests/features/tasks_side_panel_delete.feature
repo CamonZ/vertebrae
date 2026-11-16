@@ -1,12 +1,13 @@
 Feature: Tasks side panel deletion
   Tasks can be deleted from the Tasks page side-panel detail view.
 
-  Scenario: Opening a task shows the v2 detail hero
+  Scenario: Opening a task shows its detail panel
     Given the GUI is showing the task list
-    When I create a task "Side Panel Hero Task" via the CLI
-    Then the GUI should show "Side Panel Hero Task" within 10 seconds
-    When I click on the element containing text "Side Panel Hero Task"
-    Then the GUI should show an element with test id "task-detail-hero" within 5 seconds
+    When I create a task "Side Panel Detail Task" via the CLI
+    Then the GUI should show "Side Panel Detail Task" within 10 seconds
+    When I click on the element containing text "Side Panel Detail Task"
+    Then the GUI should show an element with test id "task-detail-panel" within 5 seconds
+    And the GUI should not show an element with test id "task-detail-run-status" within 5 seconds
 
   Scenario: Delete a task through the Tasks side-panel button
     Given the GUI is showing the task list

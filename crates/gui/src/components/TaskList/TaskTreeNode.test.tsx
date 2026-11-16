@@ -189,35 +189,80 @@ describe("TaskTreeNode", () => {
     expect(pills.map((p) => p.textContent)).toEqual(["backend", "urgent"]);
   });
 
-  it("renders priority as a directional arrow on the right", () => {
+  it("marks only high and critical priority", () => {
+    renderTree([
+      node(createTask({ id: "p1", priority: "critical" })),
+      node(createTask({ id: "p2", priority: "high" })),
+      node(createTask({ id: "p3", priority: "medium" })),
+      node(createTask({ id: "p4", priority: "low" })),
+    ]);
+
+    const marks = screen.getAllByTestId("task-tree-node-priority");
+    expect(marks.map((mark) => mark.textContent)).toEqual([
+      "↑ Critical",
+      "↑ High",
+    ]);
+  });
+
+  it("shows children progress with live counts", () => {
+    const ticket = (id: string, extra: Partial<Task> = {}) =>
+      node(createTask({ id, level: "ticket", ...extra }));
+    renderTree([
+      node(createTask({ id: "epic", level: "epic" }), [
+        ticket("t1", { completed_at: "2025-01-01T00:00:00Z" }),
+        node(
+          withActiveRun(
+            createTask({ id: "t2", level: "ticket" }),
+            "executing",
+            "2025-01-01T00:00:00Z"
+          )
+        ),
+        ticket("t3"),
+      ]),
+    ]);
+
+    const [epicProgress] = screen.getAllByTestId("task-tree-node-child-summary");
+    expect(epicProgress).toHaveTextContent("1 of 3 tickets done · 1 running");
+  });
+
+  it("shows the step only while a run is moving the task", () => {
+    renderTree([
+      node(
+        withActiveRun(
+          createTask({ step_name: "write_tests" }),
+          "executing",
+          "2025-01-01T00:00:00Z"
+        )
+      ),
+    ]);
+    expect(screen.getByTestId("task-tree-node-step")).toHaveTextContent(
+      "Write tests"
+    );
+  });
+
+  it("shows Blocked for a dependency-blocked task", () => {
     renderTree([
       node(
         createTask({
-          id: "p0000000-0000-0000-0000-000000000001",
-          priority: "high",
-        })
-      ),
-      node(
-        createTask({
-          id: "p0000000-0000-0000-0000-000000000002",
-          priority: "medium",
-        })
-      ),
-      node(
-        createTask({
-          id: "p0000000-0000-0000-0000-000000000003",
-          priority: "low",
+          run_controls: {
+            runnable: false,
+            stoppable: false,
+            disabled_reason_code: "blocked",
+            disabled_reason: "Blocked by dependencies",
+            active_run: null,
+          } as Task["run_controls"],
         })
       ),
     ]);
+    expect(screen.getByTestId("task-tree-node-blocked")).toHaveTextContent(
+      "Blocked"
+    );
+  });
 
-    const arrows = screen.getAllByTestId("task-tree-node-priority");
-    expect(arrows[0]).toHaveAttribute("data-priority", "high");
-    expect(arrows[0]).toHaveTextContent("↑");
-    expect(arrows[1]).toHaveAttribute("data-priority", "medium");
-    expect(arrows[1]).toHaveTextContent("→");
-    expect(arrows[2]).toHaveAttribute("data-priority", "low");
-    expect(arrows[2]).toHaveTextContent("↓");
+  it("caps tags at three and counts the rest", () => {
+    renderTree([node(createTask({ tags: ["a", "b", "c", "d", "e"] }))]);
+    expect(screen.getAllByTestId("task-tree-node-tag")).toHaveLength(3);
+    expect(screen.getByText("+2")).toBeInTheDocument();
   });
 
   it("renders no priority arrow when priority is unset", () => {

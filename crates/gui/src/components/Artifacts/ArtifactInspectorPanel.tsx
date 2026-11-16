@@ -26,6 +26,10 @@ export function ArtifactInspectorPanel({
   position,
 }: ArtifactInspectorPanelProps) {
   const label = artifact?.logical_name ?? artifact?.filename ?? "Artifact";
+  // Lead with the file name; the folder path stays readable but recedes.
+  const slash = label.lastIndexOf("/");
+  const folder = slash >= 0 ? label.slice(0, slash + 1) : "";
+  const name = slash >= 0 ? label.slice(slash + 1) : label;
   return (
     <FloatingDetailPanel
       panelId="artifact-inspector"
@@ -43,11 +47,24 @@ export function ArtifactInspectorPanel({
         data-testid="artifact-inspector-content"
       >
         <PanelHeader
-          title={<span data-testid="artifact-inspector-title">{label}</span>}
+          title={
+            <span
+              data-testid="artifact-inspector-title"
+              className="artifact-inspector-title"
+              title={label}
+            >
+              {folder && (
+                <span className="artifact-inspector-folder">{folder}</span>
+              )}
+              {name}
+            </span>
+          }
           metadata={
             artifact && (
               <>
-                <span>{artifact.filename}</span>
+                {artifact.filename !== label && (
+                  <span className="font-mono">{artifact.filename}</span>
+                )}
                 {artifact.metadata && (
                   <span>
                     {artifact.metadata.content_kind} ·{" "}

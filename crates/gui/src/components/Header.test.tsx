@@ -24,11 +24,12 @@ afterEach(() => {
 });
 
 describe("Header (Hearth v2 AppTopBar)", () => {
-  it("renders the serif italic Vertebrae brand wordmark without a decorative dot", () => {
+  it("renders the app icon as the brand mark", () => {
     render(<Header />);
 
     const brand = screen.getByTestId("topbar-brand");
-    expect(brand.textContent).toBe("Vertebrae");
+    expect(brand.tagName).toBe("IMG");
+    expect(brand).toHaveAttribute("alt", "Vertebrae");
 
     expect(screen.queryByTestId("topbar-brand-ember")).not.toBeInTheDocument();
   });

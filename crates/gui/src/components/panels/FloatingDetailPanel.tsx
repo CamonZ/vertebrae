@@ -178,7 +178,8 @@ export function FloatingDetailPanel({
   return (
     <div
       ref={panelRef}
-      className={`${className} detail detail-float${closing ? " is-closing" : ""}`.trim()}
+      // Every detail surface is opaque; only the chat panel is translucent glass.
+      className={`${className} detail detail-float detail-opaque${closing ? " is-closing" : ""}`.trim()}
       style={
         {
           width: `${panelWidth}px`,

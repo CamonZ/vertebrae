@@ -6,6 +6,7 @@ import { EdgeLabel } from "../WorkflowAtlas/EdgeLabel";
 import { ZoomWidget } from "../WorkflowAtlas/ZoomWidget";
 import "../WorkflowAtlas/WorkflowAtlas.css";
 import "./MachineDiagram.css";
+import { weightBand } from "./weightBand";
 
 export interface DiagramLabel {
   readonly id: string;
@@ -186,6 +187,7 @@ export function MachineDiagramViewport({
           className="md-stage"
           ref={zoomState.diagramRef}
           data-zoom={zoom}
+          data-weight={weightBand(zoom)}
           style={{
             display: "block",
             left: ZOOM_GUTTER,

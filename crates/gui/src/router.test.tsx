@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, Navigate, RouterProvider } from "react-router-dom";
 import * as React from "react";
 import { queryClient } from "./query/queryClient";
@@ -78,6 +78,7 @@ import { TasksPage } from "./pages/TasksPage";
 import { DaemonsPage } from "./pages/DaemonsPage";
 import { hasAllRequiredBinaries } from "./utils/installation";
 import { appRoutes } from "./router";
+import { chooseDropdownValue } from "./test/dropdown";
 
 /**
  * Helper to create a test router with the new route structure
@@ -306,7 +307,7 @@ describe("Router Acceptance Tests", () => {
         expect(screen.getByLabelText("Filter by level")).toBeInTheDocument();
       });
       expect(
-        screen.getByLabelText("Search tasks by title, id, or tag")
+        screen.getByRole("button", { name: "Search tasks" })
       ).toBeInTheDocument();
       expect(screen.queryByText("Status")).not.toBeInTheDocument();
       // The "Done" scope chip is a pressable button; disambiguate from the
@@ -317,7 +318,7 @@ describe("Router Acceptance Tests", () => {
       expect(doneChip).toBeInTheDocument();
     });
 
-    it("updates search and level filters on TasksPage without status or done filter overrides", async () => {
+    it("updates the level filter on TasksPage without status or done filter overrides", async () => {
       const router = createTestRouter(["/tasks"]);
 
       render(
@@ -335,35 +336,11 @@ describe("Router Acceptance Tests", () => {
         })
       );
 
-      fireEvent.change(
-        screen.getByLabelText("Search tasks by title, id, or tag"),
-        {
-          target: { value: "release" },
-        }
-      );
+      chooseDropdownValue(screen.getByLabelText("Filter by level"), "ticket");
 
       await waitFor(() => {
         expect(commands.listTasks).toHaveBeenCalledWith(
           expect.objectContaining({
-            search: "release",
-            step_names: null,
-          })
-        );
-      });
-      expect(commands.listTasks).toHaveBeenLastCalledWith(
-        expect.not.objectContaining({
-          include_done: expect.anything(),
-        })
-      );
-
-      fireEvent.change(screen.getByLabelText("Filter by level"), {
-        target: { value: "ticket" },
-      });
-
-      await waitFor(() => {
-        expect(commands.listTasks).toHaveBeenCalledWith(
-          expect.objectContaining({
-            search: "release",
             levels: ["ticket"],
             step_names: null,
           })

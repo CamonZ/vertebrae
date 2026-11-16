@@ -19,6 +19,7 @@ export { Button } from "./Button";
 export type { ButtonVariant, ButtonSize } from "./Button";
 
 export { Input, Textarea } from "./Input";
+export { NumberInput } from "./NumberInput";
 
 export { Select } from "./Select";
 export type { SelectOption, SelectOptionGroup } from "./Select";

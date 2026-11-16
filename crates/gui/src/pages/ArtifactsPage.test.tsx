@@ -95,6 +95,32 @@ describe("ArtifactsPage", () => {
     );
   });
 
+  it("shows the total on All and filters the list by artifact type", () => {
+    const json: Artifact = {
+      ...artifact("a-3", "Payload"),
+      filename: "Payload.json",
+      metadata: { ...artifact("a-3", "Payload").metadata!, format: "json" },
+    };
+    useProjectArtifacts.mockReturnValue({
+      artifacts: [artifact("a-1", "First"), artifact("a-2", "Second"), json],
+      isLoading: false,
+      error: null,
+    });
+    render(<ArtifactsPage />, { wrapper: MemoryRouter });
+
+    const filter = within(screen.getByTestId("artifacts-type-filter"));
+    expect(
+      filter.getAllByRole("button").map((chip) => chip.textContent)
+    ).toEqual(["All3", "Markdown2", "JSON1"]);
+
+    fireEvent.click(filter.getByRole("button", { name: /^JSON/ }));
+    expect(screen.getByRole("treeitem", { name: /Payload/ })).toBeInTheDocument();
+    expect(screen.queryByRole("treeitem", { name: /First/ })).toBeNull();
+
+    fireEvent.click(filter.getByRole("button", { name: /^JSON/ }));
+    expect(screen.getByRole("treeitem", { name: /First/ })).toBeInTheDocument();
+  });
+
   it("closes only the artifact inspector", () => {
     render(<ArtifactsPage />, { wrapper: MemoryRouter });
     fireEvent.click(screen.getByRole("treeitem", { name: /First/i }));

@@ -142,7 +142,7 @@ export function UserQuestionTurn({
 
   return (
     <section className="rounded-lg border border-[var(--color-accent)]/40 bg-[var(--color-bg-2)] p-4">
-      <p className="mb-3 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-accent)]">
+      <p className="mb-3 t-label text-[var(--color-accent)]">
         Claude needs your input
       </p>
 
@@ -171,7 +171,7 @@ export function UserQuestionTurn({
               className="space-y-3"
             >
               <legend className="w-full">
-                <span className="block font-mono text-xs uppercase tracking-wide text-[var(--color-fg-mute)]">
+                <span className="block t-label text-[var(--color-fg-mute)]">
                   {question.header}
                 </span>
                 <span className="mt-1 block text-sm font-medium text-[var(--color-fg)]">

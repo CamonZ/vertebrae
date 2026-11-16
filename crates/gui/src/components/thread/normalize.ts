@@ -485,7 +485,12 @@ function activityMessage(
       if (work.status === "running") return null;
 
       const outcome = BACKGROUND_OUTCOME_TEXT[work.status];
-      const detail = work.error ?? work.progress;
+      const subject = work.description ?? work.workId;
+      // Progress often repeats the description verbatim; show it only when it
+      // adds information.
+      const rawDetail = work.error ?? work.progress;
+      const detail =
+        rawDetail && rawDetail.trim() !== subject.trim() ? rawDetail : null;
 
       return {
         evt: `background-${work.workId}-${work.generation}-${work.status}`,
@@ -495,7 +500,7 @@ function activityMessage(
         at: clock(ev.timestamp),
         rel: rel(runStartMs, ms(ev.timestamp)),
         label: BACKGROUND_SUBJECT[work.kind],
-        text: [work.description ?? work.workId, outcome, detail]
+        text: [subject, outcome, detail]
           .filter(Boolean)
           .join(" · "),
       };

@@ -279,6 +279,54 @@ async fn active_local_chat_uses_project_directory(
         .await;
 }
 
+/// The provider picker lives in the composer's model settings popover; open it
+/// unless it already is.
+async fn open_local_chat_model_settings(client: &fantoccini::Client) {
+    let trigger = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(10))
+        .for_element(Locator::Css("[data-testid='local-chat-model-settings']"))
+        .await
+        .expect("local chat model settings trigger not found");
+    if trigger
+        .attr("aria-expanded")
+        .await
+        .ok()
+        .flatten()
+        .as_deref()
+        != Some("true")
+    {
+        gui_acceptance::click_when_ready(
+            client,
+            Locator::Css("[data-testid='local-chat-model-settings']"),
+            "local chat model settings",
+        )
+        .await;
+    }
+}
+
+/// Close the model settings popover so it no longer covers the composer.
+async fn close_local_chat_model_settings(client: &fantoccini::Client) {
+    if let Ok(trigger) = client
+        .find(Locator::Css("[data-testid='local-chat-model-settings']"))
+        .await
+        && trigger
+            .attr("aria-expanded")
+            .await
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("true")
+    {
+        gui_acceptance::click_when_ready(
+            client,
+            Locator::Css("[data-testid='local-chat-model-settings']"),
+            "close local chat model settings",
+        )
+        .await;
+    }
+}
+
 #[when(expr = "I choose local chat provider {string}")]
 async fn choose_local_chat_provider(world: &mut GuiWorld, provider: String) {
     let wd = world
@@ -287,16 +335,14 @@ async fn choose_local_chat_provider(world: &mut GuiWorld, provider: String) {
         .expect("WebDriver session not initialized")
         .clone();
     let client = wd.lock().await;
-    let element = client
-        .wait()
-        .at_most(std::time::Duration::from_secs(10))
-        .for_element(Locator::Css("[data-testid='local-chat-provider-picker']"))
-        .await
-        .expect("local chat provider picker not found");
-    element
-        .select_by_value(&provider)
-        .await
-        .expect("failed to select local chat provider");
+    open_local_chat_model_settings(&client).await;
+    gui_acceptance::select_when_ready(
+        &client,
+        Locator::Css("[data-testid='local-chat-provider-picker']"),
+        &provider,
+    )
+    .await;
+    close_local_chat_model_settings(&client).await;
     world
         .screenshot(&client, &format!("after-select-provider-{provider}"))
         .await;
@@ -310,21 +356,11 @@ async fn local_chat_provider_should_be(world: &mut GuiWorld, provider: String, t
         .expect("WebDriver session not initialized")
         .clone();
     let client = wd.lock().await;
-    let element = client
-        .wait()
-        .at_most(std::time::Duration::from_secs(timeout))
-        .for_element(Locator::Css("[data-testid='local-chat-provider-picker']"))
-        .await
-        .expect("local chat provider picker not found");
+    open_local_chat_model_settings(&client).await;
     gui_acceptance::wait_for_js(&client, "selected local chat provider",
-        "return document.querySelector('[data-testid=\"local-chat-provider-picker\"]')?.value === arguments[0];",
+        "return document.querySelector('[data-testid=\"local-chat-provider-picker\"]')?.getAttribute('data-value') === arguments[0];",
         vec![provider.clone().into()], std::time::Duration::from_secs(timeout)).await;
-    let value = element
-        .prop("value")
-        .await
-        .expect("failed to read local chat provider")
-        .unwrap_or_default();
-    assert_eq!(value, provider);
+    close_local_chat_model_settings(&client).await;
     world
         .screenshot(&client, &format!("after-assert-provider-{provider}"))
         .await;

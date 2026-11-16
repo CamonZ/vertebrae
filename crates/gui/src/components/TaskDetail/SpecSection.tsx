@@ -180,13 +180,13 @@ export function SpecSection({
             // description lines up with the Goal body and the subtitle above it.
             displayPadding="p-0"
             renderDisplay={(v) => (
-              <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--color-fg-soft)]">
+              <p className="t-prose whitespace-pre-wrap text-[var(--color-fg-soft)]">
                 {v}
               </p>
             )}
           />
         ) : (
-          <p className="whitespace-pre-wrap text-sm text-[var(--color-fg-soft)] leading-relaxed">
+          <p className="t-prose whitespace-pre-wrap text-[var(--color-fg-soft)]">
             {description || (
               <span className="italic text-[var(--color-fg-mute)]">
                 No description

@@ -7,6 +7,10 @@ import { AtlasMachineScene } from "./adapter/AtlasMachineScene";
 import { TaskRunMotion } from "./adapter/TaskRunMotion";
 import { usePanZoom, type PanZoomTransform } from "./hooks/usePanZoom";
 import { ZoomWidget } from "./ZoomWidget";
+import { weightBand } from "../MachineDiagram/weightBand";
+import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { levelIndexItems, type LevelIndexItem } from "./adapter/levelIndex";
+import { LevelIndex } from "./LevelIndex";
 
 interface Props {
   /** The whole project's summary; the level picks what it draws. */
@@ -90,61 +94,85 @@ function MachineGraph({
     if (diagram && !camera.userControlled) fit();
   }, [diagram, fit, camera.userControlled]);
   const noun = LEVEL_NOUN[level.kind];
+  // The list beside the scene and the scene trace each other: a row pointed
+  // at here traces its part there, and the part traced there lights its row.
+  const [pointed, setPointed] = useState<string | null>(null);
+  const [traced, setTraced] = useState<string | null>(null);
+  const items = levelIndexItems(model, level);
+  const activate = (item: LevelIndexItem) => {
+    if (item.opens) onOpen?.(item.opens);
+    else if (item.step)
+      useEntityPanelStore
+        .getState()
+        .openStep(item.step.stepId, item.step.workflowId);
+  };
   return (
-    <div
-      className="uv-machine-canvas"
-      ref={canvas}
-      data-testid="atlas-graph"
-      data-level={level.kind}
-    >
-      {state.status === "pending" && (
-        <div className="uv-loading" role="status">
-          laying out {noun} graph…
-        </div>
-      )}
-      {state.status === "done" && !state.result.ok && (
-        <div className="uv-empty" role="alert">
-          Unable to compile {noun} graph:{" "}
-          {state.result.errors.map((e) => e.message).join("; ")}
-        </div>
-      )}
-      {state.status === "done" && state.fallbackError && (
-        <div className="uv-machine-warning" role="alert" data-no-pan>
-          Automatic layout failed. Showing a simplified layout.{" "}
-          {state.fallbackError} <button onClick={retry}>Retry layout</button>
-        </div>
-      )}
-      {diagram && (
-        <>
-          <div
-            className="uv-scaler uv-machine-scene"
-            style={{ transform: camera.transform }}
-          >
-            <AtlasMachineScene
-              model={model}
-              diagram={diagram}
-              t={0}
-              label={LEVEL_LABEL[level.kind]}
-              query={query}
-              panelHost={panelHost}
-              onOpen={onOpen}
-            />
-            <TaskRunMotion
-              summary={summary}
-              level={level}
-              model={model}
-              diagram={diagram}
-              viewport={canvas}
-            />
+    <div className="uv-machine-graph">
+      <LevelIndex
+        level={level}
+        items={items}
+        hotId={pointed ?? traced}
+        onPoint={setPointed}
+        onActivate={activate}
+      />
+      <div
+        className="uv-machine-canvas"
+        ref={canvas}
+        data-testid="atlas-graph"
+        data-level={level.kind}
+      >
+        {state.status === "pending" && (
+          <div className="uv-loading" role="status">
+            laying out {noun} graph…
           </div>
-          <ZoomWidget
-            onZoomIn={camera.zoomIn}
-            onZoomOut={camera.zoomOut}
-            onFit={camera.fit}
-          />
-        </>
-      )}
-      <div className="uv-connections-host" ref={setPanelHost} data-no-pan />
+        )}
+        {state.status === "done" && !state.result.ok && (
+          <div className="uv-empty" role="alert">
+            Unable to compile {noun} graph:{" "}
+            {state.result.errors.map((e) => e.message).join("; ")}
+          </div>
+        )}
+        {state.status === "done" && state.fallbackError && (
+          <div className="uv-machine-warning" role="alert" data-no-pan>
+            Automatic layout failed. Showing a simplified layout.{" "}
+            {state.fallbackError} <button onClick={retry}>Retry layout</button>
+          </div>
+        )}
+        {diagram && (
+          <>
+            <div
+              className="uv-scaler uv-machine-scene"
+              style={{ transform: camera.transform }}
+              data-weight={weightBand(camera.scale)}
+            >
+              <AtlasMachineScene
+                model={model}
+                diagram={diagram}
+                t={0}
+                label={LEVEL_LABEL[level.kind]}
+                query={query}
+                panelHost={panelHost}
+                onOpen={onOpen}
+                pointed={pointed}
+                onTrace={setTraced}
+              />
+              <TaskRunMotion
+                summary={summary}
+                level={level}
+                model={model}
+                diagram={diagram}
+                viewport={canvas}
+              />
+            </div>
+            <ZoomWidget
+              onZoomIn={camera.zoomIn}
+              onZoomOut={camera.zoomOut}
+              onFit={camera.fit}
+            />
+          </>
+        )}
+        <div className="uv-connections-host" ref={setPanelHost} data-no-pan />
+      </div>
     </div>
   );
 }

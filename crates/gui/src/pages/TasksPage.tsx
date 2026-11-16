@@ -3,8 +3,6 @@ import {
   useCallback,
   useMemo,
   useEffect,
-  useRef,
-  Fragment,
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { TaskFilterOptions, Task, TaskLevel } from "../bindings";
@@ -16,14 +14,15 @@ import {
 } from "../utils/buildTreeFromTasks";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { useShellHeader } from "../hooks/useShellHeader";
-import { TaskTreeView, ExpandCollapseAllButton } from "../components/TaskList";
-import { SearchInput } from "../components/molecules/SearchInput";
-import { Select } from "../components/atoms/Select";
-import { Badge } from "../components/atoms/Badge";
+import { TaskTreeView } from "../components/TaskList";
+import { PaletteSearchButton } from "../components/molecules/PaletteSearchButton";
+import { Dropdown } from "../components/molecules/Dropdown";
+import { ScopeChip } from "../components/molecules/ScopeChip";
 import { LiveCount } from "../components/shared/LiveCount";
 import { isActiveRunStatus, isTaskDone } from "../utils/runState";
 import { useSummaryExpanded } from "../hooks/useSummaryExpanded";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
+import { OverflowMenu } from "../components/molecules/OverflowMenu";
 
 type TaskScope =
   | "all"
@@ -45,11 +44,13 @@ interface TaskScopeChipDefinition {
   countKey?: keyof TaskScopeCounts;
 }
 
+/** Status filter: one choice, "All" by default. "Recent" is not a status;
+ * it is the "Updated in last 24h" toggle in the View menu and combines with
+ * any status. */
 const TASK_SCOPE_CHIPS: TaskScopeChipDefinition[] = [
   { key: "active", label: "Active", countKey: "active" },
   { key: "waiting", label: "Waiting", countKey: "waiting" },
   { key: "blocked", label: "Blocked", countKey: "blocked" },
-  { key: "recent", label: "Recent", countKey: "recent" },
   { key: "queued", label: "Queued", countKey: "queued" },
   { key: "done", label: "Done", countKey: "done" },
 ];
@@ -112,15 +113,17 @@ function matchesScope(
 function deriveScopedTasks(
   tasks: Task[],
   scope: TaskScope,
-  activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>
+  activeRuns: ReadonlyMap<string, import("../bindings").TaskRun>,
+  recentOnly = false
 ): Task[] {
-  if (scope === "all") return tasks;
+  if (scope === "all" && !recentOnly) return tasks;
 
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const include = new Set<string>();
 
   for (const task of tasks) {
-    if (!matchesScope(task, scope, activeRuns)) continue;
+    if (scope !== "all" && !matchesScope(task, scope, activeRuns)) continue;
+    if (recentOnly && !matchesScope(task, "recent", activeRuns)) continue;
     include.add(task.id);
 
     let parentId = task.parent_id;
@@ -157,34 +160,6 @@ function containsAllExpandedIds(
   return candidateIds.every((id) => expandedIds.has(id));
 }
 
-function ScopeChip({
-  active,
-  count,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  count?: number;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={["scope-chip", active ? "active" : ""]
-        .filter(Boolean)
-        .join(" ")}
-    >
-      <span>{label}</span>
-      {count != null && (
-        <Badge count={count} intent={active ? "accent" : "neutral"} />
-      )}
-    </button>
-  );
-}
-
 export function TasksPage() {
   const [searchParams] = useSearchParams();
   const openTask = useEntityPanelStore((state) => state.openTask);
@@ -194,35 +169,10 @@ export function TasksPage() {
   const [filters, setFilters] = useState<TaskFilterOptions>(INITIAL_FILTERS);
   const [scope, setScope] = useState<TaskScope>("all");
   const [hideCompleted, setHideCompleted] = useState(false);
-
-  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [recentOnly, setRecentOnly] = useState(false);
 
   const expandedNodes = useExpandedNodes();
   const summaryExpanded = useSummaryExpanded();
-
-  // Press "/" anywhere on the page to jump to the search box, unless the user
-  // is already typing in a field. Mirrors the docs/design search hint badge.
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) {
-        return;
-      }
-      const el = document.activeElement as HTMLElement | null;
-      const tag = el?.tagName;
-      if (
-        tag === "INPUT" ||
-        tag === "TEXTAREA" ||
-        tag === "SELECT" ||
-        el?.isContentEditable
-      ) {
-        return;
-      }
-      event.preventDefault();
-      searchInputRef.current?.focus();
-    }
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
 
   useEffect(() => {
     const workflowId = searchParams.get("workflowId");
@@ -243,8 +193,8 @@ export function TasksPage() {
   const { tasks, isLoading, error } = useTasks(filters);
   const activeRunsByTaskId = useMemo(() => activeRunsFromTasks(tasks), [tasks]);
   const scopedTasks = useMemo(
-    () => deriveScopedTasks(tasks, scope, activeRunsByTaskId),
-    [activeRunsByTaskId, tasks, scope]
+    () => deriveScopedTasks(tasks, scope, activeRunsByTaskId, recentOnly),
+    [activeRunsByTaskId, tasks, scope, recentOnly]
   );
   const counts = useMemo(
     () => scopeCounts(tasks, activeRunsByTaskId),
@@ -261,18 +211,13 @@ export function TasksPage() {
     [scopedTasks, treeCache]
   );
 
-  // "Filtering" mirrors the prototype: a scope chip (other than "all") or a
-  // non-empty search narrows the list, in which case hide-done and the
-  // done-summary collapse are bypassed so every match stays visible.
-  const filtering = scope !== "all" || Boolean(filters.search?.trim());
-
-  const handleSearchChange = useCallback((value: string) => {
-    setFilters((prev) => ({ ...prev, search: value || null }));
-  }, []);
+  // A scope chip (other than "all") narrows the list, in which case hide-done
+  // and the done-summary collapse are bypassed so every match stays visible.
+  // Finding a specific task goes through the ⌘K palette.
+  const filtering = scope !== "all" || recentOnly;
 
   const handleLevelChange = useCallback(
-    (event: React.ChangeEvent<HTMLSelectElement>) => {
-      const value = event.target.value;
+    (value: string) => {
       const levels = value ? [value as TaskLevel] : null;
       setFilters((prev) => ({ ...prev, levels }));
     },
@@ -295,13 +240,13 @@ export function TasksPage() {
   const { expandedNodeIds, expandAll } = expandedNodes;
   useEffect(() => {
     if (
-      scope !== "all" &&
+      filtering &&
       expandableIds.length > 0 &&
       !containsAllExpandedIds(expandedNodeIds, expandableIds)
     ) {
       expandAll(expandableIds);
     }
-  }, [scope, expandableIds, expandedNodeIds, expandAll]);
+  }, [filtering, expandableIds, expandedNodeIds, expandAll]);
 
   const allExpanded =
     expandableIds.length > 0 &&
@@ -316,26 +261,13 @@ export function TasksPage() {
 
   const runningCount = counts.active;
 
-  const currentIsLoading = isLoading;
-  const currentError = error;
-
-  const taskCount = scopedTasks.length;
-
   const headerActions = useMemo(
     () => (
       <div className="flex items-center gap-3 text-eyebrow">
         <LiveCount running={runningCount} />
-        {!currentIsLoading && !currentError && taskCount > 0 && (
-          <span className="text-[var(--color-fg-mute)]">
-            <b className="font-semibold text-[var(--color-fg)]">{taskCount}</b>{" "}
-            task{taskCount !== 1 ? "s" : ""}{" "}
-            <span className="text-[var(--color-fg-ghost)]">·</span>{" "}
-            {hierarchy.length} root{hierarchy.length !== 1 ? "s" : ""}
-          </span>
-        )}
       </div>
     ),
-    [runningCount, currentIsLoading, currentError, taskCount, hierarchy.length]
+    [runningCount]
   );
 
   useShellHeader("Tasks", headerActions);
@@ -351,88 +283,83 @@ export function TasksPage() {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="list-head">
             <div className="scope-row" data-testid="tasks-scope-bar">
-              <div className="scope-primary">
+              <div
+                className="scope-primary"
+                role="group"
+                aria-label="Filter tasks by status"
+              >
+                <ScopeChip
+                  active={scope === "all"}
+                  count={isLoading || error ? undefined : tasks.length}
+                  label="All"
+                  onClick={() => setScope("all")}
+                />
                 {TASK_SCOPE_CHIPS.map((item) => (
-                  <Fragment key={item.key}>
-                    <ScopeChip
-                      active={scope === item.key}
-                      count={item.countKey ? counts[item.countKey] : undefined}
-                      label={item.label}
-                      onClick={() =>
-                        setScope(scope === item.key ? "all" : item.key)
-                      }
-                    />
-                    {item.key === "recent" && (
-                      <span className="scope-sep" aria-hidden />
-                    )}
-                  </Fragment>
+                  <ScopeChip
+                    key={item.key}
+                    active={scope === item.key}
+                    count={item.countKey ? counts[item.countKey] : undefined}
+                    label={item.label}
+                    onClick={() =>
+                      setScope(scope === item.key ? "all" : item.key)
+                    }
+                  />
                 ))}
               </div>
               <div className="scope-secondary">
-                <button
-                  type="button"
-                  className={["hide-done", hideCompleted ? "on" : ""]
-                    .filter(Boolean)
-                    .join(" ")}
-                  aria-pressed={hideCompleted}
-                  onClick={() => setHideCompleted((v) => !v)}
-                  title={
-                    hideCompleted
-                      ? "Show completed tasks"
-                      : "Hide completed tasks"
-                  }
-                  data-testid="tasks-hide-done"
-                >
-                  <svg
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    aria-hidden
-                  >
-                    {hideCompleted ? (
-                      <>
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                      </>
-                    ) : (
-                      <>
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </>
-                    )}
-                  </svg>
-                  {hideCompleted ? "Done hidden" : "Hide done"}
-                </button>
                 <div className="scope-level">
-                  <Select
+                  <Dropdown
                     options={LEVEL_SELECT_OPTIONS}
                     value={selectedLevel}
                     onChange={handleLevelChange}
                     aria-label="Filter by level"
                     id="level-filter"
+                    align="end"
                   />
                 </div>
-                <div className="scope-expand">
-                  <ExpandCollapseAllButton
-                    allExpanded={allExpanded}
-                    onToggle={handleToggleExpandAll}
-                    disabled={expandableIds.length === 0}
-                  />
-                </div>
+                <OverflowMenu
+                  label="View options"
+                  triggerClassName={[
+                    "ctl ctl-outline tasks-view-trigger",
+                    recentOnly || hideCompleted ? "on" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  testId="tasks-view-menu"
+                  items={[
+                    {
+                      key: "recent",
+                      label: "Updated in last 24h",
+                      checked: recentOnly,
+                      badge: counts.recent || undefined,
+                      testId: "tasks-recent-only",
+                      onSelect: () => setRecentOnly((value) => !value),
+                    },
+                    {
+                      key: "hide-done",
+                      label: "Hide done",
+                      title: hideCompleted
+                        ? "Show completed tasks"
+                        : "Hide completed tasks",
+                      checked: hideCompleted,
+                      testId: "tasks-hide-done",
+                      onSelect: () => setHideCompleted((value) => !value),
+                    },
+                    {
+                      key: "expand",
+                      label: allExpanded ? "Collapse all" : "Expand all",
+                      disabled: expandableIds.length === 0,
+                      separatorBefore: true,
+                      testId: "tasks-expand-all",
+                      onSelect: handleToggleExpandAll,
+                    },
+                  ]}
+                />
               </div>
             </div>
-            <SearchInput
-              ref={searchInputRef}
-              value={filters.search ?? ""}
-              onChange={handleSearchChange}
-              debounceMs={0}
-              hint="/"
-              placeholder="Search tasks by title, id, or tag…"
-              aria-label="Search tasks by title, id, or tag"
-              data-testid="task-search-input"
+            <PaletteSearchButton
+              label="Search tasks"
+              data-testid="task-search-button"
             />
           </div>
 

@@ -1,4 +1,14 @@
 import { useUIStore } from "../../stores/uiStore";
+import {
+  getComposerPicker,
+  findComposerPicker,
+} from "../../test/composerControls";
+import {
+  clickPaneControl,
+  firePaneControl,
+  getPaneControl,
+  hasPaneControl,
+} from "../../test/paneControls";
 import { useProviderSettingsStore } from "../../stores/providerSettingsStore";
 import { useLocalChatDefaultsStore } from "../../utils/localChatDefaults";
 import { withBuiltinProviders } from "../../test/localChatCatalog";
@@ -30,6 +40,11 @@ import {
   routeLocalChatTurnStartedEvent,
   routePermissionRequestEvent,
 } from "../../hooks/useLocalChatEventRouter";
+import {
+  chooseDropdownValue,
+  dropdownOptions,
+  dropdownOptionValues,
+} from "../../test/dropdown";
 
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
@@ -264,18 +279,18 @@ describe("ChatWindow", () => {
       expect(current).toBeDefined();
       act(() => current.notify(800));
       act(() => retired.notify(0));
-      fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+      firePaneControl("Changes");
       let handle = await screen.findByRole("separator", {
         name: "Resize Changes panel",
       });
       expect(handle).toHaveAttribute("aria-valuenow", "560");
       fireEvent.keyDown(handle, { key: "End" });
       expect(handle).toHaveAttribute("aria-valuenow", "618");
-      fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+      firePaneControl("Changes");
       expect(
         screen.queryByRole("separator", { name: "Resize Changes panel" })
       ).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+      firePaneControl("Changes");
       handle = await screen.findByRole("separator", {
         name: "Resize Changes panel",
       });
@@ -310,9 +325,9 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     await waitFor(() => {
-      const modelPicker = screen.getByTestId("local-chat-model-picker");
+      const modelPicker = getComposerPicker("local-chat-model-picker");
 
-      expect(modelPicker).toHaveValue("opus");
+      expect(modelPicker).toHaveAttribute("data-value", "opus");
     });
 
     const composer = screen.getByTestId("local-chat-composer");
@@ -377,13 +392,13 @@ describe("ChatWindow", () => {
     conversation.scrollTop = 123;
     fireEvent.scroll(conversation);
 
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     await screen.findByText("No changes against this baseline.");
 
     expect(composer).toBeVisible();
     expect(container.querySelector(".selection-discussions")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
 
     expect(screen.getByTestId("local-chat-composer")).toBe(composer);
     expect(composer).toHaveValue("keep this draft");
@@ -395,7 +410,7 @@ describe("ChatWindow", () => {
         worktreePath: "/new-worktree",
       })
     );
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     await waitFor(() =>
       expect(mockedCommands.loadWorktreeChanges).toHaveBeenLastCalledWith(
         "/new-worktree",
@@ -419,7 +434,7 @@ describe("ChatWindow", () => {
       sessions: { "test-session": createSession({ association }) },
     });
     render(<ChatWindow sessionId="test-session" />);
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     await screen.findByText("No changes against this baseline.");
     act(() =>
       useDocumentStore.setState({
@@ -445,7 +460,7 @@ describe("ChatWindow", () => {
         },
       })
     );
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
 
     const dialog = await screen.findByRole("dialog", {
       name: "Unsaved changes",
@@ -459,13 +474,11 @@ describe("ChatWindow", () => {
       "true"
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
 
-    expect(screen.getByRole("button", { name: "Changes" })).toHaveAttribute(
-      "aria-pressed",
-      "false"
-    );
+    // Closed Changes returns to the overflow menu.
+    expect(screen.queryByTestId("local-chat-view-changes")).toBeNull();
     expect(
       useDocumentStore.getState().workspaces["/dirty-worktree"]?.documents[
         "a.txt"
@@ -477,7 +490,7 @@ describe("ChatWindow", () => {
     useChatStore.setState({ sessions: { "test-session": createSession() } });
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByRole("button", { name: "Changes" })).toBeNull();
+    expect(hasPaneControl("Changes")).toBe(false);
   });
 
   it("opens running background tasks in the side panel in place of Changes", async () => {
@@ -535,7 +548,7 @@ describe("ChatWindow", () => {
     ).toHaveTextContent("npm run dev");
     expect(screen.getByTestId("local-chat-composer")).toBeVisible();
 
-    fireEvent.click(screen.getByRole("button", { name: "Changes" }));
+    firePaneControl("Changes");
     await screen.findByText("No changes against this baseline.");
 
     expect(
@@ -661,9 +674,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Regenerate chat title" })
-    );
+    await clickPaneControl(user, "Regenerate chat title");
 
     await waitFor(() => {
       expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith({
@@ -728,9 +739,7 @@ describe("ChatWindow", () => {
       titleStatus: "manual",
     });
 
-    await user.click(
-      screen.getByRole("button", { name: "Regenerate chat title" })
-    );
+    await clickPaneControl(user, "Regenerate chat title");
     expect(mockedCommands.inferLocalChatSessionTitle).not.toHaveBeenCalled();
     expect(screen.getByText("Manual conversation title")).toBeInTheDocument();
   });
@@ -760,9 +769,7 @@ describe("ChatWindow", () => {
 
       render(<ChatWindow sessionId="test-session" />);
 
-      await user.click(
-        screen.getByRole("button", { name: "Regenerate chat title" })
-      );
+      await clickPaneControl(user, "Regenerate chat title");
       await waitFor(() => {
         expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith(
           expect.objectContaining({ harness })
@@ -838,9 +845,7 @@ describe("ChatWindow", () => {
         },
       });
       render(<ChatWindow sessionId="test-session" />);
-      await user.click(
-        screen.getByRole("button", { name: "Regenerate chat title" })
-      );
+      await clickPaneControl(user, "Regenerate chat title");
       await waitFor(() => {
         expect(mockedCommands.inferLocalChatSessionTitle).toHaveBeenCalledWith(
           expect.objectContaining({ harness })
@@ -855,9 +860,7 @@ describe("ChatWindow", () => {
         status: "error",
         error: { message: "provider unavailable" },
       });
-      await user.click(
-        screen.getByRole("button", { name: "Regenerate chat title" })
-      );
+      await clickPaneControl(user, "Regenerate chat title");
       await waitFor(() => {
         expect(screen.getByRole("alert")).toHaveTextContent(
           "provider unavailable"
@@ -1076,7 +1079,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTitle("Clear messages")).toBeInTheDocument();
+    expect(getPaneControl("Clear messages")).toBeInTheDocument();
   });
 
   it("refreshes model choices after provider settings are saved before a session starts", async () => {
@@ -1087,8 +1090,10 @@ describe("ChatWindow", () => {
       panelOpen: true,
     });
     render(<ChatWindow sessionId="test-session" />);
-    const picker = await screen.findByTestId("local-chat-model-picker");
-    expect(picker).toHaveTextContent("Sonnet");
+    const picker = await findComposerPicker("local-chat-model-picker");
+    expect(dropdownOptions(picker).map((option) => option.label).join(" ")).toContain(
+      "Sonnet"
+    );
     const latest = withBuiltinProviders({
       default_harness: "claude",
       harnesses: [
@@ -1111,9 +1116,11 @@ describe("ChatWindow", () => {
     });
     act(() => useProviderSettingsStore.getState().changed());
     await waitFor(() =>
-      expect(screen.getByTestId("local-chat-model-picker")).toHaveTextContent(
-        "New model"
-      )
+      expect(
+        dropdownOptions(getComposerPicker("local-chat-model-picker")).map(
+          (option) => option.label
+        )
+      ).toContain("New model (default)")
     );
   });
 
@@ -1129,7 +1136,7 @@ describe("ChatWindow", () => {
       panelOpen: true,
     });
     render(<ChatWindow sessionId="test-session" />);
-    const picker = await screen.findByTestId("local-chat-model-picker");
+    const picker = await findComposerPicker("local-chat-model-picker");
     expect(picker).toHaveTextContent("Sonnet");
     const calls =
       mockedCommands.getSupportedLocalChatHarnesses.mock.calls.length;
@@ -1153,8 +1160,8 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const picker = await screen.findByTestId("local-chat-model-picker");
-    expect(picker).toHaveValue("");
+    const picker = await findComposerPicker("local-chat-model-picker");
+    expect(picker).toHaveAttribute("data-value", "");
     expect(
       useChatStore.getState().sessions["test-session"].selectedModelId
     ).toBeUndefined();
@@ -1206,12 +1213,10 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const providerPicker = await screen.findByTestId(
-      "local-chat-provider-picker"
-    );
-    expect(providerPicker).toHaveValue("anthropic");
+    const providerPicker = await findComposerPicker("local-chat-provider-picker");
+    expect(providerPicker).toHaveAttribute("data-value", "anthropic");
     expect(
-      Array.from((providerPicker as HTMLSelectElement).options).map(
+      dropdownOptions(providerPicker).map(
         (option) => option.value
       )
     ).toEqual(["anthropic"]);
@@ -1264,17 +1269,15 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const providerPicker = await screen.findByTestId(
-      "local-chat-provider-picker"
-    );
+    const providerPicker = await findComposerPicker("local-chat-provider-picker");
     await waitFor(() => {
       expect(useChatStore.getState().sessions["test-session"].harness).toBe(
         "codex"
       );
     });
-    expect(providerPicker).toHaveValue("openai");
+    expect(providerPicker).toHaveAttribute("data-value", "openai");
     expect(
-      Array.from((providerPicker as HTMLSelectElement).options).map(
+      dropdownOptions(providerPicker).map(
         (option) => option.value
       )
     ).toEqual(["openai"]);
@@ -1354,39 +1357,23 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.selectOptions(
-      await screen.findByTestId("local-chat-provider-picker"),
-      "openai"
-    );
+    chooseDropdownValue(await findComposerPicker("local-chat-provider-picker"), "openai");
     await waitFor(() => {
       expect(useChatStore.getState().sessions["test-session"].harness).toBe(
         "codex"
       );
     });
-    await user.selectOptions(
-      await screen.findByTestId("local-chat-effort-picker"),
-      "high"
-    );
-    await user.selectOptions(
-      await screen.findByTestId("local-chat-model-picker"),
-      "catalog-codex-alt"
-    );
+    chooseDropdownValue(await findComposerPicker("local-chat-effort-picker"), "high");
+    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "catalog-codex-alt");
     await waitFor(() => {
       expect(
         useChatStore.getState().sessions["test-session"].selectedReasoningEffort
       ).toBeNull();
     });
     expect(
-      Array.from(
-        (screen.getByTestId("local-chat-effort-picker") as HTMLSelectElement)
-          .options,
-        (option) => option.value
-      )
+      dropdownOptionValues(getComposerPicker("local-chat-effort-picker"))
     ).toEqual(["", "medium"]);
-    await user.selectOptions(
-      screen.getByTestId("local-chat-effort-picker"),
-      "medium"
-    );
+    chooseDropdownValue(getComposerPicker("local-chat-effort-picker"), "medium");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
 
@@ -1458,26 +1445,16 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.selectOptions(
-      await screen.findByTestId("local-chat-provider-picker"),
-      "openrouter"
-    );
+    chooseDropdownValue(await findComposerPicker("local-chat-provider-picker"), "openrouter");
     await waitFor(() => {
       const updated = useChatStore.getState().sessions["test-session"];
       expect(updated.providerId).toBe("openrouter");
       expect(updated.harness).toBe("claude");
     });
     expect(
-      Array.from(
-        (screen.getByTestId("local-chat-model-picker") as HTMLSelectElement)
-          .options,
-        (option) => option.value
-      )
+      dropdownOptionValues(getComposerPicker("local-chat-model-picker"))
     ).toEqual(["", "moonshotai/kimi-k2", "z-ai/glm-5"]);
-    await user.selectOptions(
-      screen.getByTestId("local-chat-model-picker"),
-      "moonshotai/kimi-k2"
-    );
+    chooseDropdownValue(getComposerPicker("local-chat-model-picker"), "moonshotai/kimi-k2");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
 
@@ -1502,7 +1479,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const modelPicker = await screen.findByTestId("local-chat-model-picker");
+    const modelPicker = await findComposerPicker("local-chat-model-picker");
     const permissionPicker = screen.getByTestId(
       "local-chat-permission-mode-picker"
     );
@@ -1510,17 +1487,17 @@ describe("ChatWindow", () => {
     expect(modelPicker.closest(".hc-foot")).not.toBeNull();
     expect(permissionPicker.closest(".hc-foot")).not.toBeNull();
     expect(
-      (await screen.findByTestId("local-chat-provider-picker")).closest(
+      (await findComposerPicker("local-chat-provider-picker")).closest(
         ".hc-foot"
       )
     ).not.toBeNull();
     expect(
       document.querySelector(".hc-head [data-testid='local-chat-model-picker']")
     ).toBeNull();
-    expect(permissionPicker).toHaveValue("default");
+    expect(permissionPicker).toHaveAttribute("data-value", "default");
     expect(
-      Array.from((permissionPicker as HTMLSelectElement).options, (option) => [
-        option.textContent,
+      dropdownOptions(permissionPicker).map((option) => [
+        option.label,
         option.value,
       ])
     ).toEqual([
@@ -1550,16 +1527,15 @@ describe("ChatWindow", () => {
     expect(
       await screen.findByTestId("local-chat-provider-unavailable")
     ).toHaveTextContent("This chat session's harness is no longer available.");
-    expect(
-      Array.from(
-        (screen.getByTestId("local-chat-provider-picker") as HTMLSelectElement)
-          .options
-      ).map((option) => option.value)
-    ).toEqual(["anthropic"]);
+    // Locked to its unavailable harness: the picker keeps that value and
+    // cannot be changed.
+    const lockedPicker = getComposerPicker("local-chat-provider-picker");
+    expect(lockedPicker).toBeDisabled();
+    expect(lockedPicker.getAttribute("data-value")).not.toBe("anthropic");
     expect(useChatStore.getState().sessions["test-session"].harness).toBe(
       "codex"
     );
-    expect(screen.getByTestId("local-chat-model-picker")).toBeDisabled();
+    expect(getComposerPicker("local-chat-model-picker")).toBeDisabled();
     expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
 
     await user.type(screen.getByTestId("local-chat-composer"), "Start Codex");
@@ -1607,10 +1583,8 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const providerPicker = await screen.findByTestId(
-      "local-chat-provider-picker"
-    );
-    expect((providerPicker as HTMLSelectElement).options).toHaveLength(0);
+    const providerPicker = await findComposerPicker("local-chat-provider-picker");
+    expect(dropdownOptions(providerPicker)).toHaveLength(0);
     expect(
       await screen.findByTestId("local-chat-provider-unavailable")
     ).toHaveTextContent(
@@ -1680,9 +1654,9 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     expect(
-      await screen.findByTestId("local-chat-provider-picker")
+      await findComposerPicker("local-chat-provider-picker")
     ).toBeDisabled();
-    expect(screen.getByTestId("local-chat-model-picker")).toBeEnabled();
+    expect(getComposerPicker("local-chat-model-picker")).toBeEnabled();
 
     await user.type(screen.getByTestId("local-chat-composer"), "Resume Codex");
     await user.click(screen.getByTitle("Resume session"));
@@ -1716,10 +1690,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.selectOptions(
-      await screen.findByTestId("local-chat-model-picker"),
-      "opus"
-    );
+    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "opus");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
 
@@ -1755,7 +1726,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.selectOptions(
+    chooseDropdownValue(
       screen.getByTestId("local-chat-permission-mode-picker"),
       "plan"
     );
@@ -1795,7 +1766,7 @@ describe("ChatWindow", () => {
 
     const { rerender } = render(<ChatWindow sessionId="test-session" />);
 
-    expect(await screen.findByTestId("local-chat-model-picker")).toBeEnabled();
+    expect(await findComposerPicker("local-chat-model-picker")).toBeEnabled();
     expect(
       screen.getByTestId("local-chat-permission-mode-picker")
     ).toBeEnabled();
@@ -1811,7 +1782,7 @@ describe("ChatWindow", () => {
     });
     rerender(<ChatWindow sessionId="test-session" />);
 
-    expect(await screen.findByTestId("local-chat-model-picker")).toBeEnabled();
+    expect(await findComposerPicker("local-chat-model-picker")).toBeEnabled();
     expect(
       screen.getByTestId("local-chat-permission-mode-picker")
     ).toBeEnabled();
@@ -1828,16 +1799,10 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.selectOptions(
-      await screen.findByTestId("local-chat-model-picker"),
-      "opus"
-    );
+    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "opus");
     expect(localStorage.getItem("local-chat-model:last-used:v1")).toBe("opus");
 
-    await user.selectOptions(
-      await screen.findByTestId("local-chat-model-picker"),
-      ""
-    );
+    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
 
@@ -1873,9 +1838,9 @@ describe("ChatWindow", () => {
     useChatStore.setState({ sessions: { "test-session": createSession() }, activeSessionId: "test-session", panelOpen: true });
     const user = userEvent.setup();
     render(<ChatWindow sessionId="test-session" />);
-    const picker = await screen.findByTestId("local-chat-model-picker");
-    expect(Array.from((picker as HTMLSelectElement).options, (option) => option.value)).toEqual(["", ...ids]);
-    await user.selectOptions(picker, "claude-fable-5-2");
+    const picker = await findComposerPicker("local-chat-model-picker");
+    expect(dropdownOptionValues(picker)).toEqual(["", ...ids]);
+    chooseDropdownValue(picker, "claude-fable-5-2");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
     await waitFor(() => expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(expect.objectContaining({ model_id: "claude-fable-5-2" })));
@@ -1893,12 +1858,12 @@ describe("ChatWindow", () => {
     });
     const user = userEvent.setup();
     render(<ChatWindow sessionId="test-session" />);
-    const picker = await screen.findByTestId("local-chat-model-picker");
-    await waitFor(() => expect(picker).toHaveValue("claude-opus-4-8"));
+    const picker = await findComposerPicker("local-chat-model-picker");
+    await waitFor(() => expect(picker).toHaveAttribute("data-value", "claude-opus-4-8"));
     expect(picker).toHaveTextContent("Unsupported: claude-opus-4-8");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
-    await user.selectOptions(picker, "opus");
+    chooseDropdownValue(picker, "opus");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
     await waitFor(() =>
@@ -1919,9 +1884,9 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const picker = await screen.findByTestId("local-chat-model-picker");
+    const picker = await findComposerPicker("local-chat-model-picker");
     await waitFor(() => {
-      expect(picker).toHaveValue("haiku");
+      expect(picker).toHaveAttribute("data-value", "haiku");
     });
   });
 
@@ -1935,9 +1900,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(await screen.findByTestId("local-chat-model-picker")).toHaveValue(
-      ""
-    );
+    expect(await findComposerPicker("local-chat-model-picker")).toHaveAttribute("data-value", "");
     expect(
       useChatStore.getState().sessions["test-session"].selectedModelId
     ).toBeUndefined();
@@ -1953,7 +1916,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await screen.findByTestId("local-chat-model-picker");
+    await findComposerPicker("local-chat-model-picker");
     expect(
       useChatStore.getState().sessions["test-session"].selectedModelId
     ).toBe("claude-retired");
@@ -2008,7 +1971,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(await screen.findByTestId("local-chat-model-picker")).toBeDisabled();
+    expect(await findComposerPicker("local-chat-model-picker")).toBeDisabled();
     await waitFor(() => {
       expect(
         useChatStore.getState().sessions["test-session"].selectedModelId
@@ -2037,7 +2000,7 @@ describe("ChatWindow", () => {
 
     expect(screen.getByText("Hello")).toBeInTheDocument();
 
-    await user.click(screen.getByTitle("Clear messages"));
+    await clickPaneControl(user, "Clear messages");
 
     expect(
       useChatStore.getState().sessions["test-session"].messages
@@ -2065,7 +2028,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.click(screen.getByTitle("Clear messages"));
+    await clickPaneControl(user, "Clear messages");
 
     await waitFor(() => {
       expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
@@ -2092,7 +2055,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.click(screen.getByTitle("Clear messages"));
+    await clickPaneControl(user, "Clear messages");
 
     await waitFor(() => {
       expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
@@ -2338,7 +2301,7 @@ describe("ChatWindow", () => {
     });
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.click(screen.getByTitle("Clear messages"));
+    await clickPaneControl(user, "Clear messages");
 
     // The clear owns the teardown; a second concurrent close must not be sent.
     const stop = screen.getByTestId("local-chat-stop-generation");
@@ -2784,7 +2747,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    await user.click(screen.getByTitle("Clear messages"));
+    await clickPaneControl(user, "Clear messages");
 
     await waitFor(() => {
       expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(

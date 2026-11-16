@@ -264,7 +264,7 @@ export function DaemonInspector({
               <section aria-labelledby="daemon-identity-heading">
                 <h2
                   id="daemon-identity-heading"
-                  className="mb-2 font-mono text-2xs uppercase tracking-[0.12em] text-[var(--color-fg-mute)]"
+                  className="mb-2 t-label text-[var(--color-fg-mute)]"
                 >
                   Identity
                 </h2>
@@ -344,7 +344,7 @@ export function DaemonInspector({
               <section aria-labelledby="daemon-readiness-heading">
                 <h2
                   id="daemon-readiness-heading"
-                  className="mb-2 font-mono text-2xs uppercase tracking-[0.12em] text-[var(--color-fg-mute)]"
+                  className="mb-2 t-label text-[var(--color-fg-mute)]"
                 >
                   Readiness
                 </h2>

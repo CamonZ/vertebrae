@@ -67,6 +67,7 @@ import { roundedPath } from "./layout/geometry";
 import { layoutCondensed } from "./layout/layoutCondensed";
 import type { AtlasModel, CondensedLayout, Kind } from "./layout/types";
 import "./WorkflowAtlas.css";
+import { useShellHeader } from "../../hooks/useShellHeader";
 
 const COND_OPTS = { boxW: 264, boxH: 140 } as const;
 
@@ -110,6 +111,7 @@ export function layoutKey(model: AtlasModel): string {
 }
 
 export function WorkflowAtlas() {
+  useShellHeader("Atlas");
   const projectGeneration = useProjectScopeGeneration();
   const { summary, isLoading, error } = usePipelineSummary();
   useAtlasLayoutWarmup(summary);
@@ -507,8 +509,9 @@ export function WorkflowAtlas() {
           </h1>
         </div>
         <div className="uv-controls">
-          {/* Search fills the toolbar in the topology views (the board has its
-              own task search); the view toggle sits at the end. */}
+          {/* This box highlights matches on the canvas; finding and opening a
+              workflow, factory or task goes through ⌘K ("/" opens it scoped
+              to workflows here). The board's search button opens ⌘K too. */}
           <div className="uv-search">
             {!isBoard && (
               <SearchInput
@@ -517,7 +520,6 @@ export function WorkflowAtlas() {
                 placeholder={
                   showFactoryOverview ? "Find a factory…" : "Find a workflow…"
                 }
-                hint="/"
               />
             )}
           </div>

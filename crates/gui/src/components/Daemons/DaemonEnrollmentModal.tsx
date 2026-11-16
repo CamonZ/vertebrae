@@ -22,7 +22,7 @@ function maskToken(token: string): string {
 
 function StepLabel({ step }: { step: EnrollmentStep }) {
   return (
-    <p className="font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+    <p className="t-label text-[var(--color-fg-mute)]">
       <span className={step === "name" ? "text-[var(--color-accent)]" : ""}>
         1 · Name
       </span>
@@ -50,7 +50,7 @@ function CopyButton({
   return (
     <button
       type="button"
-      className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+      className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
       onClick={() => onCopy(target, value)}
     >
       {copied === target ? "Copied" : "Copy"}
@@ -179,7 +179,7 @@ export function DaemonEnrollmentModal({
           <div className="mt-5 border-t border-[var(--color-line)] pt-4">
             <label
               htmlFor="daemon-enrollment-name"
-              className="font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]"
+              className="t-label text-[var(--color-fg-mute)]"
             >
               Name
             </label>
@@ -255,7 +255,7 @@ export function DaemonEnrollmentModal({
           {bootstrap && (
             <div className="mt-5 space-y-4 border-t border-[var(--color-line)] pt-4">
               <div>
-                <p className="font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <p className="t-label text-[var(--color-fg-mute)]">
                   Daemon ID
                 </p>
                 <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] bg-[var(--color-bg)] px-3 py-2">
@@ -272,7 +272,7 @@ export function DaemonEnrollmentModal({
               </div>
 
               <div>
-                <p className="font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <p className="t-label text-[var(--color-fg-mute)]">
                   One-time enrollment token
                 </p>
                 <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] bg-[var(--color-bg)] px-3 py-2">
@@ -290,7 +290,7 @@ export function DaemonEnrollmentModal({
                   </code>
                   <button
                     type="button"
-                    className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+                    className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
                     onClick={() => setTokenVisible((visible) => !visible)}
                   >
                     {tokenVisible ? "Hide" : "Reveal"}
@@ -310,7 +310,7 @@ export function DaemonEnrollmentModal({
               </div>
 
               <div>
-                <p className="font-mono text-eyebrow uppercase tracking-wider text-[var(--color-fg-mute)]">
+                <p className="t-label text-[var(--color-fg-mute)]">
                   Or paste this
                 </p>
                 <div className="mt-2 flex items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] bg-[var(--color-bg)] p-3">
