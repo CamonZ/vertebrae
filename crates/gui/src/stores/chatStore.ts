@@ -113,6 +113,8 @@ export type ChatMessage =
     }
   | {
       kind: "assistant";
+      /** Local stable identity used when a legacy reply has no provider item ID. */
+      referenceReplyId?: string;
       text: string;
       timestamp: string;
       isPartial?: boolean;

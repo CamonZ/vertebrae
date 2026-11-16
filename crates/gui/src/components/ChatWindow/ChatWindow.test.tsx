@@ -46,6 +46,31 @@ import {
   dropdownOptionValues,
 } from "../../test/dropdown";
 
+vi.mock("./workspace/SourceEvidence", () => ({
+  SourceEvidence: ({
+    checkout,
+    target,
+    exactPath,
+    onClose,
+  }: {
+    checkout: string;
+    target: { path: string; line?: number; column?: number };
+    exactPath?: boolean;
+    onClose(): void;
+  }) => (
+    <div
+      data-testid="source-target"
+      data-checkout={checkout}
+      data-path={target.path}
+      data-line={target.line}
+      data-column={target.column}
+      data-exact={exactPath}
+    >
+      <button onClick={onClose}>Close source</button>
+    </div>
+  ),
+}));
+
 // Mock scrollIntoView
 Element.prototype.scrollIntoView = vi.fn();
 const mockedCommands = vi.mocked(commands);
@@ -55,6 +80,13 @@ vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
     commands: {
+      worktreeFileExists: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: true }),
+      readWorktreeFile: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: { kind: "text", contents: "file", revision: "r" },
+      }),
       listComparisonChoices: vi
         .fn()
         .mockResolvedValue({ status: "ok", data: [] }),
@@ -223,6 +255,100 @@ describe("ChatWindow", () => {
       paneLayout: { panes: [], activePaneId: null },
       panelOpen: false,
     });
+  });
+
+  it("uses the shared source panel without retargeting a saved reference after reassignment", async () => {
+    const text = "[source](src/a.ts:12:3)";
+    const association = {
+      ticketId: null,
+      ticketTitle: null,
+      worktreePath: "/current",
+      branch: "feature",
+      lastProcessedAt: null,
+      processedAtCount: 0,
+      awaitingWorktree: null,
+      recentWorktrees: [],
+    };
+    useChatStore.setState({
+      sessions: {
+        "test-session": createSession({
+          projectPath: "/test/project",
+          association,
+          toolAnnotations: {
+            '["turn","saved-turn"]': {
+              worktree_history: {
+                session_id: "test-session",
+                tool_id: "",
+                subject: { kind: "turn", id: "saved-turn" },
+                kind: "worktree_history",
+                recorded_at: "2026-11-16T00:00:00Z",
+                payload: {
+                  version: 1,
+                  worktree: "/saved-feature",
+                  state: "ready",
+                },
+              },
+            },
+          },
+          messages: [
+            {
+              kind: "assistant",
+              turnId: "saved-turn",
+              itemId: "saved-source",
+              text,
+              timestamp: "2026-11-16T00:00:00Z",
+            },
+          ],
+        }),
+      },
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+    await userEvent.click(screen.getByTestId("local-file-reference-link"));
+
+    expect(screen.getByTestId("source-target")).toHaveAttribute(
+      "data-checkout",
+      "/saved-feature"
+    );
+    expect(screen.getByTestId("source-target")).toHaveAttribute(
+      "data-path",
+      "src/a.ts"
+    );
+    expect(screen.getByTestId("source-target")).toHaveAttribute(
+      "data-line",
+      "12"
+    );
+    expect(screen.getByTestId("source-target")).toHaveAttribute(
+      "data-column",
+      "3"
+    );
+    expect(screen.getByTestId("source-target")).toHaveAttribute(
+      "data-exact",
+      "true"
+    );
+
+    act(() =>
+      useChatStore.getState().setSessionAssociation("test-session", {
+        ...association,
+        worktreePath: "/replacement",
+      })
+    );
+
+    expect(screen.getByTestId("source-target")).toHaveAttribute(
+      "data-checkout",
+      "/saved-feature"
+    );
+
+    firePaneControl("Changes");
+
+    expect(screen.queryByTestId("source-target")).not.toBeInTheDocument();
+
+    firePaneControl("Changes");
+
+    await userEvent.click(screen.getByTestId("local-file-reference-link"));
+    await userEvent.click(screen.getByRole("button", { name: "Close source" }));
+
+    expect(screen.queryByTestId("source-target")).not.toBeInTheDocument();
   });
 
   it("keeps Changes resizable after a worktree association replaces its container", async () => {
@@ -1091,9 +1217,13 @@ describe("ChatWindow", () => {
     });
     render(<ChatWindow sessionId="test-session" />);
     const picker = await findComposerPicker("local-chat-model-picker");
-    expect(dropdownOptions(picker).map((option) => option.label).join(" ")).toContain(
-      "Sonnet"
-    );
+
+    expect(
+      dropdownOptions(picker)
+        .map((option) => option.label)
+        .join(" ")
+    ).toContain("Sonnet");
+
     const latest = withBuiltinProviders({
       default_harness: "claude",
       harnesses: [
@@ -1213,12 +1343,13 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const providerPicker = await findComposerPicker("local-chat-provider-picker");
+    const providerPicker = await findComposerPicker(
+      "local-chat-provider-picker"
+    );
+
     expect(providerPicker).toHaveAttribute("data-value", "anthropic");
     expect(
-      dropdownOptions(providerPicker).map(
-        (option) => option.value
-      )
+      dropdownOptions(providerPicker).map((option) => option.value)
     ).toEqual(["anthropic"]);
   });
 
@@ -1269,7 +1400,10 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const providerPicker = await findComposerPicker("local-chat-provider-picker");
+    const providerPicker = await findComposerPicker(
+      "local-chat-provider-picker"
+    );
+
     await waitFor(() => {
       expect(useChatStore.getState().sessions["test-session"].harness).toBe(
         "codex"
@@ -1277,9 +1411,7 @@ describe("ChatWindow", () => {
     });
     expect(providerPicker).toHaveAttribute("data-value", "openai");
     expect(
-      dropdownOptions(providerPicker).map(
-        (option) => option.value
-      )
+      dropdownOptions(providerPicker).map((option) => option.value)
     ).toEqual(["openai"]);
 
     await user.type(screen.getByTestId("local-chat-composer"), "Start Codex");
@@ -1357,14 +1489,26 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    chooseDropdownValue(await findComposerPicker("local-chat-provider-picker"), "openai");
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-provider-picker"),
+      "openai"
+    );
+
     await waitFor(() => {
       expect(useChatStore.getState().sessions["test-session"].harness).toBe(
         "codex"
       );
     });
-    chooseDropdownValue(await findComposerPicker("local-chat-effort-picker"), "high");
-    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "catalog-codex-alt");
+
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-effort-picker"),
+      "high"
+    );
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-model-picker"),
+      "catalog-codex-alt"
+    );
+
     await waitFor(() => {
       expect(
         useChatStore.getState().sessions["test-session"].selectedReasoningEffort
@@ -1373,7 +1517,12 @@ describe("ChatWindow", () => {
     expect(
       dropdownOptionValues(getComposerPicker("local-chat-effort-picker"))
     ).toEqual(["", "medium"]);
-    chooseDropdownValue(getComposerPicker("local-chat-effort-picker"), "medium");
+
+    chooseDropdownValue(
+      getComposerPicker("local-chat-effort-picker"),
+      "medium"
+    );
+
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
 
@@ -1445,7 +1594,11 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    chooseDropdownValue(await findComposerPicker("local-chat-provider-picker"), "openrouter");
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-provider-picker"),
+      "openrouter"
+    );
+
     await waitFor(() => {
       const updated = useChatStore.getState().sessions["test-session"];
       expect(updated.providerId).toBe("openrouter");
@@ -1454,7 +1607,12 @@ describe("ChatWindow", () => {
     expect(
       dropdownOptionValues(getComposerPicker("local-chat-model-picker"))
     ).toEqual(["", "moonshotai/kimi-k2", "z-ai/glm-5"]);
-    chooseDropdownValue(getComposerPicker("local-chat-model-picker"), "moonshotai/kimi-k2");
+
+    chooseDropdownValue(
+      getComposerPicker("local-chat-model-picker"),
+      "moonshotai/kimi-k2"
+    );
+
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
 
@@ -1583,7 +1741,10 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    const providerPicker = await findComposerPicker("local-chat-provider-picker");
+    const providerPicker = await findComposerPicker(
+      "local-chat-provider-picker"
+    );
+
     expect(dropdownOptions(providerPicker)).toHaveLength(0);
     expect(
       await screen.findByTestId("local-chat-provider-unavailable")
@@ -1690,7 +1851,11 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "opus");
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-model-picker"),
+      "opus"
+    );
+
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
 
@@ -1799,10 +1964,18 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "opus");
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-model-picker"),
+      "opus"
+    );
+
     expect(localStorage.getItem("local-chat-model:last-used:v1")).toBe("opus");
 
-    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "");
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-model-picker"),
+      ""
+    );
+
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
 
@@ -1829,13 +2002,36 @@ describe("ChatWindow", () => {
   });
 
   it("sends the exact versioned Fable choice to session creation", async () => {
-    const ids = ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"];
-    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({ status: "ok", data: withBuiltinProviders({ default_harness: "claude", harnesses: [{
-      harness: "claude", label: "Claude", available: true, unavailable_reason: null,
-      default_model_id: "claude-sonnet-5-5", default_reasoning_effort: null,
-      reasoning_efforts: [], supports_resume: true, models: ids.map((id) => ({ id, label: id })),
-    }] }) });
-    useChatStore.setState({ sessions: { "test-session": createSession() }, activeSessionId: "test-session", panelOpen: true });
+    const ids = [
+      "claude-fable-5-2",
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
+    ];
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      status: "ok",
+      data: withBuiltinProviders({
+        default_harness: "claude",
+        harnesses: [
+          {
+            harness: "claude",
+            label: "Claude",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: "claude-sonnet-5-5",
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: true,
+            models: ids.map((id) => ({ id, label: id })),
+          },
+        ],
+      }),
+    });
+    useChatStore.setState({
+      sessions: { "test-session": createSession() },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
     const user = userEvent.setup();
     render(<ChatWindow sessionId="test-session" />);
     const picker = await findComposerPicker("local-chat-model-picker");
@@ -1843,7 +2039,11 @@ describe("ChatWindow", () => {
     chooseDropdownValue(picker, "claude-fable-5-2");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     await user.click(screen.getByTitle("Start session"));
-    await waitFor(() => expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(expect.objectContaining({ model_id: "claude-fable-5-2" })));
+    await waitFor(() =>
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+        expect.objectContaining({ model_id: "claude-fable-5-2" })
+      )
+    );
   });
 
   it("requires an explicit reset of an obsolete saved model for a new chat", async () => {
@@ -1859,7 +2059,11 @@ describe("ChatWindow", () => {
     const user = userEvent.setup();
     render(<ChatWindow sessionId="test-session" />);
     const picker = await findComposerPicker("local-chat-model-picker");
-    await waitFor(() => expect(picker).toHaveAttribute("data-value", "claude-opus-4-8"));
+
+    await waitFor(() =>
+      expect(picker).toHaveAttribute("data-value", "claude-opus-4-8")
+    );
+
     expect(picker).toHaveTextContent("Unsupported: claude-opus-4-8");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
@@ -1900,7 +2104,10 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(await findComposerPicker("local-chat-model-picker")).toHaveAttribute("data-value", "");
+    expect(await findComposerPicker("local-chat-model-picker")).toHaveAttribute(
+      "data-value",
+      ""
+    );
     expect(
       useChatStore.getState().sessions["test-session"].selectedModelId
     ).toBeUndefined();

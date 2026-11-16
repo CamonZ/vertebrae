@@ -494,7 +494,6 @@ export function ChatComposer({
         return (
           <div
             key={comment.id}
-            className="relative"
             data-testid="local-chat-pending-comment"
             onMouseEnter={() => setActiveCommentId(comment.id)}
             onMouseLeave={(event) => {

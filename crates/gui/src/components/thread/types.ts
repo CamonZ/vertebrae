@@ -249,6 +249,7 @@ export interface ToolMessage extends BaseMessage {
  * shared MarkdownContent; the prototype passes JSX, hence `ReactNode`.
  */
 export interface AgentMessage extends BaseMessage {
+  referenceReplyId?: string;
   type: "agent";
   /** Speaker eyebrow (e.g. "Agent · Codex", "sacrum"). */
   speaker?: string;

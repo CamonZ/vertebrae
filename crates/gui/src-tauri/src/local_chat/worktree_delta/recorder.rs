@@ -26,7 +26,7 @@ pub(crate) enum Boundary {
     FileChange,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum RecorderEvent {
     Started {
         tool_id: String,
@@ -41,7 +41,14 @@ pub(crate) enum RecorderEvent {
         parent_tool_id: Option<String>,
     },
     TurnStarted,
+    TurnIdentity {
+        turn_id: String,
+    },
     TurnEnded,
+    TurnCheckpoint {
+        turn_id: String,
+        completion: Option<tokio::sync::oneshot::Sender<()>>,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -69,6 +76,7 @@ impl Default for RecorderConfig {
 /// append in progress, so nothing is appended after a recorder is torn down.
 #[derive(Debug)]
 pub(crate) struct RecorderGate {
+    terminal_turns: Mutex<HashSet<String>>,
     active: Mutex<bool>,
     overflowed: AtomicBool,
     /// Root tool starts queued but not yet processed; one ends a settle early.
@@ -83,6 +91,7 @@ pub(crate) struct RecorderGate {
 impl RecorderGate {
     pub(crate) fn new() -> Self {
         Self {
+            terminal_turns: Mutex::new(HashSet::new()),
             active: Mutex::new(true),
             overflowed: AtomicBool::new(false),
             pending_starts: AtomicUsize::new(0),
@@ -92,6 +101,13 @@ impl RecorderGate {
             #[cfg(test)]
             idle_snapshot: Mutex::new(None),
         }
+    }
+
+    pub(super) fn accept_terminal(&self, turn: &str) -> bool {
+        self.terminal_turns
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(turn.into())
     }
 
     pub(crate) fn start_queued(&self) {
@@ -109,6 +125,10 @@ impl RecorderGate {
 
     pub(super) fn start_pending(&self) -> bool {
         self.pending_starts.load(Ordering::Acquire) > 0
+    }
+
+    pub(crate) fn can_publish_history(&self) -> bool {
+        self.is_active() && !self.start_pending()
     }
 
     pub(crate) fn is_active(&self) -> bool {
@@ -135,7 +155,7 @@ impl RecorderGate {
         self.overflowed.swap(false, Ordering::AcqRel)
     }
 
-    fn while_active<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
+    pub(crate) fn while_active<T>(&self, operation: impl FnOnce() -> T) -> Option<T> {
         let active = self
             .active
             .lock()
@@ -266,6 +286,24 @@ impl Recorder {
         // Capture the pre-tool baseline before potentially slow native watch
         // registration. Tool boundaries can already be queued during startup.
         let mut idle = self.snapshot().await.map(Arc::new).ok();
+        let history_session = self.chat_session_id.clone();
+        let history_worktree = self.worktree.clone();
+        let history_store = self.store.clone();
+        let history_snapshot = idle.clone();
+        let history_limits = self.config.limits;
+        let history_gate = self.gate.clone();
+        let history = tokio::task::spawn_blocking(move || {
+            crate::local_chat::file_history::HistoryRecorder::start_active(
+                &history_session,
+                &history_worktree,
+                &history_store,
+                history_snapshot.as_deref(),
+                &history_limits,
+                Some(&history_gate),
+            )
+        })
+        .await
+        .ok();
         let changed = Arc::new(Notify::new());
         let signal = changed.clone();
         // Poll registration alongside tool events: installing a recursive
@@ -429,18 +467,91 @@ impl Recorder {
                     }
                 }
                 RecorderEvent::Child { parent_tool_id } => windows.child(parent_tool_id.as_deref()),
-                RecorderEvent::TurnStarted => {
+                RecorderEvent::TurnStarted | RecorderEvent::TurnIdentity { .. } => {
+                    if let RecorderEvent::TurnIdentity { turn_id } = &event {
+                        if let Some(history) = history.as_ref() {
+                            let history = history.clone();
+                            let turn_id = turn_id.clone();
+                            let store = self.store.clone();
+                            let gate = self.gate.clone();
+                            if let Err(error) = tokio::task::spawn_blocking(move || {
+                                history.record_origin_checked(&turn_id, &store, || gate.is_active())
+                            })
+                            .await
+                            {
+                                log::warn!("[CHAT_HISTORY] origin task failed: {error}");
+                            }
+                        }
+                    }
                     in_turn = true;
                     if windows.is_empty() {
                         idle = self.snapshot().await.map(Arc::new).ok();
                     }
                 }
-                RecorderEvent::TurnEnded => {
+                RecorderEvent::TurnEnded | RecorderEvent::TurnCheckpoint { .. } => {
+                    let (history_turn, completion) = match event {
+                        RecorderEvent::TurnCheckpoint {
+                            turn_id,
+                            completion,
+                        } => (Some(turn_id), completion),
+                        _ => (None, None),
+                    };
+                    if let (Some(turn), Some(history)) = (history_turn.as_ref(), history.as_ref()) {
+                        if history.contains_turn(turn, &self.store) {
+                            if let Some(completion) = completion {
+                                let _ = completion.send(());
+                            }
+                            continue;
+                        }
+                    }
                     let dropped = windows.end_turn();
                     log::info!("[WORKTREE_DELTA] turn ended; dropped open windows {dropped:?}");
                     checkpoint = None;
                     in_turn = false;
                     idle = self.snapshot().await.map(Arc::new).ok();
+                    let mut historical = idle.clone();
+                    // A boundary is an observation, not a filesystem lock.
+                    // Refuse a visibly changing state rather than assemble
+                    // a historical file from inconsistent observations.
+                    if history_turn.is_some() && !self.gate.start_pending() {
+                        let verified = self.snapshot().await.map(Arc::new).ok();
+                        if !idle
+                            .as_ref()
+                            .zip(verified.as_ref())
+                            .is_some_and(|(a, b)| a.agrees_with(b))
+                        {
+                            historical = None;
+                        }
+                    }
+                    if let (Some(turn_id), Some(history)) = (history_turn, history.as_ref()) {
+                        let history = history.clone();
+                        let snapshot = if self.gate.start_pending()
+                            || completion
+                                .as_ref()
+                                .is_some_and(tokio::sync::oneshot::Sender::is_closed)
+                        {
+                            None
+                        } else {
+                            historical
+                        };
+                        let store = self.store.clone();
+                        let gate = self.gate.clone();
+                        if let Err(error) = tokio::task::spawn_blocking(move || {
+                            history.capture_checked(&turn_id, &store, snapshot.as_deref(), || {
+                                gate.can_publish_history()
+                                    && !completion
+                                        .as_ref()
+                                        .is_some_and(tokio::sync::oneshot::Sender::is_closed)
+                            });
+                            if let Some(completion) = completion {
+                                let _ = completion.send(());
+                            }
+                        })
+                        .await
+                        {
+                            log::warn!("[CHAT_HISTORY] capture task failed: {error}");
+                        }
+                    }
                     if !dropped.is_empty() {
                         log::debug!(
                             "[WORKTREE_DELTA] dropped windows {dropped:?} still open at turn end"

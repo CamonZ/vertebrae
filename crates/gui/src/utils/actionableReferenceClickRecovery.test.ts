@@ -117,4 +117,19 @@ describe("actionable reference click recovery", () => {
 
     expect(onClick).not.toHaveBeenCalled();
   });
+  it("does not recover a press onto a different turn with the same file path", () => {
+    const first = fileReferenceButton();
+    const other = fileReferenceButton();
+    first.dataset.fileReferenceId = "turn-one";
+    other.dataset.fileReferenceId = "turn-two";
+    const firstClick = vi.fn();
+    const otherClick = vi.fn();
+    first.addEventListener("click", firstClick);
+    other.addEventListener("click", otherClick);
+    first.dispatchEvent(pointerEvent("pointerdown"));
+    other.dispatchEvent(pointerEvent("pointerup"));
+    vi.runAllTimers();
+    expect(firstClick).not.toHaveBeenCalled();
+    expect(otherClick).not.toHaveBeenCalled();
+  });
 });

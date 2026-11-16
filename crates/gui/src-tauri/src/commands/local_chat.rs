@@ -69,6 +69,39 @@ pub fn get_local_file_roots(project_root: String) -> Result<Vec<String>, Command
         .collect())
 }
 
+/// Read a recorded turn's file without applying anything to the working directory.
+#[tauri::command]
+#[specta::specta]
+pub async fn read_chat_history_file(
+    annotation_store: State<'_, LocalChatAnnotationStore>,
+    session_id: String,
+    turn_id: String,
+    path: String,
+) -> Result<crate::local_chat::file_history::HistoryRead, CommandError> {
+    let store = annotation_store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::local_chat::file_history::read_for_view(&store, &session_id, &turn_id, &path)
+    })
+    .await
+    .map_err(|error| CommandError {
+        message: error.to_string(),
+    })
+}
+
+/// A metadata-only availability check for editor actions.
+#[tauri::command]
+#[specta::specta]
+pub async fn worktree_file_exists(
+    worktree_path: String,
+    path: String,
+) -> Result<bool, CommandError> {
+    worktree_files_task(move || {
+        let root = crate::local_chat::worktree_files::worktree_root(Path::new(&worktree_path))?;
+        crate::local_chat::worktree_files::existing_file(&root, &path).map(|file| file.is_some())
+    })
+    .await
+}
+
 fn resolve_local_file(project_root: &str, path: &str) -> Result<PathBuf, CommandError> {
     let root = fs::canonicalize(project_root).map_err(|error| CommandError {
         message: format!("Could not resolve project root: {error}"),

@@ -30,6 +30,7 @@ vi.mock("../../bindings", () => ({
       .fn()
       .mockResolvedValue({ status: "ok", data: [] }),
     listWorktreeDirectory: vi.fn(),
+    worktreeFileExists: vi.fn().mockResolvedValue({ status: "ok", data: true }),
     readWorktreeFile: vi.fn(),
     readWorktreeBaselineFile: vi.fn(),
     saveWorktreeFile: vi.fn(),

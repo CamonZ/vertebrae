@@ -1,3 +1,4 @@
+import { OpenInExternalEditor } from "./workspace/OpenInExternalEditor";
 import { backgroundClient } from "../../background/client";
 import type { BackgroundTask, BackgroundOutputs } from "../../background/types";
 
@@ -411,6 +412,22 @@ export function WorktreeChanges({
             parsedPatches={state.parsed}
             jumpTarget={effectiveJumpTarget}
             onOpen={(path) => open(path, "diff")}
+            renderExternalEditor={(path) => (
+              <OpenInExternalEditor
+                root={worktreePath}
+                path={path}
+                line={
+                  effectiveJumpTarget?.path === path
+                    ? effectiveJumpTarget.line
+                    : undefined
+                }
+                column={
+                  effectiveJumpTarget?.path === path
+                    ? effectiveJumpTarget.column
+                    : undefined
+                }
+              />
+            )}
             diffStyle={diffStyle}
           />
         </Suspense>

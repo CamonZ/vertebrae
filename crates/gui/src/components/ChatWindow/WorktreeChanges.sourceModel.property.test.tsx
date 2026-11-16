@@ -38,6 +38,7 @@ vi.mock("../../bindings", () => ({
       status: "ok",
       data: { path: "", entries: [], truncated: false },
     }),
+    worktreeFileExists: vi.fn().mockResolvedValue({ status: "ok", data: true }),
     readWorktreeFile: vi.fn(),
     readWorktreeBaselineFile: vi.fn(),
     saveWorktreeFile: vi.fn(),

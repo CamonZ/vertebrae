@@ -151,3 +151,28 @@ describe("resolveSource", () => {
     ).rejects.toThrow("unknown revision");
   });
 });
+
+it("an exact prepared chat target cannot be replaced by a rename's new path", async () => {
+  changes([{ path: "b.ts", old_path: "a.ts", status: "renamed" }], "main");
+  files({
+    "a.ts": text("new file reusing the original name"),
+    "a.ts@0123456789abcdef0123": text("old original"),
+    "b.ts": text("renamed file"),
+  });
+
+  expect(
+    await resolveSource(
+      "/selected-feature",
+      { path: "a.ts" },
+      { exactPath: true }
+    )
+  ).toEqual({
+    kind: "file",
+    path: "a.ts",
+    contents: "new file reusing the original name",
+  });
+  expect(mocked.readWorktreeFile).toHaveBeenCalledExactlyOnceWith(
+    "/selected-feature",
+    "a.ts"
+  );
+});

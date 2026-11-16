@@ -21,11 +21,24 @@ pub(crate) const MAX_ANNOTATION_LINE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SESSION_ID_LEN: usize = 200;
 const ANNOTATIONS_DIR: &str = "local-chat-annotations";
 const ANNOTATIONS_EXTENSION: &str = "jsonl";
+mod records;
+pub(crate) use records::PublishOutcome;
+
+/// A durable annotation can describe a tool, an association, or a turn.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq, Hash)]
+#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
+pub enum AnnotationSubject {
+    Association(String),
+    Turn(String),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq)]
 pub struct LocalChatAnnotation {
     pub session_id: String,
     pub tool_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub subject: Option<AnnotationSubject>,
     pub kind: String,
     pub payload: serde_json::Value,
     /// RFC 3339 timestamp of when Vertebrae recorded the entry.
@@ -33,6 +46,26 @@ pub struct LocalChatAnnotation {
 }
 
 impl LocalChatAnnotation {
+    fn frontend(&self) -> Self {
+        let mut entry = self.clone();
+        if self.kind == "worktree_history" {
+            if let Some(payload) = entry.payload.as_object_mut() {
+                payload.retain(|key, _| {
+                    matches!(
+                        key.as_str(),
+                        "version"
+                            | "epoch"
+                            | "repository"
+                            | "worktree"
+                            | "base_head"
+                            | "state"
+                            | "message"
+                    )
+                });
+            }
+        }
+        entry
+    }
     pub(crate) fn new(
         session_id: impl Into<String>,
         tool_id: impl Into<String>,
@@ -42,6 +75,7 @@ impl LocalChatAnnotation {
         Self {
             session_id: session_id.into(),
             tool_id: tool_id.into(),
+            subject: None,
             kind: kind.into(),
             payload,
             recorded_at: chrono::Utc::now().to_rfc3339(),
@@ -157,12 +191,11 @@ impl LocalChatAnnotationStore {
         &self,
         annotation: LocalChatAnnotation,
     ) -> Result<(), AnnotationStoreError> {
-        let path = self.session_path(&annotation.session_id)?;
-        if annotation.tool_id.is_empty() || annotation.kind.is_empty() {
-            return Err(AnnotationStoreError::InvalidAnnotation(
-                "tool_id and kind must not be empty".to_string(),
-            ));
+        validate_annotation(&annotation)?;
+        if annotation.kind == "worktree_history" && annotation.subject.is_some() {
+            return self.publish_record(annotation, None, || true).map(|_| ());
         }
+        let path = self.session_path(&annotation.session_id)?;
         let mut line = serde_json::to_vec(&annotation)
             .map_err(|error| AnnotationStoreError::InvalidAnnotation(error.to_string()))?;
         line.push(b'\n');
@@ -193,6 +226,11 @@ impl LocalChatAnnotationStore {
         }
         written?;
 
+        self.emit_annotation(annotation.frontend());
+        Ok(())
+    }
+
+    fn emit_annotation(&self, annotation: LocalChatAnnotation) {
         let session_id = annotation.session_id.clone();
         if let Err(error) =
             self.sink
@@ -203,7 +241,6 @@ impl LocalChatAnnotationStore {
         {
             log::warn!("[LOCAL_CHAT] annotation event delivery failed: {error}");
         }
-        Ok(())
     }
 
     /// Valid entries in file order, keeping only the last entry for a repeated
@@ -213,14 +250,50 @@ impl LocalChatAnnotationStore {
         session_id: &str,
     ) -> Result<Vec<LocalChatAnnotation>, AnnotationStoreError> {
         let path = self.session_path(session_id)?;
-        let file = match File::open(&path) {
-            Ok(file) => file,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        let entries = match File::open(&path) {
+            Ok(file) => read_entries(BufReader::new(file), session_id, &path)
+                .map_err(|e| AnnotationStoreError::Io(e.to_string()))?,
+            Err(error) if error.kind() == ErrorKind::NotFound => vec![],
             Err(error) => return Err(AnnotationStoreError::Io(error.to_string())),
         };
-        let entries = read_entries(BufReader::new(file), session_id, &path)
-            .map_err(|error| AnnotationStoreError::Io(error.to_string()))?;
-        Ok(last_entry_per_key(entries))
+        let mut ordinary = vec![];
+        for entry in entries {
+            if entry.kind == "worktree_history" && entry.subject.is_some() {
+                self.publish_record_inner(entry, None, || true, false)?;
+            } else {
+                ordinary.push(entry);
+            }
+        }
+        // Header readers share the publication lock, including expiry rollback.
+        let lock = self.session_lock(session_id);
+        let _guard = lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        ordinary.extend(self.record_headers(session_id)?);
+        Ok(last_entry_per_key(ordinary))
+    }
+
+    fn retention_headers(&self, session: &str) -> Vec<LocalChatAnnotation> {
+        let mut headers = self.record_headers(session).unwrap_or_else(|error| {
+            log::warn!("[LOCAL_CHAT] could not read history headers during cleanup: {error}");
+            vec![]
+        });
+        if let Ok(path) = self.session_path(session) {
+            if let Ok(file) = File::open(&path) {
+                match read_entries(BufReader::new(file), session, &path) {
+                    Ok(entries) => headers.extend(
+                        entries
+                            .into_iter()
+                            .filter(|entry| entry.kind == "worktree_history")
+                            .map(|entry| entry.frontend()),
+                    ),
+                    Err(error) => {
+                        log::warn!("[LOCAL_CHAT] could not read legacy retention metadata: {error}")
+                    }
+                }
+            }
+        }
+        headers
     }
 
     /// Remove a session's metadata transcript; an absent file is not an error.
@@ -234,7 +307,11 @@ impl LocalChatAnnotationStore {
         fs::create_dir_all(self.directory()?)
             .and_then(|()| File::create(path.with_extension("deleted")))
             .map_err(|error| AnnotationStoreError::Io(error.to_string()))?;
-        remove_if_present(&path).map_err(|error| AnnotationStoreError::Io(error.to_string()))
+        let entries = self.retention_headers(session_id);
+        remove_if_present(&path).map_err(|error| AnnotationStoreError::Io(error.to_string()))?;
+        super::file_history::release_baselines(&entries);
+        self.remove_records(session_id)?;
+        Ok(())
     }
 
     /// Delete metadata transcripts whose session the GUI no longer knows.
@@ -252,18 +329,21 @@ impl LocalChatAnnotationStore {
             Err(error) => return Err(AnnotationStoreError::Io(error.to_string())),
         };
         let mut removed = Vec::new();
+        let mut visited = HashSet::new();
         for entry in entries {
             let entry = entry.map_err(|error| AnnotationStoreError::Io(error.to_string()))?;
             let path = entry.path();
-            if path.extension().and_then(|extension| extension.to_str())
-                != Some(ANNOTATIONS_EXTENSION)
-            {
+            if !matches!(
+                path.extension().and_then(|extension| extension.to_str()),
+                Some(ANNOTATIONS_EXTENSION) | Some("records")
+            ) {
                 continue;
             }
             let Some(session_id) = path.file_stem().and_then(|stem| stem.to_str()) else {
                 continue;
             };
-            if validate_session_id(session_id).is_err()
+            if !visited.insert(session_id.to_string())
+                || validate_session_id(session_id).is_err()
                 || known_session_ids.contains(session_id)
                 || live_session_ids.contains(session_id)
             {
@@ -271,8 +351,14 @@ impl LocalChatAnnotationStore {
             }
             let lock = self.session_lock(session_id);
             let _guard = lock.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-            match remove_if_present(&path) {
-                Ok(()) => removed.push(session_id.to_string()),
+            let entries = self.retention_headers(session_id);
+            let transcript = self.session_path(session_id)?;
+            match remove_if_present(&transcript) {
+                Ok(()) => {
+                    super::file_history::release_baselines(&entries);
+                    self.remove_records(session_id)?;
+                    removed.push(session_id.to_string());
+                }
                 Err(error) => log::warn!(
                     "[LOCAL_CHAT] could not remove orphaned annotations {}: {error}",
                     path.display()
@@ -385,7 +471,13 @@ fn last_entry_per_key(entries: Vec<LocalChatAnnotation>) -> Vec<LocalChatAnnotat
     let mut latest_first: Vec<_> = entries
         .into_iter()
         .rev()
-        .filter(|entry| seen.insert((entry.tool_id.clone(), entry.kind.clone())))
+        .filter(|entry| {
+            seen.insert((
+                entry.tool_id.clone(),
+                entry.subject.clone(),
+                entry.kind.clone(),
+            ))
+        })
         .collect();
     latest_first.reverse();
     latest_first
@@ -393,3 +485,26 @@ fn last_entry_per_key(entries: Vec<LocalChatAnnotation>) -> Vec<LocalChatAnnotat
 
 #[cfg(test)]
 mod tests;
+
+fn validate_annotation(annotation: &LocalChatAnnotation) -> Result<(), AnnotationStoreError> {
+    validate_session_id(&annotation.session_id)?;
+    if annotation
+        .subject
+        .as_ref()
+        .is_some_and(|subject| match subject {
+            AnnotationSubject::Association(id) | AnnotationSubject::Turn(id) => id.is_empty(),
+        })
+        || (annotation.subject.is_some() && !annotation.tool_id.is_empty())
+    {
+        return Err(AnnotationStoreError::InvalidAnnotation(
+            "annotation must have one nonempty subject".into(),
+        ));
+    }
+    if (annotation.tool_id.is_empty() && annotation.subject.is_none()) || annotation.kind.is_empty()
+    {
+        return Err(AnnotationStoreError::InvalidAnnotation(
+            "tool_id and kind must not be empty".to_string(),
+        ));
+    }
+    Ok(())
+}

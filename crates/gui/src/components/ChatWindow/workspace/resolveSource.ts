@@ -21,7 +21,7 @@ export type ResolvedSource =
       /** The compared revisions, for display. */
       label: string;
     }
-  | { kind: "unavailable"; message: string };
+  | { kind: "unavailable"; message: string; retryable?: boolean };
 
 const WORKING_TREE = "the working tree";
 
@@ -105,7 +105,8 @@ function compare(
  */
 export async function resolveSource(
   checkout: string,
-  location: SourceLocation
+  location: SourceLocation,
+  options: { exactPath?: boolean } = {}
 ): Promise<ResolvedSource> {
   const { path, base, head } = location;
 
@@ -137,7 +138,8 @@ export async function resolveSource(
   const data = changes?.status === "ok" ? changes.data : null;
   const change = data?.files.find(
     (file) =>
-      file.marker == null && (file.path === path || file.old_path === path)
+      file.marker == null &&
+      (file.path === path || (!options.exactPath && file.old_path === path))
   );
 
   if (data && change) {

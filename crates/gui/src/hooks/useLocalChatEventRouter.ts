@@ -189,6 +189,7 @@ export function routeLocalChatTurnStartedEvent(
   ) {
     return false;
   }
+
   // Content routing must follow the provider even when the store declines the
   // bind (no local turn, or a duplicate start). Dropping the routing update
   // would silently discard every event of this turn.
@@ -495,6 +496,7 @@ export function routeLocalChatSessionEndEvent(
   // A stop that interrupted the turn without closing the process ends here;
   // a closing stop settles the lifecycle when the close returns.
   if (wasStopping && !closing) store.setSessionLifecycle(sessionId, "idle");
+
   if (!wasStopping) void flushNextQueuedMessage(sessionId);
 
   return true;

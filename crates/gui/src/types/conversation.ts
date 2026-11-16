@@ -101,6 +101,7 @@ export type AssistantMessageLifecycle =
 
 export interface AssistantMessageEvent extends BaseEvent {
   kind: "assistant_message";
+  referenceReplyId?: string;
   text: string;
   /** Provider-neutral item identity, when the harness supplies one. */
   itemId?: string;

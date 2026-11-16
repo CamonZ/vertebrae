@@ -155,6 +155,8 @@ fn create_builder() -> Builder {
             commands::get_supported_local_chat_harnesses,
             commands::get_local_file_editors,
             commands::get_local_file_roots,
+            commands::read_chat_history_file,
+            commands::worktree_file_exists,
             commands::resolve_chat_association,
             commands::resolve_chat_association_entity,
             commands::classify_tool_operations,

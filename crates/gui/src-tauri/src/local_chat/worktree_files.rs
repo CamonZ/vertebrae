@@ -119,7 +119,7 @@ fn is_git_dir(component: &std::ffi::OsStr) -> bool {
 
 /// Canonicalize the worktree, which must be a Git worktree's top level so a
 /// subdirectory or an unrelated directory is never treated as one.
-fn worktree_root(worktree: &Path) -> Result<PathBuf, FilesError> {
+pub(crate) fn worktree_root(worktree: &Path) -> Result<PathBuf, FilesError> {
     let root = fs::canonicalize(worktree).map_err(io)?;
     let not_worktree =
         || FilesError::Invalid(format!("{} is not a Git worktree", worktree.display()));
@@ -136,7 +136,7 @@ fn worktree_root(worktree: &Path) -> Result<PathBuf, FilesError> {
 }
 
 /// Validate a worktree-relative path, returning it with `/` separators.
-fn relative(path: &str) -> Result<String, FilesError> {
+pub(crate) fn relative(path: &str) -> Result<String, FilesError> {
     let mut parts = Vec::new();
     for component in Path::new(path).components() {
         match component {
@@ -177,7 +177,13 @@ fn resolve(root: &Path, path: &str) -> Result<Option<PathBuf>, FilesError> {
     }
 }
 
-fn classify(bytes: Vec<u8>) -> FileBody {
+/// Resolve a file under an already validated canonical worktree root.
+/// Inventory callers share the same lexical and symlink policy as file reads.
+pub(crate) fn existing_file(root: &Path, path: &str) -> Result<Option<PathBuf>, FilesError> {
+    Ok(resolve(root, &relative(path)?)?.filter(|target| target.is_file()))
+}
+
+pub(crate) fn classify(bytes: Vec<u8>) -> FileBody {
     if bytes[..bytes.len().min(BINARY_SNIFF)].contains(&0) {
         return FileBody::Binary;
     }

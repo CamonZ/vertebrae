@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { parseLocalFileReference } from "./localFileReference";
+import {
+  parseLocalFileReference,
+  parseFileReferenceDestination,
+} from "./localFileReference";
 
 describe("parseLocalFileReference", () => {
   it("accepts line ranges and preserves their starting line", () => {
@@ -51,7 +54,43 @@ describe("parseLocalFileReference", () => {
 
   it("rejects protocols and prose that only looks like code", () => {
     expect(parseLocalFileReference("file:///repo/main.rs", "/repo")).toBeNull();
-    expect(parseLocalFileReference("vscode://file/repo/main.rs", "/repo")).toBeNull();
+    expect(
+      parseLocalFileReference("vscode://file/repo/main.rs", "/repo")
+    ).toBeNull();
     expect(parseLocalFileReference("console.log()", "/repo")).toBeNull();
+  });
+});
+
+describe("shared destination identity", () => {
+  it("decodes link destinations while keeping inline percent filenames literal", () => {
+    expect(
+      parseFileReferenceDestination(
+        {
+          destination: "/repo/feature/src/%C3%A9%20file.ts#L7C2",
+          syntax: "link",
+        },
+        "/repo",
+        ["/repo", "/repo/feature"]
+      )
+    ).toEqual({
+      root: "/repo/feature",
+      path: "src/é file.ts",
+      line: 7,
+      column: 2,
+    });
+    expect(
+      parseFileReferenceDestination(
+        { destination: "literal%20.ts", syntax: "inline" },
+        "/repo",
+        ["/repo"]
+      )
+    ).toEqual({ root: null, path: "literal%20.ts", line: null, column: null });
+    expect(
+      parseFileReferenceDestination(
+        { destination: "/foreign/file.ts", syntax: "link" },
+        "/repo",
+        ["/repo"]
+      )
+    ).toBeNull();
   });
 });

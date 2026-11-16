@@ -394,3 +394,44 @@ fn deletion_blocks_late_appends_from_clones_and_after_reload() {
     assert!(reloaded.load("deleted-chat").unwrap().is_empty());
     reloaded.delete("deleted-chat").unwrap();
 }
+
+#[test]
+fn an_unreadable_orphan_does_not_prevent_other_sessions_being_swept() {
+    let dir = tempdir().unwrap();
+    let store = store_in(&dir);
+    store
+        .append(annotation("good", "tool", "test", json!({})))
+        .unwrap();
+    fs::create_dir(session_file(&dir, "broken")).unwrap();
+
+    assert_eq!(
+        store
+            .sweep_orphans(&HashSet::new(), &HashSet::new())
+            .unwrap(),
+        vec!["good"]
+    );
+    assert!(session_file(&dir, "broken").is_dir());
+    assert!(!session_file(&dir, "good").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn deleting_a_session_does_not_require_its_transcript_to_be_readable() {
+    let dir = tempdir().unwrap();
+    let store = store_in(&dir);
+    fs::create_dir_all(dir.path().join(ANNOTATIONS_DIR)).unwrap();
+    let other = tempdir().unwrap();
+    let path = session_file(&dir, "chat-1");
+    std::os::unix::fs::symlink(other.path(), &path).unwrap();
+    assert!(
+        store.load("chat-1").is_err(),
+        "fixture must fail while reading the transcript"
+    );
+    store.delete("chat-1").unwrap();
+    assert!(!path.exists());
+    assert!(other.path().is_dir());
+    store
+        .append(annotation("chat-1", "late", "test", json!({})))
+        .unwrap();
+    assert!(!path.exists());
+}

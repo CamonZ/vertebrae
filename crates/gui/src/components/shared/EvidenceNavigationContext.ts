@@ -7,6 +7,7 @@ import { createContext } from "react";
 export interface SourceLocation {
   path: string;
   line?: number;
+  column?: number;
   endLine?: number;
   /** Which side of a diff the line numbers refer to. */
   side?: "old" | "new";

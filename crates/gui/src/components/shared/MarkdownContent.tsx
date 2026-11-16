@@ -1,3 +1,8 @@
+import { isLocalFileLocation } from "./localFileReference";
+import {
+  MarkdownFileReference,
+  MarkdownFileReferences,
+} from "./MarkdownFileReferences";
 import {
   createContext,
   lazy,
@@ -22,14 +27,13 @@ import { loadGraphviz } from "../../utils/graphviz";
 import { useNearViewport } from "../../hooks/useNearViewport";
 import { StatechartDiagramBlock } from "./StatechartDiagramBlock";
 import { FlowBlock } from "./FlowBlock";
-import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
-import { parseLocalFileReference } from "./localFileReference";
 import { VtbEntityMarkdownLink } from "./VtbEntityLink";
 import { parseVtbEntityHref } from "./vtbEntityLinkTarget";
 
 interface MarkdownContentProps {
   text: string;
   projectPath?: string | null;
+  referenceReplyId?: string;
 }
 
 const MarkdownProjectRootContext = createContext<string | null>(null);
@@ -501,11 +505,7 @@ function isCompletedDiagramBlock(
   );
 }
 
-const MarkdownRenderContext = createContext<{
-  text: string;
-  projectPath: string | null;
-  projectRoots: readonly string[];
-}>({ text: "", projectPath: null, projectRoots: [] });
+const MarkdownRenderContext = createContext<{ text: string }>({ text: "" });
 
 function isAbsoluteHttpUrl(href: string | undefined): href is string {
   if (!href || !/^https?:\/\//i.test(href)) return false;
@@ -523,6 +523,14 @@ function isAbsoluteHttpUrl(href: string | undefined): href is string {
 
 function markdownUrlTransform(value: string): string {
   if (value.toLowerCase().startsWith("vtb://")) return value;
+  // Preserve local line anchors, while all actual URI schemes use the
+  // renderer's allowlist. A numeric suffix is a location, not a scheme.
+  if (
+    !/^[a-z][a-z0-9+.-]*:/i.test(value) ||
+    /^[A-Za-z]:[\\/]/.test(value) ||
+    isLocalFileLocation(value)
+  )
+    return value;
   return defaultUrlTransform(value);
 }
 
@@ -597,7 +605,13 @@ function createMarkdownComponents() {
         {children}
       </blockquote>
     ),
-    a: ({ children, href, ...props }: ComponentPropsWithoutRef<"a">) => {
+    a: ({
+      children,
+      href,
+      node,
+      ...props
+    }: ComponentPropsWithoutRef<"a"> & { node?: CodeProps["node"] }) => {
+      void node; // react-markdown metadata must not reach the DOM anchor.
       const vtbTarget = parseVtbEntityHref(href);
       if (href?.toLowerCase().startsWith("vtb://")) {
         return vtbTarget ? (
@@ -612,6 +626,24 @@ function createMarkdownComponents() {
       }
 
       const canOpenExternally = isAbsoluteHttpUrl(href);
+
+      if (href && !canOpenExternally)
+        return (
+          <MarkdownFileReference
+            destination={href}
+            syntax="link"
+            fallback={
+              <a
+                {...props}
+                className="text-[var(--link-fg)] underline decoration-current/30"
+              >
+                {children}
+              </a>
+            }
+          >
+            {children}
+          </MarkdownFileReference>
+        );
 
       return (
         <a
@@ -699,10 +731,9 @@ function MarkdownCode({
   node,
   ...props
 }: CodeProps) {
-  const { text, projectPath, projectRoots } = useContext(MarkdownRenderContext);
+  const { text } = useContext(MarkdownRenderContext);
   const language = normalizeCodeLanguage(className);
   let codeString = String(children).replace(/\n$/, "");
-  const isInlineCode = inline ?? !(className || codeString.includes("\n"));
 
   if (language === "json") {
     codeString = prettyPrintJsonIfPossible(codeString);
@@ -732,27 +763,23 @@ function MarkdownCode({
     return <HighlightedCodeBlock language={language} source={codeString} />;
   }
 
-  const fileReference =
-    isInlineCode &&
-    parseLocalFileReference(codeString, projectPath, projectRoots);
-  if (fileReference && projectPath) {
-    return (
-      <LocalFileReferenceLink
-        reference={fileReference}
-        projectRoot={projectPath}
-      >
-        {children}
-      </LocalFileReferenceLink>
-    );
-  }
-
-  return (
+  const fallback = (
     <code
       className="rounded bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-13 text-[var(--inline-code-fg)]"
       {...props}
     >
       {children}
     </code>
+  );
+
+  return (
+    <MarkdownFileReference
+      destination={codeString}
+      syntax="inline"
+      fallback={fallback}
+    >
+      {children}
+    </MarkdownFileReference>
   );
 }
 
@@ -984,29 +1011,37 @@ function formatInlineJsonBlocks(text: string): string {
   return result;
 }
 
-function RenderedMarkdownContent({ text, projectPath }: MarkdownContentProps) {
+function RenderedMarkdownContent({
+  text,
+  projectPath,
+  referenceReplyId,
+}: MarkdownContentProps) {
   const inheritedProjectPath = useContext(MarkdownProjectRootContext);
   const inheritedProjectRoots = useContext(MarkdownProjectRootsContext);
   const effectiveProjectPath = projectPath ?? inheritedProjectPath;
   const effectiveProjectRoots = projectPath
     ? [projectPath]
     : inheritedProjectRoots;
-  const prepared = formatInlineJsonBlocks(maybeWrapBareJson(text));
+  const prepared = useMemo(
+    () => formatInlineJsonBlocks(maybeWrapBareJson(text)),
+    [text]
+  );
+
   return (
-    <MarkdownRenderContext.Provider
-      value={{
-        text: prepared,
-        projectPath: effectiveProjectPath,
-        projectRoots: effectiveProjectRoots,
-      }}
-    >
-      <Markdown
-        remarkPlugins={remarkPlugins}
-        components={markdownComponents}
-        urlTransform={markdownUrlTransform}
+    <MarkdownRenderContext.Provider value={{ text: prepared }}>
+      <MarkdownFileReferences
+        replyId={referenceReplyId}
+        projectPath={effectiveProjectPath}
+        roots={effectiveProjectRoots}
       >
-        {prepared}
-      </Markdown>
+        <Markdown
+          remarkPlugins={remarkPlugins}
+          components={markdownComponents}
+          urlTransform={markdownUrlTransform}
+        >
+          {prepared}
+        </Markdown>
+      </MarkdownFileReferences>
     </MarkdownRenderContext.Provider>
   );
 }
@@ -1019,6 +1054,7 @@ export const MarkdownContent = memo(function MarkdownContent(
       <RenderedMarkdownContent
         text={props.text}
         projectPath={props.projectPath}
+        referenceReplyId={props.referenceReplyId}
       />
     </div>
   );

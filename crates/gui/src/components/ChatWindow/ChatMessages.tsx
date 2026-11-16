@@ -1,3 +1,4 @@
+import { withFileReferenceReplyIds } from "../../utils/fileReferenceReplyIds";
 import { LiveAssistantText } from "./LiveAssistantText";
 import { liveAssistantKey } from "../../stores/liveAssistantMessages";
 import { ChatSessionContext } from "../thread/toolChange/ChatSessionContext";
@@ -287,7 +288,7 @@ function buildChatRenderItems(
     segment = [];
   };
 
-  messages.forEach((message, index) => {
+  withFileReferenceReplyIds(messages).forEach((message, index) => {
     if (message.kind === "permission_request") {
       flushSegment();
       items.push({

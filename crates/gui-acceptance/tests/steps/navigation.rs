@@ -513,6 +513,30 @@ async fn local_chat_selection_action_visible_above_panel(world: &mut GuiWorld, t
     .await;
 }
 
+#[then("the local chat comment popover should fit within the viewport")]
+async fn local_chat_comment_popover_fits_viewport(world: &mut GuiWorld) {
+    let wd = world.webdriver.as_ref().expect("WebDriver session").clone();
+    let client = wd.lock().await;
+    gui_acceptance::wait_for_js(
+        &client,
+        "comment popover within the viewport and composer",
+        r#"
+          const popover = document.querySelector('[data-testid="local-chat-comment-popover"]');
+          const chips = document.querySelector('[data-testid="local-chat-pending-comments"]');
+          if (!popover || !chips) return false;
+          const card = popover.getBoundingClientRect();
+          const row = chips.getBoundingClientRect();
+          return card.width > 0 && card.height > 0 &&
+            card.left >= Math.max(0, row.left) &&
+            card.right <= Math.min(window.innerWidth, row.right) &&
+            card.top >= 0 && card.bottom <= window.innerHeight;
+        "#,
+        vec![],
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+}
+
 #[then(
     expr = "the GUI should show exactly {int} elements with test id {string} within {int} seconds"
 )]
