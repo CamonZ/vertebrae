@@ -8,8 +8,9 @@ Feature: Real-time step detail panel updates
     And I create a step "Original Step Name" in the workflow "Step Panel Workflow" via the CLI
     And the GUI is on the pipeline view
     And I select factory "No Factory"
-    Then the GUI should show "Original Step Name" within 5 seconds
-    When I click on the element containing text "Original Step Name"
+    And I open workflow "Step Panel Workflow" in the Graph
+    Then the GUI should show an element with test id "step-node-Original Step Name" within 5 seconds
+    When I click on the element with test id "step-node-Original Step Name"
     Then the GUI should show "Step Configuration" within 5 seconds
     When I update the step name to "Updated Step Name" via the CLI
     Then the GUI should show "Updated Step Name" within 10 seconds
@@ -20,7 +21,8 @@ Feature: Real-time step detail panel updates
     And I create a step "Approval Gate" with type "human_input" in the workflow "Human Input Step Panel Workflow" via the CLI
     And the GUI is on the pipeline view
     And I select factory "No Factory"
-    Then the GUI should show "Approval Gate" within 10 seconds
+    And I open workflow "Human Input Step Panel Workflow" in the Graph
+    Then the GUI should show an element with test id "step-node-Approval Gate" within 10 seconds
     When I click on the element with test id "step-node-Approval Gate"
     Then the GUI should show "Step Configuration" within 5 seconds
     And the GUI element with test id "step-type-badge" should have text "human_input" within 5 seconds
@@ -31,7 +33,8 @@ Feature: Real-time step detail panel updates
     And I create a step "Rhai Transform" with type "execute" in the workflow "Execute Step Panel Workflow" via the CLI
     And the GUI is on the pipeline view
     And I select factory "No Factory"
-    Then the GUI should show "Rhai Transform" within 10 seconds
+    And I open workflow "Execute Step Panel Workflow" in the Graph
+    Then the GUI should show an element with test id "step-node-Rhai Transform" within 10 seconds
     When I click on the element with test id "step-node-Rhai Transform"
     Then the GUI should show "Step Configuration" within 5 seconds
     And the GUI element with test id "step-type-badge" should have text "execute" within 5 seconds
@@ -45,8 +48,8 @@ Feature: Real-time step detail panel updates
       | name | Step Harness Panel Workflow |
     And the GUI is on the pipeline view
     And I select factory "No Factory"
-    Then the GUI should show "Step Harness Panel Workflow" within 5 seconds
-    When I click on the element containing text "Step Harness Panel Workflow"
+    Then the GUI should show an element with test id "workflow-station-Step Harness Panel Workflow" within 5 seconds
+    When I click on the element with test id "workflow-station-Step Harness Panel Workflow"
     Then the GUI should show "Workflow Details" within 5 seconds
     When I create a step "Harness Panel Step" with harness "codex" in the open workflow panel
     Then the GUI element with test id "step-harness-value" should have text "codex" within 10 seconds

@@ -29,6 +29,29 @@ import type { CompiledPart, CompiledPartStep } from "./registry";
 
 export type Drawing = (t: number, compiled: CompiledPart) => ReactNode;
 
+/**
+ * Workflow topology (the Atlas): a step part with no story draws its
+ * catalogue still, scenario 0 at its still time, so its mechanism and inner
+ * fixtures read as they do in the gallery. Cards and the status line come
+ * from the (empty) flow timeline, so nothing claims an observed run.
+ */
+function topologyStill(
+  kind:
+    | "inference step"
+    | "structured step"
+    | "execute step"
+    | "wait children"
+    | "human gate"
+): ReactNode {
+  const def = MACHINE_PARTS[kind];
+  const still = def.scenarios[0];
+  // The gallery's example question would read as this gate's; topology hides it.
+  return (def.draw as (t: number, extra: unknown) => ReactNode)(
+    still.still,
+    kind === "human gate" ? { ...still.extra, topology: true } : still.extra
+  );
+}
+
 /** Protocol specs carry the gallery's mechanism state under `extra`. */
 function protocolDrawing<E>(draw: (t: number, extra: E) => ReactNode): Drawing {
   return (t, p) => draw(t, (p.state as { extra: E }).extra);
@@ -1037,12 +1060,7 @@ export const FLOW_DRAWINGS = {
     });
   },
   "inference step": (t, p) => {
-    if (p.props.topology)
-      return MACHINE_PARTS["inference step"].draw(t, {
-        topology: true,
-        cl: [1e9, 1e9],
-        lights: [],
-      });
+    if (p.props.topology) return topologyStill("inference step");
     const stage = latest(
       p.steps.filter((s) => s.verb === "stage"),
       t
@@ -1065,12 +1083,7 @@ export const FLOW_DRAWINGS = {
     });
   },
   "structured step": (t, p) => {
-    if (p.props.topology)
-      return MACHINE_PARTS["structured step"].draw(t, {
-        wait: [1e9, 1e9],
-        chk: [],
-        lamps: [[], [], []],
-      });
+    if (p.props.topology) return topologyStill("structured step");
     const ask = latest(
       p.steps.filter((s) => s.verb === "ask"),
       t
@@ -1099,12 +1112,7 @@ export const FLOW_DRAWINGS = {
     });
   },
   "execute step": (t, p) => {
-    if (p.props.topology)
-      return MACHINE_PARTS["execute step"].draw(t, {
-        topology: true,
-        st: 1e9,
-        crash: null,
-      });
+    if (p.props.topology) return topologyStill("execute step");
     const run = latest(
       p.steps.filter((s) => s.verb === "transform" || s.verb === "fail"),
       t
@@ -1166,12 +1174,7 @@ export const FLOW_DRAWINGS = {
     });
   },
   "wait children": (t, p) => {
-    if (p.props.topology)
-      return MACHINE_PARTS["wait children"].draw(t, {
-        topology: true,
-        rings: [],
-        chk: [],
-      });
+    if (p.props.topology) return topologyStill("wait children");
     const steps = cycle(p.steps, t, ["spawn"], ["validate", "fail"]);
     const spawn = steps.find((s) => s.verb === "spawn");
     const from = spawn ? spawn.t + 0.7 : p.timeline.period + 1;
@@ -1195,11 +1198,7 @@ export const FLOW_DRAWINGS = {
     });
   },
   "human gate": (t, p) => {
-    if (p.props.topology)
-      return MACHINE_PARTS["human gate"].draw(t, {
-        topology: true,
-        wait: [1e9, 1e9],
-      });
+    if (p.props.topology) return topologyStill("human gate");
     const steps = cycle(p.steps, t, ["wait"], ["stop"]);
     const wait = steps.find((s) => s.verb === "wait");
     const end = steps.find(

@@ -404,6 +404,15 @@ pub async fn click_when_ready(
 /// part hit area (or its own box) once it has stopped moving and nothing
 /// covers it. WebDriver's element click does not reach SVG groups in WebKitGTK.
 pub async fn pointer_click_svg_when_ready(client: &Client, css: &str, description: &str) {
+    pointer_clicks_svg_when_ready(client, css, description, 1).await;
+}
+
+async fn pointer_clicks_svg_when_ready(
+    client: &Client,
+    css: &str,
+    description: &str,
+    clicks: usize,
+) {
     use fantoccini::actions::{InputSource, MouseActions, PointerAction};
     let point = std::cell::Cell::new(None);
     wait_until(description, std::time::Duration::from_secs(5), || async {
@@ -429,14 +438,16 @@ pub async fn pointer_click_svg_when_ready(client: &Client, css: &str, descriptio
     .await
     .unwrap_or_else(|error| panic!("{error}"));
     let (x, y) = point.get().expect("settled point");
-    let pointer = MouseActions::new("svg-click".into())
-        .then(PointerAction::MoveTo {
-            duration: None,
-            x,
-            y,
-        })
-        .then(PointerAction::Down { button: 0 })
-        .then(PointerAction::Up { button: 0 });
+    let pointer = MouseActions::new("svg-click".into()).then(PointerAction::MoveTo {
+        duration: None,
+        x,
+        y,
+    });
+    let pointer = (0..clicks).fold(pointer, |actions, _| {
+        actions
+            .then(PointerAction::Down { button: 0 })
+            .then(PointerAction::Up { button: 0 })
+    });
     client
         .perform_actions(pointer)
         .await

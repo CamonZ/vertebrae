@@ -7,8 +7,8 @@ Feature: Real-time workflow detail panel step updates
       | name | Workflow Steps Panel |
     And the GUI is on the pipeline view
     And I select factory "No Factory"
-    Then the GUI should show "Workflow Steps Panel" within 5 seconds
-    When I click on the element containing text "Workflow Steps Panel"
+    Then the GUI should show an element with test id "workflow-station-Workflow Steps Panel" within 5 seconds
+    When I click on the element with test id "workflow-station-Workflow Steps Panel"
     Then the GUI should show "Workflow Details" within 5 seconds
     When I create a step "New Panel Step" in the workflow "Workflow Steps Panel" via the CLI
     Then the GUI should show "New Panel Step" within 10 seconds
@@ -19,8 +19,8 @@ Feature: Real-time workflow detail panel step updates
     And I create a step "Step To Delete" in the workflow "Workflow Delete Panel" via the CLI
     And the GUI is on the pipeline view
     And I select factory "No Factory"
-    Then the GUI should show "Step To Delete" within 5 seconds
-    When I click on the element containing text "Workflow Delete Panel"
+    Then the GUI should show an element with test id "workflow-station-Workflow Delete Panel" within 5 seconds
+    When I click on the element with test id "workflow-station-Workflow Delete Panel"
     Then the GUI should show "Workflow Details" within 5 seconds
     And the GUI should show "Step To Delete" within 5 seconds
     When I delete the step via the CLI

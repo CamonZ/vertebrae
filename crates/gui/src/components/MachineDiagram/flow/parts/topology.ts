@@ -43,6 +43,29 @@ export function workflowTopology(def: AnyPartKind): AnyPartKind {
   };
 }
 
+/**
+ * A station (workflow or factory) drawn as configured structure: no observed
+ * status line, and every station port kept (unlike step parts, a station's
+ * ports are its transitions). Live counts come from the host's presentation.
+ */
+export function stationTopology(def: AnyPartKind): AnyPartKind {
+  return {
+    ...def,
+    props: {
+      ...def.props,
+      topology: {
+        ...topologyField,
+        description:
+          "show configured structure without an observed execution (no status line); ports are unchanged",
+      },
+    },
+    resolve: (props) => {
+      const resolved = def.resolve?.(props) ?? {};
+      return props.topology ? { ...resolved, neutral: true } : resolved;
+    },
+  };
+}
+
 /** Injective UTF-16 encoding: punctuation, Unicode and names resembling defaults stay distinct. */
 export function decisionPort(name: string): string {
   return `rule_${Array.from({ length: name.length }, (_, i) =>

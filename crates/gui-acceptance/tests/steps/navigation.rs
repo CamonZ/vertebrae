@@ -1137,6 +1137,50 @@ async fn click_element_with_test_id(world: &mut GuiWorld, test_id: String) {
         .await;
 }
 
+/// Opens a workflow station of the factory Graph one level down, to its steps.
+#[given(expr = "I open workflow {string} in the Graph")]
+#[when(expr = "I open workflow {string} in the Graph")]
+async fn open_workflow_in_graph(world: &mut GuiWorld, workflow: String) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    let css = format!("[data-testid=\"workflow-station-{workflow}\"]");
+    // Focus and Enter open the station: the keyboard twin of a double-click,
+    // which WebKitGTK's WebDriver does not dispatch. A click would also open
+    // the workflow inspector over the steps the scenario goes on to use.
+    let station = client
+        .wait()
+        .at_most(std::time::Duration::from_secs(10))
+        .for_element(Locator::Css(&format!("{css} [role='button']")))
+        .await
+        .unwrap_or_else(|_| panic!("workflow station '{workflow}' is not a button"));
+    client
+        .execute(
+            "arguments[0].focus();",
+            vec![serde_json::to_value(&station).expect("serialize station element")],
+        )
+        .await
+        .unwrap_or_else(|_| panic!("failed to focus workflow station '{workflow}'"));
+    station
+        .send_keys("\u{E007}")
+        .await
+        .unwrap_or_else(|_| panic!("failed to press Enter on workflow station '{workflow}'"));
+    client
+        .wait()
+        .at_most(std::time::Duration::from_secs(10))
+        .for_element(Locator::Css(
+            "[data-testid='atlas-graph'][data-level='steps']",
+        ))
+        .await
+        .unwrap_or_else(|_| panic!("workflow '{workflow}' did not open its steps"));
+    world
+        .screenshot(&client, &format!("after-open-workflow-{workflow}"))
+        .await;
+}
+
 #[when(expr = "I create a step {string} with harness {string} in the open workflow panel")]
 async fn create_step_with_harness_in_open_workflow_panel(
     world: &mut GuiWorld,

@@ -3,7 +3,7 @@ import { useEntityPanelStore } from "../../../stores/entityPanelStore";
 import type { DiagramTimeline } from "../../MachineDiagram/flow/compile";
 import type { FlowPresentation } from "../../MachineDiagram/flow/presentation";
 import type { DiagramInteraction } from "../../MachineDiagram/interaction";
-import type { AtlasMachineFlow } from "./buildMachineFlow";
+import type { AtlasLevelTarget, AtlasMachineFlow } from "./buildMachineFlow";
 
 /** One rail of the current trace, as the connections list names it. */
 export interface AtlasConnection {
@@ -31,7 +31,9 @@ export interface AtlasTrace {
 export function useAtlasPresentation(
   model: AtlasMachineFlow,
   diagram?: DiagramTimeline,
-  query = ""
+  query = "",
+  /** Opens the level a station or stub leads to (double-click or Enter). */
+  onOpen?: (target: AtlasLevelTarget) => void
 ) {
   const selection = useEntityPanelStore((s) => s.selection);
   const edge = useEntityPanelStore((s) => s.hoveredEdgeId);
@@ -45,7 +47,7 @@ export function useAtlasPresentation(
     if (id) setLatestInput(channel);
   };
   const valid = (id: string | null) =>
-    id && model.selections.has(id) ? id : null;
+    id && (model.selections.has(id) || model.destinations?.has(id)) ? id : null;
   // Retire removed IDs, so reintroducing an entity cannot resurrect an old trace.
   if (hover && !valid(hover)) setHover(null);
   if (focus && !valid(focus)) setFocus(null);
@@ -99,7 +101,11 @@ export function useAtlasPresentation(
       edge === rail.id ||
       (!!edge &&
         (edge === metadata?.transitionId ||
-          edge === `X_${metadata?.transitionId}`)) ||
+          edge === `X_${metadata?.transitionId}` ||
+          // Station levels aggregate several handoffs on one rail.
+          !!metadata?.transitionIds?.some(
+            (id) => edge === id || edge === `X_${id}`
+          ))) ||
       (!!metadata?.stepId &&
         !!metadata.targetStepId &&
         (edge ===
@@ -141,15 +147,28 @@ export function useAtlasPresentation(
   // A region lights when any of its parts does (neighbours at the overview).
   for (const g of diagram?.regions ?? [])
     if (g.parts.some((id) => traced.has(id))) traced.add(g.id);
+  const open = (id: string) => {
+    const target = model.destinations?.get(id);
+    if (target) onOpen?.(target);
+  };
+  // A click inspects an entity; a part with nothing to inspect (a factory
+  // station, a stub) opens where it leads instead.
   const activate = (id: string) => {
     const entity = model.selections.get(id);
     const store = useEntityPanelStore.getState();
     if (entity?.type === "workflow") store.openWorkflow(entity.workflowId);
     else if (entity?.type === "step")
       store.openStep(entity.stepId, entity.workflowId);
+    else open(id);
   };
   const interaction: DiagramInteraction = {
     onActivatePart: activate,
+    ...(onOpen && model.destinations?.size
+      ? {
+          onOpenPart: (id: string) =>
+            model.destinations?.has(id) ? open(id) : activate(id),
+        }
+      : {}),
     onHoverPart: (id) => inspect("hover", id),
     onFocusPart: (id) => inspect("focus", id),
     activePart: [...selected][0] ?? null,
@@ -164,7 +183,13 @@ export function useAtlasPresentation(
         for (const id of region.parts) matches.add(id);
       }
     }
-    for (const id of model.selections.keys())
+    // Stations and stubs match by their own name.
+    for (const [id, name] of model.names ?? [])
+      if (name.toLocaleLowerCase().includes(q)) matches.add(id);
+    for (const id of [
+      ...model.selections.keys(),
+      ...(model.destinations?.keys() ?? []),
+    ])
       if (!matches.has(id)) dimmed.add(id);
     for (const rail of diagram?.rails ?? [])
       if (!matches.has(rail.from.part) || !matches.has(rail.to.part))
@@ -179,7 +204,8 @@ export function useAtlasPresentation(
   const partName = new Map(model.spec.parts.map((p) => [p.id, p.label]));
   const workflowOf = (part: string) => {
     const entity = model.selections.get(part);
-    return entity ? (regionName.get(entity.workflowId) ?? "") : "";
+    const region = entity ? regionName.get(entity.workflowId) : undefined;
+    return region ?? model.names?.get(part) ?? "";
   };
   const stepOf = (part: string) =>
     model.selections.get(part)?.type === "step"
@@ -223,7 +249,9 @@ export function useAtlasPresentation(
       title:
         entity?.type === "step"
           ? (partName.get(trace) ?? trace)
-          : (regionName.get(entity?.workflowId ?? "") ?? trace),
+          : (regionName.get(entity?.workflowId ?? "") ??
+            model.names?.get(trace) ??
+            trace),
       kind: entity?.type === "step" ? "step" : "workflow",
       connections,
     };
@@ -237,6 +265,8 @@ export function useAtlasPresentation(
     rails,
     handoffs,
     flow,
+    // The hovered or focused part plays its own mechanism.
+    preview: trace ?? undefined,
     onHoverRail: setHoverRail,
     onActivateRegion: activate,
     onHoverRegion: (id) => inspect("hover", id),

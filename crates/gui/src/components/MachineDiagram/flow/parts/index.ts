@@ -1,4 +1,4 @@
-import { workflowTopology } from "./topology";
+import { stationTopology, workflowTopology } from "./topology";
 import { topologyEndpointPart } from "./topologyEndpoint";
 import { failureDetectorPart } from "./failureDetector";
 import { fencingTokenPart } from "./fencingToken";
@@ -128,8 +128,8 @@ export const STARTER_PARTS: readonly AnyPartKind[] = [
   workflowTopology(humanGatePart),
   runEndPart,
   taskRunPart,
-  workflowPart,
-  factoryPart,
+  stationTopology(workflowPart),
+  stationTopology(factoryPart),
   topologyEndpointPart,
 ];
 

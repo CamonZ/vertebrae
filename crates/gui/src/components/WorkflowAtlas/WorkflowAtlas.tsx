@@ -1,10 +1,12 @@
 /* ──────────────────────────────────────────────────────────────────
    Workflow Atlas — the canonical workflow-topology surface.
 
-   GRAPH view — the shared machine-flow path: the adapter, the
-                `useLaidOutFlow` worker/cache and `AtlasMachineScene`, hosted
-                by `ScopedMachineGraph` (factory scope) and by the zoom-expanded
-                `FactoryOverview` (no scope). See adapter/README.md.
+   GRAPH view — the shared machine-flow path at three levels: between
+                factories (factory stations), inside a factory (workflow
+                stations) and inside a workflow (step parts), each hosted by
+                `ScopedMachineGraph`. Opening a station (double-click or
+                Enter) goes one level down; the breadcrumb goes back up.
+                See adapter/README.md.
    MAP view   — `layoutCondensed`: deterministic value-stream phase columns,
                 condensed workflow cards (step-count + live ember only),
                 aggregated workflow→workflow edges with condition chips, plus
@@ -27,6 +29,8 @@
    ────────────────────────────────────────────────────────────────── */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScopedMachineGraph } from "./ScopedMachineGraph";
+import { atlasLevel } from "./adapter/atlasLevels";
+import type { AtlasLevelTarget } from "./adapter/buildMachineFlow";
 import { useAtlasLayoutWarmup } from "./adapter/useAtlasLayoutWarmup";
 import type { PanZoomTransform } from "./hooks/usePanZoom";
 import { useProjectScopeGeneration } from "../../stores/projectScopedStores";
@@ -117,15 +121,24 @@ export function WorkflowAtlas() {
   );
   const lastFactory = useFactoryFilterStore((state) => state.lastFactoryName);
   const scopeKey = JSON.stringify([projectGeneration, factoryFilter]);
+  // The workflow opened inside each factory (the Graph's steps level). Kept
+  // per factory scope, so Map, Board and other factories leave it in place.
+  const [openWorkflows, setOpenWorkflows] = useState<
+    Record<string, string | null>
+  >({});
+  const requestedWorkflow = openWorkflows[scopeKey] ?? null;
+  const openWorkflowIn = useCallback(
+    (scope: FactoryFilterValue, workflowId: string | null) =>
+      setOpenWorkflows((current) => ({
+        ...current,
+        [JSON.stringify([projectGeneration, scope])]: workflowId,
+      })),
+    [projectGeneration]
+  );
   const cameras = useMemo(
     () => new Map<string, { current: PanZoomTransform | null }>(),
     [projectGeneration]
   );
-  const graphCamera = useMemo(() => {
-    const saved = cameras.get(scopeKey) ?? { current: null };
-    cameras.set(scopeKey, saved);
-    return saved;
-  }, [cameras, scopeKey]);
   // Factory search and workflow search have separate meanings. Restore each
   // scope's query on return instead of applying one scope's text to another.
   const [queries, setQueries] = useState<Record<string, string>>({});
@@ -146,8 +159,6 @@ export function WorkflowAtlas() {
   const showFactoryOverview = summary !== null && factoryFilter === null;
   const isBoard = view === "board";
   const isGraph = view === "graph";
-  // The factory overview only knows Graph and Map; Board stands in for Map.
-  const overviewView = isGraph ? "graph" : "map";
 
   // The board needs a factory scope. Clearing the scope while on Board returns
   // to the factory overview, which has no Board option.
@@ -164,6 +175,51 @@ export function WorkflowAtlas() {
       workflows: filterByFactory(summary.workflows, factoryFilter),
     };
   }, [summary, factoryFilter]);
+
+  // A workflow removed (or moved to another factory) closes its steps level.
+  const openWorkflowId =
+    factoryFilter !== null &&
+    requestedWorkflow !== null &&
+    scopedSummary?.workflows.some((wf) => wf.id === requestedWorkflow)
+      ? requestedWorkflow
+      : null;
+  const graphLevel = atlasLevel(factoryFilter, openWorkflowId);
+  const levelKey = JSON.stringify([
+    projectGeneration,
+    factoryFilter,
+    openWorkflowId,
+  ]);
+  // One camera per level: going back up restores the camera left there.
+  const graphCamera = useMemo(() => {
+    const saved = cameras.get(levelKey) ?? { current: null };
+    cameras.set(levelKey, saved);
+    return saved;
+  }, [cameras, levelKey]);
+  const openLevel = useCallback(
+    (target: AtlasLevelTarget) => {
+      if (target.level === "factory") {
+        openWorkflowIn(target.scope, null);
+        changeScope(target.scope);
+      } else {
+        openWorkflowIn(target.scope, target.workflowId);
+        changeScope(target.scope);
+      }
+      // A level opened from a station is framed fresh, not on an old camera.
+      cameras.delete(
+        JSON.stringify([
+          projectGeneration,
+          target.scope,
+          target.level === "workflow" ? target.workflowId : null,
+        ])
+      );
+    },
+    [cameras, changeScope, openWorkflowIn, projectGeneration]
+  );
+  const openWorkflowName =
+    openWorkflowId === null
+      ? null
+      : (scopedSummary?.workflows.find((wf) => wf.id === openWorkflowId)
+          ?.name ?? null);
 
   // If a realtime update removes the selected factory from the project, return
   // to the unscoped topology instead of leaving a value with no option.
@@ -233,9 +289,9 @@ export function WorkflowAtlas() {
   const openWorkflow = (workflowId: string) =>
     useEntityPanelStore.getState().openWorkflow(workflowId);
 
-  // The shared machine Graph hosts the factory scope; the overview hosts both
-  // of its own views. The Map canvas below is the scoped Map.
-  const machineGraph = isGraph && factoryFilter !== null;
+  // The shared machine Graph hosts every Graph level; the factory overview
+  // hosts the unscoped Map. The Map canvas below is the scoped Map.
+  const machineGraph = isGraph;
   const showMap = view === "map" && !showFactoryOverview;
 
   const key = useMemo(() => (model ? layoutKey(model) : ""), [model]);
@@ -408,9 +464,29 @@ export function WorkflowAtlas() {
                 Factories
               </button>
               <span aria-hidden="true">/</span>
-              <span className="uv-crumb-current" aria-current="page">
-                {isNoFactoryScope(factoryFilter) ? "No Factory" : factoryFilter}
-              </span>
+              {isGraph && openWorkflowName !== null ? (
+                <>
+                  <button
+                    type="button"
+                    className="uv-crumb-back"
+                    onClick={() => openWorkflowIn(factoryFilter, null)}
+                  >
+                    {isNoFactoryScope(factoryFilter)
+                      ? "No Factory"
+                      : factoryFilter}
+                  </button>
+                  <span aria-hidden="true">/</span>
+                  <span className="uv-crumb-current" aria-current="page">
+                    {openWorkflowName}
+                  </span>
+                </>
+              ) : (
+                <span className="uv-crumb-current" aria-current="page">
+                  {isNoFactoryScope(factoryFilter)
+                    ? "No Factory"
+                    : factoryFilter}
+                </span>
+              )}
             </nav>
           ) : (
             !showFactoryOverview && (
@@ -480,29 +556,41 @@ export function WorkflowAtlas() {
           <div className="uv-empty">no workflows to graph</div>
         )}
 
-        {showFactoryOverview && !isLoading && !error && summary && (
+        {showFactoryOverview && !isGraph && !isLoading && !error && summary && (
           <FactoryOverview
             key={projectGeneration}
-            routeConfigs={routeConfigs}
-            scope={JSON.stringify([projectGeneration, null])}
             summary={summary}
             query={query}
-            view={overviewView}
             recentFactory={lastFactory}
             onSelect={changeScope}
           />
         )}
 
-        {machineGraph && scopedSummary && !isLoading && !error && !empty && (
-          <ScopedMachineGraph
-            key={JSON.stringify([projectGeneration, factoryFilter])}
-            cameraSnapshot={graphCamera}
-            summary={scopedSummary}
-            routeConfigs={routeConfigs}
-            scope={JSON.stringify([projectGeneration, factoryFilter])}
-            query={query}
-          />
-        )}
+        {machineGraph &&
+          showFactoryOverview &&
+          !isLoading &&
+          !error &&
+          summary.workflows.length === 0 && (
+            <div className="uv-empty">No factories configured</div>
+          )}
+
+        {machineGraph &&
+          summary &&
+          !isLoading &&
+          !error &&
+          !empty &&
+          !(showFactoryOverview && summary.workflows.length === 0) && (
+            <ScopedMachineGraph
+              key={levelKey}
+              cameraSnapshot={graphCamera}
+              summary={summary}
+              routeConfigs={routeConfigs}
+              level={graphLevel}
+              scope={levelKey}
+              query={query}
+              onOpen={openLevel}
+            />
+          )}
 
         {isBoard && factoryFilter !== null && (
           <div className="uv-kanban" data-no-pan>

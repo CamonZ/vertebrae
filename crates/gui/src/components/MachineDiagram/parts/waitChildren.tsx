@@ -20,7 +20,6 @@ const M = [315, WY] as const;
 const CHILD_X = [255, 315, 375] as const;
 
 interface WaitExtra {
-  readonly topology?: boolean;
   /** One ring per child: `[x, from, to, outcome | null]` (null keeps it waiting). */
   readonly rings: readonly (readonly [
     x: number,
@@ -157,7 +156,7 @@ export const waitChildrenMachine: MachinePartDef<WaitExtra> = {
     waitStory("combined output rejected"),
     waitStory("child still running"),
   ],
-  draw: (t, { rings, chk, topology }) => (
+  draw: (t, { rings, chk }) => (
     <>
       <Rail
         points={[
@@ -173,35 +172,31 @@ export const waitChildrenMachine: MachinePartDef<WaitExtra> = {
       />
       <PartBox x={180} y={110} w={270} h={180} />
       <Hole x={M[0]} y={WY} r={22} />
-      {!topology && (
-        <>
-          <path
-            d={CHILD_X.map((x) => `M315 213 L${x} 170`).join(" ")}
-            fill="none"
-            stroke={roleColor("edge")}
-            strokeWidth={2}
+      <path
+        d={CHILD_X.map((x) => `M315 213 L${x} 170`).join(" ")}
+        fill="none"
+        stroke={roleColor("edge")}
+        strokeWidth={2}
+      />
+      {rings.map(([x, a, b, c]) => (
+        <g key={x}>
+          <Hole x={x} y={150} r={20} />
+          <SvgText
+            x={x}
+            y={151}
+            runs={[[`c${1 + (x - 255) / 60}`, 400, "dim"]]}
+            size={18}
+            align="center"
           />
-          {rings.map(([x, a, b, c]) => (
-            <g key={x}>
-              <Hole x={x} y={150} r={20} />
-              <SvgText
-                x={x}
-                y={151}
-                runs={[[`c${1 + (x - 255) / 60}`, 400, "dim"]]}
-                size={18}
-                align="center"
-              />
-              {c ? (
-                <Ring x={x} y={150} t={t} from={a} to={b} result={c} r={20} />
-              ) : (
-                <Spinner x={x} y={150} t={t} from={a} to={b} r={20} />
-              )}
-              {c && t >= b + 0.45 && <Settled x={x} role={c} />}
-            </g>
-          ))}
-        </>
-      )}
-      {!topology && <CheckFrame x={400} y={WY} t={t} flashes={chk} />}
+          {c ? (
+            <Ring x={x} y={150} t={t} from={a} to={b} result={c} r={20} />
+          ) : (
+            <Spinner x={x} y={150} t={t} from={a} to={b} r={20} />
+          )}
+          {c && t >= b + 0.45 && <Settled x={x} role={c} />}
+        </g>
+      ))}
+      <CheckFrame x={400} y={WY} t={t} flashes={chk} />
     </>
   ),
 };

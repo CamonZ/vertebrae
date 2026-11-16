@@ -6,4 +6,4 @@ Feature: Real-time workflow rendering on pipeline view
     Given the GUI is on the pipeline view
     When I create a workflow "Pipeline Workflow Test" via the CLI
     And I select factory "No Factory"
-    Then the GUI should show "Pipeline Workflow Test" within 10 seconds
+    Then the GUI should show an element with test id "workflow-station-Pipeline Workflow Test" within 10 seconds

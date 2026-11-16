@@ -13,6 +13,7 @@ const Y = 210;
 const SLOT = [300, Y] as const;
 
 interface HumanGateExtra {
+  /** Workflow topology: no example question (a real gate's question is unknown). */
   readonly topology?: boolean;
   /** The spinner turns between these times. */
   readonly wait: readonly [number, number];
@@ -164,24 +165,20 @@ export const humanGateMachine: MachinePartDef<HumanGateExtra> = {
           [616, Y],
         ]}
       />
-      {!topology && (
-        <>
-          <Rail
-            points={[
-              [600, 96],
-              [400, 96],
-              [400, 150],
-            ]}
-          />
-          <SvgText
-            x={616}
-            y={122}
-            runs={[["reviewer", 400, "dim"]]}
-            size={18}
-            align="right"
-          />
-        </>
-      )}
+      <Rail
+        points={[
+          [600, 96],
+          [400, 96],
+          [400, 150],
+        ]}
+      />
+      <SvgText
+        x={616}
+        y={122}
+        runs={[["reviewer", 400, "dim"]]}
+        size={18}
+        align="right"
+      />
       <PartBox x={200} y={150} w={220} h={120} />
       <Hole x={SLOT[0]} y={Y} />
       <Spinner x={SLOT[0]} y={Y} t={t} from={wait[0]} to={wait[1]} />

@@ -17,6 +17,10 @@ import {
   type SessionDirective,
 } from "../inspector/routeSessions";
 import { buildAtlasModel } from "./buildAtlasModel";
+import {
+  NO_FACTORY_SCOPE,
+  type FactoryFilterValue,
+} from "../../../utils/workflowFactory";
 
 /** IDs contain no endpoint separator, even when backend IDs contain punctuation. */
 export const machineId = (...keys: string[]): string =>
@@ -40,7 +44,27 @@ export interface MachineTransition {
   readonly decisionKey?: string;
   readonly session?: SessionDirective | null;
   readonly transitionId?: string;
+  /** Every backend transition an aggregated rail carries (station levels). */
+  readonly transitionIds?: readonly string[];
 }
+
+/**
+ * Where opening a part leads, one level of the Atlas Graph to another:
+ * a factory station or a stub naming another factory opens that factory's
+ * workflows; a workflow station or a stub naming a workflow opens its steps.
+ */
+export type AtlasLevelTarget =
+  | { readonly level: "factory"; readonly scope: FactoryFilterValue }
+  | {
+      readonly level: "workflow";
+      readonly scope: FactoryFilterValue;
+      readonly workflowId: string;
+    };
+
+/** The factory scope a workflow belongs to. */
+export const workflowFactoryScope = (wf: {
+  factory_name: string | null;
+}): FactoryFilterValue => wf.factory_name ?? NO_FACTORY_SCOPE;
 
 export interface AtlasMachineFlow {
   readonly spec: FlowSpec;
@@ -52,6 +76,10 @@ export interface AtlasMachineFlow {
   /** `step-node-<name>` hooks, matching the Map canvas step nodes. */
   readonly testIds: ReadonlyMap<string, string>;
   readonly diagnostics: readonly string[];
+  /** Parts that open another level (stations and stubs), by part id. */
+  readonly destinations?: ReadonlyMap<string, AtlasLevelTarget>;
+  /** Display names of stations and stubs that are not inspector entities. */
+  readonly names?: ReadonlyMap<string, string>;
 }
 
 const PART_KIND = {
@@ -71,11 +99,17 @@ const PART_KIND = {
  * Explicit decisions replace that link to the same target, each on its own port.
  * Workflow handoffs originate at a neutral shared logical endpoint,
  * never at a guessed finish/route step. Empty workflows retain this endpoint.
+ *
+ * With a `context` (the whole project's summary), a handoff to a workflow
+ * outside `summary` ends at a short stub naming its destination workflow, and
+ * a handoff into `summary` from outside starts at a stub naming its source,
+ * so no connection is dropped. Without one they are diagnosed and omitted.
  */
 export function buildMachineFlow(
   summary: PipelineSummary,
   routeConfigs: ReadonlyMap<string, JsonValue | null> = new Map(),
-  scope = ""
+  scope = "",
+  context?: PipelineSummary
 ): AtlasMachineFlow {
   const model = buildAtlasModel(summary, routeConfigs);
   const parts: PartSpec[] = [];
@@ -86,7 +120,39 @@ export function buildMachineFlow(
   const counts = new Map<string, { total: number; running: number }>();
   const testIds = new Map<string, string>();
   const diagnostics: string[] = [];
+  const destinations = new Map<string, AtlasLevelTarget>();
+  const names = new Map<string, string>();
   const workflows = new Map(summary.workflows.map((wf) => [wf.id, wf]));
+  const known = new Map(
+    (context ?? summary).workflows.map((wf) => [wf.id, wf])
+  );
+  /** A stub part naming a workflow outside the scope (one per end and pair). */
+  const stub = (
+    direction: "out" | "in",
+    inside: string,
+    outside: PipelineWorkflow
+  ) => {
+    const id = machineId("stub", direction, inside, outside.id);
+    if (!destinations.has(id)) {
+      destinations.set(id, {
+        level: "workflow",
+        scope: workflowFactoryScope(outside),
+        workflowId: outside.id,
+      });
+      names.set(id, outside.name);
+      parts.push({
+        id,
+        kind: "topology endpoint",
+        label: direction === "out" ? `→ ${outside.name}` : `${outside.name} →`,
+        job:
+          direction === "out"
+            ? `Handoff to ${outside.name}, outside this view`
+            : `Handoff from ${outside.name}, outside this view`,
+        scale: 0.5,
+      });
+    }
+    return id;
+  };
   const endpoint = (wf: string) => machineId("workflow", wf);
   const stepPart = (wf: string, step: string) => machineId("step", wf, step);
 
@@ -145,7 +211,11 @@ export function buildMachineFlow(
     const handsOff =
       workflows
         .get(wf.id)
-        ?.transitions.some((t) => workflows.has(t.to_workflow_id)) ?? false;
+        ?.transitions.some(
+          (t) =>
+            workflows.has(t.to_workflow_id) ||
+            (!!context && known.has(t.to_workflow_id))
+        ) ?? false;
     parts.push({
       id,
       kind: "topology endpoint",
@@ -224,9 +294,15 @@ export function buildMachineFlow(
       };
       const linked = new Set<string>();
       for (const [i, d] of decisions.entries()) {
-        const toWorkflow = d.targetWorkflowId
+        const inScope = d.targetWorkflowId
           ? workflows.get(d.targetWorkflowId)
           : workflows.get(wf.id);
+        // A decision handing off outside the scope ends at a stub naming it.
+        const outside =
+          !inScope && d.targetWorkflowId && context
+            ? known.get(d.targetWorkflowId)
+            : undefined;
+        const toWorkflow = inScope ?? outside;
         if (!toWorkflow || (!d.targetStepId && !d.targetWorkflowId)) {
           diagnostics.push(
             `Route ${step.stepId} decision ${d.label}: unresolved destination`
@@ -234,7 +310,8 @@ export function buildMachineFlow(
           continue;
         }
         let to: { part: string; step: string };
-        if (d.targetWorkflowId) to = target(toWorkflow, null);
+        if (outside) to = { part: stub("out", wf.id, outside), step: "" };
+        else if (d.targetWorkflowId) to = target(toWorkflow, null);
         else if (toWorkflow.workflow_steps.some((s) => s.id === d.targetStepId))
           to = {
             part: stepPart(wf.id, d.targetStepId!),
@@ -351,8 +428,27 @@ export function buildMachineFlow(
     for (const transition of wf.transitions) {
       const toWorkflow = workflows.get(transition.to_workflow_id);
       if (!toWorkflow) {
-        diagnostics.push(
-          `Handoff ${transition.id}: destination workflow outside scope or missing`
+        const outside = context ? known.get(transition.to_workflow_id) : null;
+        if (!outside) {
+          diagnostics.push(
+            `Handoff ${transition.id}: destination workflow outside scope or missing`
+          );
+          continue;
+        }
+        rail(
+          machineId("handoff", transition.id),
+          `${endpoint(wf.id)}.out`,
+          `${stub("out", wf.id, outside)}.in`,
+          {
+            kind: "handoff",
+            workflowId: wf.id,
+            targetWorkflowId: outside.id,
+            ...(transition.target_step_id
+              ? { targetStepId: transition.target_step_id }
+              : {}),
+            transitionId: transition.id,
+          },
+          transition.label
         );
         continue;
       }
@@ -372,7 +468,40 @@ export function buildMachineFlow(
       );
     }
   }
-  const spec: FlowSpec = { version: 1, parts, rails, regions };
+  // Handoffs into the scope from outside start at a stub naming their source.
+  for (const wf of context?.workflows ?? []) {
+    if (workflows.has(wf.id)) continue;
+    for (const transition of wf.transitions) {
+      const toWorkflow = workflows.get(transition.to_workflow_id);
+      if (!toWorkflow) continue;
+      const to = target(toWorkflow, transition.target_step_id);
+      rail(
+        machineId("handoff", transition.id),
+        `${stub("in", toWorkflow.id, wf)}.out`,
+        `${to.part}.in`,
+        {
+          kind: "handoff",
+          workflowId: wf.id,
+          targetWorkflowId: toWorkflow.id,
+          ...(to.step ? { targetStepId: to.step } : {}),
+          transitionId: transition.id,
+        },
+        transition.label
+      );
+    }
+  }
+  // Inbound stubs lead the spec: the layout reads spec order as flow order,
+  // so a stub listed after its target would be drawn as a return rail.
+  const inbound = (p: PartSpec) =>
+    destinations.has(p.id) && p.id.startsWith(machineId("stub", "in"));
+  const spec: FlowSpec = {
+    version: 1,
+    parts: [...parts.filter(inbound), ...parts.filter((p) => !inbound(p))].map(
+      hoverLabels
+    ),
+    rails,
+    regions,
+  };
   return {
     spec,
     structuralKey: JSON.stringify({ scope, spec }),
@@ -381,5 +510,17 @@ export function buildMachineFlow(
     counts,
     testIds,
     diagnostics,
+    destinations,
+    names,
   };
+}
+
+/**
+ * Titles and subtitles show on hover or focus only, so the mechanisms carry
+ * the Graph. Stubs keep their names: a stub's name is where it leads.
+ */
+export function hoverLabels(part: PartSpec): PartSpec {
+  return part.kind === "topology endpoint"
+    ? part
+    : { ...part, labels: { title: "hover", subtitle: "hover" } };
 }

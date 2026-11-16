@@ -69,7 +69,9 @@ export async function layoutFlowComposite(
   options: FlowLayoutOptions = {}
 ): Promise<FlowLayout> {
   const arrangements = flow.arrangements;
-  if (!composable(arrangements[0])) return layoutFlow(flow, options);
+  // A flat Atlas level (stations, no regions) packs its unconnected pieces.
+  if (!composable(arrangements[0]))
+    return layoutFlow(flow, { ...options, pack: true });
   const useCache = options.cache !== false;
   const compose = () => layoutComposite(arrangements, useCache);
   const level = useCache

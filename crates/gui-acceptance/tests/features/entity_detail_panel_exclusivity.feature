@@ -56,7 +56,7 @@ Feature: Exclusive entity detail panels
     And I create a workflow "Existing workflow panel" via the CLI
     And the GUI is on the pipeline view
     And I select factory "No Factory"
-    When I click on the element containing text "Existing workflow panel"
+    When I click on the element with test id "workflow-station-Existing workflow panel"
     Then the GUI should show "Workflow Details" within 10 seconds
     When I press the "Escape" key
     When I click on the element with test id "local-chat-launcher"
@@ -75,8 +75,9 @@ Feature: Exclusive entity detail panels
     And I create a step "Existing step panel" in the workflow "Existing step panel workflow" via the CLI
     And the GUI is on the pipeline view
     And I select factory "No Factory"
+    And I open workflow "Existing step panel workflow" in the Graph
     When I click on the element with test id "step-node-Existing step panel"
-    Then the GUI should show "Existing step panel" within 10 seconds
+    Then the GUI should show an element with test id "step-node-Existing step panel" within 10 seconds
     When I press the "Escape" key
     When I click on the element with test id "local-chat-launcher"
     And I type "open the linked step" into the element with test id "local-chat-composer"

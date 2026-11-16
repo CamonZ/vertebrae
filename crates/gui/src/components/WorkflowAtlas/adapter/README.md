@@ -1,23 +1,58 @@
 # Atlas machine-flow adapter
 
-`buildMachineFlow(scopedSummary, routeConfigs, scopeKey)` is a pure, additive
-adapter. The caller scopes the summary using the existing Atlas scope logic and
-supplies only already loaded configs. `useAtlasMachineFlow` stabilizes its spec
-and uses the shipped `useLaidOutFlow` compiler/worker/cache lifecycle. Scoped
-Graph and zoom-expanded factory overview both consume this API and the complete
-`AtlasMachineScene`; it is the only Graph renderer (the legacy ELK Graph,
-its morph and its build-time rollback toggle were removed). Map retains
-`layoutCondensed` phase columns; Board and Run Console retain their hosts.
-Overview uses a uniform 0.32 projection from catalogue units into Atlas units;
-compiled part positions, rail identities, points, jumps and corner radii stay
-unchanged. Expanded factory-name buttons open their factory scope; shared
-workflow/step controls continue opening global inspectors. Collapsed detailed scenes and
-factory-entry buttons are inert. Map overview supplies no detailed topology to
-the shared hook, so searches there start no worker requests and pending Graph
-results are retired. Searches and scoped Graph cameras are retained per project/factory; project generation retires old scenes.
-Pending topology hides prior geometry; worker errors show the shared row fallback
-with an explicit warning and Retry layout action. A retry remounts the shared
-hook; the adapter does not introduce another worker or layout client.
+## Levels
+
+The Atlas Graph has three levels, each one shared machine scene
+(`ScopedMachineGraph` → `useAtlasLevelFlow` → `AtlasMachineScene`), built by
+`buildAtlasLevel` (`atlasLevels.ts`) from the whole project's summary:
+
+- **Between factories** (`buildFactoryLevel`): one `factory` station per
+  factory, one rail per directed factory route (`factoryRoutes`, the routes
+  `factoryLinkCounts` counts).
+- **Inside a factory** (`buildWorkflowLevel`): one `workflow` station per
+  workflow (lamps by `step_type`, never names) and one rail per ordered pair of
+  workflows that hand work to each other, carrying every backend transition
+  in `transitionIds`. An empty workflow is a labelled endpoint.
+- **Inside a workflow** (`buildMachineFlow` with a `context`): only that
+  workflow's steps.
+
+No connection is dropped: a handoff either joins two parts of the level or
+ends at a short labelled stub (`topology endpoint`) naming where it goes or
+comes from — the other factory inside a factory, the other workflow inside a
+workflow. Only a handoff to a workflow missing from the project is diagnosed
+and omitted. Inbound stubs lead the spec and station parts are listed in flow
+order, because the layout reads spec order as model order.
+
+`destinations` maps stations and stubs to the level they open. A click on a
+part with an inspector entity inspects it; double-click or Enter opens its
+level (`DiagramInteraction.onOpenPart`); a part with nothing to inspect (a
+factory station, a stub) opens on click too. `WorkflowAtlas` keeps the opened
+workflow per factory scope and one camera per level, so the breadcrumb returns
+up with the previous camera and level and camera survive Map and Board.
+Opening a level from a station frames it fresh. Station levels have no
+regions; the composite layout packs their unconnected pieces in rows
+(`FlowLayoutOptions.pack`). Station parts use the neutral `topology` prop: no
+status line, counts in the title gap.
+
+`TaskRunMotion` draws TaskRun motion: a realtime `task_run_step_changed` move
+sends one card along the rail that carries it at the current level
+(`railForMove`). Frames run only while a card travels, travel is capped and
+skipped off-screen, and reduced motion shows the card at its destination.
+
+## Steps level
+
+`buildMachineFlow(scopedSummary, routeConfigs, scopeKey, context?)` is a pure,
+additive adapter. The caller scopes the summary; it supplies only already
+loaded configs. `useAtlasLevelFlow` stabilizes its spec and uses the shipped
+`useLaidOutFlow` compiler/worker/cache lifecycle. It is the only Graph renderer
+(the legacy ELK Graph, its morph and its build-time rollback toggle were
+removed). Map retains `layoutCondensed` phase columns, and the unscoped Map
+is `FactoryOverview`; Board and Run Console retain their hosts. Searches and
+Graph cameras are retained per project/factory/level; project generation
+retires old scenes. Pending topology hides prior geometry; worker errors show
+the shared row fallback with an explicit warning and Retry layout action. A
+retry remounts the shared hook; the adapter does not introduce another worker
+or layout client.
 
 Each backend step maps to a registered neutral topology part, including separate
 stop and finish forms. Each workflow is a region containing its steps and a
@@ -45,8 +80,9 @@ when at least one valid outgoing rail exists.
 
 Missing configs stay neutral and show only summary transitions and inferred
 order. Unknown step types use the existing neutral process fallback. Missing
-intra-workflow targets and workflows outside scope are diagnosed and omitted as
-rails (their source parts/decision ports remain). Workflow handoff targets fall
+intra-workflow targets are diagnosed and omitted as rails (their source
+parts/decision ports remain); workflows outside the scope end at stubs when a
+`context` is given and are diagnosed and omitted otherwise. Workflow handoff targets fall
 back from a missing explicit step to a valid initial step, then first ordered
 step, then the empty workflow endpoint; missing references are diagnosed.
 Malformed duplicate rule IDs retain distinct ports/rails using positional
@@ -110,10 +146,10 @@ labels and endpoint identity. No second rail or catalogue lead is drawn.
 
 ## Layout
 
-The Graph lays out each workflow region on its own and then composes the
-factory (`MachineDiagram/flow/composite.ts`): workflow layouts are memoized
-and persisted in IndexedDB (`layoutStore.ts`), so a workflow edit relays out
-only that workflow plus the handoffs between regions. `useAtlasLayoutWarmup`
-precomputes every factory's Graph at background priority after the pipeline
-summary and route configs load; the visible Graph always jumps the queue.
+Every level lays out through the composite entry
+(`MachineDiagram/flow/composite.ts`): region flows compose per-region layouts,
+flat station levels pack their pieces. Layouts are memoized and persisted in
+IndexedDB (`layoutStore.ts`). `useAtlasLayoutWarmup` precomputes every level
+(`atlasWarmupLevels`) at background priority after the pipeline summary and
+route configs load; the visible Graph always jumps the queue.
 Persisted layouts are keyed by build, so a new build recomputes them once.

@@ -1,19 +1,42 @@
 import { useEffect, useRef, useState } from "react";
 import type { JsonValue, PipelineSummary } from "../../bindings";
-import { useAtlasMachineFlow } from "./adapter/useAtlasMachineFlow";
+import type { AtlasGraphLevel } from "./adapter/atlasLevels";
+import type { AtlasLevelTarget } from "./adapter/buildMachineFlow";
+import { useAtlasLevelFlow } from "./adapter/useAtlasLevelFlow";
 import { AtlasMachineScene } from "./adapter/AtlasMachineScene";
+import { TaskRunMotion } from "./adapter/TaskRunMotion";
 import { usePanZoom, type PanZoomTransform } from "./hooks/usePanZoom";
 import { ZoomWidget } from "./ZoomWidget";
 
 interface Props {
+  /** The whole project's summary; the level picks what it draws. */
   summary: PipelineSummary;
   routeConfigs: ReadonlyMap<string, JsonValue | null>;
+  level: AtlasGraphLevel;
   scope: string;
   query: string;
   cameraSnapshot?: { current: PanZoomTransform | null };
+  /** Opens the level a station or stub leads to. */
+  onOpen?: (target: AtlasLevelTarget) => void;
 }
 
-/** Shared scoped Graph host. Map and Board retain their existing hosts. */
+const LEVEL_LABEL: Record<AtlasGraphLevel["kind"], string> = {
+  factories: "Factory graph",
+  workflows: "Factory workflow graph",
+  steps: "Workflow step graph",
+};
+
+const LEVEL_NOUN: Record<AtlasGraphLevel["kind"], string> = {
+  factories: "factory",
+  workflows: "workflow",
+  steps: "step",
+};
+
+/**
+ * The Atlas Graph at one level: between factories, inside a factory or
+ * inside a workflow. Each level is one shared machine scene; the host owns
+ * its camera. Map and Board retain their existing hosts.
+ */
 export function ScopedMachineGraph(props: Props) {
   const [attempt, setAttempt] = useState(0);
   return (
@@ -28,12 +51,14 @@ export function ScopedMachineGraph(props: Props) {
 function MachineGraph({
   summary,
   routeConfigs,
+  level,
   scope,
   query,
   retry,
   cameraSnapshot,
+  onOpen,
 }: Props & { retry: () => void }) {
-  const model = useAtlasMachineFlow(summary, routeConfigs, scope);
+  const model = useAtlasLevelFlow(summary, routeConfigs, level, scope);
   const state = model.layout;
   const diagram =
     state.status === "done" && state.result.ok
@@ -64,16 +89,22 @@ function MachineGraph({
   useEffect(() => {
     if (diagram && !camera.userControlled) fit();
   }, [diagram, fit, camera.userControlled]);
+  const noun = LEVEL_NOUN[level.kind];
   return (
-    <div className="uv-machine-canvas" ref={canvas}>
+    <div
+      className="uv-machine-canvas"
+      ref={canvas}
+      data-testid="atlas-graph"
+      data-level={level.kind}
+    >
       {state.status === "pending" && (
         <div className="uv-loading" role="status">
-          laying out workflow graph…
+          laying out {noun} graph…
         </div>
       )}
       {state.status === "done" && !state.result.ok && (
         <div className="uv-empty" role="alert">
-          Unable to compile workflow graph:{" "}
+          Unable to compile {noun} graph:{" "}
           {state.result.errors.map((e) => e.message).join("; ")}
         </div>
       )}
@@ -93,9 +124,17 @@ function MachineGraph({
               model={model}
               diagram={diagram}
               t={0}
-              label="Factory workflow graph"
+              label={LEVEL_LABEL[level.kind]}
               query={query}
               panelHost={panelHost}
+              onOpen={onOpen}
+            />
+            <TaskRunMotion
+              summary={summary}
+              level={level}
+              model={model}
+              diagram={diagram}
+              viewport={canvas}
             />
           </div>
           <ZoomWidget
