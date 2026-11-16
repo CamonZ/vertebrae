@@ -33,7 +33,7 @@ export const PLAYER_SHORTCUTS: readonly (readonly [
   ["− / +", "slower / faster"],
   ["L", "loop, or play once and stop at the end"],
   ["B / ⇧B", "next / previous arrangement, or phase"],
-  ["C", "show or hide the beats"],
+  ["C", "show or hide the beat note"],
   ["Tab, Enter", "focus and open a part or follow a card"],
   ["Esc", "stop following, unpin"],
   ["?", "show or hide these keys"],

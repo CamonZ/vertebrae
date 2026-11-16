@@ -345,7 +345,7 @@ describe("Before/After morph", () => {
       for (let i = 0; i < beats; i++) {
         act(() => key("End")); // settle anywhere, then seek to beat i
         fireEvent.click(
-          within(screen.getByTestId("flow-chapters")).getAllByRole("button")[i]
+          within(screen.getByTestId("flow-beats")).getAllByRole("button")[i]
         );
         act(() => key(" ")); // pause where the chapter is
         if (player().dataset.playing === "true") key(" ");
@@ -561,11 +561,17 @@ describe("marks read without colour", () => {
       expect(c).toMatch(/--md-(ink|edge|bg|dim|text-dim|text-ink)\b/);
   });
 
-  it("story-step marks differ by glyph and border style in the chapters", () => {
+  it("story-step marks differ by glyph and border style in the beat note", () => {
     render(<FlowPlayer flow={flow} reducedMotion />);
-    const tags = within(screen.getByTestId("flow-chapters")).getAllByText(
-      /^[+~−] /
-    );
+    // The note shows the current beat's marks: visit every beat.
+    const tags = within(screen.getByTestId("flow-beats"))
+      .getAllByRole("button")
+      .flatMap((dot) => {
+        fireEvent.click(dot);
+        return within(screen.getByTestId("flow-note-card")).queryAllByText(
+          /^[+~−] /
+        );
+      });
     const byMark = Object.fromEntries(
       tags.map((t) => [t.dataset.mark, t.className])
     );

@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { Button, Icon } from "../../atoms";
@@ -13,7 +14,12 @@ import type { DiagramInteraction } from "../interaction";
 import { type FitInsets, ZOOM_GUTTER } from "../MachineDiagramViewport";
 import { roleColor } from "../palette";
 import { beatOutcome, nextSpeed, SPEEDS } from "./clockModel";
-import type { BeatChange, CompiledFlow, DiagramTimeline } from "./compile";
+import type {
+  BeatChange,
+  CompiledBeat,
+  CompiledFlow,
+  DiagramTimeline,
+} from "./compile";
 import { AttachmentPanel } from "./AttachmentPanel";
 import { FlowDiagram } from "./FlowDiagram";
 import {
@@ -81,21 +87,55 @@ const glass =
 /** Floating panels take input (the overlay layer itself does not). */
 const floating = `pointer-events-auto ${glass}`;
 
-/** Height kept under a fitted diagram for the floating controls bar. */
+/** Height kept under a fitted diagram for the floating transport. */
 const CONTROLS_ROOM = 56;
-/** Width of the floating beats panel (`w-72 max-w-[45%]`) and its margins. */
-const beatsRoom = (width: number) => Math.min(288, width * 0.45) + 32;
-const insetsBelow = (): FitInsets => ({ right: 0, bottom: CONTROLS_ROOM });
-const insetsBeside = (width: number): FitInsets => ({
-  right: beatsRoom(width),
-  bottom: CONTROLS_ROOM,
-});
+/** The beat hairline over the transport, with its gap. */
+const HAIRLINE_ROOM = 28;
+/** The beat note over the hairline: two caption lines, a phase line, step marks. */
+const NOTE_ROOM = 100;
+const insets = (bottom: number) => (): FitInsets => ({ right: 0, bottom });
+const insetsBare = insets(CONTROLS_ROOM);
+const insetsRail = insets(CONTROLS_ROOM + HAIRLINE_ROOM);
+const insetsNote = insets(CONTROLS_ROOM + HAIRLINE_ROOM + NOTE_ROOM);
+
+/** Width of the centred note and hairline (`max-w-[32rem]`). */
+const STAGE_WIDTH = 512;
+/** Narrowest evidence column worth showing beside the centred stage. */
+const MIN_SIDE = 200;
+/** Widest the evidence column grows on a wide frame. */
+const MAX_SIDE = 360;
+/**
+ * Room left of the centred stage for the evidence column on a frame `width`
+ * wide, or null when the frame is too narrow and evidence folds into the
+ * transport. An unmeasured frame (0) gets a default column.
+ */
+function sideRoom(width: number): number | null {
+  if (width <= 0) return 288;
+  const side = (width - ZOOM_GUTTER - 16 - STAGE_WIDTH) / 2 - 16;
+  return side < MIN_SIDE ? null : Math.min(MAX_SIDE, side);
+}
+
+/** Tracks an element's width; 0 until measured (and where there is no layout). */
+function useWidth(el: HTMLElement | null): number {
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    if (!el) return;
+    setWidth(el.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el]);
+  return width;
+}
 
 /**
- * An interactive flow explorer. The diagram fills a resizable frame; the
- * beats (a list of chapters, paused by default) float over its right side
- * and can be hidden, and the controls, evidence and inspectors float over
- * its foot. Beat and frame stepping, optional playback at a chosen speed, an
+ * An interactive flow explorer. The diagram fills a resizable frame; a
+ * player floats centred over its foot: the transport, a hairline with one
+ * dot per beat over it (paused by default), and the current beat's note over
+ * that, which can be hidden. Evidence and inspectors float bottom-left, or
+ * fold into the transport on a narrow frame; nothing floats on the right,
+ * where the changes view opens. Beat and frame stepping, optional playback at a chosen speed, an
  * arrangement selector (Before/After, or options A, B…) that keeps the beat
  * — or, for a migration told in phases, a phase strip, the story itself
  * moving the diagram from phase to phase —, hover/focus on a part to inspect its state and
@@ -141,9 +181,12 @@ export function FlowPlayer({
   const [pinned, setPinned] = useState<string | null>(null);
   const [followed, setFollowed] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
-  const [beatsShown, setBeatsShown] = useState(true);
-  const chaptersId = useId();
+  const [noteShown, setNoteShown] = useState(true);
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const noteId = useId();
+  const evidenceId = useId();
   const [overlay, setOverlay] = useState<HTMLElement | null>(null);
+  const side = sideRoom(useWidth(overlay));
   const hasBeats = diagram.beats.length > 0;
   const root = useRef<HTMLDivElement>(null);
   const playingHidden = suspended && clock.playing;
@@ -241,13 +284,14 @@ export function FlowPlayer({
         break;
       case "beats":
         if (!hasBeats) return;
-        setBeatsShown((b) => !b);
+        setNoteShown((b) => !b);
         break;
       case "clear":
-        if (!followed && !pinned && !help) return;
+        if (!followed && !pinned && !help && !evidenceOpen) return;
         setFollowed(null);
         setPinned(null);
         setHelp(false);
+        setEvidenceOpen(false);
         break;
       case "help":
         setHelp((h) => !h);
@@ -257,6 +301,82 @@ export function FlowPlayer({
   }
 
   const label = flow.title ? `Flow player: ${flow.title}` : "Flow player";
+
+  const phaseLabel =
+    phased && names.length > 1
+      ? `Phase ${names.indexOf(phase) + 1} of ${names.length} · ${flow.labels[phase] ?? phase}`
+      : undefined;
+  const narration = followed
+    ? narrateCard(flow, diagram, followed, clock.t, clock.reducedMotion)
+    : undefined;
+
+  const inspectors = (inspected || followed) && (
+    <div
+      className={
+        side === null
+          ? "grid w-full max-w-3xl gap-2 sm:grid-cols-2"
+          : "flex w-full flex-col gap-2"
+      }
+    >
+      {inspected && (
+        <PartInspector
+          diagram={diagram}
+          partId={inspected.id}
+          t={clock.t}
+          reducedMotion={clock.reducedMotion}
+          pinned={pinned === inspected.id}
+          flow={flow}
+          onFollow={setFollowed}
+        />
+      )}
+      {followed && (
+        <CardInspector
+          flow={flow}
+          cardId={followed}
+          onStop={() => setFollowed(null)}
+        />
+      )}
+    </div>
+  );
+
+  const railsWithEvidence = diagram.rails.filter(
+    (rail) => rail.presence !== "absent" && rail.attachments.length > 0
+  );
+  const evidenceCount =
+    flow.attachments.length +
+    railsWithEvidence.reduce((n, rail) => n + rail.attachments.length, 0);
+  const evidence = evidenceCount > 0 && (
+    <>
+      {flow.attachments.length > 0 && (
+        // Collapsed until asked for, like rail evidence: open, it
+        // would cover a small diagram the whole time.
+        <Fold
+          className={`${panel} max-w-xl`}
+          label="Flow evidence"
+          count={flow.attachments.length}
+          testId="flow-evidence"
+        >
+          <AttachmentPanel
+            attachments={flow.attachments}
+            label="Flow evidence"
+          />
+        </Fold>
+      )}
+      {railsWithEvidence.map((rail) => (
+        <Fold
+          key={rail.id}
+          className={panel}
+          label={`Rail: ${rail.label ?? rail.id}`}
+          count={rail.attachments.length}
+        >
+          <AttachmentPanel
+            attachments={rail.attachments}
+            label={`Rail ${rail.label ?? rail.id} evidence`}
+          />
+        </Fold>
+      ))}
+    </>
+  );
 
   return (
     <div
@@ -293,134 +413,93 @@ export function FlowPlayer({
         interaction={interaction}
         morph={morph}
         overlayRef={setOverlay}
-        fitInsets={hasBeats && beatsShown ? insetsBeside : insetsBelow}
+        fitInsets={!hasBeats ? insetsBare : noteShown ? insetsNote : insetsRail}
       />
       {overlay &&
         createPortal(
           <>
-            {hasBeats && (
-              <Chapters
-                id={chaptersId}
-                shown={beatsShown}
-                diagram={diagram}
-                clock={clock}
-                phases={
-                  phased && names.length > 1
-                    ? {
-                        names,
-                        labels: flow.labels,
-                        current: phase,
-                        onSeek: seekPhase,
-                      }
-                    : undefined
-                }
-              />
+            {side !== null && (inspectors || evidence) && (
+              <div
+                className="pointer-events-none absolute bottom-4 flex max-h-[calc(100%-2rem)] flex-col items-start justify-end gap-2 overflow-y-auto"
+                style={{ left: ZOOM_GUTTER, width: side }}
+                data-testid="flow-side-panel"
+              >
+                {/* Inspectors sit above the evidence: the stack is anchored
+                    at its foot, so one opening on hover moves nothing under
+                    the pointer. */}
+                {inspectors}
+                {evidence}
+              </div>
             )}
             <div
-              className={`pointer-events-none absolute bottom-4 flex max-h-[calc(100%-2rem)] flex-col items-start justify-end gap-2 overflow-y-auto ${
-                hasBeats && beatsShown
-                  ? "right-[calc(min(18rem,45%)+2rem)]"
-                  : "right-4"
-              }`}
+              className="pointer-events-none absolute right-4 bottom-4 flex max-h-[calc(100%-2rem)] flex-col items-center justify-end gap-2"
               style={{ left: ZOOM_GUTTER }}
               data-testid="flow-bottom-panel"
             >
-              {/* Inspectors sit above the rest: the stack is anchored at its
-                  foot, so one opening on hover moves nothing under the pointer. */}
-              {(inspected || followed) && (
-                <div className="grid w-full max-w-3xl gap-2 sm:grid-cols-2">
-                  {inspected && (
-                    <PartInspector
-                      diagram={diagram}
-                      partId={inspected.id}
-                      t={clock.t}
-                      reducedMotion={clock.reducedMotion}
-                      pinned={pinned === inspected.id}
-                      flow={flow}
-                      onFollow={setFollowed}
-                    />
-                  )}
-                  {followed && (
-                    <CardInspector
-                      flow={flow}
-                      cardId={followed}
-                      onStop={() => setFollowed(null)}
-                    />
-                  )}
-                </div>
-              )}
-              {help && <ShortcutHelp />}
-              {followed && (
-                <div
-                  className={`${floating} flex max-w-xl items-center gap-2 px-3 py-1.5 text-sm text-fg`}
-                  data-testid="flow-narration"
-                >
-                  <span
-                    className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--color-accent)]"
-                    aria-hidden
+              {side === null && inspectors}
+              {/* One card: note, hairline, transport. Popovers rise over it. */}
+              <div
+                className={`${floating} relative flex flex-col items-center ${
+                  hasBeats || narration ? "w-full max-w-[32rem]" : "max-w-full"
+                }`}
+                data-testid="flow-player-card"
+              >
+                {(hasBeats || narration) && (
+                  <BeatNote
+                    id={noteId}
+                    shown={noteShown}
+                    beats={diagram.beats}
+                    index={clock.beat}
+                    phase={phaseLabel}
+                    narration={narration}
                   />
-                  <span>
-                    {narrateCard(
-                      flow,
-                      diagram,
-                      followed,
-                      clock.t,
-                      clock.reducedMotion
-                    )}
-                  </span>
-                </div>
-              )}
-              {flow.attachments.length > 0 && (
-                // Collapsed until asked for, like rail evidence: open, it
-                // would cover a small diagram the whole time.
-                <details
-                  className={`${panel} max-w-xl`}
-                  data-testid="flow-evidence"
-                >
-                  <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
-                    Flow evidence ({flow.attachments.length})
-                  </summary>
-                  <AttachmentPanel
-                    attachments={flow.attachments}
-                    label="Flow evidence"
+                )}
+                {hasBeats && <BeatRail diagram={diagram} clock={clock} />}
+                {help && (
+                  <div className="absolute right-0 bottom-full mb-2">
+                    <ShortcutHelp />
+                  </div>
+                )}
+                {side === null && evidence && (
+                  <div
+                    id={evidenceId}
+                    hidden={!evidenceOpen}
+                    className="absolute bottom-full left-1/2 mb-2 flex w-max max-w-[min(28rem,80vw)] -translate-x-1/2 flex-col items-stretch gap-2"
+                    data-testid="flow-evidence-popover"
+                  >
+                    {evidence}
+                  </div>
+                )}
+                <div className="max-w-full p-0.5" data-testid="flow-transport">
+                  <Controls
+                    clock={clock}
+                    names={phased ? [] : names}
+                    labels={flow.labels}
+                    arrangement={diagram.arrangement}
+                    onArrangement={choose}
+                    help={help}
+                    onHelp={() => setHelp((h) => !h)}
+                    note={
+                      hasBeats
+                        ? {
+                            shown: noteShown,
+                            controls: noteId,
+                            onToggle: () => setNoteShown((b) => !b),
+                          }
+                        : undefined
+                    }
+                    evidence={
+                      side === null && evidence
+                        ? {
+                            count: evidenceCount,
+                            open: evidenceOpen,
+                            controls: evidenceId,
+                            onToggle: () => setEvidenceOpen((o) => !o),
+                          }
+                        : undefined
+                    }
                   />
-                </details>
-              )}
-              {diagram.rails
-                .filter(
-                  (rail) =>
-                    rail.presence !== "absent" && rail.attachments.length > 0
-                )
-                .map((rail) => (
-                  <details key={rail.id} className={panel}>
-                    <summary className="cursor-pointer focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
-                      Rail: {rail.label ?? rail.id}
-                    </summary>
-                    <AttachmentPanel
-                      attachments={rail.attachments}
-                      label={`Rail ${rail.label ?? rail.id} evidence`}
-                    />
-                  </details>
-                ))}
-              <div className={`${floating} max-w-full p-0.5`}>
-                <Controls
-                  clock={clock}
-                  names={phased ? [] : names}
-                  labels={flow.labels}
-                  arrangement={diagram.arrangement}
-                  onArrangement={choose}
-                  help={help}
-                  onHelp={() => setHelp((h) => !h)}
-                  beats={
-                    hasBeats
-                      ? {
-                          shown: beatsShown,
-                          controls: chaptersId,
-                          onToggle: () => setBeatsShown((b) => !b),
-                        }
-                      : undefined
-                  }
-                />
+                </div>
               </div>
             </div>
           </>,
@@ -436,211 +515,220 @@ export function FlowPlayer({
   );
 }
 
-/* ---------- chapters ---------- */
-
-/** The phases of a phased flow, for the strip over the beats. */
-interface PhaseNav {
-  readonly names: readonly ArrangementName[];
-  readonly labels: Readonly<Record<ArrangementName, string>>;
-  /** The phase the current beat is in. */
-  readonly current: ArrangementName;
-  /** Seek to a phase's first beat. */
-  readonly onSeek: (phase: ArrangementName) => void;
-}
-
+/* ---------- beat note and hairline ---------- */
 /**
- * The beats list. Hidden rather than unmounted when the reader hides it, so
- * `aria-controls` keeps a target; shown again, it brings the current beat
- * back into view. In a phased flow a phase strip heads it and the beats are
- * grouped under their phase.
+ * The current beat's note, centred over the hairline: its phase, number and
+ * caption (two lines kept for it, clamped; whole on hover or focus), its
+ * marked steps and its evidence. A followed card's narration is a second
+ * row. Hidden rather than unmounted when the reader hides it, so
+ * `aria-controls` keeps a target.
  */
-function Chapters({
+function BeatNote({
   id,
   shown,
-  diagram,
-  clock,
-  phases,
+  beats,
+  index,
+  phase,
+  narration,
 }: {
   id: string;
   shown: boolean;
-  diagram: DiagramTimeline;
-  clock: FlowClock;
-  phases?: PhaseNav;
+  beats: readonly CompiledBeat[];
+  index: number;
+  phase?: string;
+  narration?: string;
 }) {
-  const beats = diagram.beats;
-  const list = useRef<HTMLOListElement>(null);
-  const groupId = useId();
-
-  // Keep the current beat in view inside the list, without scrolling the page.
-  useEffect(() => {
-    const ol = list.current;
-    const li = ol?.querySelector<HTMLElement>(
-      `[data-beat-index="${clock.beat}"]`
-    );
-    if (!shown || !ol || !li) return;
-    const top = li.offsetTop;
-    const bottom = top + li.offsetHeight;
-    if (top < ol.scrollTop) ol.scrollTop = top;
-    else if (bottom > ol.scrollTop + ol.clientHeight)
-      ol.scrollTop = bottom - ol.clientHeight;
-  }, [clock.beat, shown]);
-
-  const item = (i: number) => {
-    const b = beats[i];
-    // Progress runs from the beat's start to its outcome: a beat just
-    // landed on reads empty, one played out (always, under reduced
-    // motion) reads full.
-    const span = beatOutcome(diagram.travel, i) - b.t;
-    const current = i === clock.beat;
-    const progress = current
-      ? span > 0
-        ? Math.max(0, Math.min(1, (clock.t - b.t) / span))
-        : 1
-      : i < clock.beat
-        ? 1
-        : 0;
-    return (
-      <li key={b.id ?? i} data-beat-index={i}>
-        <button
-          type="button"
-          className={`relative flex w-full items-start gap-2.5 py-1.5 pr-3 pl-3 text-left text-xs leading-snug transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
-            current
-              ? "text-fg"
-              : i < clock.beat
-                ? "text-fg-soft hover:text-fg"
-                : "text-fg-mute hover:text-fg-soft"
-          }`}
-          aria-label={`Beat ${i + 1} of ${beats.length}: ${b.caption}${
-            b.changes.length
-              ? `. Changed steps: ${b.changes.map((c) => `${c.change} ${c.label}`).join("; ")}`
-              : ""
-          }`}
-          aria-current={current ? "step" : undefined}
-          title={current ? undefined : b.caption}
-          onClick={() => clock.playBeat(i)}
-        >
-          <span
-            className="absolute inset-y-0 left-0 w-0.5 origin-top bg-[var(--color-accent)]"
-            style={{ transform: `scaleY(${progress})` }}
-            data-testid="flow-beat-progress"
-            aria-hidden
-          />
-          <span
-            className={`w-4 shrink-0 text-right tabular-nums ${current ? "text-[var(--color-accent)]" : "text-fg-mute"}`}
-          >
-            {i + 1}
-          </span>
-          {b.changes.length > 0 ? (
-            <span className="flex min-w-0 flex-col gap-1">
-              <span className={current ? "min-w-0" : "min-w-0 line-clamp-2"}>
-                {b.caption}
-              </span>
-              <StepMarks changes={b.changes} />
-            </span>
-          ) : (
-            <span className={current ? "min-w-0" : "min-w-0 line-clamp-2"}>
-              {b.caption}
-            </span>
-          )}
-        </button>
-        {current && (
-          <AttachmentPanel
-            attachments={b.attachments}
-            label={`Beat ${i + 1} evidence`}
-          />
-        )}
-      </li>
-    );
-  };
-
-  const indices = beats.map((_, i) => i);
+  const i = Math.max(0, index);
+  const beat = beats[i];
+  const showsBeat = !!beat && shown;
   return (
     <div
-      id={id}
-      hidden={!shown}
-      className={`${floating} absolute top-4 right-4 flex max-h-[calc(100%-2rem)] w-72 max-w-[45%] flex-col py-1.5`}
-      data-testid="flow-chapters-panel"
+      className="group w-full px-3 pt-2.5 text-xs"
+      hidden={!showsBeat && !narration}
+      data-testid="flow-note-card"
     >
-      {phases && <PhaseStrip phases={phases} />}
-      <ol
-        ref={list}
-        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto"
-        aria-label="Beats"
-        data-testid="flow-chapters"
-      >
-        {phases
-          ? phases.names.map((name, k) => {
-              const own = indices.filter((i) => beats[i].phase === name);
-              if (own.length === 0) return null;
-              const head = `${groupId}-${k}`;
-              return (
-                <li key={name} data-testid="flow-phase-group" data-phase={name}>
-                  <div
-                    id={head}
-                    className={`px-3 pt-2 pb-0.5 text-[10px] font-medium tracking-[0.12em] uppercase ${
-                      name === phases.current
-                        ? "text-[var(--color-accent)]"
-                        : "text-fg-mute"
-                    }`}
-                  >
-                    {phases.labels[name] ?? name}
-                  </div>
-                  <ol aria-labelledby={head}>{own.map(item)}</ol>
-                </li>
-              );
-            })
-          : indices.map(item)}
-      </ol>
+      {beat && (
+        <div id={id} hidden={!shown} data-testid="flow-beat-note">
+          {phase && (
+            <div
+              className="mb-0.5 text-center text-[11px] text-fg-mute"
+              data-testid="flow-note-phase"
+            >
+              {phase}
+            </div>
+          )}
+          <p
+            className="flex min-h-[2lh] items-center justify-center text-center leading-snug text-fg"
+            title={beat.caption}
+          >
+            <span className="line-clamp-2 group-hover:line-clamp-none group-focus-within:line-clamp-none">
+              <span className="mr-1.5 font-mono tabular-nums text-fg-mute">
+                {i + 1}
+              </span>
+              <span data-testid="flow-note-caption">{beat.caption}</span>
+            </span>
+          </p>
+          {beat.changes.length > 0 && (
+            <div className="mt-1.5 flex justify-center">
+              <StepMarks changes={beat.changes} />
+            </div>
+          )}
+          {beat.attachments.length > 0 && (
+            // Keyed by beat: a new beat opens with its evidence folded.
+            <Fold
+              key={i}
+              className="mx-auto mt-1.5 w-max max-w-full"
+              label="Evidence"
+              count={beat.attachments.length}
+              testId="flow-beat-evidence"
+            >
+              <AttachmentPanel
+                attachments={beat.attachments}
+                label={`Beat ${i + 1} evidence`}
+              />
+            </Fold>
+          )}
+        </div>
+      )}
+      {narration && (
+        <div
+          className={`flex items-center justify-center gap-2 text-sm text-fg ${
+            showsBeat ? "mt-2 border-t border-[var(--color-line)] pt-2" : ""
+          }`}
+          data-testid="flow-narration"
+        >
+          <span
+            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-fg-soft"
+            aria-hidden
+          />
+          <span>{narration}</span>
+        </div>
+      )}
     </div>
   );
 }
 
 /**
- * Where the migration stands: every phase in order, the current one marked;
- * activating one seeks to its first beat.
+ * The story as a hairline: one dot per beat, placed by its start across the
+ * period (each segment at least `min-w-4`), phases as gaps. Played dots
+ * are small and filled, the current one large and ringed, those ahead
+ * hollow; the line fills from a beat's start to its outcome. A dot plays its
+ * beat; hovering or focusing another shows its caption above it.
  */
-function PhaseStrip({ phases }: { phases: PhaseNav }) {
-  const at = phases.names.indexOf(phases.current);
+function BeatRail({
+  diagram,
+  clock,
+}: {
+  diagram: DiagramTimeline;
+  clock: FlowClock;
+}) {
+  const beats = diagram.beats;
+  const [peek, setPeek] = useState<number | null>(null);
+  const period = diagram.period;
+  const unpeek = (i: number) => setPeek((p) => (p === i ? null : p));
   return (
-    <nav
-      aria-label="Phases"
-      className="border-b border-[var(--color-line)] px-2 pb-1.5"
-      data-testid="flow-phases"
+    <ol
+      className="flex h-6 w-full items-center px-5"
+      aria-label="Beats"
+      data-testid="flow-beats"
     >
-      <ol className="flex flex-wrap items-center gap-0.5 text-xs">
-        {phases.names.map((name, k) => {
-          const current = k === at;
-          const label = phases.labels[name] ?? name;
-          return (
-            <li key={name} className="flex items-center gap-0.5">
-              {k > 0 && (
-                <span className="text-fg-mute" aria-hidden>
-                  →
-                </span>
-              )}
-              <button
-                type="button"
-                className={`rounded-[var(--radius-sm,4px)] px-1.5 py-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+      {beats.map((b, i) => {
+        const next = i + 1 < beats.length ? beats[i + 1].t : period;
+        // Progress runs from the beat's start to its outcome: a beat just
+        // landed on reads empty, one played out (always, under reduced
+        // motion) reads full.
+        const span = beatOutcome(diagram.travel, i) - b.t;
+        const current = i === clock.beat;
+        const played = i < clock.beat;
+        const progress = current
+          ? span > 0
+            ? Math.max(0, Math.min(1, (clock.t - b.t) / span))
+            : 1
+          : played
+            ? 1
+            : 0;
+        const at = period > 0 ? b.t / period : i / beats.length;
+        const align =
+          at < 0.25
+            ? "left-0"
+            : at > 0.75
+              ? "left-0 -translate-x-full"
+              : "left-0 -translate-x-1/2";
+        const phaseStart = i > 0 && b.phase !== beats[i - 1].phase;
+        return (
+          <li
+            key={b.id ?? i}
+            className={`relative flex h-full min-w-4 items-center ${phaseStart ? "ml-4" : ""}`}
+            style={{ flex: `${Math.max(0, next - b.t)} 1 0px` }}
+            data-beat-index={i}
+            data-phase={b.phase}
+            data-phase-start={phaseStart ? "true" : undefined}
+          >
+            <span
+              className="absolute inset-x-0 top-1/2 h-px bg-[var(--color-line-strong)]"
+              aria-hidden
+            />
+            <span
+              className="absolute inset-x-0 top-1/2 -mt-px h-0.5 origin-left bg-[var(--color-accent)]"
+              style={{ transform: `scaleX(${progress})` }}
+              data-testid="flow-beat-progress"
+              aria-hidden
+            />
+            <button
+              type="button"
+              className="group/dot absolute top-1/2 left-0 z-[1] flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              aria-label={`Beat ${i + 1} of ${beats.length}: ${b.caption}${
+                b.changes.length
+                  ? `. Changed steps: ${b.changes.map((c) => `${c.change} ${c.label}`).join("; ")}`
+                  : ""
+              }`}
+              aria-current={current ? "step" : undefined}
+              data-state={current ? "current" : played ? "played" : "ahead"}
+              onClick={() => clock.playBeat(i)}
+              onMouseEnter={() => setPeek(i)}
+              onMouseLeave={() => unpeek(i)}
+              onFocus={() => setPeek(i)}
+              onBlur={() => unpeek(i)}
+            >
+              <span
+                className={`block rounded-full transition-transform group-hover/dot:scale-125 ${
                   current
-                    ? "bg-[var(--color-accent-wash)] text-[var(--color-accent)]"
-                    : k < at
-                      ? "text-fg-soft hover:text-fg"
-                      : "text-fg-mute hover:text-fg-soft"
+                    ? "h-2.5 w-2.5 bg-[var(--color-accent)] ring-2 ring-[var(--color-accent-wash)]"
+                    : played
+                      ? "h-1.5 w-1.5 bg-fg-soft"
+                      : "h-2 w-2 border border-fg-mute bg-[var(--color-bg-1)]"
                 }`}
-                aria-current={current ? "step" : undefined}
-                aria-label={`Phase ${k + 1} of ${phases.names.length}: ${label}`}
-                aria-keyshortcuts={current ? undefined : "B Shift+B"}
-                title={`Go to ${label} (B / ⇧B)`}
-                data-phase={name}
-                onClick={() => phases.onSeek(name)}
+                aria-hidden
+              />
+            </button>
+            {peek === i && !current && (
+              <span
+                role="tooltip"
+                className={`pointer-events-none absolute bottom-full z-[2] mb-2 w-max max-w-64 rounded-[var(--radius-md)] bg-[var(--color-bg-2)] px-2 py-1 text-xs leading-snug text-fg shadow-[var(--shadow-2)] ${align}`}
+                data-testid="flow-beat-peek"
               >
-                {label}
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
+                <span className="mr-1.5 tabular-nums text-fg-mute">
+                  {i + 1}
+                </span>
+                {b.caption}
+              </span>
+            )}
+            {i === beats.length - 1 && (
+              // The story's end: the line closes on a dot, not a cut.
+              <span
+                className={`absolute top-1/2 right-0 h-2 w-2 translate-x-1/2 -translate-y-1/2 rounded-full ${
+                  progress >= 1 && clock.t >= period
+                    ? "bg-fg-soft"
+                    : "border border-fg-mute bg-[var(--color-bg-1)]"
+                }`}
+                data-testid="flow-beat-end"
+                aria-hidden
+              />
+            )}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -653,7 +741,10 @@ const STEP_GLYPH = { added: "+", changed: "~", removed: "−" } as const;
  */
 function StepMarks({ changes }: { changes: readonly BeatChange[] }) {
   return (
-    <span className="flex flex-wrap gap-1" data-testid="flow-step-marks">
+    <span
+      className="flex flex-wrap justify-center gap-1"
+      data-testid="flow-step-marks"
+    >
       {changes.map((c, k) => (
         <span
           key={k}
@@ -670,6 +761,46 @@ function StepMarks({ changes }: { changes: readonly BeatChange[] }) {
         </span>
       ))}
     </span>
+  );
+}
+
+/**
+ * A folded evidence group: a quiet chevron, its name and a mono count, in
+ * place of the browser's disclosure triangle.
+ */
+function Fold({
+  className,
+  label,
+  count,
+  testId,
+  children,
+}: {
+  className?: string;
+  label: string;
+  count: number;
+  testId?: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className={`group/fold ${className ?? ""}`} data-testid={testId}>
+      <summary className="flex w-max cursor-pointer list-none items-center gap-1.5 rounded-[var(--radius-sm,4px)] text-fg-soft hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] [&::-webkit-details-marker]:hidden">
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3 w-3 shrink-0 text-fg-mute transition-transform group-open/fold:rotate-90"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+        <span>{label}</span>
+        <span className="font-mono tabular-nums text-fg-mute">{count}</span>
+      </summary>
+      {children}
+    </details>
   );
 }
 
@@ -695,14 +826,18 @@ const ICONS = {
       <path d="M6 6l9 6-9 6z" fill="currentColor" />
     </>
   ),
-  beats: (
+  note: (
     <>
-      <path d="M9 6h11" />
-      <path d="M9 12h11" />
-      <path d="M9 18h11" />
-      <path d="M4 6h.01" strokeWidth={3} />
-      <path d="M4 12h.01" strokeWidth={3} />
-      <path d="M4 18h.01" strokeWidth={3} />
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M7 10h10" />
+      <path d="M7 14h6" />
+    </>
+  ),
+  evidence: (
+    <>
+      <path d="M8 3h8l4 4v14H8z" />
+      <path d="M16 3v4h4" />
+      <path d="M4 7v14h10" />
     </>
   ),
   loop: (
@@ -768,7 +903,8 @@ function Controls({
   onArrangement,
   help,
   onHelp,
-  beats,
+  note,
+  evidence,
 }: {
   clock: FlowClock;
   names: readonly ArrangementName[];
@@ -777,8 +913,15 @@ function Controls({
   onArrangement: (a: ArrangementName) => void;
   help: boolean;
   onHelp: () => void;
-  /** The beats list toggle; absent when the flow has no beats. */
-  beats?: { shown: boolean; controls: string; onToggle: () => void };
+  /** The beat note toggle; absent when the flow has no beats. */
+  note?: { shown: boolean; controls: string; onToggle: () => void };
+  /** Flow and rail evidence folded into the transport on a narrow frame. */
+  evidence?: {
+    count: number;
+    open: boolean;
+    controls: string;
+    onToggle: () => void;
+  };
 }) {
   const noBeats = clock.beatCount === 0;
   const nextSpeedUp =
@@ -853,16 +996,36 @@ function Controls({
         </>
       )}
       <Divider />
-      {beats && (
+      {note && (
         <IconButton
-          label={beats.shown ? "Hide beats" : "Show beats"}
+          label={note.shown ? "Hide beat note" : "Show beat note"}
           keys="C"
           shortcut="C"
-          icon="beats"
-          onClick={beats.onToggle}
-          expanded={beats.shown}
-          controls={beats.controls}
+          icon="note"
+          onClick={note.onToggle}
+          expanded={note.shown}
+          controls={note.controls}
         />
+      )}
+      {evidence && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className={`!gap-1 !px-1.5 text-xs tabular-nums ${
+            evidence.open
+              ? "!bg-[var(--color-accent-wash)] !text-[var(--color-accent)]"
+              : ""
+          }`}
+          onClick={evidence.onToggle}
+          aria-label={`Evidence (${evidence.count})`}
+          aria-expanded={evidence.open}
+          aria-controls={evidence.controls}
+          title="Flow and rail evidence"
+          iconLeft={<Icon size="sm">{ICONS.evidence}</Icon>}
+          data-testid="flow-evidence-toggle"
+        >
+          {evidence.count}
+        </Button>
       )}
       <Button
         size="sm"

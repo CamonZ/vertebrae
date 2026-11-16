@@ -178,7 +178,7 @@ describe("the arrangement selector", () => {
   it("lists a beat's marked steps against the baseline", () => {
     renderPlayer();
     const marks = () =>
-      within(screen.getByTestId("flow-chapters"))
+      within(screen.getByTestId("flow-note-card"))
         .queryAllByTestId("flow-step-marks")
         .map((m) => m.textContent);
     expect(marks()[0]).toContain("+ rate limiter · send");
