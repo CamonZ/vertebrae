@@ -3,10 +3,11 @@
  * warm-up only helps if it lays out exactly what the Graph will ask for.
  * Hegel generates projects — workflows spread over named factories and no
  * factory, with steps, transitions, handoffs (inside and across factories)
- * and arbitrary live counts — and for every scope the Atlas can open:
+ * and arbitrary live counts — and for every Graph level the Atlas can open:
  *
- * - the warm-up visits it: every factory, the No Factory scope when some
- *   workflow has none, and the whole project, each once;
+ * - the warm-up visits it: between factories, inside every factory (and the
+ *   No Factory scope when some workflow has none) and inside every
+ *   workflow, each once;
  * - the flow it warms has the same layout identity (the cache key the
  *   layout engine uses, per region and composed) as the flow the Graph lays
  *   out for that scope, whatever the live counts, and whether or not the
@@ -20,17 +21,13 @@ import type { PipelineSummary, PipelineWorkflow } from "../../../bindings";
 import { compileFlow } from "../../MachineDiagram/flow/compile";
 import { levelKey, needsAutoLayout } from "../../MachineDiagram/flow/layout";
 import type { FlowSpec } from "../../MachineDiagram/flow/spec";
-import {
-  NO_FACTORY_SCOPE,
-  filterByFactory,
-  type FactoryFilterValue,
-} from "../../../utils/workflowFactory";
-import { buildMachineFlow } from "./buildMachineFlow";
+import { NO_FACTORY_SCOPE } from "../../../utils/workflowFactory";
+import { buildAtlasLevel, type AtlasGraphLevel } from "./atlasLevels";
 import { step, workflow } from "./machineFlow.fixture";
 import {
   atlasTopology,
   atlasWarmupFlow,
-  atlasWarmupScopes,
+  atlasWarmupLevels,
 } from "./useAtlasLayoutWarmup";
 
 function check(condition: boolean, message: string): void {
@@ -101,19 +98,16 @@ function identity(spec: FlowSpec): string | null {
   return levelKey(compiled.flow.arrangements);
 }
 
-/** What the Graph lays out for a scope (WorkflowAtlas → useAtlasMachineFlow). */
+/** What the Graph lays out for a level (WorkflowAtlas → useAtlasLevelFlow). */
 function graphIdentity(
   summary: PipelineSummary,
-  scope: FactoryFilterValue
+  level: AtlasGraphLevel
 ): string | null {
-  const scoped =
-    scope === null
-      ? summary
-      : { ...summary, workflows: filterByFactory(summary.workflows, scope) };
-  const adapted = buildMachineFlow(
-    scoped,
+  const adapted = buildAtlasLevel(
+    summary,
     new Map(),
-    JSON.stringify([0, scope])
+    level,
+    JSON.stringify([0, level])
   );
   const { spec } = JSON.parse(adapted.structuralKey) as { spec: FlowSpec };
   return identity(spec);
@@ -138,35 +132,46 @@ test("the warm-up lays out exactly what each scope's Graph will ask for", () =>
   hegel.test(
     (tc) => {
       const summary = tc.draw(project);
-      const scopes = atlasWarmupScopes(summary);
+      const levels = atlasWarmupLevels(summary);
       const named = new Set(
         summary.workflows.map((w) => w.factory_name).filter((f) => f !== null)
       );
       check(
-        scopes.length === new Set(scopes.map((s) => JSON.stringify(s))).size,
-        "a scope is warmed twice"
+        levels.length === new Set(levels.map((l) => JSON.stringify(l))).size,
+        "a level is warmed twice"
+      );
+      const factories = levels.flatMap((l) =>
+        l.kind === "workflows" ? [l.factory] : []
       );
       for (const f of named)
-        check(scopes.includes(f), `factory ${f} is never warmed`);
-      check(scopes.includes(null), "the whole project is never warmed");
+        check(factories.includes(f), `factory ${f} is never warmed`);
       check(
-        scopes.includes(NO_FACTORY_SCOPE) ===
+        levels.some((l) => l.kind === "factories"),
+        "the between-factories level is never warmed"
+      );
+      check(
+        factories.includes(NO_FACTORY_SCOPE) ===
           summary.workflows.some((w) => w.factory_name === null),
         "the No Factory scope is warmed exactly when it exists"
       );
+      for (const w of summary.workflows)
+        check(
+          levels.some((l) => l.kind === "steps" && l.workflowId === w.id),
+          `workflow ${w.id} is never warmed`
+        );
       const k = tc.draw(gs.integers({ minValue: 1, maxValue: 9 }));
-      for (const scope of scopes) {
+      for (const level of levels) {
         // The hook warms the count-free topology, not the live summary.
-        const warm = atlasWarmupFlow(atlasTopology(summary), new Map(), scope);
+        const warm = atlasWarmupFlow(atlasTopology(summary), new Map(), level);
         const warmKey = warm ? levelKey(warm.arrangements) : null;
-        const shown = graphIdentity(summary, scope);
+        const shown = graphIdentity(summary, level);
         check(
           warmKey === shown,
-          `scope ${JSON.stringify(scope)}: the warm-up lays out a different flow than the Graph`
+          `level ${JSON.stringify(level)}: the warm-up lays out a different flow than the Graph`
         );
         check(
-          graphIdentity(recount(summary, k), scope) === shown,
-          `scope ${JSON.stringify(scope)}: live counts change the layout`
+          graphIdentity(recount(summary, k), level) === shown,
+          `level ${JSON.stringify(level)}: live counts change the layout`
         );
       }
     },

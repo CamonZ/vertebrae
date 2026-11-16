@@ -219,9 +219,9 @@ describe("workflow topology contracts", () => {
       );
       expect(full).not.toMatch(/idle|Now: idle|NaN/);
       expect(part.timeline.cards).toEqual([]);
-      expect(markup).not.toMatch(
-        /claude|typesafe|reviewer|approve the plan|tools|artifacts|cmd|c1|done|NaN/
-      );
+      // The catalogue still shows the mechanism and its generic fixtures
+      // (tools, host functions, reviewer, child slots), never example content.
+      expect(markup).not.toMatch(/claude|typesafe|approve the plan|done|NaN/);
       if ("form" in props && props.form === "stop") {
         expect(markup).toContain('aria-label="Stop step"');
         expect(markup).not.toContain("md-terminal");

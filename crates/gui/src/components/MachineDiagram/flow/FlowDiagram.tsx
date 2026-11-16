@@ -1,3 +1,4 @@
+import { placedLabels } from "../partLabels";
 import { memo, useMemo, useState, type ReactNode } from "react";
 import { PartContext, usePart } from "../partContext";
 import { countDescription, type FlowPresentation } from "./presentation";
@@ -21,6 +22,8 @@ import { RailCards } from "../RailCards";
 import { SvgText } from "../SvgText";
 import type { DiagramPart, DiagramRail, DiagramTimeline } from "./compile";
 import { useFlowDrawings } from "./drawings";
+import { useReducedMotion } from "../useReducedMotion";
+import { hoverPreview, usePreviewClock } from "./hoverPreview";
 import { DrillMark } from "./DrillMark";
 import { CROSS_LABEL_SIZE, nameLabelLocal, regionLabelAt } from "./extent";
 import { route, routePath } from "../route";
@@ -38,6 +41,27 @@ import {
  * statechart viewer's minimum).
  */
 export const MIN_FLOW_HEIGHT = 320;
+
+/**
+ * Where a neutral part's live count sits, in part space: the legacy slot under
+ * the title, or after the last always-shown line of an explicit label
+ * placement (so it never sits on a placed title).
+ */
+function liveCountAt(p: DiagramPart): { x: number; y: number } {
+  if (!p.labels) return { x: 24, y: 75 };
+  const lines = placedLabels({
+    identity: p.identity,
+    bb: p.bb,
+    scale: p.scale,
+    timeline: p.timeline,
+    labels: p.labels,
+    change: p.change,
+    changeNote: p.changeNote,
+  }).filter((l) => !l.hover);
+  const last = lines.find((l) => l.key === "subtitle") ?? lines[0];
+  if (!last) return { x: 24, y: 75 };
+  return { x: (last.box.x1 + 12) / p.scale, y: last.y / p.scale };
+}
 
 /** Accessible note on a part with a drill-down. */
 export const DRILL_HINT = "Opens a deeper diagram.";
@@ -365,6 +389,14 @@ function PartView({
 }) {
   const drawings = useFlowDrawings();
   const parent = usePart();
+  const previewing = !leaving && presentation?.preview === p.id;
+  const preview = useMemo(
+    () => (previewing ? hoverPreview(p) : null),
+    [previewing, p]
+  );
+  const prefersReduced = useReducedMotion();
+  const previewReduced = reducedMotion ?? prefersReduced;
+  const previewT = usePreviewClock(preview?.period ?? null, previewReduced);
   const ctx = useMemo(
     () => ({
       ...parent,
@@ -377,6 +409,7 @@ function PartView({
     <PartContext.Provider value={ctx}>
       <g
         data-scene-part={p.id}
+        data-part-kind={p.kind}
         data-testid={leaving ? undefined : presentation?.testIds?.get(p.id)}
         data-search-dim={presentation?.dimmed?.has(p.id) || undefined}
         data-traced={presentation?.traced?.has(p.id) || undefined}
@@ -409,7 +442,9 @@ function PartView({
               : undefined;
             return (
               <>
-                {draw ? (
+                {preview ? (
+                  preview.draw(previewT, previewReduced)
+                ) : draw ? (
                   draw(frame.t, p)
                 ) : (
                   <PartBox x={p.bb[0]} y={p.bb[1]} w={p.bb[2]} h={p.bb[3]} />
@@ -419,8 +454,7 @@ function PartView({
                 {p.neutral && p.scale >= 1 && !p.changeNote && (
                   <LiveCount
                     count={presentation?.counts?.get(p.id)}
-                    x={24}
-                    y={75}
+                    {...liveCountAt(p)}
                   />
                 )}
                 {p.drill && <DrillMark bb={p.bb} scale={p.scale} />}

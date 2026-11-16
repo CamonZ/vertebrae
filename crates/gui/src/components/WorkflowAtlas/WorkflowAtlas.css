@@ -1584,16 +1584,15 @@
 .uv-machine-scene [data-search-dim] {
   opacity: 0.24;
 }
-/* Handoffs between workflows are the factory's main story: solid and heavy,
-   with accent on hover (the rail and both of its ends light up). */
+/* Handoffs between workflows are the factory's main story: solid and heavy.
+   On hover the rail and both of its ends light up, in ink, never a hue. */
 .uv-machine-scene [data-handoff] .md-wire .gedge {
   stroke: var(--md-ink);
   stroke-width: 3;
   stroke-opacity: 0.8;
 }
 .uv-machine-scene [data-handoff] .md-wire[data-emphasis="true"] .gedge {
-  stroke: var(--color-accent);
-  stroke-width: 5;
+  stroke-width: 4.5;
   stroke-opacity: 1;
 }
 .uv-machine-scene .md-rail-hit {
@@ -1609,13 +1608,48 @@
 .uv-machine-layer[data-tracing] .md-region:not([data-traced]) {
   opacity: 0.3;
 }
-/* Direction of a traced rail: work arriving (info) or leaving (accent).
-   The connections list uses the same two colours. */
-.uv-machine-scene [data-rail][data-flow="in"] .md-wire .gedge {
-  stroke: var(--color-info);
+/* A traced rail is heavier ink, never a hue: the connections list names
+   which way the work goes. The step back and the lift fade in. */
+.uv-machine-layer [data-scene-part],
+.uv-machine-layer [data-rail],
+.uv-machine-layer .md-region {
+  transition: opacity var(--t-fast, 150ms) var(--ease, ease);
 }
-.uv-machine-scene [data-rail][data-flow="out"] .md-wire .gedge {
-  stroke: var(--color-accent);
+.uv-machine-scene [data-rail] .md-wire .gedge {
+  transition:
+    stroke var(--t-fast, 150ms) var(--ease, ease),
+    stroke-width var(--t-fast, 150ms) var(--ease, ease);
+}
+.uv-machine-scene [data-rail][data-traced] .md-wire .gedge {
+  stroke: var(--md-ink);
+  stroke-width: 3;
+}
+.uv-machine-scene [data-rail][data-handoff][data-traced] .md-wire .gedge {
+  stroke-width: 4.5;
+}
+/* Route labels show only with their route: when a part it touches (or the
+   route itself) is hovered, focused or selected. The layout still reserves
+   their room, so revealing one moves nothing. */
+.uv-machine-scene [data-rail] .md-wire text {
+  transition: opacity var(--t-fast, 150ms) var(--ease, ease);
+}
+.uv-machine-scene [data-rail]:not([data-traced]) .md-wire text {
+  opacity: 0;
+}
+/* A station's port labels name the same routes: shown with the station. */
+.uv-machine-scene
+  :is([data-part-kind="workflow"], [data-part-kind="factory"])
+  [data-port]
+  text {
+  transition: opacity var(--t-fast, 150ms) var(--ease, ease);
+}
+.uv-machine-scene
+  :is([data-part-kind="workflow"], [data-part-kind="factory"]):not(
+    [data-traced]
+  )
+  [data-port]
+  text {
+  opacity: 0;
 }
 
 /* Connections of the hovered element, in words. */
@@ -1660,11 +1694,8 @@
   display: flex;
   flex-direction: column;
   padding: 3px 0 3px 10px;
-  border-left: 3px solid var(--color-accent);
+  border-left: 3px solid var(--color-fg-mute);
   margin-bottom: 4px;
-}
-.uv-connections [data-direction="in"] li {
-  border-left-color: var(--color-info);
 }
 .uv-connections-end {
   font-weight: 600;
@@ -1680,4 +1711,18 @@
 .uv-connections-more,
 .uv-connections-empty {
   margin: 4px 0 0;
+}
+
+/* TaskRun motion: one card on the rail a move travels; rails stay neutral. */
+.uv-taskrun-motion {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.uv-taskrun-card {
+  fill: var(--color-accent);
+  stroke: var(--color-bg);
+  stroke-width: 2;
 }

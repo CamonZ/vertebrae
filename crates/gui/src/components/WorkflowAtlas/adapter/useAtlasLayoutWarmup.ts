@@ -14,37 +14,47 @@ import { layoutFlowOffThread } from "../../MachineDiagram/flow/layoutClient";
 import {
   NO_FACTORY_SCOPE,
   factoryNames,
-  filterByFactory,
   hasNoFactory,
+  matchesFactory,
   type FactoryFilterValue,
 } from "../../../utils/workflowFactory";
-import { buildMachineFlow } from "./buildMachineFlow";
+import { buildAtlasLevel, type AtlasGraphLevel } from "./atlasLevels";
+import { workflowFactoryScope } from "./buildMachineFlow";
 
-/** Delay before warming starts, and between scopes, to stay out of the way. */
+/** Delay before warming starts, and between levels, to stay out of the way. */
 const WARMUP_DELAY_MS = 750;
 
-/** Every Graph the Atlas can show: each factory, the unassigned scope, and all. */
-export function atlasWarmupScopes(
-  summary: PipelineSummary
-): FactoryFilterValue[] {
-  return [
+/**
+ * Every Graph the Atlas can show: between factories, inside each factory
+ * (and the unassigned scope), then inside each workflow.
+ */
+export function atlasWarmupLevels(summary: PipelineSummary): AtlasGraphLevel[] {
+  const factories: FactoryFilterValue[] = [
     ...factoryNames(summary.workflows),
     ...(hasNoFactory(summary.workflows) ? [NO_FACTORY_SCOPE] : []),
-    null,
+  ];
+  return [
+    { kind: "factories" },
+    ...factories.map((factory) => ({ kind: "workflows" as const, factory })),
+    ...factories.flatMap((factory) =>
+      summary.workflows
+        .filter((wf) => matchesFactory(wf.factory_name, factory))
+        .map((wf) => ({
+          kind: "steps" as const,
+          factory: workflowFactoryScope(wf),
+          workflowId: wf.id,
+        }))
+    ),
   ];
 }
 
-/** The compiled flow a scope's Graph lays out, or null when it needs no layout. */
+/** The compiled flow a level's Graph lays out, or null when it needs no layout. */
 export function atlasWarmupFlow(
   summary: PipelineSummary,
   routeConfigs: ReadonlyMap<string, JsonValue | null>,
-  scope: FactoryFilterValue
+  level: AtlasGraphLevel
 ): CompiledFlow | null {
-  const scoped =
-    scope === null
-      ? summary
-      : { ...summary, workflows: filterByFactory(summary.workflows, scope) };
-  const { spec } = buildMachineFlow(scoped, routeConfigs);
+  const { spec } = buildAtlasLevel(summary, routeConfigs, level);
   const compiled = compileFlow(spec);
   return compiled.ok && needsAutoLayout(compiled.flow) ? compiled.flow : null;
 }
@@ -76,10 +86,9 @@ export const atlasTopology = (summary: PipelineSummary): PipelineSummary =>
   JSON.parse(structureOf(summary)) as PipelineSummary;
 
 /**
- * Precompute the machine-graph layout of every factory in the background
- * once the topology and its route configs have loaded. Each workflow's
- * layout is persisted, so opening any factory later (or after a restart)
- * only composes cached workflows. Requests run at background priority: the
+ * Precompute the layout of every Graph level in the background once the
+ * topology and its route configs have loaded. Layouts are persisted, so
+ * opening any level later (or after a restart) reads it from the cache. Requests run at background priority: the
  * Graph on screen always jumps the queue.
  */
 export function useAtlasLayoutWarmup(summary: PipelineSummary | null): void {
@@ -116,12 +125,12 @@ export function useAtlasLayoutWarmup(summary: PipelineSummary | null): void {
       routeStepIds.map((id, index) => [id, configs[index]])
     );
     const abort = new AbortController();
-    const scopes = atlasWarmupScopes(topology);
+    const levels = atlasWarmupLevels(topology);
     let timer: ReturnType<typeof setTimeout>;
     const next = () => {
-      const scope = scopes.shift();
-      if (scope === undefined || abort.signal.aborted) return;
-      const flow = atlasWarmupFlow(topology, routeConfigs, scope);
+      const level = levels.shift();
+      if (level === undefined || abort.signal.aborted) return;
+      const flow = atlasWarmupFlow(topology, routeConfigs, level);
       if (flow)
         layoutFlowOffThread(flow, {
           composite: true,

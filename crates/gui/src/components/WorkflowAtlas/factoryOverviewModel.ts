@@ -189,6 +189,38 @@ function translatedRect(rect: Rect, offsetX: number, offsetY: number): Rect {
   return { ...rect, x: rect.x + offsetX, y: rect.y + offsetY };
 }
 
+/** A directed factory route: how many workflow handoffs go from one factory to another. */
+export interface FactoryRoute {
+  from: string;
+  to: string;
+  count: number;
+}
+
+/**
+ * Aggregate cross-workflow handoffs into one route per ordered factory pair,
+ * keyed by `factoryGroupKey` values. Handoffs inside a factory are not routes.
+ */
+export function factoryRoutes(model: AtlasModel): FactoryRoute[] {
+  const routes = new Map<string, FactoryRoute>();
+  const workflowById = new Map(
+    model.workflows.map((workflow) => [workflow.id, workflow])
+  );
+  for (const edge of model.edges) {
+    if (edge.kind !== "cross") continue;
+    const from = workflowById.get(edge.fromWorkflow);
+    const to = workflowById.get(edge.toWorkflow);
+    if (!from || !to) continue;
+    const fromKey = factoryKey(from.factoryName);
+    const toKey = factoryKey(to.factoryName);
+    if (fromKey === toKey) continue;
+    const routeKey = `${fromKey}>${toKey}`;
+    const route = routes.get(routeKey);
+    if (route) route.count += 1;
+    else routes.set(routeKey, { from: fromKey, to: toKey, count: 1 });
+  }
+  return [...routes.values()];
+}
+
 /**
  * Place the factory overlay over an already-laid-out workflow canvas.
  *
@@ -262,30 +294,9 @@ export function layoutFactoryOverview(
     factoryRects.set(factoryGroupKey(factory), factory.rect);
   });
 
-  const factoryRoutes = new Map<
-    string,
-    { from: string; to: string; count: number }
-  >();
-  const workflowById = new Map(
-    model.workflows.map((workflow) => [workflow.id, workflow])
-  );
-
-  for (const edge of model.edges) {
-    if (edge.kind !== "cross") continue;
-    const from = workflowById.get(edge.fromWorkflow);
-    const to = workflowById.get(edge.toWorkflow);
-    if (!from || !to) continue;
-    const fromKey = factoryKey(from.factoryName);
-    const toKey = factoryKey(to.factoryName);
-    if (fromKey === toKey) continue;
-    const routeKey = `${fromKey}>${toKey}`;
-    const route = factoryRoutes.get(routeKey);
-    if (route) route.count += 1;
-    else factoryRoutes.set(routeKey, { from: fromKey, to: toKey, count: 1 });
-  }
-
   const routes: FactoryOverviewFactoryRoute[] = [];
-  for (const [key, route] of factoryRoutes) {
+  for (const route of factoryRoutes(model)) {
+    const key = `${route.from}>${route.to}`;
     const fromRect = factoryRects.get(route.from);
     const toRect = factoryRects.get(route.to);
     if (!fromRect || !toRect) continue;

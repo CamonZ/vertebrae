@@ -31,6 +31,15 @@ import { fixture, step, workflow } from "./adapter/machineFlow.fixture";
 import { machineId } from "./adapter/buildMachineFlow";
 import { FactoryOverview } from "./FactoryOverview";
 
+/** The Graph inside one workflow (its steps), once laid out. */
+const stepScene = (v: ReturnType<typeof render>) =>
+  v.container.querySelector('[aria-label="Workflow step graph"]');
+const factoryScene = (v: ReturnType<typeof render>) =>
+  v.container.querySelector('[aria-label="Factory graph"]');
+/** The interactive part of a part id, once drawn. */
+const partEl = (v: ReturnType<typeof render>, id: string) =>
+  v.container.querySelector(`[data-part-id="${id}"]`);
+
 // Only the worker transport is simulated. Replies execute real ELK, bus routing
 // and cache; the production hook recompiles with layoutFrom before rendering.
 const transport = vi.hoisted(() => {
@@ -99,47 +108,77 @@ const paths = (v: ReturnType<typeof render>) =>
     p.getAttribute("d")
   );
 
-/** Membership oracle: only workflow b and rails entirely inside it match. */
-function expectSearchForB(
+/**
+ * Membership oracle for a search at the steps level: only the parts in
+ * `matches` (and rails entirely between them) stay lit; the workflow region
+ * dims unless it matches.
+ */
+function expectSearch(
   v: ReturnType<typeof render>,
-  d: compiler.DiagramTimeline
+  d: compiler.DiagramTimeline,
+  matches: ReadonlySet<string>
 ) {
-  const b = d.regions.find((r) => r.id === machineId("region", "b"))!;
-  const members = new Set(b.parts);
   for (const region of d.regions) {
     const el = v.container.querySelector(`[data-region-id="${region.id}"]`)!;
-    expect(el.hasAttribute("data-search-dim")).toBe(region.id !== b.id);
+    expect(el.hasAttribute("data-search-dim")).toBe(!matches.has(region.id));
   }
   for (const part of d.parts) {
     const el = v.container.querySelector(`[data-scene-part="${part.id}"]`)!;
-    expect(el.hasAttribute("data-search-dim")).toBe(!members.has(part.id));
+    expect(el.hasAttribute("data-search-dim")).toBe(!matches.has(part.id));
   }
   for (const rail of d.rails) {
     const el = v.container.querySelector(
       `[data-rail-id="${rail.id}"]`
     )!.parentElement!;
     expect(el.hasAttribute("data-search-dim")).toBe(
-      !members.has(rail.from.part) || !members.has(rail.to.part)
+      !matches.has(rail.from.part) || !matches.has(rail.to.part)
     );
   }
 }
 
-it("integrates the real scoped graph and preserves routes/camera/compile counts under live interaction", async () => {
+/**
+ * From the factory's workflows Graph (request 0), open workflow `id` by a
+ * double-click. Its steps request becomes request 0; `clear` resets spies
+ * just before the steps level mounts.
+ */
+async function openSteps(
+  v: ReturnType<typeof render>,
+  id = "a",
+  clear: readonly { mockClear(): unknown }[] = []
+) {
+  await reply(0);
+  const station = await waitFor(() => {
+    const el = partEl(v, machineId("station", id));
+    if (!el) throw new Error(`station ${id} not drawn yet`);
+    return el;
+  });
+  for (const spy of clear) spy.mockClear();
+  fireEvent.doubleClick(station);
+  transport.requests.splice(0, 1);
+}
+
+it("integrates the real steps graph and preserves routes/camera/compile counts under live interaction", async () => {
   const compile = vi.spyOn(compiler, "compileFlow");
   const elkCalls = vi.spyOn(elk, "layout");
   const v = render(<WorkflowAtlas />);
+  await openSteps(v, "a", [compile, elkCalls]);
   expect(transport.requests).toHaveLength(1);
-  expect(scene(v)).toBeNull();
+  expect(stepScene(v)).toBeNull();
   await reply(0);
-  await waitFor(() => expect(scene(v)).not.toBeNull());
+  await waitFor(() => expect(stepScene(v)).not.toBeNull());
   const result = compile.mock.results.at(-1)!.value as compiler.CompileResult;
   if (!result.ok) throw new Error(JSON.stringify(result.errors));
   const d = result.flow.arrangements[0];
   expect(compile).toHaveBeenCalledTimes(2);
   expect(elkCalls).toHaveBeenCalledTimes(1);
-  expect(d.regions).toHaveLength(3);
-  expect(d.parts).toHaveLength(
-    input.summary.workflows.reduce((n, w) => n + w.workflow_steps.length + 1, 0)
+  // Only workflow a is drawn; its handoffs end at stubs naming b and empty.
+  expect(d.regions).toHaveLength(1);
+  const a = input.summary.workflows[0];
+  expect(d.regions[0].parts).toHaveLength(a.workflow_steps.length + 1);
+  const toB = machineId("stub", "out", "a", "b");
+  const toEmpty = machineId("stub", "out", "a", "empty");
+  expect(d.parts.map((p) => p.id).sort()).toEqual(
+    [...d.regions[0].parts, toB, toEmpty].sort()
   );
   expect(paths(v)).toEqual(
     d.rails.map((r) => routePath(route(r.points, undefined, r)))
@@ -150,7 +189,9 @@ it("integrates the real scoped graph and preserves routes/camera/compile counts 
     (r) => r.id === machineId("handoff", "explicit")
   )!;
   expect(handoff.from.part).toBe(machineId("workflow", "a"));
-  expect(handoff.to.part).toBe(machineId("step", "b", "end"));
+  expect(handoff.to.part).toBe(toB);
+  // The route decision leaving for workflow empty ends at its stub too.
+  expect(d.rails.some((r) => r.to.part === toEmpty)).toBe(true);
   expect(
     d.parts.find((p) => p.id === machineId("step", "a", "typed"))!.position.x
   ).toBeGreaterThan(
@@ -175,9 +216,7 @@ it("integrates the real scoped graph and preserves routes/camera/compile counts 
     expect(
       v.getAllByLabelText(new RegExp(`${3 * n} parked, ${n} active`)).length
     ).toBeGreaterThan(0);
-    const part = v.container.querySelector(
-      `[data-part-id="${machineId("step", "a", "llm")}"]`
-    )!;
+    const part = partEl(v, machineId("step", "a", "llm"))!;
     fireEvent.keyDown(part, { key: "Enter" });
     expect(useEntityPanelStore.getState().selection).toMatchObject({
       type: "step",
@@ -195,21 +234,22 @@ it("integrates the real scoped graph and preserves routes/camera/compile counts 
       type: "workflow",
       workflowId: "a",
     });
-    // Keep the inspector open: selection must not suppress workflow search.
+    // Keep the inspector open: selection must not suppress the search. Only
+    // the stub naming b matches.
     fireEvent.change(v.getByPlaceholderText("Find a workflow…"), {
       target: { value: "b" },
     });
-    expectSearchForB(v, d);
+    expectSearch(v, d, new Set([toB]));
     fireEvent.mouseEnter(header);
     expect(v.container.querySelectorAll("[data-search-dim]")).toHaveLength(0);
     fireEvent.mouseLeave(header);
-    expectSearchForB(v, d);
+    expectSearch(v, d, new Set([toB]));
     fireEvent.click(part);
     expect(useEntityPanelStore.getState().selection).toMatchObject({
       type: "step",
       stepId: "llm",
     });
-    expectSearchForB(v, d);
+    expectSearch(v, d, new Set([toB]));
     act(() =>
       useEntityPanelStore
         .getState()
@@ -217,7 +257,7 @@ it("integrates the real scoped graph and preserves routes/camera/compile counts 
     );
     expect(v.container.querySelectorAll("[data-search-dim]")).toHaveLength(0);
     act(() => useEntityPanelStore.getState().setHoveredEdge(null));
-    expectSearchForB(v, d);
+    expectSearch(v, d, new Set([toB]));
     expect(camera()).toBe(originalCamera);
     expect(paths(v)).toEqual(originalPaths);
     expect(compile).toHaveBeenCalledTimes(calls);
@@ -235,10 +275,10 @@ it("integrates the real scoped graph and preserves routes/camera/compile counts 
     ],
   ]);
   v.rerender(<WorkflowAtlas />);
-  expect(scene(v)).toBeNull();
+  expect(stepScene(v)).toBeNull();
   expect(transport.requests).toHaveLength(2);
   await reply(1);
-  await waitFor(() => expect(scene(v)).not.toBeNull());
+  await waitFor(() => expect(stepScene(v)).not.toBeNull());
   expect(compile).toHaveBeenCalledTimes(calls + 2);
   expect(elkCalls).toHaveBeenCalledTimes(2);
 }, 30_000);
@@ -292,7 +332,7 @@ it("retires old factory/project replies and unmounts, shows worker-error fallbac
   expect(v.container).toBeEmptyDOMElement();
 });
 
-it("renders separate parallel tracks and unavoidable jumps in a dense nonplanar factory", async () => {
+it("aggregates handoffs into one rail per workflow pair in a dense nonplanar factory", async () => {
   input.summary.workflows = ["a", "b", "c", "x", "y", "z"].map((id) =>
     workflow(id)
   );
@@ -313,13 +353,9 @@ it("renders separate parallel tracks and unavoidable jumps in a dense nonplanar 
   const result = compile.mock.results.at(-1)!.value as compiler.CompileResult;
   if (!result.ok) throw new Error("compile failed");
   const d = result.flow.arrangements[0];
-  expect(d.rails).toHaveLength(12);
-  expect(
-    d.rails.find((r) => r.id === machineId("handoff", "a-0"))!.points
-  ).not.toEqual(
-    d.rails.find((r) => r.id === machineId("handoff", "a-3"))!.points
-  );
-  expect(d.rails.some((r) => r.jumps?.length)).toBe(true);
+  // a-0 and a-3 both go a → x: one rail carrying both transitions.
+  expect(d.rails).toHaveLength(9);
+  expect(new Set(d.rails.map((r) => JSON.stringify(r.points))).size).toBe(9);
   for (const rail of d.rails) {
     expect(rail.points).toEqual(layout.routes![rail.id].points);
     expect(rail.jumps).toEqual(layout.routes![rail.id].jumps);
@@ -329,15 +365,15 @@ it("renders separate parallel tracks and unavoidable jumps in a dense nonplanar 
     d.rails.map((r) => routePath(route(r.points, undefined, r)))
   );
   const original = paths(v);
-  act(() =>
-    useEntityPanelStore.getState().setHoveredEdge(machineId("handoff", "a-3"))
-  );
+  // The inspector's handoff row names one backend transition; its rail lights.
+  act(() => useEntityPanelStore.getState().setHoveredEdge("a-3"));
   expect(paths(v)).toEqual(original);
   expect(v.container.querySelectorAll("[data-emphasis]")).toHaveLength(1);
 });
 
 it("ignores retired topology success/failure after a newer layout and recovers from a crashed worker", async () => {
   const v = render(<WorkflowAtlas />);
+  const station = (name: string) => v.queryByTestId(`workflow-station-${name}`);
   input = structuredClone(input);
   input.summary.workflows[0].name = "intermediate topology";
   v.rerender(<WorkflowAtlas />);
@@ -346,7 +382,7 @@ it("ignores retired topology success/failure after a newer layout and recovers f
   v.rerender(<WorkflowAtlas />);
   expect(transport.requests).toHaveLength(3);
   await reply(2);
-  expect(v.getByLabelText("current topology")).toBeInTheDocument();
+  expect(station("current topology")).toBeInTheDocument();
   await reply(0);
   const stale = transport.requests[1];
   await act(async () =>
@@ -355,7 +391,7 @@ it("ignores retired topology success/failure after a newer layout and recovers f
     })
   );
   expect(v.queryByRole("alert")).toBeNull();
-  expect(v.getByLabelText("current topology")).toBeInTheDocument();
+  expect(station("current topology")).toBeInTheDocument();
   input = structuredClone(input);
   input.summary.workflows[0].name = "after crash";
   v.rerender(<WorkflowAtlas />);
@@ -368,7 +404,7 @@ it("ignores retired topology success/failure after a newer layout and recovers f
   fireEvent.click(v.getByRole("button", { name: "Retry layout" }));
   await reply(4);
   await waitFor(() => expect(v.queryByRole("alert")).toBeNull());
-  expect(v.getByLabelText("after crash")).toBeInTheDocument();
+  expect(station("after crash")).toBeInTheDocument();
 });
 
 it("keeps geometry and camera on an equivalent reconnect refetch and refreshes changed topology", async () => {
@@ -445,137 +481,126 @@ it("keeps geometry and camera on an equivalent reconnect refetch and refreshes c
   expect(elkCalls).toHaveBeenCalledTimes(1);
   expect(transport.requests).toHaveLength(1);
   input = structuredClone(input);
-  input.summary.workflows[1].workflow_steps.push({
-    ...step("reconnected-step", "execute", 2),
-    workflow_id: "b",
-  });
+  // Two more steps widen b's station (its frame fits four lamps), a change of
+  // geometry; a third lamp alone would fit the same frame and layout.
+  input.summary.workflows[1].workflow_steps.push(
+    { ...step("reconnected-step", "execute", 2), workflow_id: "b" },
+    { ...step("reconnected-step-2", "execute", 3), workflow_id: "b" }
+  );
   await reconnect(4);
   await waitFor(() => expect(transport.requests).toHaveLength(2));
   expect(scene(v)).toBeNull();
   await reply(1);
-  await waitFor(() =>
-    expect(
-      v.container.querySelector(
-        `[data-scene-part="${machineId("step", "b", "reconnected-step")}"]`
-      )
-    ).not.toBeNull()
-  );
+  await waitFor(() => expect(scene(v)).not.toBeNull());
   expect(compile).toHaveBeenCalledTimes(4);
   expect(elkCalls).toHaveBeenCalledTimes(2);
-  expect(paths(v)).not.toEqual(originalPaths);
+  expect(v.getByTestId("workflow-station-b")).toBeInTheDocument();
 });
 
-it("reports deterministic compile errors without offering a layout retry", () => {
+it("reports deterministic compile errors without offering a layout retry", async () => {
   input.summary.workflows[0].workflow_steps.push(
     input.summary.workflows[0].workflow_steps[0]
   );
   const v = render(<WorkflowAtlas />);
+  // The workflow station draws step types only; the steps level cannot compile.
+  await openSteps(v, "a");
   expect(v.getByRole("alert")).toHaveTextContent(
-    "Unable to compile workflow graph"
+    "Unable to compile step graph"
   );
   expect(v.queryByRole("button", { name: "Retry layout" })).toBeNull();
   expect(transport.requests).toHaveLength(0);
-  expect(scene(v)).toBeNull();
+  expect(stepScene(v)).toBeNull();
 });
 
-it("uses complete shared routes through repeated overview expansion, Map and scoped navigation", async () => {
-  input.summary.workflows = ["a", "b", "c", "x", "y", "z"].map((id) =>
-    workflow(id)
-  );
-  for (const source of input.summary.workflows.slice(0, 3)) {
-    source.transitions = ["x", "y", "z", "x"].map((target, i) => ({
-      id: `${source.id}-${i}`,
-      from_workflow_id: source.id,
-      to_workflow_id: target,
-      target_step_id: null,
-      label: `${source.id}-${target}-${i}`,
-    }));
-  }
-  input.configs.clear();
+it("drills factories → factory → workflow and returns up the breadcrumb with each level's camera, across Map and Board", async () => {
   act(() => useFactoryFilterStore.getState().reset());
-  const compile = vi.spyOn(compiler, "compileFlow");
-  const v = render(<WorkflowAtlas />);
-  const layout = await reply(0);
-  const overviewScene = () =>
-    v.container.querySelector('[aria-label="Factory overview workflow graph"]');
-  await waitFor(() => expect(overviewScene()).not.toBeNull());
-  const result = compile.mock.results.at(-1)!.value as compiler.CompileResult;
-  if (!result.ok) throw new Error("compile failed");
-  const d = result.flow.arrangements[0];
-  expect(d.rails.some((r) => r.jumps?.length)).toBe(true);
-  for (const rail of d.rails) {
-    expect({
-      points: rail.points,
-      jumps: rail.jumps,
-      cornerRadii: rail.cornerRadii,
-    }).toEqual({
-      points: layout.routes![rail.id].points,
-      jumps: layout.routes![rail.id].jumps,
-      cornerRadii: layout.routes![rail.id].cornerRadii,
-    });
-  }
-  const expectedPaths = d.rails.map((r) =>
-    routePath(route(r.points, undefined, r))
-  );
-  const layer = () => v.container.querySelector(".factory-overview-workflows")!;
-  const stage = () => v.getByTestId("factory-overview-stage");
-  const camera = () =>
-    v.container.querySelector<HTMLElement>(".factory-overview-scaler")!.style
-      .transform;
-  // Model oracle: zoom threshold controls which of the two input layers is live.
-  let scale = 1;
-  for (const delta of [-400, 300, -300, 500, -600, 400, -400]) {
-    const previousCamera = camera();
-    fireEvent.wheel(stage(), { deltaY: delta, clientX: 600, clientY: 400 });
-    scale = Math.min(2.4, Math.max(0.12, scale * Math.exp(-delta * 0.0016)));
-    expect(layer().hasAttribute("inert")).toBe(scale < 1.6);
-    expect(
-      v.container
-        .querySelector(".factory-overview-factories")!
-        .hasAttribute("inert")
-    ).toBe(scale >= 1.6);
-    expect(paths(v)).toEqual(expectedPaths);
-    expect(camera()).not.toBe(previousCamera);
-    expect(transport.requests).toHaveLength(1);
-  }
-  const beforeMap = camera();
-  fireEvent.click(v.getByRole("radio", { name: "Map" }));
-  expect(overviewScene()).toBeNull();
-  expect(
-    v.container.querySelector(".factory-overview-map-columns")
-  ).not.toBeNull();
-  fireEvent.click(v.getByRole("radio", { name: "Graph" }));
-  expect(camera()).toBe(beforeMap);
-  expect(overviewScene()).toBeNull();
-  expect(transport.requests).toHaveLength(2);
-  await reply(1);
-  expect(camera()).toBe(beforeMap);
-  expect(paths(v)).toEqual(expectedPaths);
-  const header = v.container.querySelector(
-    `[data-region-header="${machineId("region", "a")}"]`
-  )!;
-  fireEvent.keyDown(header, { key: "Enter" });
-  expect(useEntityPanelStore.getState().selection).toMatchObject({
-    type: "workflow",
-    workflowId: "a",
+  input.summary.workflows.push({
+    ...workflow("other-wf", [step("other-step", "execute", 0)]),
+    factory_name: "other",
+    transitions: [
+      {
+        id: "to-a",
+        from_workflow_id: "other-wf",
+        to_workflow_id: "a",
+        target_step_id: null,
+        label: "hand over",
+      },
+    ],
   });
-  fireEvent.click(v.getByRole("button", { name: "Open factory factory" }));
-  expect(transport.requests).toHaveLength(3);
-  await reply(2);
-  expect(scene(v)).not.toBeNull();
-  expect(paths(v)).toEqual(expectedPaths);
-  fireEvent.click(v.getByRole("radio", { name: "Board" }));
-  expect(scene(v)).toBeNull();
-  expect(v.container.querySelector(".uv-kanban")).not.toBeNull();
-  fireEvent.click(v.getByRole("button", { name: "Factories" }));
-  expect(v.getByTestId("factory-overview")).toBeInTheDocument();
-  expect(v.getByRole("radio", { name: "Map" })).toHaveAttribute(
-    "aria-checked",
-    "true"
-  );
-});
+  const v = render(<WorkflowAtlas />);
+  const camera = () =>
+    v.container.querySelector<HTMLElement>(".uv-machine-scene")!.style
+      .transform;
+  const crumb = () =>
+    v.getByRole("navigation", { name: "Breadcrumb" }).textContent;
+  // Between factories: one station per factory, one rail per factory route.
+  await reply(0);
+  await waitFor(() => expect(factoryScene(v)).not.toBeNull());
+  expect(v.getByTestId("factory-station-factory")).toBeInTheDocument();
+  expect(v.getByTestId("factory-station-other")).toBeInTheDocument();
+  expect(
+    v.container.querySelector(
+      `[data-rail-id="${machineId("factory-route", "other", "factory")}"]`
+    )
+  ).not.toBeNull();
+  fireEvent.click(v.getByRole("button", { name: "Zoom in" }));
+  const factoriesCamera = camera();
 
-it("retires overview requests across search, project changes and view toggles without moving focus or camera", async () => {
+  // Enter on a factory station opens its workflows, framed fresh.
+  fireEvent.keyDown(partEl(v, machineId("factory", "factory"))!, {
+    key: "Enter",
+  });
+  expect(useFactoryFilterStore.getState().factoryName).toBe("factory");
+  await reply(transport.requests.length - 1);
+  await waitFor(() => expect(scene(v)).not.toBeNull());
+  expect(crumb()).toBe("Factories/factory");
+  // The handoff from the other factory arrives from a stub naming it.
+  expect(v.getByTestId("handoff-stub-other")).toBeInTheDocument();
+  fireEvent.click(v.getByRole("button", { name: "Zoom out" }));
+  const workflowsCamera = camera();
+
+  // Double-click a workflow station: only its steps.
+  fireEvent.doubleClick(partEl(v, machineId("station", "a"))!);
+  await reply(transport.requests.length - 1);
+  await waitFor(() => expect(stepScene(v)).not.toBeNull());
+  expect(crumb()).toBe("Factories/factory/a");
+  expect(partEl(v, machineId("step", "b", "start"))).toBeNull();
+  fireEvent.click(v.getByRole("button", { name: "Zoom in" }));
+  fireEvent.click(v.getByRole("button", { name: "Zoom in" }));
+  const stepsCamera = camera();
+
+  // Level and camera survive Map and Board.
+  for (const view of ["Map", "Board"]) {
+    fireEvent.click(v.getByRole("radio", { name: view }));
+    expect(stepScene(v)).toBeNull();
+    fireEvent.click(v.getByRole("radio", { name: "Graph" }));
+    await reply(transport.requests.length - 1);
+    await waitFor(() => expect(stepScene(v)).not.toBeNull());
+    expect(camera()).toBe(stepsCamera);
+    expect(crumb()).toBe("Factories/factory/a");
+  }
+
+  // The breadcrumb goes back up with each level's previous camera.
+  fireEvent.click(v.getByRole("button", { name: "factory" }));
+  await reply(transport.requests.length - 1);
+  await waitFor(() => expect(scene(v)).not.toBeNull());
+  expect(camera()).toBe(workflowsCamera);
+  fireEvent.click(v.getByRole("button", { name: "Factories" }));
+  await reply(transport.requests.length - 1);
+  await waitFor(() => expect(factoryScene(v)).not.toBeNull());
+  expect(camera()).toBe(factoriesCamera);
+
+  // A stub opens the level it names: other's handoff into a goes to factory.
+  fireEvent.click(partEl(v, machineId("factory", "other"))!);
+  await reply(transport.requests.length - 1);
+  await waitFor(() => expect(scene(v)).not.toBeNull());
+  fireEvent.doubleClick(
+    partEl(v, machineId("stub", "out", "other-wf", "factory"))!
+  );
+  expect(useFactoryFilterStore.getState().factoryName).toBe("factory");
+}, 30_000);
+
+it("searches between factories without layout requests and retires replies across project changes", async () => {
   input.summary.workflows.push({
     ...workflow("outside"),
     factory_name: "other",
@@ -584,40 +609,26 @@ it("retires overview requests across search, project changes and view toggles wi
   const v = render(<WorkflowAtlas />);
   const search = v.getByPlaceholderText("Find a factory…");
   search.focus();
-  fireEvent.change(search, { target: { value: "other" } });
-  expect(transport.requests).toHaveLength(2);
-  fireEvent.wheel(v.getByTestId("factory-overview-stage"), { deltaY: -400 });
-  const camera = () =>
-    v.container.querySelector<HTMLElement>(".factory-overview-scaler")!.style
-      .transform;
-  const pendingCamera = camera();
-  fireEvent.click(v.getByRole("radio", { name: "Map" }));
   await reply(0);
-  expect(v.container.querySelectorAll("[data-scene-part]")).toHaveLength(0);
-  await reply(1);
-  expect(camera()).toBe(pendingCamera);
+  await waitFor(() => expect(factoryScene(v)).not.toBeNull());
+  // Search decorates the scene; it is never a layout input.
+  fireEvent.change(search, { target: { value: "other" } });
+  expect(transport.requests).toHaveLength(1);
+  expect(
+    v.getByTestId("factory-station-factory").hasAttribute("data-search-dim")
+  ).toBe(true);
+  expect(
+    v.getByTestId("factory-station-other").hasAttribute("data-search-dim")
+  ).toBe(false);
   expect(document.activeElement).toBe(search);
+  fireEvent.click(v.getByRole("radio", { name: "Map" }));
+  expect(v.container.querySelectorAll("[data-scene-part]")).toHaveLength(0);
   fireEvent.click(v.getByRole("radio", { name: "Graph" }));
-  expect(v.container.querySelectorAll("[data-scene-part]")).toHaveLength(0);
-  expect(transport.requests).toHaveLength(3);
-  await reply(2);
-  expect(
-    v.container.querySelector(
-      `[data-scene-part="${machineId("workflow", "outside")}"]`
-    )
-  ).not.toBeNull();
-  expect(
-    v.container.querySelector(
-      `[data-scene-part="${machineId("workflow", "a")}"]`
-    )
-  ).toBeNull();
-  fireEvent.change(search, { target: { value: "" } });
-  expect(transport.requests).toHaveLength(4);
   act(() => resetProjectScopedStores());
-  expect(transport.requests).toHaveLength(5);
-  await reply(3);
+  const retired = transport.requests.length - 2;
+  await reply(retired);
   expect(v.container.querySelectorAll("[data-scene-part]")).toHaveLength(0);
-  await reply(4);
+  await reply(transport.requests.length - 1);
   expect(
     v.container.querySelectorAll("[data-scene-part]").length
   ).toBeGreaterThan(0);
@@ -670,10 +681,16 @@ it("retains each scope's search, recent factory and selection across the default
   });
   fireEvent.click(v.getByRole("radio", { name: "Graph" }));
   await reply(transport.requests.length - 1);
-  const part = v.container.querySelector(
-    `[data-part-id="${machineId("step", "b", "start")}"]`
-  )!;
-  fireEvent.keyDown(part, { key: "Enter" });
+  await waitFor(() =>
+    expect(partEl(v, machineId("station", "b"))).not.toBeNull()
+  );
+  fireEvent.keyDown(partEl(v, machineId("station", "b"))!, { key: "Enter" });
+  await reply(transport.requests.length - 1);
+  await waitFor(() => expect(stepScene(v)).not.toBeNull());
+  // Enter on a step (nothing below it) inspects it.
+  fireEvent.keyDown(partEl(v, machineId("step", "b", "start"))!, {
+    key: "Enter",
+  });
   fireEvent.click(v.getByRole("radio", { name: "Board" }));
   fireEvent.click(v.getByRole("button", { name: "Factories" }));
   expect(v.getByPlaceholderText("Find a factory…")).toHaveValue("factory");
@@ -691,7 +708,7 @@ it("retains each scope's search, recent factory and selection across the default
 });
 
 it.each([null, "empty-factory"])(
-  "preserves empty workflow endpoints in scope %s and retires removed factories",
+  "preserves empty workflow stations in scope %s and retires removed factories",
   async (factory) => {
     input.summary.workflows.push({
       ...workflow("unconfigured"),
@@ -706,7 +723,7 @@ it.each([null, "empty-factory"])(
     await reply(0);
     expect(
       v.container.querySelector(
-        `[data-scene-part="${machineId("workflow", "unconfigured")}"]`
+        `[data-scene-part="${machineId("station", "unconfigured")}"]`
       )
     ).not.toBeNull();
     expect(v.container.querySelectorAll("[data-scene-part]")).toHaveLength(1);
@@ -716,12 +733,12 @@ it.each([null, "empty-factory"])(
     );
     v.rerender(<WorkflowAtlas />);
     expect(useFactoryFilterStore.getState().factoryName).toBeNull();
-    expect(v.getByTestId("factory-overview")).toBeInTheDocument();
     expect(v.container.querySelectorAll("[data-scene-part]")).toHaveLength(0);
     await reply(transport.requests.length - 1);
+    await waitFor(() => expect(factoryScene(v)).not.toBeNull());
     expect(
       v.container.querySelector(
-        `[data-scene-part="${machineId("workflow", "unconfigured")}"]`
+        `[data-scene-part="${machineId("station", "unconfigured")}"]`
       )
     ).toBeNull();
   }
@@ -790,121 +807,17 @@ it.each([false, true])(
   }
 );
 
-it.each([null, "factory"])(
-  "opens factory %s from an expanded region while retaining workflow inspector actions",
-  async (factory) => {
-    input.summary.workflows.forEach((w) => {
-      w.factory_name = factory;
-    });
-    act(() => useFactoryFilterStore.getState().reset());
-    const v = render(<WorkflowAtlas />);
-    await reply(0);
-    const region = v.container.querySelector(".factory-overview-regions")!;
-    expect(region).toHaveAttribute("inert");
-    fireEvent.wheel(v.getByTestId("factory-overview-stage"), { deltaY: -400 });
-    expect(region).not.toHaveAttribute("inert");
-    const header = v.container.querySelector(
-      `[data-region-header="${machineId("region", "a")}"]`
-    )!;
-    fireEvent.keyDown(header, { key: "Enter" });
-    expect(useEntityPanelStore.getState().selection).toMatchObject({
-      type: "workflow",
-      workflowId: "a",
-    });
-    const entry = v.getByRole("button", {
-      name: `Open factory ${factory ?? "No Factory"}`,
-    });
-    entry.focus();
-    expect(entry).toHaveFocus();
-    // Native button activation covers keyboard and pointer without a custom key handler.
-    fireEvent.click(entry);
-    expect(useFactoryFilterStore.getState().factoryName).toEqual(
-      factory ?? NO_FACTORY_SCOPE
-    );
-    expect(v.queryByTestId("factory-overview")).toBeNull();
-    await reply(1);
-    expect(scene(v)).not.toBeNull();
-  }
-);
-
-it("starts no detailed worker in Map even during search and retires pending Graph replies", async () => {
+it("starts no worker in the factories Map, even during search", async () => {
   const select = vi.fn();
-  const props = {
-    summary: input.summary,
-    routeConfigs: input.configs,
-    machineGraph: true,
-    onSelect: select,
-  };
-  const v = render(<FactoryOverview {...props} view="map" query="" />);
+  const props = { summary: input.summary, onSelect: select };
+  const v = render(<FactoryOverview {...props} query="" />);
   for (const query of ["f", "fa", "factory", "missing", ""]) {
-    v.rerender(<FactoryOverview {...props} view="map" query={query} />);
+    v.rerender(<FactoryOverview {...props} query={query} />);
     expect(transport.requests).toHaveLength(0);
   }
-  v.rerender(<FactoryOverview {...props} view="graph" query="" />);
-  expect(transport.requests).toHaveLength(1);
-  v.rerender(<FactoryOverview {...props} view="map" query="" />);
-  await reply(0);
   expect(v.container.querySelectorAll("[data-scene-part]")).toHaveLength(0);
-  expect(transport.requests).toHaveLength(1);
-  v.rerender(<FactoryOverview {...props} view="graph" query="" />);
-  expect(v.container.querySelectorAll("[data-scene-part]")).toHaveLength(0);
-  expect(transport.requests).toHaveLength(2);
-  await reply(1);
+  fireEvent.wheel(v.getByTestId("factory-overview-stage"), { deltaY: -400 });
   expect(
-    v.container.querySelectorAll("[data-scene-part]").length
+    v.container.querySelectorAll(".factory-overview-workflows .al-cond").length
   ).toBeGreaterThan(0);
 });
-
-it.each([false, true])(
-  "hides condensed handoff labels in pending/failed shared Graph (compile failure: %s)",
-  async (invalid) => {
-    if (invalid)
-      input.summary.workflows[0].workflow_steps.push(
-        input.summary.workflows[0].workflow_steps[0]
-      );
-    const v = render(
-      <FactoryOverview
-        summary={input.summary}
-        routeConfigs={input.configs}
-        view="graph"
-        query=""
-        onSelect={vi.fn()}
-      />
-    );
-    fireEvent.wheel(v.getByTestId("factory-overview-stage"), { deltaY: -400 });
-    expect(
-      v.container.querySelector(".factory-overview-workflows")
-    ).toHaveClass("is-expanded");
-    expect(
-      v.container.querySelectorAll(".factory-overview-workflows .al-cond")
-    ).toHaveLength(0);
-    expect(v.container.querySelectorAll("[data-scene-part]")).toHaveLength(0);
-    if (invalid)
-      expect(v.getByRole("alert")).toHaveTextContent("Unable to compile");
-    else {
-      expect(v.getByRole("status")).toHaveTextContent("Laying out");
-      await reply(0);
-      expect(
-        v.container.querySelectorAll(".factory-overview-workflows .al-cond")
-      ).toHaveLength(0);
-      expect(
-        v.container.querySelectorAll("[data-scene-part]").length
-      ).toBeGreaterThan(0);
-    }
-    // The same fixture does have aggregated handoff labels in Map; the Graph
-    // assertions above must not pass merely because the fixture lacked labels.
-    v.rerender(
-      <FactoryOverview
-        summary={input.summary}
-        routeConfigs={input.configs}
-        view="map"
-        query=""
-        onSelect={vi.fn()}
-      />
-    );
-    expect(
-      v.container.querySelectorAll(".factory-overview-workflows .al-cond")
-        .length
-    ).toBeGreaterThan(0);
-  }
-);

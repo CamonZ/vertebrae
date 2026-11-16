@@ -14,7 +14,6 @@ import { card, dot, gateV, note, seal, story } from "../timeline";
 import type { MachinePartDef, PartScenario } from "./types";
 
 interface InferenceExtra {
-  readonly topology?: boolean;
   /** Clamp engaged / released. */
   readonly cl: readonly [number, number];
   /** When each press light comes on. */
@@ -181,7 +180,7 @@ export const inferenceStepMachine: MachinePartDef<InferenceExtra> = {
     inferenceStory("output fails schema"),
     inferenceStory("tool calls"),
   ],
-  draw: (t, { cl, lights, topology }) => (
+  draw: (t, { cl, lights }) => (
     <>
       <Rail
         points={[
@@ -195,25 +194,21 @@ export const inferenceStepMachine: MachinePartDef<InferenceExtra> = {
           [616, Y],
         ]}
       />
-      {!topology && (
-        <>
-          <Rail
-            points={[
-              [380, 105],
-              [380, 88],
-              [474, 88],
-            ]}
-          />
-          <PartBox x={474} y={64} w={104} h={48} r={12} />
-          <SvgText
-            x={526}
-            y={89}
-            runs={[["tools", 400, "dim"]]}
-            size={18}
-            align="center"
-          />
-        </>
-      )}
+      <Rail
+        points={[
+          [380, 105],
+          [380, 88],
+          [474, 88],
+        ]}
+      />
+      <PartBox x={474} y={64} w={104} h={48} r={12} />
+      <SvgText
+        x={526}
+        y={89}
+        runs={[["tools", 400, "dim"]]}
+        size={18}
+        align="center"
+      />
       <PartBox x={200} y={105} w={240} h={190} />
       <Press
         cx={320}

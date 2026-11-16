@@ -20,6 +20,8 @@ export interface FlowPresentation {
   readonly onHoverRail?: (id: string | null) => void;
   /** Traced rails relative to the trace: leaving it (`out`) or entering it (`in`). */
   readonly flow?: ReadonlyMap<string, "in" | "out">;
+  /** The part playing its hover preview (see hoverPreview), if any. */
+  readonly preview?: string;
   readonly onActivateRegion?: (id: string) => void;
   readonly onHoverRegion?: (id: string | null) => void;
   readonly onFocusRegion?: (id: string | null) => void;

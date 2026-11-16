@@ -158,13 +158,23 @@ export function needsAutoLayout(flow: CompiledFlow): boolean {
 export interface FlowLayoutOptions {
   /** Bypass value memoization for independent ELK/replay verification. */
   readonly cache?: boolean;
+  /**
+   * Pack the unconnected pieces of a flat (region-less) level in rows near
+   * the canvas aspect instead of one tall layer. The Atlas station levels
+   * use it; embedded flows keep their single layered column.
+   */
+  readonly pack?: boolean;
 }
 
 export async function layoutFlow(
   flow: CompiledFlow,
   options: FlowLayoutOptions = {}
 ): Promise<FlowLayout> {
-  const level = await layoutLevel(flow.arrangements, options.cache !== false);
+  const level = await layoutLevel(
+    flow.arrangements,
+    options.cache !== false,
+    options.pack === true
+  );
   const drills: Record<string, FlowLayout> = {};
   for (const p of flow.arrangements[0].parts)
     if (p.drill?.kind === "inline")
@@ -296,14 +306,18 @@ export function cachedLevel(
 /** Lay out one level, memoized unless `useCache` is false. */
 export function layoutLevel(
   arrangements: readonly DiagramTimeline[],
-  useCache: boolean
+  useCache: boolean,
+  pack = false
 ): Promise<LevelLayout> {
-  if (!useCache) return computeLevel(arrangements);
-  return cachedLevel(levelKey(arrangements), () => computeLevel(arrangements));
+  if (!useCache) return computeLevel(arrangements, pack);
+  // Packing only changes flat levels with unconnected pieces; key it anyway.
+  const key = (pack ? "pack:" : "") + levelKey(arrangements);
+  return cachedLevel(key, () => computeLevel(arrangements, pack));
 }
 
 async function computeLevel(
-  arrangements: readonly DiagramTimeline[]
+  arrangements: readonly DiagramTimeline[],
+  pack = false
 ): Promise<LevelLayout> {
   const first = arrangements[0];
   // Leg searches are pure; repair passes ask the same questions many times.
@@ -334,7 +348,7 @@ async function computeLevel(
   // carries its "+" in After); reserve room for the longest one.
   const labelOf = (id: string) => longestRailLabel(arrangements, id);
 
-  const graph = elkGraph(nodes, forward, first, labelOf);
+  const graph = elkGraph(nodes, forward, first, labelOf, pack);
   const laid = await elk.layout(graph);
 
   /* positions */
@@ -1452,11 +1466,35 @@ export function keptOnCanvas(
   };
 }
 
+/** Width:height the packed pieces of an unconnected flat flow aim for. */
+const PACK_ASPECT = 1.8;
+
+/** Connected components of the layout graph (parts joined by rails). */
+function components(
+  nodes: ReadonlyMap<string, PartNode>,
+  rails: readonly DiagramRail[]
+): number {
+  const parent = new Map([...nodes.keys()].map((id) => [id, id]));
+  const find = (id: string): string => {
+    const p = parent.get(id) ?? id;
+    if (p === id) return id;
+    const root = find(p);
+    parent.set(id, root);
+    return root;
+  };
+  for (const r of rails) {
+    if (!parent.has(r.from.part) || !parent.has(r.to.part)) continue;
+    parent.set(find(r.from.part), find(r.to.part));
+  }
+  return new Set([...parent.keys()].map(find)).size;
+}
+
 function elkGraph(
   nodes: ReadonlyMap<string, PartNode>,
   forward: readonly DiagramRail[],
   d: DiagramTimeline,
-  labelOf: (rail: string) => string | undefined
+  labelOf: (rail: string) => string | undefined,
+  packPieces = false
 ): ElkNode {
   const used = new Map<string, Set<string>>();
   for (const r of forward)
@@ -1555,13 +1593,25 @@ function elkGraph(
     };
   });
 
+  // With `pack`, a flat flow made of several unconnected pieces (the Atlas
+  // station levels: factories or workflows, few of them joined) packs them in
+  // rows near the canvas aspect instead of stacking them in one tall layer.
+  // Compound (region) layouts must keep INCLUDE_CHILDREN for their rails.
+  const pack =
+    packPieces && d.regions.length === 0 && components(nodes, forward) > 1;
   return {
     id: "root",
     layoutOptions: {
       "elk.algorithm": "layered",
       "elk.direction": "RIGHT",
       "elk.edgeRouting": "ORTHOGONAL",
-      "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+      ...(pack
+        ? {
+            "elk.hierarchyHandling": "SEPARATE_CHILDREN",
+            "elk.separateConnectedComponents": "true",
+            "elk.aspectRatio": String(PACK_ASPECT),
+          }
+        : { "elk.hierarchyHandling": "INCLUDE_CHILDREN" }),
       "elk.layered.cycleBreaking.strategy": "MODEL_ORDER",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
       // Spec order decides top to bottom within a layer, so branches stay

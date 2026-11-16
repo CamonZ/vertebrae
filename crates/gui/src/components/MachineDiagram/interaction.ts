@@ -10,6 +10,11 @@ export interface DiagramInteraction {
    * focus. Evidence panels and drill-down hook in here.
    */
   readonly onActivatePart?: (id: string) => void;
+  /**
+   * Opening a part (double-click, or Enter while it has focus) when the host
+   * draws a level below it. Without it Enter activates like a click.
+   */
+  readonly onOpenPart?: (id: string) => void;
   /** A part gained pointer hover or keyboard focus (`null` when it left). */
   readonly onInspectPart?: (id: string | null) => void;
   /** Independent channels for hosts where pointer and keyboard traces overlap. */

@@ -4,6 +4,7 @@ import {
   useContext,
   type FocusEvent,
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
 } from "react";
 import {
@@ -401,11 +402,20 @@ function partHandlers(
   return {
     tabIndex: 0,
     onClick: () => i.onActivatePart?.(id),
+    ...(i.onOpenPart
+      ? {
+          onDoubleClick: (e: MouseEvent<SVGGElement>) => {
+            e.stopPropagation();
+            i.onOpenPart?.(id);
+          },
+        }
+      : {}),
     onKeyDown: (e: KeyboardEvent<SVGGElement>) => {
       if (!isActivationKey(e.key) || e.target !== e.currentTarget) return;
       e.preventDefault();
       e.stopPropagation();
-      i.onActivatePart?.(id);
+      if (e.key === "Enter" && i.onOpenPart) i.onOpenPart(id);
+      else i.onActivatePart?.(id);
     },
     onMouseEnter: () => {
       i.onInspectPart?.(id);

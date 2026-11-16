@@ -267,9 +267,37 @@ function regionNames(): string[] {
   );
 }
 
-/** The scoped shared Graph, once its layout has resolved. */
+/** The scoped shared Graph (a factory's workflows), once laid out. */
 function findScopedGraph() {
   return screen.findByLabelText("Factory workflow graph");
+}
+
+/** The between-factories Graph, once laid out. */
+function findFactoryGraph() {
+  return screen.findByLabelText("Factory graph");
+}
+
+/** The steps Graph of one workflow, once laid out. */
+function findStepGraph() {
+  return screen.findByLabelText("Workflow step graph");
+}
+
+/** Names of the stations drawn at the current level, by test id prefix. */
+function stationNames(prefix: "workflow" | "factory" = "workflow"): string[] {
+  return Array.from(
+    document.querySelectorAll(`[data-testid^='${prefix}-station-']`)
+  ).map((el) => el.getAttribute("data-testid")!.slice(prefix.length + 9));
+}
+
+function breadcrumbText(): string {
+  return (
+    screen.getByRole("navigation", { name: "Breadcrumb" }).textContent ?? ""
+  );
+}
+
+/** The interactive part inside a station or stub, by test id. */
+function partByTestId(testId: string): Element {
+  return screen.getByTestId(testId).querySelector("[data-part-id]")!;
 }
 
 /* ── tests ─────────────────────────────────────────────────────── */
@@ -361,6 +389,18 @@ describe("WorkflowAtlas", () => {
 
     render(<WorkflowAtlas />);
 
+    // The between-factories Graph draws one factory station per factory.
+    await findFactoryGraph();
+    await waitFor(() =>
+      expect(stationNames("factory").sort()).toEqual([
+        "Factory A",
+        "Factory B",
+        "Factory C",
+        "No Factory",
+      ])
+    );
+
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
     expect(
       screen.queryByText("design · workflow topology · elk")
@@ -379,9 +419,6 @@ describe("WorkflowAtlas", () => {
     expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
       "is-collapsed"
     );
-    expect(
-      document.querySelector(".factory-overview-map-columns")
-    ).not.toBeInTheDocument();
     expect(document.querySelector(".factory-overview-regions")).toHaveClass(
       "is-hidden"
     );
@@ -393,16 +430,6 @@ describe("WorkflowAtlas", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("2 routes")).toHaveLength(2);
     expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
-    // The collapsed Graph overview holds the shared scene, never legacy cards.
-    expect(
-      await screen.findByLabelText("Factory overview workflow graph")
-    ).toBeInTheDocument();
-    expect(
-      document.querySelectorAll(".factory-overview-workflows .uv-wf")
-    ).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
-    expect(screen.getByTestId("factory-overview")).toBeInTheDocument();
     expect(
       document.querySelectorAll(".factory-overview-factories .uv-wf")
     ).toHaveLength(4);
@@ -421,9 +448,8 @@ describe("WorkflowAtlas", () => {
     ).toBe(true);
 
     fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
-    expect(
-      document.querySelector(".factory-overview-map-columns")
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("factory-overview")).not.toBeInTheDocument();
+    expect(await findFactoryGraph()).toBeInTheDocument();
   });
 
   it("pans the factory surface and reveals workflow contents after zooming in", async () => {
@@ -435,9 +461,9 @@ describe("WorkflowAtlas", () => {
     });
 
     render(<WorkflowAtlas />);
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
 
     const stage = await screen.findByTestId("factory-overview-stage");
-    await screen.findByLabelText("Factory overview workflow graph");
     expect(document.querySelector(".factory-overview-workflows")).toHaveClass(
       "is-collapsed"
     );
@@ -456,7 +482,6 @@ describe("WorkflowAtlas", () => {
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("step-node-Plan")).toBeInTheDocument();
       expect(
         screen.getByTestId("factory-region-Factory A")
       ).toBeInTheDocument();
@@ -464,9 +489,9 @@ describe("WorkflowAtlas", () => {
         "is-expanded"
       );
     });
-    expect(regionNames()).toEqual(
-      expect.arrayContaining(["Build", "Review", "Pack", "Ship"])
-    );
+    expect(
+      document.querySelectorAll(".factory-overview-workflows .uv-wf").length
+    ).toBe(6);
     expect(
       document.querySelectorAll(".factory-overview-factories .uv-wf")
     ).toHaveLength(4);
@@ -476,8 +501,7 @@ describe("WorkflowAtlas", () => {
       )
     ).toHaveLength(0);
     expect(
-      document.querySelectorAll(".factory-overview-workflows .md-wire path")
-        .length
+      document.querySelectorAll(".factory-overview-workflow-edges path").length
     ).toBeGreaterThan(0);
   });
 
@@ -490,6 +514,7 @@ describe("WorkflowAtlas", () => {
     });
 
     render(<WorkflowAtlas />);
+    fireEvent.click(screen.getByRole("radio", { name: "Map" }));
 
     expect(
       await screen.findByRole("heading", { name: "Workflow Factories" })
@@ -547,10 +572,16 @@ describe("WorkflowAtlas", () => {
 
     render(<WorkflowAtlas />);
 
-    fireEvent.click(await screen.findByTestId("factory-node-No Factory"));
+    await findFactoryGraph();
+    await waitFor(() =>
+      expect(stationNames("factory")).toContain("No Factory")
+    );
+    fireEvent.click(partByTestId("factory-station-No Factory"));
 
     await findScopedGraph();
-    await waitFor(() => expect(regionNames()).toEqual(["Unclassified"]));
+    await waitFor(() => expect(stationNames()).toEqual(["Unclassified"]));
+    // Its handoff into Factory A ends at a stub naming that factory.
+    expect(screen.getByTestId("handoff-stub-Factory A")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     await waitFor(() => {
@@ -571,15 +602,23 @@ describe("WorkflowAtlas", () => {
 
     render(<WorkflowAtlas />);
 
-    fireEvent.click(await screen.findByTestId("factory-node-Factory A"));
+    await findFactoryGraph();
+    await waitFor(() => expect(stationNames("factory")).toContain("Factory A"));
+    fireEvent.click(partByTestId("factory-station-Factory A"));
 
     await findScopedGraph();
-    await waitFor(() => {
-      const names = regionNames();
-      expect(names).toContain("Build");
-      expect(names).toContain("Unnamed workflow");
-    });
-    expect(regionNames()).not.toContain("Review");
+    await waitFor(() =>
+      expect(stationNames().sort()).toEqual(["Build", "Unnamed workflow"])
+    );
+    // Handoffs leaving or entering the factory end at stubs naming the other
+    // factory; none is dropped.
+    expect(screen.getByTestId("handoff-stub-Factory B")).toBeInTheDocument();
+    expect(screen.getByTestId("handoff-stub-No Factory")).toBeInTheDocument();
+    // Opening a stub goes to the factory it names.
+    fireEvent.click(partByTestId("handoff-stub-Factory B"));
+    await waitFor(() =>
+      expect(stationNames().sort()).toEqual(["Pack", "Review"])
+    );
   });
 
   it("renders the shared graph from a fixture summary", async () => {
@@ -599,18 +638,25 @@ describe("WorkflowAtlas", () => {
       screen.queryByText("design · workflow topology · elk")
     ).not.toBeInTheDocument();
     await waitFor(() =>
-      expect(regionNames()).toEqual(expect.arrayContaining(["Build", "Review"]))
+      expect(stationNames().sort()).toEqual(["Build", "Review"])
     );
 
-    // step parts carry the step names
+    // wf-review has an active TaskRun: its station reports it
+    expect(partByTestId("workflow-station-Review")).toHaveAttribute(
+      "aria-label",
+      expect.stringMatching(/2 active/)
+    );
+
+    // Opening a station (Enter) draws only that workflow's steps
+    fireEvent.keyDown(partByTestId("workflow-station-Build"), {
+      key: "Enter",
+    });
+    await findStepGraph();
+    expect(breadcrumbText()).toBe("Factories/Factory A/Build");
+    await waitFor(() => expect(regionNames()).toEqual(["Build"]));
     expect(screen.getByTestId("step-node-Plan")).toBeInTheDocument();
     expect(screen.getByTestId("step-node-Ship")).toBeInTheDocument();
-
-    // wf-review has an active TaskRun: its header reports it
-    const review = Array.from(
-      document.querySelectorAll("[data-region-header]")
-    ).find((header) => header.getAttribute("aria-label")?.startsWith("Review"));
-    expect(review?.getAttribute("aria-label")).toMatch(/2 active/);
+    expect(screen.queryByTestId("step-node-Approve")).not.toBeInTheDocument();
 
     // zoom widget + search (the toolbar carries it in graph view too)
     expect(screen.getByLabelText(/fit to view/i)).toBeInTheDocument();
@@ -633,14 +679,10 @@ describe("WorkflowAtlas", () => {
 
     renderAtlasWithEntityHost();
     await findScopedGraph();
-    const build = await waitFor(() => {
-      const header = Array.from(
-        document.querySelectorAll<SVGElement>("[data-region-header]")
-      ).find((el) => el.getAttribute("aria-label")?.startsWith("Build"));
-      if (!header) throw new Error("Build header not rendered yet");
-      return header;
-    });
+    await waitFor(() => expect(stationNames()).toContain("Build"));
+    const build = partByTestId("workflow-station-Build");
 
+    // A click inspects the workflow; a double-click opens its steps.
     fireEvent.click(build);
     expect(await screen.findByText(/Workflow Details/)).toBeInTheDocument();
     const inspector = screen.getByTestId("global-entity-panel");
@@ -649,8 +691,12 @@ describe("WorkflowAtlas", () => {
       "calc(432px + var(--s-3))"
     );
 
+    fireEvent.doubleClick(build);
+    await findStepGraph();
     fireEvent.click(
-      screen.getByTestId("step-node-Execute").querySelector("[data-part-id]")!
+      (await screen.findByTestId("step-node-Execute")).querySelector(
+        "[data-part-id]"
+      )!
     );
     expect(await screen.findByText("Step Configuration")).toBeInTheDocument();
     expect(inspector).toHaveAttribute("data-chat-adjacent", "true");
@@ -666,18 +712,14 @@ describe("WorkflowAtlas", () => {
 
     useFactoryFilterStore.getState().reset();
     render(<WorkflowAtlas />);
-    await waitFor(() =>
-      expect(
-        document.querySelectorAll("[data-testid^='factory-node-']")
-      ).toHaveLength(2)
-    );
+    await waitFor(() => expect(stationNames("factory")).toHaveLength(2));
 
     fireEvent.change(screen.getByLabelText("Filter by factory"), {
       target: { value: "Factory A" },
     });
 
     await findScopedGraph();
-    await waitFor(() => expect(regionNames()).toEqual(["Build"]));
+    await waitFor(() => expect(stationNames()).toEqual(["Build"]));
 
     fireEvent.click(screen.getByRole("radio", { name: "Map" }));
     await waitFor(() => {
@@ -874,7 +916,7 @@ describe("WorkflowAtlas — BOARD view", () => {
     useFactoryFilterStore.getState().reset();
     render(<WorkflowAtlas />);
 
-    expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
+    expect(await findFactoryGraph()).toBeInTheDocument();
     expect(
       screen.queryByRole("radio", { name: "Board" })
     ).not.toBeInTheDocument();
@@ -961,8 +1003,10 @@ it("keeps shared rendering in Graph and returns through Map, Board and the facto
   fireEvent.click(screen.getByRole("radio", { name: "Graph" }));
   expect(await findScopedGraph()).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Factories" }));
-  expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
+  expect(await findFactoryGraph()).toBeInTheDocument();
   expect(
     screen.queryByLabelText("Factory workflow graph")
   ).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("radio", { name: "Map" }));
+  expect(await screen.findByTestId("factory-overview")).toBeInTheDocument();
 });
