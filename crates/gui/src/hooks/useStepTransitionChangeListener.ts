@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { events, type StepTransitionChangedEvent } from "../bindings";
+import { applyStepTransitionToQueryCache } from "../query";
 import {
   getProjectScopeGeneration,
   useProjectScopeGeneration,
@@ -7,16 +8,16 @@ import {
 
 /** Options for the step transition change listener hook */
 interface UseStepTransitionChangeListenerOptions {
-  /** Called when a step transition is created or deleted */
+  /** Called after the per-step cache is updated for a transition change */
   onStepTransitionChange?: (event: StepTransitionChangedEvent) => void;
   /** Whether the listener is enabled (default: true) */
   enabled?: boolean;
 }
 
 /**
- * Hook that listens to StepTransitionChangedEvent from Tauri.
- * Step transitions define how steps connect to each other in a workflow.
- * This hook notifies consumers so they can update transition-related state.
+ * Hook that listens to StepTransitionChangedEvent from Tauri and applies the
+ * edge to the source step's `steps.byId` entry (`transitions_to` and
+ * `transition_sessions`), then notifies the optional consumer.
  *
  * @param options - Configuration options for the listener
  */
@@ -35,6 +36,8 @@ export function useStepTransitionChangeListener(
       console.debug(
         `[StepTransitionChangeListener] Received ${change_type} event for transition ${transition_id.slice(0, 6)}`
       );
+
+      applyStepTransitionToQueryCache(event.payload, projectScopeGeneration);
 
       if (onStepTransitionChange) {
         onStepTransitionChange(event.payload);

@@ -242,10 +242,22 @@ session directive; other steps' transitions carry `<mode>` or
 so a directive change re-lays out the Graph. On the Map, aggregated handoffs
 carry condition chips, and route labels are part of `layoutKey`.
 
-Sacrum's `step_transition_created` event carries no directive, so
-`usePipelineSummary` refetches the summary after applying it. Sacrum sends no
-event when a kept transition's directive changes; the Atlas shows that change
-after the next summary fetch, such as on reconnect or reload.
+Sacrum's `step_transition_created`, `step_transition_updated` and
+`step_transition_deleted` events carry the full edge, including its label and
+session directive, so the summary reducer and the per-step `steps.byId` cache
+apply them without a refetch. Step events carry no outgoing edges
+(`StepChangedEvent.includes_transitions` is false for realtime payloads), so
+they never replace the cached `transitions_to` / `transition_sessions`; edges
+change only through transition events. The StepInspector sends
+`transitions_to` only when the user edited it, because `update_step` replaces
+the whole outgoing set.
+
+`usePipelineSummarySync` (mounted in `GlobalListeners`) applies realtime
+events to the cached summary even while no Atlas surface is mounted; the
+summary is cached with an infinite stale time, so returning to the Atlas would
+otherwise show it as it was when the Atlas was left. A summary fetch that
+overlaps an event which changed the cache is retried, at most
+`MAX_SUMMARY_FETCH_ATTEMPTS` times.
 
 Hovering on the Atlas is a quiet trace. In the Graph (`useAtlasPresentation`)
 hovering or focusing a workflow, step or rail lights it, its incident rails

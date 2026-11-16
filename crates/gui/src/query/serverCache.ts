@@ -2,6 +2,7 @@ import type {
   Section,
   Step,
   StepExecution,
+  StepTransitionChangedEvent,
   Task,
   Artifact,
   TaskFilterOptions,
@@ -663,14 +664,67 @@ export function upsertWorkflowInQueryCache(
   }
 }
 
+/**
+ * Apply a step to its `steps.byId` entry.
+ *
+ * Realtime step payloads carry no outgoing edges (`includesTransitions:
+ * false`): their `transitions_to` / `transition_sessions` are placeholders, so
+ * the cached edges are kept and a step without a complete cached entry is
+ * refetched rather than seeded with empty edges.
+ */
 export function upsertStepInQueryCache(
   step: Step,
-  generation = getProjectScopeGeneration()
+  generation = getProjectScopeGeneration(),
+  { includesTransitions = true }: { includesTransitions?: boolean } = {}
 ) {
   if (!step.id) return;
+  const key = queryKeys.steps.byId(generation, step.id);
+  if (includesTransitions) {
+    queryClient.setQueryData<Step | null>(key, step);
+    return;
+  }
+  const existing = queryClient.getQueryData<Step | null>(key);
+  if (!existing) {
+    void queryClient.invalidateQueries({ queryKey: key, exact: true });
+    return;
+  }
+  const next: Step = {
+    ...step,
+    transitions_to: existing.transitions_to,
+    transition_sessions: existing.transition_sessions,
+  };
+  queryClient.setQueryData<Step | null>(key, next);
+}
+
+/** Apply an outgoing-edge change to the source step's `steps.byId` entry. */
+export function applyStepTransitionToQueryCache(
+  event: StepTransitionChangedEvent,
+  generation = getProjectScopeGeneration()
+) {
+  const { from_step_id: fromStepId, to_step_id: toStepId } = event;
+  if (!fromStepId || !toStepId) return;
   queryClient.setQueryData<Step | null>(
-    queryKeys.steps.byId(generation, step.id),
-    (existing) => (existing ? { ...existing, ...step } : step)
+    queryKeys.steps.byId(generation, fromStepId),
+    (step) => {
+      if (!step) return step;
+      const sessions = { ...step.transition_sessions };
+      delete sessions[toStepId];
+      if (event.change_type === "Deleted") {
+        return {
+          ...step,
+          transitions_to: step.transitions_to.filter((id) => id !== toStepId),
+          transition_sessions: sessions,
+        };
+      }
+      if (event.session) sessions[toStepId] = event.session;
+      return {
+        ...step,
+        transitions_to: step.transitions_to.includes(toStepId)
+          ? step.transitions_to
+          : [...step.transitions_to, toStepId],
+        transition_sessions: sessions,
+      };
+    }
   );
 }
 

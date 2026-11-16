@@ -178,13 +178,20 @@ pub enum WorkflowChangeType {
 
 /// Event payload for step changes.
 /// Emitted when a step is created, updated, or deleted.
-/// For create/update events, `step` carries the full deserialized entity.
+/// For create/update events, `step` carries the deserialized entity.
+///
+/// Sacrum's step payload has no outgoing edges, so realtime events set
+/// `includes_transitions` to false and their `step.transitions_to` /
+/// `step.transition_sessions` are empty placeholders, not the step's edges.
+/// Edges change only through `StepTransitionChangedEvent`. Events emitted
+/// from a full step read set it to true.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct StepChangedEvent {
     pub step_id: String,
     pub workflow_id: String,
     pub change_type: StepChangeType,
     pub step: Option<types::Step>,
+    pub includes_transitions: bool,
 }
 
 /// The type of change that occurred on a step.
@@ -265,18 +272,22 @@ pub enum StepExecutionChangeType {
 }
 
 /// Event payload for step transition changes.
-/// Emitted when a step transition is created or deleted.
+/// Emitted when a step transition is created, updated in place (label or
+/// session directive) or deleted.
 ///
-/// `from_step_id` / `to_step_id` are hoisted from the Sacrum payload so the
-/// pipeline reducer can update each step's `transitions_to[]` without a
-/// refetch. Sacrum sends the full edge on both `Created` and `Deleted`
-/// (before-image tombstone), so these endpoints are always populated under
-/// the v1 CDC contract.
+/// The edge is hoisted from the Sacrum payload so the pipeline reducer and
+/// the per-step cache can update each step's `transitions_to[]` and
+/// `transition_sessions` without a refetch. Sacrum sends the full edge on
+/// every change (before-image tombstone on `Deleted`), so the endpoints are
+/// always populated under the v1 CDC contract. `session` is null when the
+/// edge enters a new conversation.
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct StepTransitionChangedEvent {
     pub transition_id: String,
     pub from_step_id: Option<String>,
     pub to_step_id: Option<String>,
+    pub label: Option<String>,
+    pub session: Option<types::SessionDirective>,
     pub change_type: StepTransitionChangeType,
 }
 
@@ -284,6 +295,7 @@ pub struct StepTransitionChangedEvent {
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub enum StepTransitionChangeType {
     Created,
+    Updated,
     Deleted,
 }
 

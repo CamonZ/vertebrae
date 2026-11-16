@@ -755,6 +755,8 @@ describe("applyStepTransitionCreated", () => {
       transition_id: "tr-1",
       from_step_id: "s1",
       to_step_id: "s2",
+      label: null,
+      session: null,
       change_type: "Created",
     });
 
@@ -772,10 +774,46 @@ describe("applyStepTransitionCreated", () => {
       transition_id: "tr-1",
       from_step_id: "s1",
       to_step_id: "s2",
+      label: null,
+      session: null,
       change_type: "Created",
     });
 
     expect(next.workflows[0].workflow_steps[0].transitions_to).toEqual(["s2"]);
+  });
+
+  it("sets and clears an in-place session directive change", () => {
+    const step: PipelineStep = {
+      ...makeStep("s1", "wf-1", "todo", 0),
+      transitions_to: ["s2"],
+    };
+    const summary = makeSummary([makeWorkflow("wf-1", [step])]);
+    const event = {
+      transition_id: "tr-1",
+      from_step_id: "s1",
+      to_step_id: "s2",
+      label: null,
+      change_type: "Updated",
+    } as const;
+
+    const forked = applyStepTransitionCreated(summary, {
+      ...event,
+      session: { mode: "fork", step_id: null },
+    });
+    expect(forked.workflows[0].workflow_steps[0].transition_sessions).toEqual({
+      s2: { mode: "fork", step_id: null },
+    });
+
+    const cleared = applyStepTransitionCreated(forked, {
+      ...event,
+      session: null,
+    });
+    expect(cleared.workflows[0].workflow_steps[0].transitions_to).toEqual([
+      "s2",
+    ]);
+    expect(cleared.workflows[0].workflow_steps[0].transition_sessions).toEqual(
+      {}
+    );
   });
 });
 
@@ -792,6 +830,8 @@ describe("applyStepTransitionDeleted", () => {
       transition_id: "tr-1",
       from_step_id: "s1",
       to_step_id: "s2",
+      label: null,
+      session: null,
       change_type: "Deleted",
     });
 
@@ -808,6 +848,8 @@ describe("applyStepTransitionDeleted", () => {
       transition_id: "tr-unknown",
       from_step_id: null,
       to_step_id: null,
+      label: null,
+      session: null,
       change_type: "Deleted",
     });
 

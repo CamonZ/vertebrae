@@ -25,6 +25,7 @@ export {
   mergeFetchedStepExecutions,
   mergeFetchedTaskRuns,
   mergeFetchedTaskRunTrace,
+  applyStepTransitionToQueryCache,
   removeTaskFromQueryCache,
   removeArtifactFromQueryCache,
   removeTaskRunsFromQueryCache,

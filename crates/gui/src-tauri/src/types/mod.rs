@@ -1061,9 +1061,10 @@ pub struct Workflow {
     /// Sort order for displaying workflows (Sacrum: `display_order`).
     #[serde(default, alias = "order")]
     pub display_order: i32,
-    /// Additional metadata as key-value pairs
+    /// Additional metadata. Sacrum stores an arbitrary JSON object, so
+    /// realtime payloads may carry non-string values.
     #[serde(default)]
-    pub metadata: std::collections::HashMap<String, String>,
+    pub metadata: std::collections::HashMap<String, serde_json::Value>,
     /// Creation timestamp (ISO 8601 string)
     #[serde(alias = "inserted_at")]
     pub created_at: Option<String>,
@@ -1082,7 +1083,11 @@ impl From<vertebrae_core::Workflow> for Workflow {
             factory_name: workflow.factory_name,
             is_default: workflow.is_default,
             display_order: workflow.order,
-            metadata: workflow.metadata,
+            metadata: workflow
+                .metadata
+                .into_iter()
+                .map(|(key, value)| (key, serde_json::Value::String(value)))
+                .collect(),
             created_at: workflow.created_at.map(|dt| dt.to_rfc3339()),
             updated_at: workflow.updated_at.map(|dt| dt.to_rfc3339()),
         }
@@ -1979,6 +1984,32 @@ impl From<UpdateStepOptions> for vertebrae_core::StepUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workflow_realtime_payload_accepts_non_string_metadata() {
+        // Shape of Sacrum's workflow_updated CDC payload.
+        let payload = serde_json::json!({
+            "id": "87eca190-3c79-4415-b17d-8eddad8a51e7",
+            "name": "Workflow",
+            "description": null,
+            "metadata": {"n": 1, "s": "x"},
+            "schema_version": 1,
+            "inserted_at": "2026-11-16T20:10:58.842115Z",
+            "updated_at": "2026-11-16T20:10:58.856669Z",
+            "project_id": "b52fe944-f4e6-48a0-88b4-7180eb6b1d00",
+            "display_order": 2,
+            "is_default": false,
+            "initial_step_id": null,
+            "kanban_column": null,
+            "factory_name": "Factory"
+        });
+
+        let workflow: Workflow = serde_json::from_value(payload).unwrap();
+
+        assert_eq!(workflow.metadata["n"], serde_json::json!(1));
+        assert_eq!(workflow.metadata["s"], serde_json::json!("x"));
+        assert_eq!(workflow.factory_name.as_deref(), Some("Factory"));
+    }
 
     // ─── TaskLevel Conversion Tests ─────────────────────────────────
 

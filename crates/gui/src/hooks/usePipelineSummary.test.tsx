@@ -71,7 +71,17 @@ vi.mock("./useWebSocketStatus", () => ({
   useWebSocketStatus: () => "connected",
 }));
 
-import { usePipelineSummary } from "./usePipelineSummary";
+import {
+  MAX_SUMMARY_FETCH_ATTEMPTS,
+  usePipelineSummary,
+  usePipelineSummarySync,
+} from "./usePipelineSummary";
+
+/** The Atlas query together with the globally mounted event sync. */
+function useSyncedSummary() {
+  usePipelineSummarySync();
+  return usePipelineSummary();
+}
 
 const summary = (
   ticketCount = 0,
@@ -149,7 +159,7 @@ describe("usePipelineSummary", () => {
   });
 
   it("keys data by project generation and ignores stale event listeners", async () => {
-    const { result } = renderHook(() => usePipelineSummary(), { wrapper });
+    const { result } = renderHook(() => useSyncedSummary(), { wrapper });
     await waitFor(() => expect(result.current.summary).not.toBeNull());
     const staleHandler = taskHandlers[0];
     const oldGeneration = getProjectScopeGeneration();
@@ -198,7 +208,7 @@ describe("usePipelineSummary", () => {
 
   it("reduces archive updates without refetching", async () => {
     getPipelineSummary.mockResolvedValue({ status: "ok", data: summary(1) });
-    const { result } = renderHook(() => usePipelineSummary(), { wrapper });
+    const { result } = renderHook(() => useSyncedSummary(), { wrapper });
     await waitFor(() => expect(taskHandlers).toHaveLength(1));
     await waitFor(() => expect(getPipelineSummary).toHaveBeenCalledTimes(1));
     await waitFor(() =>
@@ -249,7 +259,7 @@ describe("usePipelineSummary", () => {
       )
       .mockResolvedValueOnce({ status: "ok", data: summary(0) });
 
-    const { result } = renderHook(() => usePipelineSummary(), { wrapper });
+    const { result } = renderHook(() => useSyncedSummary(), { wrapper });
     await waitFor(() => expect(taskHandlers).toHaveLength(1));
 
     act(() => {
@@ -279,7 +289,7 @@ describe("usePipelineSummary", () => {
 
   it("leaves step movement to the semantic event", async () => {
     getPipelineSummary.mockResolvedValue({ status: "ok", data: summary(1, 0) });
-    const { result } = renderHook(() => usePipelineSummary(), { wrapper });
+    const { result } = renderHook(() => useSyncedSummary(), { wrapper });
     await waitFor(() => expect(result.current.summary).not.toBeNull());
 
     act(() => {
@@ -326,7 +336,7 @@ describe("usePipelineSummary", () => {
     getPipelineSummary
       .mockResolvedValueOnce({ status: "ok", data: summary(1, 0) })
       .mockResolvedValue({ status: "ok", data: summary(0, 0) });
-    const { result } = renderHook(() => usePipelineSummary(), { wrapper });
+    const { result } = renderHook(() => useSyncedSummary(), { wrapper });
     await waitFor(() => expect(result.current.summary).not.toBeNull());
 
     act(() => {
@@ -379,7 +389,7 @@ describe("usePipelineSummary", () => {
     getPipelineSummary
       .mockResolvedValueOnce({ status: "ok", data: summary(1, 0) })
       .mockResolvedValue({ status: "ok", data: reconciled });
-    const { result } = renderHook(() => usePipelineSummary(), { wrapper });
+    const { result } = renderHook(() => useSyncedSummary(), { wrapper });
     await waitFor(() => expect(result.current.summary).not.toBeNull());
 
     act(() => {
@@ -429,16 +439,8 @@ describe("usePipelineSummary", () => {
     expect(getPipelineSummary.mock.calls.length).toBeGreaterThan(1);
   });
 
-  it("refetches a created transition to read its session directive", async () => {
-    const withSession = summary();
-    withSession.workflows[0].workflow_steps[0].transitions_to = ["step-2"];
-    withSession.workflows[0].workflow_steps[0].transition_sessions = {
-      "step-2": { mode: "resume", step_id: "step-1" },
-    };
-    getPipelineSummary
-      .mockResolvedValueOnce({ status: "ok", data: summary() })
-      .mockResolvedValue({ status: "ok", data: withSession });
-    const { result } = renderHook(() => usePipelineSummary(), { wrapper });
+  it("applies a transition's session directive without refetching", async () => {
+    const { result } = renderHook(() => useSyncedSummary(), { wrapper });
     await waitFor(() => expect(result.current.summary).not.toBeNull());
 
     act(() => {
@@ -447,6 +449,8 @@ describe("usePipelineSummary", () => {
           transition_id: "transition-1",
           from_step_id: "step-1",
           to_step_id: "step-2",
+          label: null,
+          session: { mode: "resume", step_id: "step-1" },
           change_type: "Created",
         },
       });
@@ -455,9 +459,96 @@ describe("usePipelineSummary", () => {
     await waitFor(() =>
       expect(
         result.current.summary?.workflows[0].workflow_steps[0]
-          .transition_sessions
-      ).toEqual({ "step-2": { mode: "resume", step_id: "step-1" } })
+      ).toMatchObject({
+        transitions_to: ["step-2"],
+        transition_sessions: {
+          "step-2": { mode: "resume", step_id: "step-1" },
+        },
+      })
     );
-    expect(getPipelineSummary).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      transitionHandlers[0]({
+        payload: {
+          transition_id: "transition-1",
+          from_step_id: "step-1",
+          to_step_id: "step-2",
+          label: null,
+          session: { mode: "fork", step_id: null },
+          change_type: "Updated",
+        },
+      });
+    });
+
+    await waitFor(() =>
+      expect(
+        result.current.summary?.workflows[0].workflow_steps[0]
+          .transition_sessions
+      ).toEqual({ "step-2": { mode: "fork", step_id: null } })
+    );
+    expect(getPipelineSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the summary current while no Atlas surface is mounted", async () => {
+    const sync = renderHook(() => usePipelineSummarySync(), { wrapper });
+    const atlas = renderHook(() => usePipelineSummary(), { wrapper });
+    await waitFor(() => expect(atlas.result.current.summary).not.toBeNull());
+    atlas.unmount();
+
+    act(() => {
+      transitionHandlers[0]({
+        payload: {
+          transition_id: "transition-1",
+          from_step_id: "step-1",
+          to_step_id: "step-2",
+          label: null,
+          session: null,
+          change_type: "Created",
+        },
+      });
+    });
+
+    const remounted = renderHook(() => usePipelineSummary(), { wrapper });
+    expect(
+      remounted.result.current.summary?.workflows[0].workflow_steps[0]
+        .transitions_to
+    ).toEqual(["step-2"]);
+    sync.unmount();
+  });
+
+  it("stops retrying an overlapped fetch after a bounded number of attempts", async () => {
+    const { result } = renderHook(() => useSyncedSummary(), { wrapper });
+    await waitFor(() => expect(taskHandlers).toHaveLength(1));
+    // Every fetch is overlapped by an event that arrives before it resolves.
+    getPipelineSummary.mockImplementation(async () => {
+      taskHandlers[0]({
+        payload: {
+          task_id: "task-1",
+          change_type: "Created",
+          task: createMockTask({
+            id: "task-1",
+            current_step_id: "step-1",
+            level: "ticket",
+          }),
+          current_step_id: "step-1",
+          workflow_id: "workflow-1",
+          level: "ticket",
+          archived: false,
+        },
+      });
+      return { status: "ok", data: summary() };
+    });
+
+    act(() => result.current.refetch());
+
+    await waitFor(() =>
+      expect(getPipelineSummary).toHaveBeenCalledTimes(
+        1 + MAX_SUMMARY_FETCH_ATTEMPTS
+      )
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getPipelineSummary).toHaveBeenCalledTimes(
+      1 + MAX_SUMMARY_FETCH_ATTEMPTS
+    );
   });
 });

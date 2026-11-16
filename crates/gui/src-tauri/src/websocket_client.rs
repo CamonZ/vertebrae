@@ -941,7 +941,9 @@ impl SacrumSocket {
                 "step_created" | "step_updated" | "step_deleted" => {
                     Self::handle_step_event(event, payload, app_handle)?;
                 }
-                "step_transition_created" | "step_transition_deleted" => {
+                "step_transition_created"
+                | "step_transition_updated"
+                | "step_transition_deleted" => {
                     Self::handle_step_transition_event(event, payload, app_handle)?;
                 }
                 "workflow_transition_created" | "workflow_transition_deleted" => {
@@ -1445,6 +1447,7 @@ impl SacrumSocket {
             workflow_id,
             change_type,
             step,
+            includes_transitions: false,
         };
 
         log::debug!(
@@ -1481,16 +1484,31 @@ impl SacrumSocket {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
+        let label = payload
+            .get("label")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let session = match payload.get("session") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(value) => Some(
+                serde_json::from_value::<types::SessionDirective>(value.clone())
+                    .map_err(|e| format!("Invalid session in step transition payload: {}", e))?,
+            ),
+        };
+
         let change_type = match event {
             "step_transition_created" => StepTransitionChangeType::Created,
+            "step_transition_updated" => StepTransitionChangeType::Updated,
             "step_transition_deleted" => StepTransitionChangeType::Deleted,
-            _ => StepTransitionChangeType::Created,
+            _ => return Err(format!("Unknown step transition event: {}", event)),
         };
 
         let event = StepTransitionChangedEvent {
             transition_id,
             from_step_id,
             to_step_id,
+            label,
+            session,
             change_type,
         };
 
