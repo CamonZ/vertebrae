@@ -43,6 +43,196 @@ describe("chatStore", () => {
     vi.useRealTimers();
   });
 
+  describe("history recovery", () => {
+    const line = (n: number) =>
+      JSON.stringify({
+        version: 1,
+        event_id: `history-${n}`,
+        stream_id: "history",
+        sequence: n,
+        correlation: { session_id: "history", thread_id: "history" },
+        timestamp: `2026-01-01T00:00:0${n}Z`,
+        semantics: "snapshot",
+        type: "turn_input",
+        data: {
+          thread_id: "history",
+          content: `message ${n}`,
+          provenance: "human",
+        },
+      });
+    const page = (
+      events: number[],
+      key = "revision",
+      cursor: string | null = null
+    ) => ({
+      status: "ok" as const,
+      data: {
+        events: events.map(line),
+        cache_key: key,
+        next_cursor: cursor,
+        has_more: cursor !== null,
+      },
+    });
+    const seed = () => {
+      const id = useChatStore
+        .getState()
+        .openSession("History", "/repo/history");
+      const message: ChatMessage = {
+        kind: "user",
+        text: "message 2",
+        timestamp: "2026-01-01T00:00:02Z",
+      };
+      useChatStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          [id]: {
+            ...state.sessions[id],
+            providerResumeId: "history",
+            selectedSpeedTier: "default",
+            messages: [message],
+            providerReplay: {
+              generation: 12345,
+              lines: [line(2)],
+              cacheKey: "revision",
+              nextCursor: "old-cursor",
+              hasMore: true,
+              loading: null,
+              loaded: true,
+              error: null,
+              installedMessages: [message],
+              seenCursors: ["old-cursor"],
+            },
+          },
+        },
+      }));
+      return id;
+    };
+
+    it("Retry history retries the failed older page with an unchanged cache key", async () => {
+      const id = seed();
+      const load = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce({
+          status: "error",
+          error: { message: "disk temporarily unavailable" },
+        })
+        .mockResolvedValueOnce(page([1]));
+      expect(await useChatStore.getState().loadOlderReplayMessages(id)).toBe(
+        false
+      );
+      expect(useChatStore.getState().sessions[id].providerReplay?.error).toBe(
+        "disk temporarily unavailable"
+      );
+      useChatStore.getState().refreshProviderThreadSession(id);
+      await vi.waitFor(() =>
+        expect(
+          useChatStore.getState().sessions[id].providerReplay?.hasMore
+        ).toBe(false)
+      );
+      expect(load.mock.calls.map(([input]) => input.cursor)).toEqual([
+        "old-cursor",
+        "old-cursor",
+      ]);
+      expect(
+        useChatStore.getState().sessions[id].providerReplay?.error
+      ).toBeNull();
+      expect(
+        useChatStore
+          .getState()
+          .sessions[id].messages.map((m) => m.kind === "user" && m.text)
+      ).toEqual(["message 1", "message 2"]);
+    });
+
+    it.each([
+      "transcript replay cursor no longer matches the transcript revision",
+      "transcript replay cursor is outside the retained event window",
+    ])("rebases a failed cursor and keeps live messages: %s", async (error) => {
+      const id = seed();
+      const live: ChatMessage = {
+        kind: "user",
+        text: "live message",
+        timestamp: "2026-01-01T00:00:04Z",
+      };
+      const load = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce({ status: "error", error: { message: error } })
+        .mockImplementationOnce(async () => {
+          // This live message is already present in the fresh transcript page.
+          useChatStore.getState().addMessage(id, {
+            kind: "user",
+            text: "message 3",
+            timestamp: "2026-01-01T00:00:03Z",
+          });
+          useChatStore.getState().addMessage(id, live);
+          return page([2, 3], "new-revision", "new-cursor");
+        })
+        .mockResolvedValueOnce(page([1], "new-revision"));
+      expect(await useChatStore.getState().loadOlderReplayMessages(id)).toBe(
+        true
+      );
+      expect(load.mock.calls.map(([input]) => input.cursor)).toEqual([
+        "old-cursor",
+        null,
+        "new-cursor",
+      ]);
+      expect(
+        useChatStore
+          .getState()
+          .sessions[id].messages.map((m) => m.kind === "user" && m.text)
+      ).toEqual(["message 1", "message 2", "message 3", "live message"]);
+      expect(useChatStore.getState().sessions[id].providerReplay).toMatchObject(
+        { cacheKey: "new-revision", error: null, hasMore: false }
+      );
+    });
+
+    it("bounds recovery and reports the current failure without dropping visible history", async () => {
+      const id = seed();
+      const before = useChatStore.getState().sessions[id].messages;
+      const load = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce({
+          status: "error",
+          error: {
+            message:
+              "transcript replay cursor no longer matches the transcript revision",
+          },
+        })
+        .mockResolvedValueOnce(page([2], "new-revision", "new-cursor"))
+        .mockResolvedValueOnce({
+          status: "error",
+          error: { message: "transcript changed again" },
+        });
+      expect(await useChatStore.getState().loadOlderReplayMessages(id)).toBe(
+        false
+      );
+      expect(load).toHaveBeenCalledTimes(3);
+      expect(useChatStore.getState().sessions[id].messages).toBe(before);
+      expect(useChatStore.getState().sessions[id].providerReplay).toMatchObject(
+        { error: "transcript changed again", loading: null }
+      );
+    });
+
+    it("ignores a recovery result after the session is closed", async () => {
+      const id = seed();
+      vi.spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValueOnce({
+          status: "error",
+          error: {
+            message:
+              "transcript replay cursor no longer matches the transcript revision",
+          },
+        })
+        .mockImplementationOnce(async () => {
+          useChatStore.getState().closeSession(id);
+          return page([1, 2]);
+        });
+      expect(await useChatStore.getState().loadOlderReplayMessages(id)).toBe(
+        false
+      );
+      expect(useChatStore.getState().sessions[id]).toBeUndefined();
+    });
+  });
+
   it("preserves live gate details on catalog refresh but accepts a new execution", async () => {
     const id = useChatStore.getState().openSession("Gate chat");
     const gate = {

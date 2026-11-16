@@ -41,6 +41,7 @@ import {
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const BOTTOM_SCROLL_TOLERANCE_PX = 24;
+const HISTORY_LOAD_THRESHOLD_PX = 240;
 // Stay inside WebKit's signed scrolling range; MAX_SAFE_INTEGER wraps to zero.
 const BOTTOM_SCROLL_TARGET_PX = 1_000_000_000;
 const COMMENT_EDITOR_MAX_WIDTH_PX = 384;
@@ -571,41 +572,62 @@ export function ChatMessages({
     },
     []
   );
-  const handleLoadOlderMessages = useCallback(() => {
-    const container = messagesContainerRef.current;
-    if (
-      !container ||
-      !onLoadOlderMessages ||
-      !hasOlderMessages ||
-      isLoadingOlderMessages
-    ) {
-      return;
-    }
-    const anchor = {
-      messages,
-      scrollHeight: container.scrollHeight,
-      scrollTop: container.scrollTop,
-    };
-    prependAnchorRef.current = anchor;
-    keepAtBottomRef.current = false;
-
-    void onLoadOlderMessages().then((applied) => {
-      if (prependAnchorRef.current !== anchor) return;
-
-      if (!applied) {
-        prependAnchorRef.current = null;
+  const handleLoadOlderMessages = useCallback(
+    (retry = false) => {
+      const container = messagesContainerRef.current;
+      if (
+        !container ||
+        !onLoadOlderMessages ||
+        !hasOlderMessages ||
+        isLoadingOlderMessages ||
+        isLoadingInitialHistory ||
+        (replayError && !retry) ||
+        prependAnchorRef.current ||
+        !isVisible
+      ) {
         return;
       }
+      const anchor = {
+        messages,
+        scrollHeight: container.scrollHeight,
+        scrollTop: container.scrollTop,
+      };
+      prependAnchorRef.current = anchor;
+      keepAtBottomRef.current = false;
 
-      requestAnimationFrame(() => {
-        if (prependAnchorRef.current !== anchor) return;
+      void onLoadOlderMessages().then(
+        (applied) => {
+          if (prependAnchorRef.current !== anchor) return;
 
-        if (anchor.messages === latestMessagesRef.current) {
-          prependAnchorRef.current = null;
+          if (!applied) {
+            prependAnchorRef.current = null;
+            return;
+          }
+
+          requestAnimationFrame(() => {
+            if (prependAnchorRef.current !== anchor) return;
+
+            if (anchor.messages === latestMessagesRef.current) {
+              prependAnchorRef.current = null;
+            }
+          });
+        },
+        () => {
+          if (prependAnchorRef.current === anchor)
+            prependAnchorRef.current = null;
         }
-      });
-    });
-  }, [hasOlderMessages, isLoadingOlderMessages, messages, onLoadOlderMessages]);
+      );
+    },
+    [
+      hasOlderMessages,
+      isLoadingOlderMessages,
+      isLoadingInitialHistory,
+      replayError,
+      isVisible,
+      messages,
+      onLoadOlderMessages,
+    ]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -795,7 +817,11 @@ export function ChatMessages({
           className="min-h-0 flex-1 overflow-y-auto p-4"
           data-testid="chat-messages-scroll"
           onWheel={(event) => {
-            if (event.deltaY < 0) beginUserScroll();
+            if (event.deltaY < 0) {
+              beginUserScroll();
+              if (event.currentTarget.scrollTop <= HISTORY_LOAD_THRESHOLD_PX)
+                handleLoadOlderMessages();
+            }
           }}
           onTouchStart={() => {
             activeScrollGestureRef.current = true;
@@ -864,6 +890,12 @@ export function ChatMessages({
                 bottomFollowTimerRef.current = null;
               }
 
+              if (
+                top <= HISTORY_LOAD_THRESHOLD_PX &&
+                (boundedPrevious === null || top < boundedPrevious)
+              ) {
+                handleLoadOlderMessages();
+              }
               lastScrollTopRef.current = top;
 
               const anchor = prependAnchorRef.current;
@@ -886,18 +918,12 @@ export function ChatMessages({
                 Loading conversation history…
               </div>
             )}
-            {(hasOlderMessages || isLoadingOlderMessages) && (
-              <div className="flex justify-center">
-                <button
-                  type="button"
-                  className="rounded-full border border-[var(--color-border)] px-3 py-1 text-xs text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-hover)] disabled:cursor-wait disabled:opacity-60"
-                  disabled={isLoadingOlderMessages}
-                  onClick={handleLoadOlderMessages}
-                >
-                  {isLoadingOlderMessages
-                    ? "Loading older messages…"
-                    : "Load older messages"}
-                </button>
+            {isLoadingOlderMessages && (
+              <div
+                className="text-center text-xs text-[var(--color-fg-mute)]"
+                role="status"
+              >
+                Loading older messages…
               </div>
             )}
             {replayError && (
@@ -906,7 +932,14 @@ export function ChatMessages({
                 role="status"
               >
                 {replayError}
-                <button type="button" onClick={() => retryHistory(sessionId)}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (hasOlderMessages && onLoadOlderMessages)
+                      handleLoadOlderMessages(true);
+                    else retryHistory(sessionId);
+                  }}
+                >
                   Retry history
                 </button>
               </div>

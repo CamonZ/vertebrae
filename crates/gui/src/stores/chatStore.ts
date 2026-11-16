@@ -2061,7 +2061,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     void requestInitialProviderReplayPage(
       session,
       retainFromEventId,
-      refresh ? currentReplay?.cacheKey : undefined
+      refresh && !currentReplay?.error ? currentReplay?.cacheKey : undefined
     )
       .then(async (result) => {
         const owns = (current: ChatSession | undefined) =>
@@ -2862,7 +2862,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }));
       });
 
-      const result = await requestProviderReplayPage(session, requestedCursor);
+      let result = await requestProviderReplayPage(session, requestedCursor);
       const owns = (current: ChatSession | undefined) =>
         !!current &&
         current.providerResumeId === session.providerResumeId &&
@@ -2870,6 +2870,61 @@ export const useChatStore = create<ChatStore>((set, get) => {
         current.providerReplay.generation === expectedGeneration &&
         current.providerReplay.nextCursor === requestedCursor &&
         current.providerReplay.cacheKey === expectedCacheKey;
+      // A live append invalidates revision-bound cursors. Rebase once through
+      // the oldest installed event, preserving the visible/live suffix.
+      let rebased = false;
+      if (
+        owns(get().sessions[sessionId]) &&
+        result.status === "error" &&
+        /transcript replay cursor (no longer matches|is outside)/.test(
+          result.error
+        )
+      ) {
+        let boundary: string | undefined;
+        try {
+          boundary = JSON.parse(replay.lines[0]).event_id;
+        } catch {
+          /* An empty deferred page has no installed boundary. */
+        }
+        const fresh = await requestInitialProviderReplayPage(session, boundary);
+        if (!owns(get().sessions[sessionId])) return false;
+        result = fresh;
+        if (fresh.status === "ok") {
+          rebased = true;
+          if (fresh.page.has_more && fresh.page.next_cursor) {
+            const older = await requestProviderReplayPage(
+              session,
+              fresh.page.next_cursor
+            );
+            result = older;
+            if (older.status === "ok") {
+              if (older.page.cache_key !== fresh.page.cache_key) {
+                result = {
+                  status: "error",
+                  error:
+                    "Provider transcript changed while refreshing; retry the replay.",
+                };
+              } else if (
+                older.page.has_more &&
+                older.page.next_cursor === fresh.page.next_cursor
+              ) {
+                result = {
+                  status: "error",
+                  error: "Provider transcript returned a repeated page cursor.",
+                };
+              } else {
+                result = {
+                  status: "ok",
+                  page: {
+                    ...older.page,
+                    events: [...older.page.events, ...fresh.page.events],
+                  },
+                };
+              }
+            }
+          }
+        }
+      }
       const current = get().sessions[sessionId];
 
       if (!current || !owns(current)) return false;
@@ -2893,7 +2948,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
         nextCursor: result.page.next_cursor,
         hasMore: result.page.has_more,
       };
-      const outcome = applyOlderPage(current.providerReplay!, page, () => []);
+      const outcome = rebased
+        ? {
+            status: "applied" as const,
+            replay: applyInitialPage(current.providerReplay!, page, {
+              messages: [],
+              installedMessageCount: 0,
+            }),
+          }
+        : applyOlderPage(current.providerReplay!, page, () => []);
 
       if (outcome.status === "rejected") {
         set((state) =>
@@ -2909,7 +2972,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           sessionId,
           owns,
           (latest) => ({
-            kind: "older",
+            kind: rebased ? "initial" : "older",
             refresh: true,
             lines: outcome.replay.lines,
             context: {
@@ -3105,7 +3168,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     refreshProviderThreadSession: (sessionId) => {
       const session = get().sessions[sessionId];
-      if (session) hydrateProviderMessagesInPlace(sessionId, session, true);
+      if (
+        session?.providerReplay?.error &&
+        session.providerReplay.hasMore &&
+        session.providerReplay.nextCursor
+      ) {
+        void get().loadOlderReplayMessages(sessionId);
+      } else if (session) {
+        hydrateProviderMessagesInPlace(sessionId, session, true);
+      }
     },
 
     selectProviderThreadSession: async (input) => {
