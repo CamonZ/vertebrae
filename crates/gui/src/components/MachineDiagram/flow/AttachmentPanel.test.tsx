@@ -231,11 +231,17 @@ it("extends the existing inspectors and exposes flow, rail and beat evidence", (
   expect(
     screen.getByRole("list", { name: "Flow evidence", hidden: true })
   ).not.toBeVisible();
-  fireEvent.click(within(flowEvidence).getByText("Flow evidence (1)"));
+  fireEvent.click(within(flowEvidence).getByText("Flow evidence"));
   expect(flowEvidence).toHaveAttribute("open");
   expect(screen.getByRole("list", { name: "Flow evidence" })).toBeVisible();
-  fireEvent.click(within(flowEvidence).getByText("Flow evidence (1)"));
+  fireEvent.click(within(flowEvidence).getByText("Flow evidence"));
   expect(flowEvidence).not.toHaveAttribute("open");
+  // The current beat's evidence folds into its note.
+  const beatEvidence = screen.getByTestId("flow-beat-evidence");
+  expect(
+    screen.getByRole("list", { name: "Beat 1 evidence", hidden: true })
+  ).not.toBeVisible();
+  fireEvent.click(within(beatEvidence).getByText("Evidence"));
   expect(screen.getByRole("list", { name: "Beat 1 evidence" })).toBeVisible();
   expect(screen.getAllByText("Rail evidence body").length).toBeGreaterThan(0);
 

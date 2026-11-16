@@ -2,7 +2,8 @@
  * The player over a migration told in phases (the session-per-thread
  * reference spec): the story picks the phase, a boundary morphs once, the
  * clock holds while it does, seeking jumps straight to a beat's phase, and
- * the phase strip shows and seeks phases by pointer and key.
+ * the note names the phase, the hairline gaps between phases, and B / ⇧B
+ * seek phases.
  */
 import {
   act,
@@ -31,8 +32,11 @@ const shownT = () => Number(player().getAttribute("data-t"));
 const morph = () => player().getAttribute("data-morph");
 const key = (k: string, init: KeyboardEventInit = {}) =>
   fireEvent.keyDown(document.activeElement ?? player(), { key: k, ...init });
-const strip = () => screen.getByRole("navigation", { name: "Phases" });
-const phaseButtons = () => within(strip()).getAllByRole("button");
+const notePhase = () => screen.getByTestId("flow-note-phase").textContent;
+const phaseNote = (k: number) =>
+  `Phase ${k + 1} of ${PHASES.length} · ${flow.labels[PHASES[k]]}`;
+const dots = () =>
+  within(screen.getByTestId("flow-beats")).getAllByRole("button");
 
 function renderPlayer(reducedMotion = false) {
   const r = render(<FlowPlayer flow={flow} reducedMotion={reducedMotion} />);
@@ -46,38 +50,28 @@ afterEach(() => {
 });
 
 describe("a phased flow", () => {
-  it("starts in the first phase, with a phase strip instead of the selector", () => {
+  it("starts in the first phase, named in the note instead of a selector", () => {
     renderPlayer();
     expect(player()).toHaveAttribute("data-phased", "true");
     expect(shown()).toBe("today");
     expect(screen.queryByRole("radiogroup", { name: "Arrangement" })).toBe(
       null
     );
-    expect(phaseButtons().map((b) => b.textContent)).toEqual(
-      PHASES.map((p) => flow.labels[p])
-    );
-    expect(phaseButtons()[0]).toHaveAttribute("aria-current", "step");
-    expect(phaseButtons()[0]).toHaveAccessibleName(
-      `Phase 1 of ${PHASES.length}: ${flow.labels.today}`
-    );
+    expect(notePhase()).toBe(phaseNote(0));
   });
 
-  it("groups the beats under their phase", () => {
+  it("gaps the hairline between phases, with one beat numbering", () => {
     renderPlayer();
-    const groups = screen.getAllByTestId("flow-phase-group");
-    expect(groups.map((g) => g.getAttribute("data-phase"))).toEqual(PHASES);
-    for (const g of groups) {
-      const phase = g.getAttribute("data-phase")!;
-      const list = within(g).getByRole("list", { name: flow.labels[phase] });
-      expect(within(list).getAllByRole("button")).toHaveLength(
-        beats.filter((b) => b.phase === phase).length
-      );
-    }
-    // Beats keep one numbering across the groups.
-    const all = within(screen.getByTestId("flow-chapters")).getAllByRole(
-      "button"
+    const items = [
+      ...screen.getByTestId("flow-beats").querySelectorAll("li"),
+    ] as HTMLElement[];
+    expect(items.map((li) => li.dataset.phase)).toEqual(
+      beats.map((b) => b.phase)
     );
-    expect(all.at(-1)).toHaveAccessibleName(
+    const starts = items.filter((li) => li.dataset.phaseStart === "true");
+    expect(starts.map((li) => li.dataset.phase)).toEqual(PHASES.slice(1));
+    for (const li of starts) expect(li.className).toMatch(/\bml-4\b/);
+    expect(dots().at(-1)).toHaveAccessibleName(
       new RegExp(`^Beat ${beats.length} of ${beats.length}: `)
     );
   });
@@ -93,7 +87,7 @@ describe("a phased flow", () => {
     expect(shown()).toBe("flagged");
     expect(morph()).toBe("today→flagged");
     expect(shownT()).toBe(arrangement(flow, "flagged")!.travel.beats![p1].t);
-    expect(phaseButtons()[1]).toHaveAttribute("aria-current", "step");
+    expect(notePhase()).toBe(phaseNote(1));
     key("ArrowLeft");
     expect(shownBeat()).toBe(p1 - 1);
     expect(shown()).toBe("today");
@@ -108,18 +102,15 @@ describe("a phased flow", () => {
     expect(morph()).toBe("today→target");
     key("Home");
     expect(shown()).toBe("today");
-    // A beat of the list plays in its phase.
-    const all = within(screen.getByTestId("flow-chapters")).getAllByRole(
-      "button"
-    );
-    fireEvent.click(all[firstOf("every")]);
+    // A dot plays its beat in its phase.
+    fireEvent.click(dots()[firstOf("every")]);
     expect(shown()).toBe("every");
     expect(shownBeat()).toBe(firstOf("every"));
   });
 
-  it("the strip and B / ⇧B seek to a phase's first beat", () => {
+  it("a phase's first dot and B / ⇧B seek to a phase's first beat", () => {
     renderPlayer();
-    fireEvent.click(phaseButtons()[2]);
+    fireEvent.click(dots()[firstOf("every")]);
     expect(shown()).toBe("every");
     expect(shownBeat()).toBe(firstOf("every"));
     key("b");
@@ -140,7 +131,7 @@ describe("a phased flow", () => {
         `^Phase 1 of ${PHASES.length}: ${flow.labels.today}\\. Beat 1 `
       )
     );
-    fireEvent.click(phaseButtons()[3]);
+    fireEvent.click(dots()[firstOf("target")]);
     expect(announcer()).toContain(
       `Phase 4 of ${PHASES.length}: ${flow.labels.target}. Beat ${firstOf("target") + 1} of`
     );

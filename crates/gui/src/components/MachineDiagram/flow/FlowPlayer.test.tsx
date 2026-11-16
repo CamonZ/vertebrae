@@ -34,12 +34,13 @@ const shownBeat = () => Number(player().getAttribute("data-beat"));
 const key = (k: string, init: KeyboardEventInit = {}) =>
   fireEvent.keyDown(document.activeElement ?? player(), { key: k, ...init });
 const chapterButtons = () =>
-  within(screen.getByTestId("flow-chapters")).getAllByRole("button");
+  within(screen.getByTestId("flow-beats")).getAllByRole("button");
+const noteCaption = () => screen.getByTestId("flow-note-caption");
 const progressBars = () =>
-  within(screen.getByTestId("flow-chapters"))
+  within(screen.getByTestId("flow-beats"))
     .getAllByTestId("flow-beat-progress")
     .map((bar) =>
-      Number(/scaleY\(([^)]+)\)/.exec(bar.style.transform)?.[1] ?? NaN)
+      Number(/scaleX\(([^)]+)\)/.exec(bar.style.transform)?.[1] ?? NaN)
     );
 const part = (id: string) =>
   player().querySelector(`[data-part-id='${id}']`) as SVGGElement;
@@ -160,13 +161,13 @@ describe("keyboard control", () => {
   });
 });
 
-describe("chapters and announcements", () => {
-  it("each beat is a chapter that plays just that beat, then pauses on its outcome", () => {
+describe("beat hairline, note and announcements", () => {
+  it("each beat dot plays just that beat, then pauses on its outcome", () => {
     vi.useFakeTimers({
       toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"],
     });
     renderPlayer();
-    const chapters = within(screen.getByTestId("flow-chapters")).getAllByRole(
+    const chapters = within(screen.getByTestId("flow-beats")).getAllByRole(
       "button"
     );
     expect(chapters).toHaveLength(after.beats.length);
@@ -196,7 +197,7 @@ describe("chapters and announcements", () => {
     );
   });
 
-  it("Enter or Space on a focused beat plays that beat", async () => {
+  it("Enter or Space on a focused dot plays that beat", async () => {
     const user = userEvent.setup();
     renderPlayer();
     const chapters = chapterButtons();
@@ -217,7 +218,7 @@ describe("chapters and announcements", () => {
     expect(chapters[5]).toHaveAttribute("aria-current", "step");
   });
 
-  it("clamps long captions on beats other than the current one", () => {
+  it("the note shows the current beat's caption, clamped, and follows playback", () => {
     const long = `${"A very long caption that keeps going ".repeat(8)}to the end.`;
     const withLong = {
       ...flow,
@@ -227,21 +228,79 @@ describe("chapters and announcements", () => {
       })),
     };
     renderPlayer({ flow: withLong });
-    const caption = () =>
-      chapterButtons()[1].querySelector("span:last-child") as HTMLElement;
-    expect(caption()).toHaveClass("line-clamp-2");
-    // The full caption stays available: as a tooltip and the accessible name.
-    expect(chapterButtons()[1]).toHaveAttribute("title", long);
+    expect(noteCaption()).toHaveTextContent(after.beats[0].caption);
+    key("2");
+    expect(noteCaption()).toHaveTextContent(long);
+    // Two lines kept for it; whole on hover or focus, and as a tooltip.
+    expect(noteCaption().parentElement).toHaveClass("line-clamp-2");
+    expect(noteCaption().parentElement).toHaveClass(
+      "group-hover:line-clamp-none"
+    );
+    expect(noteCaption().parentElement).toHaveClass(
+      "group-focus-within:line-clamp-none"
+    );
+    expect(noteCaption().closest("p")).toHaveAttribute("title", long);
     expect(chapterButtons()[1]).toHaveAccessibleName(
       `Beat 2 of ${after.beats.length}: ${long}`
     );
-    key("2");
-    expect(caption()).not.toHaveClass("line-clamp-2");
-    expect(caption()).toHaveTextContent(long);
-    expect(chapterButtons()[1]).not.toHaveAttribute("title");
-    expect(chapterButtons()[0].querySelector("span:last-child")).toHaveClass(
-      "line-clamp-2"
+    // Paused (the default), the caption stays without hovering anything.
+    expect(player()).toHaveAttribute("data-playing", "false");
+    key("ArrowRight");
+    expect(noteCaption()).toHaveTextContent(after.beats[2].caption);
+  });
+
+  it("the note updates as playback reaches each beat", () => {
+    vi.useFakeTimers({
+      toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance"],
+    });
+    renderPlayer();
+    key(" ");
+    const seen = new Set<string>();
+    for (let k = 0; k < 400 && player().dataset.playing === "true"; k++) {
+      act(() => vi.advanceTimersByTime(80));
+      expect(noteCaption()).toHaveTextContent(after.beats[shownBeat()].caption);
+      seen.add(noteCaption().textContent ?? "");
+    }
+    expect(player()).toHaveAttribute("data-playing", "false");
+    expect(seen.size).toBe(after.beats.length);
+  }, 30_000);
+
+  it("hovering or focusing another dot shows its caption beside it", () => {
+    renderPlayer();
+    const dots = chapterButtons();
+    // The current beat reads in the note, not as a tooltip.
+    fireEvent.mouseEnter(dots[0]);
+    expect(screen.queryByTestId("flow-beat-peek")).toBeNull();
+    fireEvent.mouseEnter(dots[3]);
+    expect(screen.getByTestId("flow-beat-peek")).toHaveTextContent(
+      after.beats[3].caption
     );
+    expect(dots[3].parentElement).toContainElement(
+      screen.getByTestId("flow-beat-peek")
+    );
+    fireEvent.mouseLeave(dots[3]);
+    expect(screen.queryByTestId("flow-beat-peek")).toBeNull();
+    act(() => dots[5].focus());
+    expect(screen.getByTestId("flow-beat-peek")).toHaveTextContent(
+      after.beats[5].caption
+    );
+    act(() => dots[5].blur());
+    expect(screen.queryByTestId("flow-beat-peek")).toBeNull();
+    // Hovering does not seek.
+    expect(shownBeat()).toBe(0);
+  });
+
+  it("marks played, current and later dots by shape, not only colour", () => {
+    renderPlayer();
+    key("3");
+    const states = chapterButtons().map((d) => d.dataset.state);
+    expect(states.slice(0, 3)).toEqual(["played", "played", "current"]);
+    expect(states.slice(3).every((x) => x === "ahead")).toBe(true);
+    const mark = (i: number) =>
+      chapterButtons()[i].firstElementChild as HTMLElement;
+    expect(mark(0).className).toMatch(/\bh-1\.5\b/);
+    expect(mark(2).className).toMatch(/\bh-2\.5\b.*\bring-2\b/);
+    expect(mark(3).className).toMatch(/\bborder\b/);
   });
 
   it("draws a progress bar per beat: done, current and still to come", () => {
@@ -266,28 +325,6 @@ describe("chapters and announcements", () => {
         .slice(3)
         .every((p) => p === 0)
     ).toBe(true);
-  });
-
-  it("keeps the current beat scrolled into view inside the list", () => {
-    renderPlayer();
-    const list = screen.getByTestId("flow-chapters");
-    // jsdom has no layout: give the list a 100px window over 50px rows.
-    Object.defineProperty(list, "clientHeight", { value: 100 });
-    [...list.children].forEach((li, i) => {
-      Object.defineProperty(li, "offsetTop", { value: i * 50 });
-      Object.defineProperty(li, "offsetHeight", { value: 50 });
-    });
-    const n = after.beats.length;
-    expect(n * 50).toBeGreaterThan(100);
-    key("End");
-    expect(list.scrollTop).toBe(n * 50 - 100);
-    key("Home");
-    expect(list.scrollTop).toBe(0);
-    key("5");
-    expect(list.scrollTop).toBe(5 * 50 - 100);
-    // A beat already in view does not scroll the list.
-    key("4");
-    expect(list.scrollTop).toBe(5 * 50 - 100);
   });
 
   it("announces the beat caption through a live region", () => {
@@ -364,9 +401,10 @@ describe("parts", () => {
     const before = [...bottom.children];
     fireEvent.mouseEnter(part("process"));
     const inspector = screen.getByTestId("flow-part-inspector");
-    // The stack is anchored at its foot: the inspector opens above it all.
-    expect(bottom.firstElementChild).toContainElement(inspector);
-    expect([...bottom.children].slice(1)).toEqual(before);
+    // Beside the player, bottom-left: the player under it does not move.
+    const side = screen.getByTestId("flow-side-panel");
+    expect(side.firstElementChild).toContainElement(inspector);
+    expect([...bottom.children]).toEqual(before);
     expect(inspector).toHaveClass("pointer-events-none");
     expect(inspector).not.toHaveClass("pointer-events-auto");
     fireEvent.click(part("process"));
@@ -516,7 +554,7 @@ describe("reduced motion", () => {
 
   it("a chapter shows its beat's outcome at once under reduced motion", () => {
     renderPlayer({ reducedMotion: true });
-    const chapters = within(screen.getByTestId("flow-chapters")).getAllByRole(
+    const chapters = within(screen.getByTestId("flow-beats")).getAllByRole(
       "button"
     );
     fireEvent.click(chapters[4]);
@@ -586,10 +624,10 @@ describe("play once or loop", () => {
   });
 });
 
-describe("hiding the beats and resizing the diagram", () => {
+describe("hiding the note and resizing the diagram", () => {
   const beatsToggle = () =>
-    screen.getByRole("button", { name: /^(Hide|Show) beats$/ });
-  const chaptersPanel = () => screen.getByTestId("flow-chapters-panel");
+    screen.getByRole("button", { name: /^(Hide|Show) beat note$/ });
+  const chaptersPanel = () => screen.getByTestId("flow-beat-note");
   /** Everything playback-related the reader would lose on a reset. */
   const playback = () => ({
     beat: player().getAttribute("data-beat"),
@@ -615,7 +653,7 @@ describe("hiding the beats and resizing the diagram", () => {
     return state;
   }
 
-  it("the toggle hides and shows the beats list by pointer and by C", () => {
+  it("the toggle hides and shows the beat note by pointer and by C", () => {
     renderPlayer();
     const toggle = beatsToggle();
     expect(toggle).toHaveAttribute("aria-expanded", "true");
@@ -625,7 +663,9 @@ describe("hiding the beats and resizing the diagram", () => {
     fireEvent.click(toggle);
     expect(chaptersPanel()).not.toBeVisible();
     expect(beatsToggle()).toHaveAttribute("aria-expanded", "false");
-    expect(beatsToggle()).toHaveAccessibleName("Show beats");
+    expect(beatsToggle()).toHaveAccessibleName("Show beat note");
+    // The hairline stays with the transport.
+    expect(screen.getByTestId("flow-beats")).toBeVisible();
 
     act(() => player().focus());
     key("c");
@@ -634,29 +674,60 @@ describe("hiding the beats and resizing the diagram", () => {
     expect(chaptersPanel()).not.toBeVisible();
   });
 
-  it("the beats and the controls float over the diagram, which fills the frame", () => {
+  it("the note, hairline and transport share one card centred over the diagram's foot", () => {
     renderPlayer();
     const frame = screen.getByTestId("machine-diagram-viewport");
     const bottom = screen.getByTestId("flow-bottom-panel");
-    expect(frame).toContainElement(chaptersPanel());
     expect(frame).toContainElement(bottom);
-    expect(bottom).toContainElement(
+    // One card; top to bottom: note, hairline, transport; nothing on the right.
+    const card = screen.getByTestId("flow-player-card");
+    expect(bottom.lastElementChild).toBe(card);
+    const [note, rail, transport] = [...card.children];
+    expect(note).toContainElement(chaptersPanel());
+    expect(rail).toBe(screen.getByTestId("flow-beats"));
+    expect(transport).toBe(screen.getByTestId("flow-transport"));
+    expect(transport).toContainElement(
       screen.getByRole("button", { name: "Next beat" })
     );
+    expect(bottom.className).toMatch(/\bitems-center\b/);
+    expect(bottom.className).toMatch(/\bright-4\b/);
     // The grip is the frame's foot, below the floating controls.
     const grip = screen.getByRole("separator", { name: "Resize diagram" });
     expect(frame.nextElementSibling).toBe(grip);
-    // With the beats hidden the controls take the full width.
-    expect(bottom.className).toMatch(/right-\[calc/);
     key("c");
     expect(bottom.className).toMatch(/\bright-4\b/);
+  });
+
+  it("help opens over its button", () => {
+    renderPlayer();
+    fireEvent.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+    expect(screen.getByTestId("flow-player-card")).toContainElement(
+      screen.getByTestId("flow-shortcuts")
+    );
+  });
+
+  it("a followed card's narration reads in the note, even with the caption hidden", () => {
+    renderPlayer();
+    settleFirstBeat();
+    fireEvent.click(
+      player().querySelector(".md-card[data-card-id='q1']") as SVGGElement
+    );
+    const card = screen.getByTestId("flow-note-card");
+    expect(card).toContainElement(screen.getByTestId("flow-narration"));
+    act(() => player().focus());
+    key("c");
+    expect(chaptersPanel()).not.toBeVisible();
+    expect(screen.getByTestId("flow-narration")).toBeVisible();
+    key("Escape");
+    expect(screen.queryByTestId("flow-narration")).toBeNull();
+    expect(card).not.toBeVisible();
   });
 
   it("lists the beats shortcut in the help", () => {
     renderPlayer();
     key("?");
     expect(screen.getByTestId("flow-shortcuts")).toHaveTextContent(
-      "show or hide the beats"
+      "show or hide the beat note"
     );
   });
 
@@ -667,21 +738,6 @@ describe("hiding the beats and resizing the diagram", () => {
     expect(playback()).toEqual(state);
     fireEvent.click(beatsToggle());
     expect(playback()).toEqual(state);
-  });
-
-  it("shown again, the list brings the current beat into view", () => {
-    renderPlayer();
-    const list = screen.getByTestId("flow-chapters");
-    Object.defineProperty(list, "clientHeight", { value: 100 });
-    [...list.children].forEach((li, i) => {
-      Object.defineProperty(li, "offsetTop", { value: i * 50 });
-      Object.defineProperty(li, "offsetHeight", { value: 50 });
-    });
-    key("c");
-    list.scrollTop = 0;
-    key("End");
-    key("c");
-    expect(list.scrollTop).toBe(after.beats.length * 50 - 100);
   });
 
   it("resizing the diagram with its grip does not reset playback", () => {
@@ -707,7 +763,69 @@ describe("hiding the beats and resizing the diagram", () => {
     };
     render(<FlowPlayer flow={noBeats} reducedMotion={false} />);
     expect(
-      screen.queryByRole("button", { name: /beats$/ })
+      screen.queryByRole("button", { name: /beat note$/ })
     ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("flow-beats")).toBeNull();
+    expect(screen.queryByTestId("flow-note-card")).toBeNull();
+    // The transport still plays the diagram.
+    expect(screen.getByRole("button", { name: "Play" })).toBeEnabled();
+  });
+});
+
+describe("evidence and inspectors beside the player", () => {
+  const withEvidence = {
+    ...flow,
+    attachments: [{ kind: "note", text: "Flow evidence body" }],
+  };
+  /** Lay the overlay out `width` wide (jsdom has no layout). */
+  function overlayWidth(width: number) {
+    const real = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "clientWidth"
+    )!;
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(
+      function (this: Element) {
+        return this.classList.contains("md-overlay")
+          ? width
+          : (real.get!.call(this) as number);
+      }
+    );
+  }
+  afterEach(() => vi.restoreAllMocks());
+
+  it("on a wide frame evidence and inspectors sit bottom-left, never right", () => {
+    overlayWidth(1400);
+    renderPlayer({ flow: withEvidence });
+    const side = screen.getByTestId("flow-side-panel");
+    expect(side).toContainElement(screen.getByTestId("flow-evidence"));
+    expect(side.style.left).toBe("62px");
+    expect(side.className).not.toMatch(/\bright-/);
+    expect(screen.queryByTestId("flow-evidence-toggle")).toBeNull();
+    fireEvent.mouseEnter(part("process"));
+    expect(side).toContainElement(screen.getByTestId("flow-part-inspector"));
+  });
+
+  it("on a narrow frame evidence folds into the transport and inspectors stack over the note", () => {
+    overlayWidth(700);
+    renderPlayer({ flow: withEvidence });
+    expect(screen.queryByTestId("flow-side-panel")).toBeNull();
+    const toggle = screen.getByTestId("flow-evidence-toggle");
+    expect(toggle).toHaveAccessibleName("Evidence (1)");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    const popover = screen.getByTestId("flow-evidence-popover");
+    expect(toggle).toHaveAttribute("aria-controls", popover.id);
+    expect(popover).not.toBeVisible();
+    fireEvent.click(toggle);
+    expect(popover).toBeVisible();
+    expect(screen.getByTestId("flow-player-card")).toContainElement(popover);
+    act(() => player().focus());
+    key("Escape");
+    expect(popover).not.toBeVisible();
+
+    fireEvent.mouseEnter(part("process"));
+    const bottom = screen.getByTestId("flow-bottom-panel");
+    expect(bottom.firstElementChild).toContainElement(
+      screen.getByTestId("flow-part-inspector")
+    );
   });
 });

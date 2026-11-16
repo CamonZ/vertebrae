@@ -28,13 +28,13 @@ Band meters count the whole story once (no per-phase footnote). See the
 
 ## In the player
 
-With phases there is no selector: a phase strip over the beats shows every
-phase in order and marks the current one, and the beats are grouped under
-their phase. Playing or stepping into a beat of another phase morphs to it
+With phases there is no selector: the beat note names the current phase
+("Phase 2 of 4 · …"), and the beat hairline leaves a gap where each phase
+starts. Playing or stepping into a beat of another phase morphs to it
 once, and playback holds on the beat's start until the morph ends; stepping
-back across a boundary restores the earlier phase. Seeking (Home/End, the
-beat list, `1`–`9`) jumps straight to the beat's phase with one morph, not
-one per phase passed. Activating a phase in the strip, or `b`/`⇧B`, seeks to
-that phase's first beat.
+back across a boundary restores the earlier phase. Seeking (Home/End, a
+beat's dot, `1`–`9`) jumps straight to the beat's phase with one morph, not
+one per phase passed. A phase's first dot, or `b`/`⇧B`, seeks to that
+phase's first beat.
 
 [Authoring index](../machine-diagrams.md).
