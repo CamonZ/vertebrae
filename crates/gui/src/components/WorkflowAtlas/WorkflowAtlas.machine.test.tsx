@@ -413,7 +413,11 @@ it("keeps geometry and camera on an equivalent reconnect refetch and refreshes c
   const actual = await vi.importActual<
     typeof import("../../hooks/usePipelineSummary")
   >("../../hooks/usePipelineSummary");
-  data.summary.mockImplementation(actual.usePipelineSummary);
+  // The app mounts the summary's event sync globally, beside the Atlas query.
+  data.summary.mockImplementation(() => {
+    actual.usePipelineSummarySync();
+    return actual.usePipelineSummary();
+  });
   const fetchSummary = vi
     .spyOn(commands, "getPipelineSummary")
     .mockImplementation(async () => ({

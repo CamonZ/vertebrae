@@ -173,6 +173,9 @@ function StepInspectorContent({
   const [agentsText, setAgentsText] = useState("");
   const [skillsText, setSkillsText] = useState("");
   const [transitionsTo, setTransitionsTo] = useState("");
+  // The outgoing set the draft started from. Save sends transitions only when
+  // the draft differs from it, because `update_step` replaces the whole set.
+  const [seededTransitionsTo, setSeededTransitionsTo] = useState("");
   const [modelValue, setModelValue] = useState("");
   const [outputSchema, setOutputSchema] = useState("");
   const [routeConfig, setRouteConfig] = useState("");
@@ -203,7 +206,9 @@ function StepInspectorContent({
     );
     setAgentsText((inferenceConfig?.agents ?? []).join(", "));
     setSkillsText((inferenceConfig?.skills ?? []).join(", "));
-    setTransitionsTo((cfg.transitions_to ?? []).join(", "));
+    const seededTransitions = (cfg.transitions_to ?? []).join(", ");
+    setTransitionsTo(seededTransitions);
+    setSeededTransitionsTo(seededTransitions);
     setModelValue(inferenceConfig?.agent_config?.model ?? "");
     setOutputSchema(
       cfg.config && "output_schema" in cfg.config && cfg.config.output_schema
@@ -420,6 +425,8 @@ function StepInspectorContent({
 
   const save = async () => {
     const nextTransitions = listValue(transitionsTo);
+    const transitionsChanged =
+      nextTransitions.join("\n") !== listValue(seededTransitionsTo).join("\n");
     if (cfg?.step_type === "stop" && nextTransitions.length !== 1) {
       setError("Stop steps require exactly one outgoing transition.");
       return;
@@ -555,7 +562,7 @@ function StepInspectorContent({
           persistence_options: parsedPersistence,
           clear_persistence_options: clearPersistenceOptions,
           order: step.order,
-          transitions_to: nextTransitions,
+          transitions_to: transitionsChanged ? nextTransitions : null,
         })
       );
       setEditing(false);

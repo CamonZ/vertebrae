@@ -31,29 +31,63 @@ import {
   applyWorkflowUpdated,
 } from "./pipelineSummaryReducer";
 
+/** Fetches per summary query before an overlapping event stream is accepted. */
+export const MAX_SUMMARY_FETCH_ATTEMPTS = 3;
+
+/**
+ * Bumped whenever an event changes (or would change) the cached summary. A
+ * fetch that overlaps a bump may predate that event, so it is retried, at most
+ * `MAX_SUMMARY_FETCH_ATTEMPTS` times so a steady event stream cannot keep the
+ * summary refetching.
+ */
+let summaryEventEpoch = 0;
+
+async function fetchPipelineSummary(
+  projectScopeGeneration: number
+): Promise<PipelineSummary> {
+  for (let attempt = 1; ; attempt++) {
+    const eventEpoch = summaryEventEpoch;
+    const summary = await unwrapCommand(commands.getPipelineSummary());
+    if (
+      projectScopeGeneration !== getProjectScopeGeneration() ||
+      eventEpoch === summaryEventEpoch ||
+      attempt >= MAX_SUMMARY_FETCH_ATTEMPTS
+    ) {
+      return summary;
+    }
+  }
+}
+
 export function usePipelineSummary() {
   const projectScopeGeneration = useProjectScopeGeneration();
-  const eventEpochRef = useRef(0);
+  const query = useQuery({
+    queryKey: queryKeys.pipelineSummary(projectScopeGeneration),
+    queryFn: () => fetchPipelineSummary(projectScopeGeneration),
+  });
+  const refetch = query.refetch;
+
+  return {
+    summary: query.data ?? null,
+    isLoading: query.isLoading,
+    error: query.error ? errorMessage(query.error) : null,
+    refetch: () => {
+      void refetch();
+    },
+  };
+}
+
+/**
+ * Keeps the cached pipeline summary in step with realtime events. Mounted once
+ * in `GlobalListeners`: the summary is cached with an infinite stale time, so
+ * events must reach it while no Atlas surface is mounted, or returning to the
+ * Atlas would show the summary as it was when the Atlas was left.
+ */
+export function usePipelineSummarySync() {
+  const projectScopeGeneration = useProjectScopeGeneration();
   const queryKey = useMemo(
     () => queryKeys.pipelineSummary(projectScopeGeneration),
     [projectScopeGeneration]
   );
-  const query = useQuery({
-    queryKey,
-    queryFn: async () => {
-      while (true) {
-        const eventEpoch = eventEpochRef.current;
-        const summary = await unwrapCommand(commands.getPipelineSummary());
-        if (
-          projectScopeGeneration !== getProjectScopeGeneration() ||
-          eventEpoch === eventEpochRef.current
-        ) {
-          return summary;
-        }
-      }
-    },
-  });
-  const refetch = query.refetch;
 
   const wsStatus = useWebSocketStatus();
   const prevWsStatus = useRef(wsStatus);
@@ -65,10 +99,10 @@ export function usePipelineSummary() {
       prevWsStatus.current === "reconnecting" ||
       prevWsStatus.current === "disconnected";
     if (wsStatus === "connected" && wasDown) {
-      void refetch();
+      void queryClient.invalidateQueries({ queryKey, exact: true });
     }
     prevWsStatus.current = wsStatus;
-  }, [wsStatus, refetch]);
+  }, [wsStatus, queryKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,14 +112,20 @@ export function usePipelineSummary() {
       reducer: (summary: PipelineSummary) => PipelineSummary
     ) => {
       if (isStale()) return;
-      queryClient.setQueryData<PipelineSummary>(queryKey, (summary) =>
-        summary ? reducer(summary) : summary
-      );
-      eventEpochRef.current += 1;
+      const current = queryClient.getQueryData<PipelineSummary>(queryKey);
+      if (!current) {
+        // Nothing cached yet; a fetch in flight may predate this event.
+        summaryEventEpoch += 1;
+        return;
+      }
+      const next = reducer(current);
+      if (next === current) return;
+      queryClient.setQueryData<PipelineSummary>(queryKey, next);
+      summaryEventEpoch += 1;
     };
     const invalidateSummary = () => {
       if (isStale()) return;
-      eventEpochRef.current += 1;
+      summaryEventEpoch += 1;
       void queryClient.invalidateQueries({ queryKey, exact: true });
     };
     const unlistenPromises = [
@@ -137,12 +177,10 @@ export function usePipelineSummary() {
       }),
       events.stepTransitionChangedEvent.listen((event) => {
         const { change_type } = event.payload;
-        if (change_type === "Created") {
+        if (change_type === "Created" || change_type === "Updated") {
           applyToCache((summary) =>
             applyStepTransitionCreated(summary, event.payload)
           );
-          // The event carries no session directive; refetch to pick it up.
-          invalidateSummary();
           return;
         }
         if (change_type === "Deleted") {
@@ -190,15 +228,6 @@ export function usePipelineSummary() {
       });
     };
   }, [projectScopeGeneration, queryKey]);
-
-  return {
-    summary: query.data ?? null,
-    isLoading: query.isLoading,
-    error: query.error ? errorMessage(query.error) : null,
-    refetch: () => {
-      void refetch();
-    },
-  };
 }
 
 export type { PipelineSummary, PipelineWorkflow, PipelineStep };

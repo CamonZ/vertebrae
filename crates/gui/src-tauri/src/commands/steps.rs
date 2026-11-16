@@ -79,6 +79,7 @@ pub async fn create_step(
             workflow_id: created.workflow_id.clone(),
             change_type: crate::events::StepChangeType::Created,
             step: Some(created.clone()),
+            includes_transitions: true,
         },
     );
     Ok(created)
@@ -147,6 +148,7 @@ pub async fn update_step(
             workflow_id,
             change_type: crate::events::StepChangeType::Updated,
             step: updated_step,
+            includes_transitions: true,
         },
     );
 
@@ -191,6 +193,7 @@ pub async fn delete_step(
             workflow_id,
             change_type: crate::events::StepChangeType::Deleted,
             step: None,
+            includes_transitions: false,
         },
     );
 

@@ -49,7 +49,10 @@ export type {
   ElkLayoutOptions,
 } from "./useElkLayout";
 export { useLocalChat, useOpenChat } from "./useLocalChat";
-export { usePipelineSummary } from "./usePipelineSummary";
+export {
+  usePipelineSummary,
+  usePipelineSummarySync,
+} from "./usePipelineSummary";
 export { useWebSocketStatus } from "./useWebSocketStatus";
 export { useShellHeader } from "./useShellHeader";
 export { useCurrentProject, projectAvatarBucket } from "./useCurrentProject";

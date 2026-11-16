@@ -11,6 +11,7 @@ import {
   useSessionLogChangeListener,
   useStepTransitionChangeListener,
   useWorkflowTransitionChangeListener,
+  usePipelineSummarySync,
 } from "../hooks";
 import { useGateChatSync } from "../hooks/useGateChatSync";
 import { useTaskRunHistoryReconciliation } from "../hooks/useTaskRunHistoryReconciliation";
@@ -42,6 +43,7 @@ export function GlobalListeners() {
   useSessionLogChangeListener();
   useStepTransitionChangeListener();
   useWorkflowTransitionChangeListener();
+  usePipelineSummarySync();
   useLocalChatEventRouter();
   useGateChatSync();
 

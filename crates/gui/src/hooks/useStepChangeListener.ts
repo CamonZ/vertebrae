@@ -42,7 +42,8 @@ export function useStepChangeListener(
     (event: { payload: StepChangedEvent }) => {
       if (projectScopeGeneration !== getProjectScopeGeneration()) return;
 
-      const { step_id, change_type, step } = event.payload;
+      const { step_id, change_type, step, includes_transitions } =
+        event.payload;
 
       console.debug(
         `[StepChangeListener] Received ${change_type} event for step ${step_id.slice(0, 6)}`
@@ -52,7 +53,9 @@ export function useStepChangeListener(
         removeStepFromQueryCache(step_id, projectScopeGeneration);
         onDeleted?.(step_id);
       } else if (step) {
-        upsertStepInQueryCache(step, projectScopeGeneration);
+        upsertStepInQueryCache(step, projectScopeGeneration, {
+          includesTransitions: includes_transitions,
+        });
         if (change_type === "Created") {
           onCreated?.(step);
         } else {

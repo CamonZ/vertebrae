@@ -2482,9 +2482,15 @@ export type StepChangeType = "Created" | "Updated" | "Deleted"
 /**
  * Event payload for step changes.
  * Emitted when a step is created, updated, or deleted.
- * For create/update events, `step` carries the full deserialized entity.
+ * For create/update events, `step` carries the deserialized entity.
+ *
+ * Sacrum's step payload has no outgoing edges, so realtime events set
+ * `includes_transitions` to false and their `step.transitions_to` /
+ * `step.transition_sessions` are empty placeholders, not the step's edges.
+ * Edges change only through `StepTransitionChangedEvent`. Events emitted
+ * from a full step read set it to true.
  */
-export type StepChangedEvent = { step_id: string; workflow_id: string; change_type: StepChangeType; step: Step | null }
+export type StepChangedEvent = { step_id: string; workflow_id: string; change_type: StepChangeType; step: Step | null; includes_transitions: boolean }
 /**
  * A step's `step_type`-specific configuration, serialized as the bare
  * config object. Narrow it with the owning step's `step_type`.
@@ -2622,18 +2628,20 @@ export type StepHarness = "claude" | "codex" | "typesafe" | "mistral_vibe"
 /**
  * The type of change that occurred on a step transition.
  */
-export type StepTransitionChangeType = "Created" | "Deleted"
+export type StepTransitionChangeType = "Created" | "Updated" | "Deleted"
 /**
  * Event payload for step transition changes.
- * Emitted when a step transition is created or deleted.
+ * Emitted when a step transition is created, updated in place (label or
+ * session directive) or deleted.
  *
- * `from_step_id` / `to_step_id` are hoisted from the Sacrum payload so the
- * pipeline reducer can update each step's `transitions_to[]` without a
- * refetch. Sacrum sends the full edge on both `Created` and `Deleted`
- * (before-image tombstone), so these endpoints are always populated under
- * the v1 CDC contract.
+ * The edge is hoisted from the Sacrum payload so the pipeline reducer and
+ * the per-step cache can update each step's `transitions_to[]` and
+ * `transition_sessions` without a refetch. Sacrum sends the full edge on
+ * every change (before-image tombstone on `Deleted`), so the endpoints are
+ * always populated under the v1 CDC contract. `session` is null when the
+ * edge enters a new conversation.
  */
-export type StepTransitionChangedEvent = { transition_id: string; from_step_id: string | null; to_step_id: string | null; change_type: StepTransitionChangeType }
+export type StepTransitionChangedEvent = { transition_id: string; from_step_id: string | null; to_step_id: string | null; label: string | null; session: SessionDirective | null; change_type: StepTransitionChangeType }
 /**
  * Step type - mirrors core::StepType
  */
@@ -3080,9 +3088,10 @@ is_default?: boolean;
  */
 display_order?: number;
 /**
- * Additional metadata as key-value pairs
+ * Additional metadata. Sacrum stores an arbitrary JSON object, so
+ * realtime payloads may carry non-string values.
  */
-metadata?: Partial<{ [key in string]: string }>;
+metadata?: Partial<{ [key in string]: JsonValue }>;
 /**
  * Creation timestamp (ISO 8601 string)
  */

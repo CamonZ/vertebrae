@@ -989,6 +989,54 @@ describe("StepInspector", () => {
     );
   });
 
+  it("leaves outgoing transitions alone when only the name is edited", async () => {
+    mockUseStep(stepFixture({ transitions_to: ["s2", "s3"] }));
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByDisplayValue("Plan"), {
+      target: { value: "Plan renamed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+
+    await waitFor(() =>
+      expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "Plan renamed", transitions_to: null })
+      )
+    );
+  });
+
+  it("sends the outgoing transitions the user edited", async () => {
+    mockUseStep(stepFixture({ transitions_to: ["s2", "s3"] }));
+    render(
+      <StepInspector
+        model={MODEL}
+        workflowId="wf-build"
+        stepId="s1"
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.change(screen.getByDisplayValue("s2, s3"), {
+      target: { value: "s2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+
+    await waitFor(() =>
+      expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({ transitions_to: ["s2"] })
+      )
+    );
+  });
+
   it("updates route config through the config patch", async () => {
     mockUseStep(
       stepFixture({

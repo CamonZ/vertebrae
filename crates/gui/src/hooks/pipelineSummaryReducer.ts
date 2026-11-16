@@ -421,6 +421,23 @@ function mutateStepTransitionsTo(
   return null;
 }
 
+function withSession(
+  sessions: PipelineStep["transition_sessions"],
+  toStepId: string,
+  session: StepTransitionChangedEvent["session"],
+): PipelineStep["transition_sessions"] {
+  if (!session) return withoutSession(sessions, toStepId);
+  const current = sessions?.[toStepId];
+  if (current?.mode === session.mode && current?.step_id === session.step_id)
+    return sessions;
+  return { ...sessions, [toStepId]: session };
+}
+
+/**
+ * `step_transition_created` / `step_transition_updated`: the event carries
+ * the full edge, so both add the destination if missing and set its session
+ * directive.
+ */
 export function applyStepTransitionCreated(
   summary: PipelineSummary,
   event: StepTransitionChangedEvent,
@@ -428,8 +445,12 @@ export function applyStepTransitionCreated(
   const { from_step_id, to_step_id } = event;
   if (!from_step_id || !to_step_id) return summary;
 
-  const next = mutateStepTransitionsTo(summary, from_step_id, (current) =>
-    current.includes(to_step_id) ? current : [...current, to_step_id],
+  const next = mutateStepTransitionsTo(
+    summary,
+    from_step_id,
+    (current) =>
+      current.includes(to_step_id) ? current : [...current, to_step_id],
+    (sessions) => withSession(sessions, to_step_id, event.session),
   );
   return next ?? summary;
 }
