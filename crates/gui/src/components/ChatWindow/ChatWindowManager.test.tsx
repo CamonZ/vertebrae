@@ -9,6 +9,17 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { CommandPalette } from "../CommandPalette/CommandPalette";
+import { FloatingChatLauncher } from "./FloatingChatLauncher";
+
+vi.mock("../../hooks/useTasks", () => ({
+  useTasks: () => ({ tasks: [] }),
+}));
+
+vi.mock("../../hooks/useWorkflows", () => ({
+  useWorkflows: () => ({ workflows: [] }),
+}));
 
 const { savedProjects } = vi.hoisted(() => {
   const savedProjects = [
@@ -1894,7 +1905,12 @@ describe("ChatWindowManager", () => {
       .getState()
       .openSession("Task One", "/test/project");
 
-    render(<ChatWindowManager />);
+    render(
+      <>
+        <button type="button">Outside chat</button>
+        <ChatWindowManager />
+      </>
+    );
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
     await clickPaneControl(user, "Split chat pane");
@@ -1902,6 +1918,11 @@ describe("ChatWindowManager", () => {
     await waitFor(() => {
       expect(screen.getAllByTestId("chat-pane")).toHaveLength(2);
     });
+    const activePane = screen.getAllByTestId("chat-pane")[1];
+    expect(activePane).toHaveAttribute("data-pane-active", "true");
+    await waitFor(() =>
+      expect(within(activePane).getByTestId("local-chat-composer")).toHaveFocus()
+    );
     const state = useChatStore.getState();
     const paneSessionIds = state.paneLayout.panes.map(
       (pane) => pane.sessionId!
@@ -1920,6 +1941,17 @@ describe("ChatWindowManager", () => {
         "Create, edit, and delete tasks, steps, and workflows"
       )
     ).toHaveLength(2);
+
+    const outside = screen.getByRole("button", { name: "Outside chat" });
+    await user.click(outside);
+    act(() => {
+      useChatStore.getState().addMessage(first, {
+        kind: "assistant",
+        text: "Inactive pane update",
+        timestamp: "2026-01-01T00:00:00Z",
+      });
+    });
+    expect(outside).toHaveFocus();
   });
 
   it("splits the maximized chat with Cmd+Option+Backslash", async () => {
@@ -2726,6 +2758,77 @@ describe("ChatWindowManager", () => {
 
     addSpy.mockRestore();
     removeSpy.mockRestore();
+  });
+
+  it.each(["shortcut", "header", "palette"])(
+    "focuses a reused empty chat from the %s",
+    async (entryPoint) => {
+      const user = userEvent.setup();
+      const id = useChatStore
+        .getState()
+        .startFreshSession("New Chat", "/test/project");
+
+      render(
+        <MemoryRouter>
+          <button type="button">Outside chat</button>
+          <ChatWindowManager />
+          <CommandPalette />
+        </MemoryRouter>
+      );
+      const composer = screen.getByTestId("local-chat-composer");
+      await user.click(screen.getByRole("button", { name: "Outside chat" }));
+
+      if (entryPoint === "shortcut") {
+        fireEvent.keyDown(window, {
+          key: "Dead",
+          code: "KeyN",
+          metaKey: true,
+          altKey: true,
+          shiftKey: true,
+        });
+      } else if (entryPoint === "header") {
+        await clickPaneControl(user, "Start fresh local chat");
+      } else {
+        fireEvent.keyDown(window, { key: "k", metaKey: true });
+        await user.type(screen.getByTestId("command-palette-input"), "new chat");
+        await user.keyboard("{Enter}");
+      }
+
+      await waitFor(() => expect(composer).toHaveFocus());
+      expect(useChatStore.getState().activeSessionId).toBe(id);
+      expect(screen.getByTestId("local-chat-composer")).toBe(composer);
+      await user.keyboard("draft");
+      expect(composer).toHaveValue("draft");
+    }
+  );
+
+  it("focuses the composer after Alt-Alt resolves a project and creates a session", async () => {
+    const user = userEvent.setup();
+    let resolveProject!: (value: { status: "ok"; data: string }) => void;
+    render(
+      <>
+        <button type="button">Outside chat</button>
+        <FloatingChatLauncher />
+        <ChatWindowManager />
+      </>
+    );
+    const outside = screen.getByRole("button", { name: "Outside chat" });
+    await user.click(outside);
+    vi.mocked(commands.getCurrentProjectPath).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveProject = resolve;
+      })
+    );
+    await user.keyboard("{Alt}{Alt}");
+    expect(useChatStore.getState().panelOpen).toBe(true);
+    expect(useChatStore.getState().activeSessionId).toBeNull();
+    expect(outside).toHaveFocus();
+
+    resolveProject({ status: "ok", data: "/test/project" });
+    const composer = await screen.findByTestId("local-chat-composer");
+    await waitFor(() => expect(composer).toHaveFocus());
+    await user.keyboard("launcher draft");
+    expect(composer).toHaveValue("launcher draft");
   });
 
   it("uses keyboard shortcuts to open history and start fresh chats", async () => {
@@ -3812,6 +3915,29 @@ describe("ChatWindowManager", () => {
 
     await user.keyboard("{Escape}");
     expect(useChatStore.getState().panelOpen).toBe(false);
+  });
+
+  it("refocuses the same composer and preserves its draft when reopening during exit", () => {
+    useChatStore.getState().openSession("Task A", "/test/project");
+    render(
+      <>
+        <button type="button">Outside chat</button>
+        <ChatWindowManager />
+      </>
+    );
+    const composer = screen.getByTestId("local-chat-composer");
+    fireEvent.change(composer, { target: { value: "keep this draft" } });
+
+    act(() => useChatStore.getState().setPanelOpen(false));
+    expect(screen.getByTestId("chat-window-manager")).toHaveClass("is-closing");
+    const outside = screen.getByRole("button", { name: "Outside chat" });
+    outside.focus();
+    expect(outside).toHaveFocus();
+    act(() => useChatStore.getState().setPanelOpen(true));
+
+    expect(screen.getByTestId("local-chat-composer")).toBe(composer);
+    expect(composer).toHaveFocus();
+    expect(composer).toHaveValue("keep this draft");
   });
 
   it("drills out on close: lingers with is-closing, then unmounts when the exit animation ends", () => {

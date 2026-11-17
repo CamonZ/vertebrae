@@ -634,6 +634,8 @@ interface ChatStoreState {
   paneLayout: ChatPaneLayout;
   /** Whether the chat panel is visible */
   panelOpen: boolean;
+  /** Requests composer focus when New Chat reuses a mounted session. */
+  composerFocusRevision: number;
   /** Persisted metadata index used by history surfaces. */
   localSessionSummaries: Record<string, LocalChatSessionSummary>;
   /** Revisions for changes visible in shared activity/spawn projections. */
@@ -954,6 +956,7 @@ const emptyState: ChatStoreState = {
   activeSessionId: null,
   paneLayout: emptyPaneLayout,
   panelOpen: false,
+  composerFocusRevision: 0,
   localSessionSummaries: {},
   activityRevisions: {},
   spawnOutlineRevisions: {},
@@ -2358,6 +2361,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         set((state) => ({
           ...focusSessionInPaneLayout(state, existing),
           panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
         }));
         return existing;
       }
@@ -3245,6 +3249,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           set((state) => ({
             ...focusSessionInPaneLayout(state, runtime.id),
             panelOpen: true,
+            composerFocusRevision: state.composerFocusRevision + 1,
           }));
           return runtime.id;
         }

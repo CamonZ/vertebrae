@@ -109,6 +109,7 @@ interface ChatWindowProps {
   onClosePane?: () => void;
   /** Whether this pane should receive composer autofocus. */
   autoFocusComposer?: boolean;
+  composerFocusRevision?: number | null;
   /** Label resolved from this session's captured project association. */
   projectLabel?: string;
   showProjectContext?: boolean;
@@ -132,6 +133,7 @@ export function ChatWindow({
   onUnsplitPanes,
   onClosePane,
   autoFocusComposer = true,
+  composerFocusRevision = 0,
   projectLabel,
   showProjectContext = false,
   renderObserver,
@@ -459,11 +461,11 @@ export function ChatWindow({
     gateStatus?.draftUpdatedAt
   );
 
-  // Focus the composer when this chat window is the foreground pane.
+  // Reopening or reusing a chat can leave this composer mounted.
   useEffect(() => {
-    if (!autoFocusComposer) return;
+    if (!autoFocusComposer || composerFocusRevision === null) return;
     inputRef.current?.focus();
-  }, [autoFocusComposer]);
+  }, [autoFocusComposer, composerFocusRevision]);
 
   const worktreePath = association.record?.worktreePath;
   const showChanges = !!worktreePath && changesSession === sessionId;

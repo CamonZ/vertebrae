@@ -248,6 +248,10 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
     const session = state.sessions[sessionId];
     return session ? session.title?.trim() || session.label : undefined;
   });
+  const isForeground = !isMaximized || paneIsActive;
+  const composerFocusRevision = useChatStore((state) =>
+    state.panelOpen && isForeground ? state.composerFocusRevision : null
+  );
   const onStartFresh = useCallback(
     () => void startFreshActiveSession(pane.id),
     [pane.id, startFreshActiveSession]
@@ -321,7 +325,8 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
           isMaximized && paneCount > 1 ? onUnsplitPanes : undefined
         }
         onClosePane={isMaximized && paneCount > 1 ? onClosePane : undefined}
-        autoFocusComposer={!isMaximized || paneIsActive}
+        autoFocusComposer={isForeground}
+        composerFocusRevision={composerFocusRevision}
         showProjectContext={paneCount > 1}
         projectLabel={projectLabelBySessionId?.get(sessionId)}
         renderObserver={(part) => renderObserver?.(pane.id, part)}
