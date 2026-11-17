@@ -11,6 +11,8 @@ export type PlayerCommand =
   /** Next (1) or previous (-1) arrangement (or phase); with two, a toggle. */
   | { readonly kind: "arrangement"; readonly dir: 1 | -1 }
   | { readonly kind: "beats" }
+  | { readonly kind: "story" }
+  | { readonly kind: "reference"; readonly dir: 1 | -1 }
   | { readonly kind: "clear" }
   | { readonly kind: "help" };
 
@@ -33,6 +35,9 @@ export const PLAYER_SHORTCUTS: readonly (readonly [
   ["− / +", "slower / faster"],
   ["L", "loop, or play once and stop at the end"],
   ["B / ⇧B", "next / previous arrangement, or phase"],
+  ["S", "show or hide Story"],
+  ["N / ⇧N", "next / previous code reference"],
+  ["↑ / ↓, Enter", "navigate and open Story items"],
   ["C", "show or hide the beat note"],
   ["Tab, Enter", "focus and open a part or follow a card"],
   ["Esc", "stop following, unpin"],
@@ -77,6 +82,12 @@ export function playerCommand(
     case "B":
       // Caps Lock types B without Shift: still the next arrangement.
       return { kind: "arrangement", dir: m.shiftKey ? -1 : 1 };
+    case "s":
+    case "S":
+      return { kind: "story" };
+    case "n":
+    case "N":
+      return { kind: "reference", dir: m.shiftKey ? -1 : 1 };
     case "c":
     case "C":
       return { kind: "beats" };

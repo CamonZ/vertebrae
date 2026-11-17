@@ -231,18 +231,16 @@ it("extends the existing inspectors and exposes flow, rail and beat evidence", (
   expect(
     screen.getByRole("list", { name: "Flow evidence", hidden: true })
   ).not.toBeVisible();
-  fireEvent.click(within(flowEvidence).getByText("Flow evidence"));
+  fireEvent.click(within(flowEvidence).getByText("Whole flow"));
   expect(flowEvidence).toHaveAttribute("open");
   expect(screen.getByRole("list", { name: "Flow evidence" })).toBeVisible();
-  fireEvent.click(within(flowEvidence).getByText("Flow evidence"));
+  fireEvent.click(within(flowEvidence).getByText("Whole flow"));
   expect(flowEvidence).not.toHaveAttribute("open");
-  // The current beat's evidence folds into its note.
-  const beatEvidence = screen.getByTestId("flow-beat-evidence");
-  expect(
-    screen.getByRole("list", { name: "Beat 1 evidence", hidden: true })
-  ).not.toBeVisible();
-  fireEvent.click(within(beatEvidence).getByText("Evidence"));
+  // The current beat's evidence now lives in the expanded Story section.
   expect(screen.getByRole("list", { name: "Beat 1 evidence" })).toBeVisible();
+  expect(screen.getByTestId("flow-story")).toContainElement(
+    screen.getByRole("list", { name: "Beat 1 evidence" })
+  );
   expect(screen.getAllByText("Rail evidence body").length).toBeGreaterThan(0);
 
   const disclosure = player.querySelector("summary")!;

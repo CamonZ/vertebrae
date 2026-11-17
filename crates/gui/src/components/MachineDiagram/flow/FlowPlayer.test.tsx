@@ -9,6 +9,8 @@ import {
 import { userEvent } from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import inlineDiscussions from "./__fixtures__/inlineDiscussions.flow.yaml?raw";
+import { EvidenceNavigationContext } from "../../shared/EvidenceNavigationContext";
+import { storyActors } from "./story";
 import { FlowPlayer } from "./FlowPlayer";
 import {
   arrangement,
@@ -395,21 +397,19 @@ describe("parts", () => {
     expect(screen.queryByTestId("flow-part-inspector")).toBeNull();
   });
 
-  it("a hovered part's inspector moves nothing under the pointer and lets it through; pinned, it takes input", () => {
+  it("keeps inspectors in the Story foot without moving the transport", () => {
     renderPlayer();
     const bottom = screen.getByTestId("flow-bottom-panel");
     const before = [...bottom.children];
     fireEvent.mouseEnter(part("process"));
     const inspector = screen.getByTestId("flow-part-inspector");
-    // Beside the player, bottom-left: the player under it does not move.
-    const side = screen.getByTestId("flow-side-panel");
-    expect(side.firstElementChild).toContainElement(inspector);
+    expect(screen.getByTestId("flow-story-inspectors")).toContainElement(
+      inspector
+    );
     expect([...bottom.children]).toEqual(before);
-    expect(inspector).toHaveClass("pointer-events-none");
-    expect(inspector).not.toHaveClass("pointer-events-auto");
     fireEvent.click(part("process"));
-    expect(screen.getByTestId("flow-part-inspector")).toHaveClass(
-      "pointer-events-auto"
+    expect(screen.getByTestId("flow-part-inspector")).toHaveTextContent(
+      "pinned"
     );
   });
 });
@@ -426,6 +426,14 @@ describe("following a card", () => {
     expect(q1().length).toBeGreaterThan(0);
     fireEvent.click(q1()[0]);
     expect(player()).toHaveAttribute("data-following", "q1");
+    expect(
+      player().querySelector(
+        '[data-story-beat="0"] [data-story-actor="card:q1"]'
+      )
+    ).toHaveAttribute("open");
+    expect(screen.getByTestId("flow-story-inspectors")).toContainElement(
+      screen.getByTestId("flow-card-inspector")
+    );
     const payload = screen.getByTestId("flow-card-payload");
     expect(payload).toHaveTextContent("Please explain what this file does");
     expect(payload).toHaveTextContent("text");
@@ -793,39 +801,284 @@ describe("evidence and inspectors beside the player", () => {
   }
   afterEach(() => vi.restoreAllMocks());
 
-  it("on a wide frame evidence and inspectors sit bottom-left, never right", () => {
-    overlayWidth(1400);
-    renderPlayer({ flow: withEvidence });
-    const side = screen.getByTestId("flow-side-panel");
-    expect(side).toContainElement(screen.getByTestId("flow-evidence"));
-    expect(side.style.left).toBe("62px");
-    expect(side.className).not.toMatch(/\bright-/);
-    expect(screen.queryByTestId("flow-evidence-toggle")).toBeNull();
-    fireEvent.mouseEnter(part("process"));
-    expect(side).toContainElement(screen.getByTestId("flow-part-inspector"));
+  it.each([1400, 700])(
+    "keeps evidence on the left at width %i and returns width when collapsed",
+    (width) => {
+      overlayWidth(width);
+      renderPlayer({ flow: withEvidence });
+      const story = screen.getByTestId("flow-story");
+      expect(story).toContainElement(screen.getByTestId("flow-evidence"));
+      expect(story.style.left).toBe("62px");
+      expect(story.className).not.toMatch(/\bright-/);
+      const stage = player().querySelector<HTMLElement>(".md-stage")!;
+      const expandedLeft = parseFloat(stage.style.left);
+      fireEvent.click(screen.getByRole("button", { name: "Hide Story" }));
+      expect(story.style.width).toBe("32px");
+      expect(parseFloat(stage.style.left)).toBeLessThan(expandedLeft);
+      act(() => player().focus());
+      key("s");
+      expect(parseFloat(stage.style.left)).toBe(expandedLeft);
+      fireEvent.click(part("process"));
+      expect(story).toContainElement(screen.getByTestId("flow-part-inspector"));
+    }
+  );
+});
+
+describe("Story navigator", () => {
+  const ref = (path: string) => ({
+    kind: "ref",
+    path,
+    line: 12,
+    status: "verified" as const,
+    source: "trace" as const,
+  });
+  const storyFlow = {
+    ...flow,
+    attachments: [ref("whole.ts")],
+    arrangements: flow.arrangements.map((d) => ({
+      ...d,
+      beats: d.beats.map((b, i) => ({
+        ...b,
+        attachments: [ref(`beat-${i}.ts`)],
+      })),
+      parts: d.parts.map((p) => ({ ...p, attachments: [ref(`${p.id}.ts`)] })),
+      rails: d.rails.map((r) => ({
+        ...r,
+        attachments: [ref(`${r.id}-rail.ts`)],
+      })),
+    })),
+  };
+  const section = (i: number) =>
+    screen
+      .getByTestId("flow-story")
+      .querySelector<HTMLDetailsElement>(`[data-story-beat="${i}"]`)!;
+
+  it("groups own evidence before acting parts, rails and cards, repeating actors across beats", () => {
+    renderPlayer({ flow: storyFlow });
+    expect(screen.getByTestId("flow-story")).toHaveTextContent("Whole flow");
+    expect(player().querySelectorAll("[data-story-beat]")).toHaveLength(
+      after.beats.length
+    );
+    const groups = after.beats.map((_, i) =>
+      storyActors(
+        storyFlow,
+        storyFlow.arrangements.find((d) => d.arrangement === "after")!,
+        i
+      )
+    );
+    expect(groups.flat().some((a) => a.key.startsWith("rail:"))).toBe(true);
+    expect(groups.flat().some((a) => a.key.startsWith("card:"))).toBe(true);
+    const repeated = groups[0].find(
+      (a) =>
+        a.key.startsWith("part:") &&
+        groups.slice(1).some((g) => g.some((b) => b.key === a.key))
+    )!;
+    expect(repeated).toBeDefined();
+    for (const [i, actors] of groups.entries()) {
+      const own = within(section(i)).getByRole("list", {
+        name: `Beat ${i + 1} evidence`,
+        hidden: true,
+      });
+      for (const actor of actors) {
+        const row = section(i).querySelector(
+          `[data-story-actor="${actor.key}"]`
+        )!;
+        expect(
+          own.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING
+        ).toBeTruthy();
+        expect(row.firstElementChild).toHaveTextContent(
+          String(actor.attachments.length)
+        );
+      }
+    }
+    expect(screen.queryByTestId("flow-beat-evidence")).toBeNull();
   });
 
-  it("on a narrow frame evidence folds into the transport and inspectors stack over the note", () => {
-    overlayWidth(700);
-    renderPlayer({ flow: withEvidence });
-    expect(screen.queryByTestId("flow-side-panel")).toBeNull();
-    const toggle = screen.getByTestId("flow-evidence-toggle");
-    expect(toggle).toHaveAccessibleName("Evidence (1)");
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    const popover = screen.getByTestId("flow-evidence-popover");
-    expect(toggle).toHaveAttribute("aria-controls", popover.id);
-    expect(popover).not.toBeVisible();
-    fireEvent.click(toggle);
-    expect(popover).toBeVisible();
-    expect(screen.getByTestId("flow-player-card")).toContainElement(popover);
-    act(() => player().focus());
-    key("Escape");
-    expect(popover).not.toBeVisible();
+  it("expands current beats, stops scrolling after reader input and restores following", () => {
+    const scroll = vi.fn();
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const top = this.hasAttribute("data-story-beat") ? 300 : 0;
+        return {
+          top,
+          bottom: top + 100,
+          height: 100,
+          left: 0,
+          right: 100,
+          width: 100,
+          x: 0,
+          y: top,
+          toJSON: () => ({}),
+        };
+      });
+    renderPlayer({ flow: storyFlow });
+    const list = screen.getByLabelText("Story evidence");
+    Object.defineProperty(list, "scrollTop", {
+      get: () => 0,
+      set: scroll,
+      configurable: true,
+    });
+    key("2");
+    expect(section(1).open).toBe(true);
+    expect(scroll).toHaveBeenCalled();
+    fireEvent.wheel(list);
+    scroll.mockClear();
+    key("3");
+    expect(section(2).open).toBe(true);
+    expect(scroll).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Jump to current" }));
+    expect(scroll).toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: "Jump to current" })
+    ).toBeNull();
+    rect.mockRestore();
+  });
 
-    fireEvent.mouseEnter(part("process"));
-    const bottom = screen.getByTestId("flow-bottom-panel");
-    expect(bottom.firstElementChild).toContainElement(
+  it("reveals a clicked part in the current beat, with the inspector at the foot", () => {
+    renderPlayer({ flow: storyFlow });
+    const actor = storyActors(
+      storyFlow,
+      storyFlow.arrangements.find((d) => d.arrangement === "after")!,
+      0
+    ).find((a) => a.key.startsWith("part:"))!;
+    key("s");
+    fireEvent.click(part(actor.key.slice(5)));
+    const row = section(0).querySelector<HTMLDetailsElement>(
+      `[data-story-actor="${actor.key}"]`
+    )!;
+    expect(row.open).toBe(true);
+    expect(section(0).open).toBe(true);
+    expect(screen.getByRole("button", { name: "Hide Story" })).toBeVisible();
+    expect(screen.getByTestId("flow-story-inspectors")).toContainElement(
       screen.getByTestId("flow-part-inspector")
     );
+  });
+
+  it("uses arrows and Enter within Story and opens source through the existing host", async () => {
+    const open = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <EvidenceNavigationContext.Provider value={open}>
+        <FlowPlayer flow={storyFlow} reducedMotion />
+      </EvidenceNavigationContext.Provider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Browse story" }));
+    const list = screen.getByLabelText("Story evidence");
+    act(() => list.focus());
+    await user.keyboard("{ArrowDown}");
+    const whole = screen.getByTestId("flow-evidence");
+    expect(whole.firstElementChild).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(whole).toHaveAttribute("open");
+    await user.keyboard("{ArrowDown}");
+    expect(
+      within(whole).getByRole("button", { name: "whole.ts:12" })
+    ).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(open).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: "whole.ts", line: 12 })
+    );
+    expect(shownBeat()).toBe(0);
+  });
+
+  it("N and Shift+N open successive refs and seek their beat, including Caps Lock N", () => {
+    const open = vi.fn();
+    render(
+      <EvidenceNavigationContext.Provider value={open}>
+        <FlowPlayer flow={storyFlow} reducedMotion />
+      </EvidenceNavigationContext.Provider>
+    );
+    act(() => player().focus());
+    key("N");
+    expect(open).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: "beat-0.ts" })
+    );
+    const count = section(0).querySelectorAll("[data-flow-code-ref]").length;
+    for (let i = 0; i < count; i++) key("N");
+    expect(open).toHaveBeenLastCalledWith(
+      expect.objectContaining({ path: "beat-1.ts" })
+    );
+    expect(shownBeat()).toBe(1);
+    key("N", { shiftKey: true });
+    expect(shownBeat()).toBe(0);
+    expect(section(0)).toContainElement(document.activeElement as HTMLElement);
+    expect(open.mock.calls.length).toBe(count + 2);
+    act(() => player().focus());
+    key("s");
+    key("n");
+    expect(screen.getByRole("button", { name: "Hide Story" })).toBeVisible();
+    expect(document.activeElement).toHaveAttribute("data-flow-code-ref");
+  });
+
+  it("returns focus to the Story toggle when a keyboard collapse hides the focused evidence", () => {
+    const open = vi.fn();
+    render(
+      <EvidenceNavigationContext.Provider value={open}>
+        <FlowPlayer flow={storyFlow} reducedMotion />
+      </EvidenceNavigationContext.Provider>
+    );
+    act(() => player().focus());
+    key("n");
+    expect(document.activeElement).toHaveAttribute("data-flow-code-ref");
+    key("s");
+    expect(
+      within(screen.getByTestId("flow-story")).getByRole("button", {
+        name: /Story/,
+      })
+    ).toHaveFocus();
+  });
+
+  it("switches between watching and browsing and pauses when opening a reference", () => {
+    const open = vi.fn();
+    render(
+      <EvidenceNavigationContext.Provider value={open}>
+        <FlowPlayer flow={storyFlow} reducedMotion />
+      </EvidenceNavigationContext.Provider>
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    expect(screen.getByTestId("flow-story")).toHaveAttribute(
+      "data-mode",
+      "watch"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Browse story" }));
+    expect(screen.getByTestId("flow-story")).toHaveAttribute(
+      "data-mode",
+      "browse"
+    );
+    expect(player()).toHaveAttribute("data-playing", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Resume following" }));
+    expect(screen.getByTestId("flow-story")).toHaveAttribute(
+      "data-mode",
+      "watch"
+    );
+    act(() => player().focus());
+    key("n");
+    expect(player()).toHaveAttribute("data-playing", "false");
+    expect(open).toHaveBeenCalled();
+    expect(screen.getByTestId("flow-story")).toHaveAttribute(
+      "data-mode",
+      "browse"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Play" }));
+    expect(player()).toHaveAttribute("data-playing", "true");
+    expect(screen.getByTestId("flow-story")).toHaveAttribute(
+      "data-mode",
+      "watch"
+    );
+    expect(screen.getByTestId("flow-story")).toHaveAttribute(
+      "data-playing",
+      "true"
+    );
+  });
+
+  it("keeps N free of platform modifiers and treats Shift independently from letter case", () => {
+    expect(playerCommand("n")).toEqual({ kind: "reference", dir: 1 });
+    expect(playerCommand("N")).toEqual({ kind: "reference", dir: 1 });
+    expect(playerCommand("N", { shiftKey: true })).toEqual({
+      kind: "reference",
+      dir: -1,
+    });
+    expect(playerCommand("n", { ctrlKey: true })).toBeNull();
   });
 });

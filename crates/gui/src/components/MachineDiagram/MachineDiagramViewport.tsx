@@ -51,13 +51,15 @@ export interface MachineDiagramViewportProps {
   overlayRef?: (layer: HTMLElement | null) => void;
   /**
    * Room kept clear of floating panels when fitting, for a frame `width`
-   * wide: the fitted diagram ends left of `right` and above `bottom`.
+   * wide: the stage starts after `left` beside the zoom gutter, and the
+   * fitted diagram ends left of `right` and above `bottom`.
    */
   fitInsets?: (width: number) => FitInsets;
   children: ReactNode;
 }
 
 export interface FitInsets {
+  readonly left?: number;
   readonly right: number;
   readonly bottom: number;
 }
@@ -117,7 +119,10 @@ export function MachineDiagramViewport({
     if (!canvas?.clientWidth || (mode === "full-page" && !canvas.clientHeight))
       return;
     const inset = fitInsets(canvas.clientWidth);
-    const room = Math.max(1, canvas.clientWidth - ZOOM_GUTTER - inset.right);
+    const room = Math.max(
+      1,
+      canvas.clientWidth - ZOOM_GUTTER - (inset.left ?? 0) - inset.right
+    );
     const fitted = Math.max(
       MIN_ZOOM,
       Math.min(
@@ -155,7 +160,10 @@ export function MachineDiagramViewport({
     if (!canvas || !canvas.clientWidth || !canvas.clientHeight) return;
     const inset = fitInsets(canvas.clientWidth);
     const fitted = Math.min(
-      Math.max(1, canvas.clientWidth - ZOOM_GUTTER - inset.right) / width,
+      Math.max(
+        1,
+        canvas.clientWidth - ZOOM_GUTTER - (inset.left ?? 0) - inset.right
+      ) / width,
       Math.max(1, canvas.clientHeight - inset.bottom) / height
     );
     setZoom(fitted, true);
@@ -190,7 +198,10 @@ export function MachineDiagramViewport({
           data-weight={weightBand(zoom)}
           style={{
             display: "block",
-            left: ZOOM_GUTTER,
+            left:
+              ZOOM_GUTTER +
+              (fitInsets(viewport.canvasRef.current?.clientWidth ?? 0).left ??
+                0),
             width,
             height,
             transform: `translate(${viewport.pan.x + zoomState.x}px, ${viewport.pan.y + zoomState.y}px) scale(${zoom})`,
