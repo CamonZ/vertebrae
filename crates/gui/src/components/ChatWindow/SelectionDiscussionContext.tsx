@@ -466,6 +466,7 @@ function MiniThread({
           </button>
           <button
             type="submit"
+            data-primary
             disabled={!!activeTurn || !question.trim() || !!choice?.error}
           >
             Ask

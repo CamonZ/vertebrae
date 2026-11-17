@@ -53,6 +53,7 @@ vi.mock("../bindings", () => ({
   commands: {
     getSupportedLocalChatHarnesses: (...args: unknown[]) =>
       mockGetSupportedLocalChatHarnesses(...args),
+    getLocalFontFamilies: async () => ({ status: "ok", data: ["Georgia", "Menlo"] }),
     getLocalFileEditors: (...args: unknown[]) =>
       mockGetLocalFileEditors(...args),
     adoptLocalBackend: (confirmed: boolean) =>
@@ -175,6 +176,10 @@ describe("SettingsPage", () => {
     useUIStore.setState({
       inlineDiscussionPreference: { mode: "follow" },
       theme: "system",
+      readingTextSize: "default",
+      customTypefaces: {},
+      useCustomTypeface: false,
+      customTypefaceBase: null,
       thinkingIndicatorStyle: "classic",
       externalEditor: "",
       codeThemeDark: "pierre-dark",
@@ -1106,6 +1111,62 @@ describe("SettingsPage", () => {
         (option) => option.value
       )
     ).toEqual(["anthropic", "openai", "openrouter"]);
+  });
+
+  it("changes reading text size independently of the typeface", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+    await user.click(screen.getByTestId("settings-nav-appearance"));
+    const size = screen.getByLabelText("Reading text size");
+
+    expect(size).toHaveAttribute("data-value", "default");
+    chooseDropdownValue(size, "large");
+    await user.click(screen.getByRole("radio", { name: "Technical" }));
+    expect(useUIStore.getState()).toMatchObject({
+      readingTextSize: "large",
+      typePairing: "technical",
+    });
+
+    chooseDropdownValue(size, "default");
+    expect(useUIStore.getState().readingTextSize).toBe("default");
+  });
+
+  it("applies a custom reading scale and installed typeface overrides", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+    await user.click(screen.getByTestId("settings-nav-appearance"));
+    chooseDropdownValue(screen.getByLabelText("Reading text size"), "custom");
+    fireEvent.change(screen.getByLabelText("Scale (%)"), { target: { value: "112" } });
+    await user.click(screen.getByRole("button", { name: "Increase Scale (%)" }));
+    expect(useUIStore.getState().readingTextSize).toBe(113);
+    await user.click(screen.getByRole("button", { name: "Decrease Scale (%)" }));
+    expect(useUIStore.getState().readingTextSize).toBe(112);
+
+    const custom = screen.getByRole("radio", { name: "Custom typefaces" });
+    await user.click(custom);
+    expect(custom).toHaveAttribute("aria-checked", "true");
+    await user.click(await screen.findByRole("button", { name: "Reading text" }));
+    await user.type(screen.getByRole("combobox", { name: "Search installed fonts" }), "geor");
+    expect(screen.queryByRole("option", { name: "Menlo" })).toBeNull();
+    await user.keyboard("{Enter}");
+    expect(useUIStore.getState().customTypefaces).toEqual({ prose: "Georgia" });
+    expect(custom).toHaveTextContent("Georgia");
+
+    const technical = screen.getByRole("radio", { name: "Technical" });
+    await user.click(technical);
+    expect(technical).toHaveAttribute("aria-checked", "true");
+    expect(custom).toHaveAttribute("aria-checked", "false");
+    await user.click(custom);
+    expect(await screen.findByRole("button", { name: "Reading text" })).toHaveTextContent("Georgia");
+    expect(custom).toHaveAttribute("aria-checked", "true");
   });
 
   it("picks an accent from swatches that each preview their own colour", async () => {

@@ -85,8 +85,8 @@ export function KanbanCard({
       <h3
         className={`min-w-0 flex-1 leading-snug text-[var(--color-fg)] line-clamp-2 ${
           isEpic
-            ? "font-serif text-base font-normal italic tracking-tight"
-            : "text-sm font-medium"
+            ? "font-serif text-[length:calc(var(--text-base)*var(--reading-scale))] font-normal italic tracking-tight"
+            : "text-[length:calc(var(--text-sm)*var(--reading-scale))] font-medium"
         }`}
       >
         {task.title}

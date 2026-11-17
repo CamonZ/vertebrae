@@ -738,7 +738,7 @@ export function TaskDetailPanel({
           onBlur={() => handleFieldSave("title")}
           autoFocus
           disabled={isSubmitting}
-          className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 font-sans text-base font-semibold leading-snug text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:opacity-50"
+          className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 font-sans text-[length:calc(var(--text-base)*var(--reading-scale))] font-semibold leading-snug text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:opacity-50"
           placeholder="Enter title"
         />
         {fieldError && (
@@ -751,7 +751,7 @@ export function TaskDetailPanel({
       <h3
         data-panel-title
         onClick={() => handleFieldClick("title")}
-        className="cursor-pointer rounded-[var(--radius-sm)] font-sans text-base font-semibold leading-snug text-[var(--color-fg)] hover:bg-[var(--color-bg-1)]"
+        className="cursor-pointer rounded-[var(--radius-sm)] font-sans text-[length:calc(var(--text-base)*var(--reading-scale))] font-semibold leading-snug text-[var(--color-fg)] hover:bg-[var(--color-bg-1)]"
       >
         {taskData.title}
       </h3>

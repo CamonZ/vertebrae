@@ -10,6 +10,7 @@ import { NO_FACTORY_SCOPE, factoryNames } from "../../utils/workflowFactory";
 import { useChatStore } from "../../stores/chatStore";
 import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
+import { isReadingPercent, READING_SIZE_PRESETS } from "../../utils/readingAppearance";
 import { ACCENTS, TYPE_PAIRINGS, useUIStore } from "../../stores/uiStore";
 import {
   isPaletteShortcut,
@@ -146,6 +147,7 @@ function PaletteDialog({
   const openTask = useEntityPanelStore((state) => state.openTask);
   const setTheme = useUIStore((state) => state.setTheme);
   const setTypePairing = useUIStore((state) => state.setTypePairing);
+  const setReadingTextSize = useUIStore((state) => state.setReadingTextSize);
   const setAccent = useUIStore((state) => state.setAccent);
 
   const close = useCallback(() => {
@@ -203,6 +205,16 @@ function PaletteDialog({
       { id: "action-theme-dark", scope: "actions", label: "Theme: Dark", keywords: "appearance", run: () => setTheme("dark") },
       { id: "action-theme-light", scope: "actions", label: "Theme: Light", keywords: "appearance", run: () => setTheme("light") },
       { id: "action-theme-system", scope: "actions", label: "Theme: System", keywords: "appearance", run: () => setTheme("system") },
+      ...READING_SIZE_PRESETS.map(
+        ({ value, label, percent }): PaletteItem => ({
+          id: `action-reading-size-${value}`,
+          scope: "actions",
+          label: `Reading text size: ${label}`,
+          detail: `${percent}%`,
+          keywords: "font size appearance scale",
+          run: () => setReadingTextSize(value),
+        })
+      ),
       ...TYPE_PAIRINGS.map(
         (pairing): PaletteItem => ({
           id: `action-type-${pairing.value}`,
@@ -310,6 +322,7 @@ function PaletteDialog({
     setFactoryName,
     setTheme,
     setTypePairing,
+    setReadingTextSize,
     setAccent,
     tasks,
     workflows,
@@ -325,17 +338,31 @@ function PaletteDialog({
       "workflows",
       "tasks",
     ];
+    const customPercent = Number(
+      /^(?:reading(?: text)? size|font size)\s+(\d{2,3})%?$/i.exec(query.trim())?.[1]
+    );
+    const customSize: PaletteItem[] = isReadingPercent(customPercent)
+      ? [{
+          id: "action-reading-size-custom",
+          scope: "actions",
+          label: `Reading text size: ${customPercent}%`,
+          run: () => setReadingTextSize(customPercent),
+        }]
+      : [];
     return order
       .filter((id) => scope === "all" || scope === id)
       .map((id) => ({
         id,
-        items: rankByLabel(
-          items.filter((item) => item.scope === id && matchesQuery(item, query)),
-          query
-        ).slice(0, scope === "all" ? MAX_PER_SCOPE : undefined),
+        items: [
+          ...(id === "actions" ? customSize : []),
+          ...rankByLabel(
+            items.filter((item) => item.scope === id && matchesQuery(item, query)),
+            query
+          ),
+        ].slice(0, scope === "all" ? MAX_PER_SCOPE : undefined),
       }))
       .filter((group) => group.items.length > 0);
-  }, [items, query, scope]);
+  }, [items, query, scope, setReadingTextSize]);
 
   const flat = useMemo(() => groups.flatMap((group) => group.items), [groups]);
 

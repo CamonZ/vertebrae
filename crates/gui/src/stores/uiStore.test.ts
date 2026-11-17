@@ -9,6 +9,10 @@ describe("uiStore", () => {
       inlineDiscussionPreference: { mode: "follow" },
       theme: "system",
       thinkingIndicatorStyle: "classic",
+      readingTextSize: "default",
+      customTypefaces: {},
+      useCustomTypeface: false,
+      customTypefaceBase: null,
       density: "auto",
       externalEditor: "",
       codeThemeDark: "pierre-dark",
@@ -114,6 +118,43 @@ describe("uiStore", () => {
   });
 
   describe("persistence", () => {
+    it("rehydrates reading size independently of typeface and density", async () => {
+      useUIStore.getState().setReadingTextSize("extra-large");
+      useUIStore.getState().setTypePairing("technical");
+      useUIStore.getState().setDensity("compact");
+      await useUIStore.persist.rehydrate();
+
+      expect(useUIStore.getState()).toMatchObject({
+        readingTextSize: "extra-large",
+        typePairing: "technical",
+        density: "compact",
+      });
+
+      localStorage.setItem(
+        "vertebrae-ui-storage",
+        JSON.stringify({ state: { typePairing: "editorial" }, version: 0 })
+      );
+      await useUIStore.persist.rehydrate();
+      expect(useUIStore.getState().readingTextSize).toBe("default");
+    });
+
+    it("restores custom reading scale and font overrides from storage", async () => {
+      localStorage.setItem(
+        "vertebrae-ui-storage",
+        JSON.stringify({
+          state: { readingTextSize: 112, customTypefaces: { prose: " Georgia ", mono: 42 } },
+          version: 0,
+        })
+      );
+      await useUIStore.persist.rehydrate();
+      expect(useUIStore.getState()).toMatchObject({
+        readingTextSize: 112,
+        customTypefaces: { prose: "Georgia" },
+        useCustomTypeface: true,
+      });
+      expect(useUIStore.getState().customTypefaces.mono).toBeUndefined();
+    });
+
     it("partializes thinking indicator style into persisted state", () => {
       const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
 
@@ -130,6 +171,10 @@ describe("uiStore", () => {
         typePairing: "editorial",
         accent: "orchid",
         thinkingIndicatorStyle: "futuristic",
+        readingTextSize: "default",
+        customTypefaces: {},
+        useCustomTypeface: false,
+        customTypefaceBase: null,
         density: "auto",
         externalEditor: "",
         gateSteeringThresholds: { soft: 3, form: 6, escape: 9 },

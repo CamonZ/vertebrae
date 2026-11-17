@@ -109,7 +109,7 @@
   padding: var(--s-2) var(--s-3);
 }
 .ev-you { user-select: none; -webkit-user-select: none; font-family: var(--sans); font-size: var(--text-11); font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--fg-mute); white-space: nowrap; flex-shrink: 0; }
-.evrow--user .ev-text { font-family: var(--sans); font-size: var(--text-13); line-height: var(--leading-normal); color: var(--fg); white-space: pre-wrap; margin-top: 3px; }
+.evrow--user .ev-text { color: var(--fg); white-space: pre-wrap; margin-top: 3px; }
 .evrow--user .ev-text .markdown-content { display: contents; font: inherit; font-size: inherit; line-height: inherit; color: inherit; white-space: normal; }
 .evrow--user .ev-text .markdown-content > :first-child { margin-top: 0; }
 .evrow--user .ev-text .markdown-content > :last-child { margin-bottom: 0; }
@@ -181,7 +181,7 @@
 .ev-speaker .model { color: var(--fg-faint); font-size: var(--text-9); padding: 1px var(--s-1h); border: 1px solid var(--line); border-radius: var(--r-xs); letter-spacing: var(--tracking-wide); text-transform: none; }
 .ev-tools { display: flex; flex-direction: column; gap: var(--s-1h); margin-bottom: var(--s-2); }
 .ev-tools:empty { display: none; }
-.evprose { font-family: var(--font-prose); font-size: var(--prose-size); line-height: var(--prose-leading); color: var(--fg-soft); border-left: 2px solid var(--line-strong); padding-left: var(--s-3); }
+.evprose { font-family: var(--font-prose); font-size: calc(var(--prose-base-size) * var(--reading-scale)); overflow-wrap: anywhere; line-height: var(--prose-leading); color: var(--fg-soft); border-left: 2px solid var(--line-strong); padding-left: var(--s-3); }
 .evprose--plain { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; user-select: text; -webkit-user-select: text; }
 .evprose .markdown-content { display: contents; min-width: 0; font: inherit; font-size: inherit; line-height: inherit; color: inherit; }
 .evprose .markdown-content > :first-child { margin-top: 0; }
@@ -392,7 +392,7 @@
 .diff-comment-editor-hint {
   margin-right: auto;
   align-self: center;
-  color: var(--color-fg-faint);
+  color: var(--color-fg-mute);
   font-size: 11px;
 }
 .diff-comment-editor-hint kbd {
@@ -422,7 +422,8 @@
   color: var(--color-warn);
 }
 .diff-comment-actions,
-.diff-comment-editor-actions {
+.diff-comment-editor-actions,
+.diff-comment-editor-buttons {
   display: flex;
   gap: 6px;
 }
@@ -430,6 +431,11 @@
   flex-wrap: wrap;
   justify-content: flex-end;
   margin-top: 4px;
+}
+.diff-comment-editor-buttons {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
 }
 .diff-comment-actions button,
 .diff-comment-editor-actions button {
@@ -445,6 +451,13 @@
 .diff-comment-editor-actions button:hover:not(:disabled) {
   background: var(--color-bg-2);
   color: var(--color-fg);
+}
+.diff-comment-editor-actions button[data-primary] {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.diff-comment-editor-actions button[data-primary]:hover:not(:disabled) {
+  background: var(--color-primary-hover);
 }
 .diff-comment-editor-actions button:disabled {
   opacity: 0.5;
@@ -463,6 +476,9 @@
   background: var(--color-bg);
   padding: 6px 8px;
   color: var(--color-fg);
+}
+.diff-comment-editor textarea::placeholder {
+  color: var(--color-fg-soft);
 }
 .diff-comment-editor textarea:focus {
   outline: none;

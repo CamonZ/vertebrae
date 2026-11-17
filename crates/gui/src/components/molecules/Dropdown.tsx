@@ -41,6 +41,7 @@ interface DropdownProps {
   align?: "start" | "end";
   disabled?: boolean;
   className?: string;
+  searchPlaceholder?: string;
 }
 
 /**
@@ -65,8 +66,13 @@ export function Dropdown({
   triggerAttributes,
   "aria-describedby": ariaDescribedBy,
   className,
+  searchPlaceholder,
 }: DropdownProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const visibleOptions = search
+    ? options.filter((option) => option.label.toLowerCase().includes(search.trim().toLowerCase()))
+    : options;
   const selectedIndex = Math.max(
     0,
     options.findIndex((option) => option.value === value)
@@ -74,6 +80,7 @@ export function Dropdown({
   const [active, setActive] = useState(selectedIndex);
   const rootRef = useRef<HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const listId = useId();
   const selected = options.find((option) => option.value === value);
@@ -85,13 +92,14 @@ export function Dropdown({
 
   const openMenu = () => {
     if (disabled) return;
-    setActive(selectedIndex);
+    setSearch("");
+    setActive(searchPlaceholder ? 0 : selectedIndex);
     setOpen(true);
   };
 
   useEffect(() => {
     if (!open) return;
-    listRef.current?.focus();
+    (searchRef.current ?? listRef.current)?.focus();
     const onPointerDown = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) close(false);
     };
@@ -107,23 +115,24 @@ export function Dropdown({
   }, [active, open]);
 
   const move = (delta: number) => {
-    if (options.length === 0) return;
+    if (visibleOptions.length === 0) return;
     let next = active;
-    for (let i = 0; i < options.length; i += 1) {
-      next = (next + delta + options.length) % options.length;
-      if (!options[next].disabled) break;
+    for (let i = 0; i < visibleOptions.length; i += 1) {
+      next = (next + delta + visibleOptions.length) % visibleOptions.length;
+      if (!visibleOptions[next].disabled) break;
     }
     setActive(next);
   };
 
   const choose = (index: number) => {
-    const option = options[index];
+    const option = visibleOptions[index];
     if (!option || option.disabled) return;
     if (option.value !== value) onChange(option.value);
     close(true);
   };
 
   const onListKeyDown = (event: React.KeyboardEvent) => {
+    if (event.target === searchRef.current && [" ", "Home", "End"].includes(event.key)) return;
     switch (event.key) {
       case "ArrowDown":
         event.preventDefault();
@@ -139,7 +148,7 @@ export function Dropdown({
         break;
       case "End":
         event.preventDefault();
-        setActive(options.length - 1);
+        setActive(visibleOptions.length - 1);
         break;
       case "Enter":
       case " ":
@@ -208,13 +217,7 @@ export function Dropdown({
         <span aria-hidden="true" className="ctl-caret" />
       </button>
       {open && (
-        <ul
-          ref={listRef}
-          id={listId}
-          role="listbox"
-          aria-label={ariaLabel}
-          aria-activedescendant={`${listId}-${active}`}
-          tabIndex={-1}
+        <div
           className={[
             "ovf-menu dd-menu",
             placement === "up" ? "up" : "",
@@ -224,44 +227,77 @@ export function Dropdown({
             .join(" ")}
           onKeyDown={onListKeyDown}
         >
-          {options.map((option, index) => (
-            <li
-              key={option.value}
-              id={`${listId}-${index}`}
-              role="option"
-              aria-selected={option.value === value}
-              aria-disabled={option.disabled || undefined}
-              data-index={index}
-              data-value={option.value}
-              data-active={index === active || undefined}
-              className="ovf-item dd-item"
-              onMouseMove={() => setActive(index)}
-              onClick={(event) => {
-                // Inside a <label>, a click would also re-activate the
-                // trigger (label activation); cancel that default.
-                event.preventDefault();
-                choose(index);
-              }}
-            >
-              <Swatch color={option.swatch} />
-              <span className="ovf-label">{option.label}</span>
-              {option.value === value && (
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  className="dd-check"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2.4}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="m5 12.5 4.5 4.5L19 7.5" />
-                </svg>
-              )}
-            </li>
-          ))}
-        </ul>
+          {searchPlaceholder && (
+            <div className="sticky top-0 z-10 bg-bg-2 p-1">
+              <input
+                ref={searchRef}
+                role="combobox"
+                aria-label={searchPlaceholder}
+                aria-expanded="true"
+                aria-autocomplete="list"
+                aria-controls={listId}
+                aria-activedescendant={visibleOptions.length ? `${listId}-${active}` : undefined}
+                className="ctl ctl-field ctl-outline w-full"
+                placeholder={searchPlaceholder}
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setActive(0);
+                }}
+              />
+            </div>
+          )}
+          <ul
+            ref={listRef}
+            id={listId}
+            role="listbox"
+            aria-label={ariaLabel}
+            aria-activedescendant={visibleOptions.length ? `${listId}-${active}` : undefined}
+            tabIndex={-1}
+            className="m-0 list-none p-0 outline-none"
+          >
+            {visibleOptions.map((option, index) => (
+              <li
+                key={option.value}
+                id={`${listId}-${index}`}
+                role="option"
+                aria-selected={option.value === value}
+                aria-disabled={option.disabled || undefined}
+                data-index={index}
+                data-value={option.value}
+                data-active={index === active || undefined}
+                className="ovf-item dd-item"
+                onMouseMove={() => setActive(index)}
+                onClick={(event) => {
+                  // Inside a <label>, a click would also re-activate the
+                  // trigger (label activation); cancel that default.
+                  event.preventDefault();
+                  choose(index);
+                }}
+              >
+                <Swatch color={option.swatch} />
+                <span className="ovf-label">{option.label}</span>
+                {option.value === value && (
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    className="dd-check"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2.4}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="m5 12.5 4.5 4.5L19 7.5" />
+                  </svg>
+                )}
+              </li>
+            ))}
+          </ul>
+          {visibleOptions.length === 0 && searchPlaceholder && (
+            <p role="status" className="px-2 py-1 text-xs text-fg-soft">No matching fonts</p>
+          )}
+        </div>
       )}
     </span>
   );

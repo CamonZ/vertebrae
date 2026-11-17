@@ -4215,7 +4215,7 @@ html.light ::selection {
   flex: 1;
   font-family: var(--sans);
   font-style: normal;
-  font-size: var(--text-sm); /* 14px */
+  font-size: calc(var(--text-sm) * var(--reading-scale));
   font-weight: 400;
   color: var(--fg);
   letter-spacing: -0.005em;
@@ -5313,94 +5313,102 @@ select.ctl.ctl-field {
      --font-mono    data: IDs, code, paths, counts
    html[data-type] picks a pairing (Settings → Appearance → Typeface). */
 :root,
+[data-type] {
+  --font-sans: var(--pairing-font-sans);
+  --font-prose: var(--pairing-font-prose);
+  --font-serif: var(--pairing-font-serif);
+  --font-mono: var(--pairing-font-mono);
+}
+
+:root,
 [data-type="editorial"] {
-  --font-sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
-  --font-prose: "Newsreader", "Iowan Old Style", Georgia, serif;
-  --font-serif: "Instrument Serif", "Newsreader", Georgia, serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --pairing-font-sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
+  --pairing-font-prose: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --pairing-font-serif: "Instrument Serif", "Newsreader", Georgia, serif;
+  --pairing-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
   --font-features: normal;
-  --prose-size: 15px;
+  --prose-base-size: 15px;
   --prose-leading: 1.6;
   --display-tracking: -0.01em;
 }
 [data-type="technical"] {
-  --font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
-  --font-prose: "IBM Plex Sans", system-ui, sans-serif;
-  --font-serif: "IBM Plex Serif", Georgia, serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+  --pairing-font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+  --pairing-font-prose: "IBM Plex Sans", system-ui, sans-serif;
+  --pairing-font-serif: "IBM Plex Serif", Georgia, serif;
+  --pairing-font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
   --font-features: normal;
-  --prose-size: 14px;
+  --prose-base-size: 14px;
   --prose-leading: 1.65;
   --display-tracking: -0.02em;
 }
 [data-type="humanist"] {
-  --font-sans: "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
-  --font-prose: "Literata", Georgia, serif;
-  --font-serif: "Fraunces", Georgia, serif;
-  --font-mono: "Spline Sans Mono", ui-monospace, "SF Mono", monospace;
+  --pairing-font-sans: "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
+  --pairing-font-prose: "Literata", Georgia, serif;
+  --pairing-font-serif: "Fraunces", Georgia, serif;
+  --pairing-font-mono: "Spline Sans Mono", ui-monospace, "SF Mono", monospace;
   --font-features: normal;
-  --prose-size: 14px;
+  --prose-base-size: 14px;
   --prose-leading: 1.65;
   --display-tracking: -0.02em;
 }
 [data-type="classic"] {
-  --font-sans: "Geist", system-ui, -apple-system, sans-serif;
-  --font-prose: "Geist", system-ui, sans-serif;
-  --font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --pairing-font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --pairing-font-prose: "Geist", system-ui, sans-serif;
+  --pairing-font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --pairing-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
   --font-features: "ss01", "cv11";
-  --prose-size: 13px;
+  --prose-base-size: 13px;
   --prose-leading: 1.6;
   --display-tracking: -0.025em;
 }
 
 [data-type="atelier"] {
-  --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
-  --font-prose: "DM Serif Text", Georgia, serif;
-  --font-serif: "DM Serif Display", Georgia, serif;
-  --font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
+  --pairing-font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+  --pairing-font-prose: "DM Serif Text", Georgia, serif;
+  --pairing-font-serif: "DM Serif Display", Georgia, serif;
+  --pairing-font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
   --font-features: normal;
-  --prose-size: 15px;
+  --prose-base-size: 15px;
   --prose-leading: 1.6;
   --display-tracking: -0.01em;
 }
 [data-type="terminal"] {
-  --font-sans: "Space Grotesk", system-ui, -apple-system, sans-serif;
-  --font-prose: "Space Grotesk", system-ui, sans-serif;
-  --font-serif: "Space Grotesk", system-ui, sans-serif;
-  --font-mono: "Space Mono", ui-monospace, "SF Mono", monospace;
+  --pairing-font-sans: "Space Grotesk", system-ui, -apple-system, sans-serif;
+  --pairing-font-prose: "Space Grotesk", system-ui, sans-serif;
+  --pairing-font-serif: "Space Grotesk", system-ui, sans-serif;
+  --pairing-font-mono: "Space Mono", ui-monospace, "SF Mono", monospace;
   --font-features: normal;
-  --prose-size: 14px;
+  --prose-base-size: 14px;
   --prose-leading: 1.6;
   --display-tracking: -0.03em;
 }
 [data-type="gazette"] {
-  --font-sans: "Public Sans", system-ui, -apple-system, sans-serif;
-  --font-prose: "Source Serif 4", Georgia, serif;
-  --font-serif: "Playfair Display", Georgia, serif;
-  --font-mono: "Source Code Pro", ui-monospace, "SF Mono", monospace;
+  --pairing-font-sans: "Public Sans", system-ui, -apple-system, sans-serif;
+  --pairing-font-prose: "Source Serif 4", Georgia, serif;
+  --pairing-font-serif: "Playfair Display", Georgia, serif;
+  --pairing-font-mono: "Source Code Pro", ui-monospace, "SF Mono", monospace;
   --font-features: normal;
-  --prose-size: 15px;
+  --prose-base-size: 15px;
   --prose-leading: 1.6;
   --display-tracking: -0.015em;
 }
 [data-type="modernist"] {
-  --font-sans: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
-  --font-prose: "Hanken Grotesk", system-ui, sans-serif;
-  --font-serif: "Syne", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+  --pairing-font-sans: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
+  --pairing-font-prose: "Hanken Grotesk", system-ui, sans-serif;
+  --pairing-font-serif: "Syne", system-ui, sans-serif;
+  --pairing-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
   --font-features: normal;
-  --prose-size: 14px;
+  --prose-base-size: 14px;
   --prose-leading: 1.65;
   --display-tracking: -0.02em;
 }
 [data-type="soft"] {
-  --font-sans: "Onest", system-ui, -apple-system, sans-serif;
-  --font-prose: "Lora", Georgia, serif;
-  --font-serif: "Young Serif", Georgia, serif;
-  --font-mono: "Fira Code", ui-monospace, "SF Mono", monospace;
+  --pairing-font-sans: "Onest", system-ui, -apple-system, sans-serif;
+  --pairing-font-prose: "Lora", Georgia, serif;
+  --pairing-font-serif: "Young Serif", Georgia, serif;
+  --pairing-font-mono: "Fira Code", ui-monospace, "SF Mono", monospace;
   --font-features: normal;
-  --prose-size: 15px;
+  --prose-base-size: 15px;
   --prose-leading: 1.62;
   --display-tracking: -0.01em;
 }
@@ -5414,9 +5422,11 @@ select.ctl.ctl-field {
 }
 .type-card {
   display: grid;
-  gap: 6px;
+  gap: 4px;
+  align-content: center;
   min-width: 0;
-  padding: 12px 14px;
+  min-height: 48px;
+  padding: 10px 14px;
   border: 1px solid var(--ctl-line);
   border-radius: var(--r-lg);
   background-color: color-mix(in oklch, var(--fg) 2%, transparent);
@@ -5441,12 +5451,6 @@ select.ctl.ctl-field {
   border-color: var(--ctl-ring);
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
 }
-.type-card-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-}
 .type-card-display {
   font-family: var(--font-serif);
   font-size: 22px;
@@ -5454,24 +5458,29 @@ select.ctl.ctl-field {
   letter-spacing: var(--display-tracking);
   color: var(--fg);
 }
-.type-card-name {
+:root {
+  --reading-scale: 1;
+  --chat-user-size: calc(var(--text-13) * var(--reading-scale));
+  --chat-composer-size: calc(var(--text-sm) * var(--reading-scale));
+  --chat-composer-leading: calc(var(--spacing-6) * var(--reading-scale));
+}
+
+/* Shared typography for chat, review comments, and inline discussions. */
+.evrow--user .ev-text,
+.chat-comment-body,
+.diff-comment-body {
   font-family: var(--font-sans);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--fg-mute);
+  font-size: var(--chat-user-size);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
 }
-.type-card-prose {
-  font-family: var(--font-prose);
-  font-size: 13px;
-  line-height: 1.45;
-}
-.type-card-meta {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--fg-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+
+.chat-composer-input,
+.chat-comment-textarea,
+.diff-comment-editor textarea {
+  font-family: var(--font-sans);
+  font-size: var(--chat-composer-size);
+  line-height: var(--chat-composer-leading);
 }
 
 /* ── Type roles ─────────────────────────────────────────────────────────────
@@ -5493,7 +5502,7 @@ select.ctl.ctl-field {
 }
 .t-prose {
   font-family: var(--font-prose);
-  font-size: var(--prose-size);
+  font-size: calc(var(--prose-base-size) * var(--reading-scale));
   line-height: var(--prose-leading);
 }
 
@@ -5503,7 +5512,7 @@ select.ctl.ctl-field {
 }
 .markdown-content p,
 .markdown-content li {
-  font-size: var(--prose-size);
+  font-size: calc(var(--prose-base-size) * var(--reading-scale));
   line-height: var(--prose-leading);
 }
 .markdown-content h1,

@@ -50,6 +50,16 @@ import {
   useUIStore,
   type ThinkingIndicatorStyle,
 } from "../stores/uiStore";
+import {
+  isReadingPercent,
+  MAX_READING_PERCENT,
+  MIN_READING_PERCENT,
+  READING_SIZE_PRESETS,
+  readingPercent,
+  resolveReadingTextSize,
+  TYPEFACE_ROLES,
+} from "../utils/readingAppearance";
+import { CustomTypefaceSettings } from "../components/settings/CustomTypefaceSettings";
 import { useIsLightTheme } from "../hooks/useTheme";
 import type { GateSteeringThresholds } from "../utils/gateDraft";
 import {
@@ -140,6 +150,34 @@ function SettingRow({
       </div>
       <div>{children}</div>
     </div>
+  );
+}
+
+function CustomReadingScale({
+  percent,
+  onChange,
+}: {
+  percent: number;
+  onChange(percent: number): void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  return (
+    <label className="mt-2 grid gap-1 text-xs text-fg-soft">
+      Scale (%)
+      <NumberInput
+        aria-label="Scale (%)"
+        value={draft ?? String(percent)}
+        min={MIN_READING_PERCENT}
+        max={MAX_READING_PERCENT}
+        onValueChange={(text) => {
+          setDraft(text);
+          const next = Number(text);
+          if (isReadingPercent(next) && next !== percent) onChange(next);
+        }}
+        onBlur={() => setDraft(null)}
+      />
+    </label>
   );
 }
 
@@ -2221,8 +2259,14 @@ export function SettingsPage({
   );
   const theme = useUIStore((state) => state.theme);
   const setTheme = useUIStore((state) => state.setTheme);
+  const readingTextSize = useUIStore((state) => state.readingTextSize);
+  const setReadingTextSize = useUIStore((state) => state.setReadingTextSize);
   const typePairing = useUIStore((state) => state.typePairing);
   const setTypePairing = useUIStore((state) => state.setTypePairing);
+  const useCustomTypeface = useUIStore((state) => state.useCustomTypeface);
+  const selectCustomTypeface = useUIStore((state) => state.selectCustomTypeface);
+  const customTypefaceBase = useUIStore((state) => state.customTypefaceBase);
+  const customTypefaces = useUIStore((state) => state.customTypefaces);
   const accent = useUIStore((state) => state.accent);
   const setAccent = useUIStore((state) => state.setAccent);
   const thinkingIndicatorStyle = useUIStore(
@@ -2617,6 +2661,46 @@ export function SettingsPage({
                   ))}
                 </div>
               </div>
+              <SettingRow
+                anchor
+                label="Reading text size"
+                description="Adjust text in chat, tasks, workflows, and Changes."
+              >
+                <Select
+                  aria-label="Reading text size"
+                  value={typeof readingTextSize === "number" ? "custom" : readingTextSize}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    setReadingTextSize(
+                      next === "custom"
+                        ? readingPercent(readingTextSize)
+                        : resolveReadingTextSize(next)
+                    );
+                    setSavedFeedback(true);
+                  }}
+                  options={[
+                    ...READING_SIZE_PRESETS.map(({ value, label, percent }) => ({
+                      value,
+                      label: `${label} · ${percent}%`,
+                    })),
+                    { value: "custom", label: typeof readingTextSize === "number" ? `Custom · ${readingTextSize}%` : "Custom" },
+                  ]}
+                />
+                {typeof readingTextSize === "number" && (
+                  <CustomReadingScale
+                    percent={readingTextSize}
+                    onChange={(percent) => {
+                      setReadingTextSize(percent);
+                      setSavedFeedback(true);
+                    }}
+                  />
+                )}
+              </SettingRow>
+              <div className="mb-2 grid gap-2 rounded-lg bg-bg-2 px-4 py-3" aria-label="Typography preview" role="group">
+                <p className="text-[length:var(--chat-user-size)] text-fg">What changed in this run?</p>
+                <p className="t-prose text-fg-soft">The run paused at review. Two findings need a decision.</p>
+                <code className="font-mono text-xs text-fg-mute">review.ts</code>
+              </div>
               <div className="border-b border-[var(--color-line)] py-5">
                 <p className="text-sm font-medium text-[var(--color-fg)]" data-settings-anchor>
                   Typeface
@@ -2636,7 +2720,7 @@ export function SettingsPage({
                       key={pairing.value}
                       type="button"
                       role="radio"
-                      aria-checked={typePairing === pairing.value}
+                      aria-checked={!useCustomTypeface && typePairing === pairing.value}
                       aria-label={pairing.label}
                       title={pairing.description}
                       className="type-card"
@@ -2646,19 +2730,37 @@ export function SettingsPage({
                         setSavedFeedback(true);
                       }}
                     >
-                      <span className="type-card-head">
-                        <span className="type-card-display">
-                          {pairing.label}
-                        </span>
-                        <span className="type-card-name">Aa</span>
+                      <span className="type-card-display">
+                        {pairing.label}
                       </span>
-                      <span className="type-card-prose">
-                        The run paused at review; two findings need a decision.
-                      </span>
-                      <span className="type-card-meta">df875b15 · step 3/10</span>
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-label="Custom typefaces"
+                    aria-checked={useCustomTypeface}
+                    className="type-card"
+                    onClick={() => {
+                      selectCustomTypeface();
+                      setSavedFeedback(true);
+                    }}
+                  >
+                    <span className="type-card-display">Custom</span>
+                    <span className="text-xs text-fg-soft">
+                      Based on {TYPE_PAIRINGS.find(({ value }) => value === (customTypefaceBase ?? typePairing))?.label}
+                    </span>
+                    {TYPEFACE_ROLES.map(({ id, label }) => {
+                      const name = customTypefaces[id];
+                      return name && (
+                        <span key={id} className="truncate text-xs text-fg-mute" title={name}>
+                          {label} · {name}
+                        </span>
+                      );
+                    })}
+                  </button>
                 </div>
+                {useCustomTypeface && <CustomTypefaceSettings onSaved={() => setSavedFeedback(true)} />}
               </div>
             </div>
           ) : activeSection === "code_editor" ? (

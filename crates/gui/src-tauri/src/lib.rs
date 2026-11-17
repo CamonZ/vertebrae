@@ -154,6 +154,7 @@ fn create_builder() -> Builder {
             // Provider-neutral local chat commands
             commands::get_supported_local_chat_harnesses,
             commands::get_local_file_editors,
+            commands::get_local_font_families,
             commands::get_local_file_roots,
             commands::read_chat_history_file,
             commands::worktree_file_exists,

@@ -124,12 +124,12 @@
 }
 
 .changes-file-name {
-  font: 500 13px/1.5 var(--font-sans);
+  font: 500 calc(13px * var(--reading-scale))/1.5 var(--font-sans);
   color: var(--color-fg);
 }
 
 .changes-file-directory {
-  font: 400 11px/1.5 var(--font-sans);
+  font: 400 calc(11px * var(--reading-scale))/1.5 var(--font-sans);
   color: var(--color-fg-soft);
 }
 
@@ -361,7 +361,7 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font: 400 13px/1.5 var(--font-sans);
+  font: 400 calc(13px * var(--reading-scale))/1.5 var(--font-sans);
   color: var(--color-fg-soft);
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -430,6 +430,7 @@
 }
 
 .changes-workspace {
+  --diffs-font-size: calc(13px * var(--reading-scale));
   gap: 0;
   min-width: 0;
 }
@@ -494,7 +495,7 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 12px;
-  font-size: 13px;
+  font-size: calc(13px * var(--reading-scale));
   font-weight: 600;
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
@@ -518,13 +519,13 @@
 }
 
 .changes-total-binary {
-  font-size: 12px;
+  font-size: calc(12px * var(--reading-scale));
   font-weight: 400;
   color: var(--color-fg-soft);
 }
 
 .changes-summary-note {
-  font-size: 11px;
+  font-size: calc(11px * var(--reading-scale));
   line-height: 1.5;
   color: var(--color-fg-soft);
 }
@@ -661,6 +662,7 @@
 }
 
 .changes-diff-name {
+  font-size: calc(1em * var(--reading-scale));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

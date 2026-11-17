@@ -220,6 +220,22 @@ describe("CommandPalette", () => {
     expect(useUIStore.getState().theme).toBe("light");
   });
 
+  it("sets a named reading-size preset from the launcher", () => {
+    renderPalette();
+    openPalette();
+    type("font size larger");
+    fireEvent.click(screen.getByRole("option", { name: /Reading text size: Larger/ }));
+    expect(useUIStore.getState().readingTextSize).toBe("larger");
+  });
+
+  it("sets a custom reading percentage from the launcher", () => {
+    renderPalette();
+    openPalette();
+    type("font size 112%");
+    fireEvent.click(screen.getByRole("option", { name: "Reading text size: 112%" }));
+    expect(useUIStore.getState().readingTextSize).toBe(112);
+  });
+
   it("shows an empty state when nothing matches", () => {
     renderPalette();
     openPalette();
