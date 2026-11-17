@@ -949,6 +949,21 @@ artifact (detected the same way as the parser: a body starting with `{` is
 JSON) with rendered presentation. Flow artifacts play in the artifact preview
 and inline wherever a chat message links them with `vtb://artifact`.
 
+The flow player's left **Story** panel follows the current beat by default.
+During playback, references use compact filename rows and the active part is
+marked when a step association is available. Pausing restores evidence details.
+**Browse story** exposes the full navigator without interrupting playback;
+**Resume following** returns to the current beat. Opening a reference pauses
+playback and switches to browsing, keeping the evidence stable for reading.
+The full navigator groups whole-flow evidence, then each
+beat's evidence and acting parts, rails and cards. Actor disclosures show their
+evidence counts; a selected part or followed card appears in the inspector at
+the panel foot. Playback expands and scrolls to the current beat until the
+reader scrolls the list; **Jump to current** restores following. `S` toggles the
+panel, `N` / `Shift+N` open the next/previous source reference and seek to its
+beat, and Up/Down/Enter navigate the panel. Fitting reserves the panel's left
+space beside the zoom gutter; collapsing returns that space to the diagram.
+
 ## Data Flow
 
 ```

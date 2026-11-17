@@ -598,6 +598,36 @@ describe("resizable viewport", () => {
     expect(frame).toContainElement(layer);
   });
 
+  it("reserves left space in both initial and explicit fits, and moves the stage with the inset", () => {
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(962);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+    const props = { width: 1200, height: 400, fitOnMount: true };
+    const { rerender } = render(
+      <MachineDiagramViewport
+        {...props}
+        fitInsets={() => ({ left: 300, right: 0, bottom: 50 })}
+      >
+        <span />
+      </MachineDiagramViewport>
+    );
+    const stage = screen
+      .getByTestId("machine-diagram-viewport")
+      .querySelector<HTMLElement>(".md-stage")!;
+    expect(stage.style.left).toBe("362px");
+    expect(stage.dataset.zoom).toBe("0.5");
+    rerender(
+      <MachineDiagramViewport
+        {...props}
+        fitInsets={() => ({ left: 32, right: 0, bottom: 50 })}
+      >
+        <span />
+      </MachineDiagramViewport>
+    );
+    expect(stage.style.left).toBe("94px");
+    fireEvent.click(screen.getByRole("button", { name: /fit/i }));
+    expect(Number(stage.dataset.zoom)).toBeCloseTo(868 / 1200);
+  });
+
   it("has no grip unless asked for one", () => {
     render(
       <MachineDiagramViewport width={640} height={400}>

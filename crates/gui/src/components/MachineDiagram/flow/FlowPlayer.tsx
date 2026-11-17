@@ -5,7 +5,6 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
-  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { Button, Icon } from "../../atoms";
@@ -20,6 +19,7 @@ import type {
   CompiledFlow,
   DiagramTimeline,
 } from "./compile";
+import { StoryNavigator, type StoryHandle } from "./StoryNavigator";
 import { AttachmentPanel } from "./AttachmentPanel";
 import { FlowDiagram } from "./FlowDiagram";
 import {
@@ -93,27 +93,12 @@ const CONTROLS_ROOM = 56;
 const HAIRLINE_ROOM = 28;
 /** The beat note over the hairline: two caption lines, a phase line, step marks. */
 const NOTE_ROOM = 100;
-const insets = (bottom: number) => (): FitInsets => ({ right: 0, bottom });
-const insetsBare = insets(CONTROLS_ROOM);
-const insetsRail = insets(CONTROLS_ROOM + HAIRLINE_ROOM);
-const insetsNote = insets(CONTROLS_ROOM + HAIRLINE_ROOM + NOTE_ROOM);
-
-/** Width of the centred note and hairline (`max-w-[32rem]`). */
-const STAGE_WIDTH = 512;
-/** Narrowest evidence column worth showing beside the centred stage. */
-const MIN_SIDE = 200;
-/** Widest the evidence column grows on a wide frame. */
-const MAX_SIDE = 360;
-/**
- * Room left of the centred stage for the evidence column on a frame `width`
- * wide, or null when the frame is too narrow and evidence folds into the
- * transport. An unmeasured frame (0) gets a default column.
- */
-function sideRoom(width: number): number | null {
-  if (width <= 0) return 288;
-  const side = (width - ZOOM_GUTTER - 16 - STAGE_WIDTH) / 2 - 16;
-  return side < MIN_SIDE ? null : Math.min(MAX_SIDE, side);
-}
+const STORY_WIDTH = 288;
+const STORY_STRIP = 32;
+const storyPanelWidth = (width: number, open: boolean) =>
+  open
+    ? Math.min(STORY_WIDTH, Math.max(160, width * 0.4 || STORY_WIDTH))
+    : STORY_STRIP;
 
 /** Tracks an element's width; 0 until measured (and where there is no layout). */
 function useWidth(el: HTMLElement | null): number {
@@ -133,9 +118,8 @@ function useWidth(el: HTMLElement | null): number {
  * An interactive flow explorer. The diagram fills a resizable frame; a
  * player floats centred over its foot: the transport, a hairline with one
  * dot per beat over it (paused by default), and the current beat's note over
- * that, which can be hidden. Evidence and inspectors float bottom-left, or
- * fold into the transport on a narrow frame; nothing floats on the right,
- * where the changes view opens. Beat and frame stepping, optional playback at a chosen speed, an
+ * that, which can be hidden. Story evidence and inspectors occupy the left panel.
+ * The right side stays clear for the changes view. Beat and frame stepping, optional playback at a chosen speed, an
  * arrangement selector (Before/After, or options A, B…) that keeps the beat
  * — or, for a migration told in phases, a phase strip, the story itself
  * moving the diagram from phase to phase —, hover/focus on a part to inspect its state and
@@ -182,11 +166,27 @@ export function FlowPlayer({
   const [followed, setFollowed] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
   const [noteShown, setNoteShown] = useState(true);
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const [storyOpen, setStoryOpen] = useState(true);
+  const [storySelection, setStorySelection] = useState<string | null>(null);
+  const story = useRef<StoryHandle>(null);
   const noteId = useId();
   const evidenceId = useId();
   const [overlay, setOverlay] = useState<HTMLElement | null>(null);
-  const side = sideRoom(useWidth(overlay));
+  const width = useWidth(overlay);
+  const storyWidth = storyPanelWidth(width, storyOpen);
+  const fitInsets = useMemo(
+    () =>
+      (frameWidth: number): FitInsets => ({
+        left: storyPanelWidth(frameWidth, storyOpen) + 8,
+        right: 0,
+        bottom:
+          CONTROLS_ROOM +
+          (diagram.beats.length > 0
+            ? HAIRLINE_ROOM + (noteShown ? NOTE_ROOM : 0)
+            : 0),
+      }),
+    [storyOpen, diagram.beats.length, noteShown]
+  );
   const hasBeats = diagram.beats.length > 0;
   const root = useRef<HTMLDivElement>(null);
   const playingHidden = suspended && clock.playing;
@@ -203,11 +203,17 @@ export function FlowPlayer({
   const interaction = useMemo<DiagramInteraction>(
     () => ({
       onActivatePart: (id) => {
+        setStoryOpen(true);
+        setStorySelection(`part:${id}`);
         setPinned((p) => (p === id ? null : id));
         onActivatePart?.(id);
       },
       onInspectPart: setHovered,
-      onActivateCard: (id) => setFollowed((f) => (f === id ? null : id)),
+      onActivateCard: (id) => {
+        setStoryOpen(true);
+        setStorySelection(`card:${id}`);
+        setFollowed((f) => (f === id ? null : id));
+      },
       activePart: pinned,
       followedCard: followed,
     }),
@@ -251,7 +257,8 @@ export function FlowPlayer({
   };
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
-    if (e.defaultPrevented || !root.current) return;
+    if (e.defaultPrevented || e.nativeEvent.isComposing || !root.current)
+      return;
     const cmd = playerCommand(e.key, e);
     if (!cmd || leaveToTarget(e.target, root.current, e.key)) return;
     switch (cmd.kind) {
@@ -286,12 +293,18 @@ export function FlowPlayer({
         if (!hasBeats) return;
         setNoteShown((b) => !b);
         break;
+      case "story":
+        setStoryOpen((open) => !open);
+        break;
+      case "reference":
+        setStoryOpen(true);
+        story.current?.nextReference(cmd.dir);
+        break;
       case "clear":
-        if (!followed && !pinned && !help && !evidenceOpen) return;
+        if (!followed && !pinned && !help) return;
         setFollowed(null);
         setPinned(null);
         setHelp(false);
-        setEvidenceOpen(false);
         break;
       case "help":
         setHelp((h) => !h);
@@ -311,13 +324,7 @@ export function FlowPlayer({
     : undefined;
 
   const inspectors = (inspected || followed) && (
-    <div
-      className={
-        side === null
-          ? "grid w-full max-w-3xl gap-2 sm:grid-cols-2"
-          : "flex w-full flex-col gap-2"
-      }
-    >
+    <div className="flex min-h-0 flex-col gap-2 overflow-y-auto">
       {inspected && (
         <PartInspector
           diagram={diagram}
@@ -326,7 +333,10 @@ export function FlowPlayer({
           reducedMotion={clock.reducedMotion}
           pinned={pinned === inspected.id}
           flow={flow}
-          onFollow={setFollowed}
+          onFollow={(id) => {
+            setFollowed(id);
+            setStorySelection(`card:${id}`);
+          }}
         />
       )}
       {followed && (
@@ -339,51 +349,12 @@ export function FlowPlayer({
     </div>
   );
 
-  const railsWithEvidence = diagram.rails.filter(
-    (rail) => rail.presence !== "absent" && rail.attachments.length > 0
-  );
-  const evidenceCount =
-    flow.attachments.length +
-    railsWithEvidence.reduce((n, rail) => n + rail.attachments.length, 0);
-  const evidence = evidenceCount > 0 && (
-    <>
-      {flow.attachments.length > 0 && (
-        // Collapsed until asked for, like rail evidence: open, it
-        // would cover a small diagram the whole time.
-        <Fold
-          className={`${panel} max-w-xl`}
-          label="Flow evidence"
-          count={flow.attachments.length}
-          testId="flow-evidence"
-        >
-          <AttachmentPanel
-            attachments={flow.attachments}
-            label="Flow evidence"
-          />
-        </Fold>
-      )}
-      {railsWithEvidence.map((rail) => (
-        <Fold
-          key={rail.id}
-          className={panel}
-          label={`Rail: ${rail.label ?? rail.id}`}
-          count={rail.attachments.length}
-        >
-          <AttachmentPanel
-            attachments={rail.attachments}
-            label={`Rail ${rail.label ?? rail.id} evidence`}
-          />
-        </Fold>
-      ))}
-    </>
-  );
-
   return (
     <div
       ref={root}
       role="group"
       aria-label={label}
-      aria-keyshortcuts={`Space ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Home End C${names.length > 1 ? " B Shift+B" : ""}`}
+      aria-keyshortcuts={`Space ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Home End C S N Shift+N${names.length > 1 ? " B Shift+B" : ""}`}
       tabIndex={0}
       onKeyDown={onKeyDown}
       className="flex flex-col gap-2 rounded-[var(--radius-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
@@ -413,30 +384,39 @@ export function FlowPlayer({
         interaction={interaction}
         morph={morph}
         overlayRef={setOverlay}
-        fitInsets={!hasBeats ? insetsBare : noteShown ? insetsNote : insetsRail}
+        fitInsets={fitInsets}
       />
       {overlay &&
         createPortal(
           <>
-            {side !== null && (inspectors || evidence) && (
-              <div
-                className="pointer-events-none absolute bottom-4 flex max-h-[calc(100%-2rem)] flex-col items-start justify-end gap-2 overflow-y-auto"
-                style={{ left: ZOOM_GUTTER, width: side }}
-                data-testid="flow-side-panel"
-              >
-                {/* Inspectors sit above the evidence: the stack is anchored
-                    at its foot, so one opening on hover moves nothing under
-                    the pointer. */}
-                {inspectors}
-                {evidence}
-              </div>
-            )}
+            <StoryNavigator
+              ref={story}
+              id={evidenceId}
+              flow={flow}
+              diagram={diagram}
+              beat={clock.beat}
+              open={storyOpen}
+              width={storyWidth}
+              onToggle={() => setStoryOpen((open) => !open)}
+              onSeek={clock.seek}
+              playing={clock.playing}
+              onPause={clock.pause}
+              activeActor={(() => {
+                const active = diagram.parts.find((part) =>
+                  part.steps.some(
+                    (step) => step.t <= clock.t && clock.t < step.end
+                  )
+                );
+                return active ? `part:${active.id}` : undefined;
+              })()}
+              selection={storySelection}
+              inspectors={inspectors}
+            />
             <div
               className="pointer-events-none absolute right-4 bottom-4 flex max-h-[calc(100%-2rem)] flex-col items-center justify-end gap-2"
-              style={{ left: ZOOM_GUTTER }}
+              style={{ left: ZOOM_GUTTER + storyWidth + 8 }}
               data-testid="flow-bottom-panel"
             >
-              {side === null && inspectors}
               {/* One card: note, hairline, transport. Popovers rise over it. */}
               <div
                 className={`${floating} relative flex flex-col items-center ${
@@ -460,16 +440,6 @@ export function FlowPlayer({
                     <ShortcutHelp />
                   </div>
                 )}
-                {side === null && evidence && (
-                  <div
-                    id={evidenceId}
-                    hidden={!evidenceOpen}
-                    className="absolute bottom-full left-1/2 mb-2 flex w-max max-w-[min(28rem,80vw)] -translate-x-1/2 flex-col items-stretch gap-2"
-                    data-testid="flow-evidence-popover"
-                  >
-                    {evidence}
-                  </div>
-                )}
                 <div className="max-w-full p-0.5" data-testid="flow-transport">
                   <Controls
                     clock={clock}
@@ -488,16 +458,11 @@ export function FlowPlayer({
                           }
                         : undefined
                     }
-                    evidence={
-                      side === null && evidence
-                        ? {
-                            count: evidenceCount,
-                            open: evidenceOpen,
-                            controls: evidenceId,
-                            onToggle: () => setEvidenceOpen((o) => !o),
-                          }
-                        : undefined
-                    }
+                    story={{
+                      open: storyOpen,
+                      controls: evidenceId,
+                      onToggle: () => setStoryOpen((open) => !open),
+                    }}
                   />
                 </div>
               </div>
@@ -519,7 +484,7 @@ export function FlowPlayer({
 /**
  * The current beat's note, centred over the hairline: its phase, number and
  * caption (two lines kept for it, clamped; whole on hover or focus), its
- * marked steps and its evidence. A followed card's narration is a second
+ * marked steps. A followed card's narration is a second
  * row. Hidden rather than unmounted when the reader hides it, so
  * `aria-controls` keeps a target.
  */
@@ -572,21 +537,6 @@ function BeatNote({
             <div className="mt-1.5 flex justify-center">
               <StepMarks changes={beat.changes} />
             </div>
-          )}
-          {beat.attachments.length > 0 && (
-            // Keyed by beat: a new beat opens with its evidence folded.
-            <Fold
-              key={i}
-              className="mx-auto mt-1.5 w-max max-w-full"
-              label="Evidence"
-              count={beat.attachments.length}
-              testId="flow-beat-evidence"
-            >
-              <AttachmentPanel
-                attachments={beat.attachments}
-                label={`Beat ${i + 1} evidence`}
-              />
-            </Fold>
           )}
         </div>
       )}
@@ -764,46 +714,6 @@ function StepMarks({ changes }: { changes: readonly BeatChange[] }) {
   );
 }
 
-/**
- * A folded evidence group: a quiet chevron, its name and a mono count, in
- * place of the browser's disclosure triangle.
- */
-function Fold({
-  className,
-  label,
-  count,
-  testId,
-  children,
-}: {
-  className?: string;
-  label: string;
-  count: number;
-  testId?: string;
-  children: ReactNode;
-}) {
-  return (
-    <details className={`group/fold ${className ?? ""}`} data-testid={testId}>
-      <summary className="flex w-max cursor-pointer list-none items-center gap-1.5 rounded-[var(--radius-sm,4px)] text-fg-soft hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] [&::-webkit-details-marker]:hidden">
-        <svg
-          viewBox="0 0 24 24"
-          className="h-3 w-3 shrink-0 text-fg-mute transition-transform group-open/fold:rotate-90"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path d="M9 6l6 6-6 6" />
-        </svg>
-        <span>{label}</span>
-        <span className="font-mono tabular-nums text-fg-mute">{count}</span>
-      </summary>
-      {children}
-    </details>
-  );
-}
-
 /* ---------- controls ---------- */
 
 const ICONS = {
@@ -904,7 +814,7 @@ function Controls({
   help,
   onHelp,
   note,
-  evidence,
+  story,
 }: {
   clock: FlowClock;
   names: readonly ArrangementName[];
@@ -915,9 +825,7 @@ function Controls({
   onHelp: () => void;
   /** The beat note toggle; absent when the flow has no beats. */
   note?: { shown: boolean; controls: string; onToggle: () => void };
-  /** Flow and rail evidence folded into the transport on a narrow frame. */
-  evidence?: {
-    count: number;
+  story: {
     open: boolean;
     controls: string;
     onToggle: () => void;
@@ -1007,26 +915,15 @@ function Controls({
           controls={note.controls}
         />
       )}
-      {evidence && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className={`!gap-1 !px-1.5 text-xs tabular-nums ${
-            evidence.open
-              ? "!bg-[var(--color-accent-wash)] !text-[var(--color-accent)]"
-              : ""
-          }`}
-          onClick={evidence.onToggle}
-          aria-label={`Evidence (${evidence.count})`}
-          aria-expanded={evidence.open}
-          aria-controls={evidence.controls}
-          title="Flow and rail evidence"
-          iconLeft={<Icon size="sm">{ICONS.evidence}</Icon>}
-          data-testid="flow-evidence-toggle"
-        >
-          {evidence.count}
-        </Button>
-      )}
+      <IconButton
+        label={story.open ? "Hide Story" : "Show Story"}
+        keys="S"
+        shortcut="S"
+        icon="evidence"
+        onClick={story.onToggle}
+        expanded={story.open}
+        controls={story.controls}
+      />
       <Button
         size="sm"
         variant="ghost"
@@ -1067,13 +964,6 @@ function ShortcutHelp() {
 /* ---------- inspectors ---------- */
 
 const panel = `${floating} min-w-0 px-3 py-2 text-xs`;
-/**
- * A part inspector shown only while its part is hovered or focused: it lets
- * the pointer through, so where it covers the diagram it cannot take the
- * hover from the part that opened it. Pinned, it takes input.
- */
-const passing = `pointer-events-none ${glass} min-w-0 px-3 py-2 text-xs`;
-
 function PartInspector({
   flow,
   diagram,
@@ -1096,7 +986,7 @@ function PartInspector({
   const inside = cardsInPart(part, t);
   return (
     <section
-      className={pinned ? panel : passing}
+      className={panel}
       aria-label={`Part ${part.identity.name}`}
       data-testid="flow-part-inspector"
       data-part-id={part.id}

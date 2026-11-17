@@ -35,7 +35,11 @@
   /* Secondary text (jobs, notes, rail labels). The state role --md-dim is
      tuned for strokes and lamps; as text it falls below a readable contrast
      once the diagram is zoomed out, so text gets its own, brighter step. */
-  --md-text-dim: color-mix(in oklab, var(--color-fg-soft) 50%, var(--color-fg-mute));
+  --md-text-dim: color-mix(
+    in oklab,
+    var(--color-fg-soft) 50%,
+    var(--color-fg-mute)
+  );
   /* Names: a step under full ink. Pure ink on the dark canvas blooms and
      reads a weight heavier than it is; lamps and strokes keep --md-ink. */
   --md-text-ink: color-mix(in oklab, var(--color-fg) 72%, var(--color-fg-soft));
@@ -54,7 +58,9 @@
 .md-root text {
   font-family: var(--font-mono);
   font-variant-ligatures: none;
-  font-feature-settings: "calt" 0, "liga" 0;
+  font-feature-settings:
+    "calt" 0,
+    "liga" 0;
   font-kerning: none;
   font-synthesis: none;
   text-rendering: geometricPrecision;
@@ -238,4 +244,222 @@
 }
 .md-live-count {
   pointer-events: none;
+}
+
+/* Story is a quiet navigation surface; only the current beat carries accent. */
+.flow-story {
+  border-radius: 12px;
+  font-family: var(--font-sans);
+}
+.flow-story summary {
+  list-style: none;
+  border-radius: 6px;
+}
+.flow-story summary::-webkit-details-marker {
+  display: none;
+}
+.flow-story summary::before {
+  content: "›";
+  color: var(--color-fg-mute);
+  flex: 0 0 10px;
+}
+.flow-story details[open] > summary::before {
+  transform: rotate(90deg);
+}
+.flow-story summary:hover {
+  background: var(--color-bg-2);
+}
+.flow-story-beat {
+  position: relative;
+  padding: 4px 0 12px;
+}
+.flow-story-beat > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 8px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.flow-story-beat[aria-current="step"]::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 12px;
+  height: 20px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--color-accent);
+}
+.flow-story-beat[aria-current="step"] > summary {
+  font-weight: 500;
+}
+.flow-story-number {
+  flex: 0 0 18px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg-mute);
+}
+.flow-story-caption {
+  min-width: 0;
+}
+.flow-story-beat:not([open]) .flow-story-caption {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.flow-story-actor {
+  margin: 0 0 0 28px;
+}
+.flow-story-actor > summary,
+.flow-story-whole > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 8px;
+  color: var(--color-fg-soft);
+}
+.flow-story-actor > summary > span {
+  margin-left: auto;
+  font-size: 11px;
+}
+.flow-story-beat > ul {
+  margin: 4px 8px 12px 28px;
+}
+.flow-story-selection section {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0;
+  backdrop-filter: none;
+}
+
+/* Expanded evidence reads as source rows rather than another stack of cards. */
+.flow-story ul[aria-label] {
+  gap: 0;
+}
+.flow-story ul[aria-label] > li {
+  border: 0;
+  border-radius: 0;
+  padding: 10px 8px;
+  border-bottom: 1px solid var(--color-line);
+}
+.flow-story ul[aria-label] > li:last-child {
+  border-bottom: 0;
+}
+.flow-story ul[aria-label] > li > div:first-child {
+  font-size: 11px;
+  line-height: 1.5;
+  gap: 2px 8px;
+  margin-bottom: 4px;
+}
+.flow-story ul[aria-label] strong {
+  font-weight: 500;
+}
+.flow-story [data-flow-code-ref] {
+  display: block;
+  width: 100%;
+  padding: 4px 0;
+  font-size: 11px;
+  line-height: 1.6;
+  text-decoration-color: var(--color-line-strong);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.flow-story [data-flow-code-ref]:hover {
+  text-decoration-color: currentColor;
+}
+.flow-story [data-flow-code-ref][aria-current="location"] {
+  color: var(--color-accent);
+  text-decoration-color: currentColor;
+}
+.flow-story-actor > ul {
+  margin-top: 0;
+}
+.flow-story li p {
+  margin-top: 4px;
+  line-height: 1.6;
+  color: var(--color-fg-soft);
+}
+
+.flow-source-short {
+  display: none;
+}
+.flow-story .flow-source-full {
+  display: none;
+}
+.flow-story .flow-source-short {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.flow-story .flow-source-file {
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.flow-story .flow-source-directory {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+  font-size: 10px;
+  color: var(--color-fg-mute);
+}
+.flow-story [data-flow-code-ref] {
+  text-decoration: none;
+  border-radius: 4px;
+}
+.flow-story [data-flow-code-ref]:hover .flow-source-file {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* During playback, the panel is a stable companion to the current beat. */
+.flow-story[data-mode="watch"] .flow-story-whole,
+.flow-story[data-mode="watch"] .flow-story-beat:not([aria-current="step"]) {
+  display: none;
+}
+.flow-story[data-mode="watch"] .flow-story-beat > summary {
+  pointer-events: none;
+}
+.flow-story[data-mode="watch"][data-playing="true"]
+  .flow-story-actor
+  > ul
+  > li
+  > div:first-child,
+.flow-story[data-mode="watch"][data-playing="true"]
+  .flow-story-actor
+  > ul
+  > li
+  > p,
+.flow-story[data-mode="watch"][data-playing="true"]
+  .flow-story-actor
+  > ul
+  > li
+  > pre {
+  display: none;
+}
+.flow-story[data-mode="watch"][data-playing="true"]
+  .flow-story-actor
+  > ul
+  > li {
+  padding: 4px 8px;
+}
+.flow-story[data-mode="watch"][data-playing="true"] .flow-source-directory {
+  display: none;
+}
+.flow-story-actor[data-active="true"] > summary {
+  color: var(--color-accent);
+}
+.flow-story-actor[data-active="true"] > summary::before {
+  content: "•";
+  transform: none;
+  color: var(--color-accent);
 }

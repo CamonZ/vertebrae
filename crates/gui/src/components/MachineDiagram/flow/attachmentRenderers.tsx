@@ -64,6 +64,9 @@ const source: AttachmentRenderer = (a, { openSource }) => {
       {path ? (
         <button
           type="button"
+          data-flow-code-ref
+          aria-label={location}
+          title={location}
           disabled={!openSource}
           className="break-all text-left font-mono underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:no-underline"
           onClick={() =>
@@ -77,7 +80,18 @@ const source: AttachmentRenderer = (a, { openSource }) => {
             })
           }
         >
-          {location}
+          <span className="flow-source-full">{location}</span>
+          <span className="flow-source-short" aria-hidden="true">
+            <span className="flow-source-file">
+              {path.split("/").pop()}
+              {line ? `:${line}${endLine ? `–${endLine}` : ""}` : ""}
+            </span>
+            {path.includes("/") && (
+              <span className="flow-source-directory">
+                {path.slice(0, path.lastIndexOf("/"))}/
+              </span>
+            )}
+          </span>
         </button>
       ) : (
         <p>No file path supplied for this diff.</p>
