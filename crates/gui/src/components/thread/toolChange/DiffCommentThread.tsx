@@ -92,6 +92,7 @@ function CommentCard({
 
 function CommentEditor({
   label,
+  placeholder,
   value,
   onChange,
   submitLabel,
@@ -102,6 +103,7 @@ function CommentEditor({
   disabled,
 }: {
   label: string;
+  placeholder?: string;
   value: string;
   onChange(value: string): void;
   submitLabel: string;
@@ -116,6 +118,7 @@ function CommentEditor({
       <textarea
         autoFocus
         aria-label={label}
+        placeholder={placeholder}
         data-testid={`${testIdPrefix}-input`}
         value={value}
         rows={3}
@@ -136,22 +139,25 @@ function CommentEditor({
         <span className="diff-comment-editor-hint" aria-hidden="true">
           <kbd>⌘↵</kbd> {submitLabel.toLowerCase()} · <kbd>esc</kbd> cancel
         </span>
-        <button type="button" onClick={onCancel}>
-          Cancel
-        </button>
-        {onSendToMain && (
-          <button type="button" onClick={onSendToMain}>
-            Send to main chat
+        <div className="diff-comment-editor-buttons">
+          <button type="button" onClick={onCancel}>
+            Cancel
           </button>
-        )}
-        <button
-          type="button"
-          data-testid={`${testIdPrefix}-submit`}
-          disabled={!value.trim() || disabled}
-          onClick={onSubmit}
-        >
-          {submitLabel}
-        </button>
+          {onSendToMain && (
+            <button type="button" onClick={onSendToMain}>
+              Send to main chat
+            </button>
+          )}
+          <button
+            type="button"
+            data-primary
+            data-testid={`${testIdPrefix}-submit`}
+            disabled={!value.trim() || disabled}
+            onClick={onSubmit}
+          >
+            {submitLabel}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -205,6 +211,7 @@ export function DiffCommentThread({
           <CommentEditor
             disabled={!!onDiscussDraft && !!choice?.error}
             label="New diff comment"
+            placeholder={onDiscussDraft ? "Ask about selected code…" : "Write a comment…"}
             value={draft}
             onChange={setDraft}
             submitLabel={onDiscussDraft ? "Discuss inline" : "Add comment"}

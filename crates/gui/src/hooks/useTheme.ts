@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { readingPercent, TYPEFACE_ROLES } from "../utils/readingAppearance";
 import { useUIStore } from "../stores/uiStore";
 
 /**
@@ -16,12 +17,37 @@ import { useUIStore } from "../stores/uiStore";
  */
 export function useTheme() {
   const theme = useUIStore((state) => state.theme);
-  const typePairing = useUIStore((state) => state.typePairing);
+  const typePairing = useUIStore((state) =>
+    state.useCustomTypeface ? state.customTypefaceBase ?? state.typePairing : state.typePairing
+  );
+  const useCustomTypeface = useUIStore((state) => state.useCustomTypeface);
+  const readingTextSize = useUIStore((state) => state.readingTextSize);
+  const customTypefaces = useUIStore((state) => state.customTypefaces);
   const accent = useUIStore((state) => state.accent);
 
   useEffect(() => {
     document.documentElement.dataset.type = typePairing;
   }, [typePairing]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--reading-scale", String(readingPercent(readingTextSize) / 100)
+    );
+  }, [readingTextSize]);
+
+  useEffect(() => {
+    const style = document.documentElement.style;
+    for (const { id } of TYPEFACE_ROLES) {
+      const name = useCustomTypeface ? customTypefaces[id] : undefined;
+      const property = `--font-${id}`;
+      if (name) {
+        const quoted = JSON.stringify(name);
+        style.setProperty(property, `${quoted}, var(--pairing-font-${id})`);
+      } else {
+        style.removeProperty(property);
+      }
+    }
+  }, [customTypefaces, useCustomTypeface]);
 
   useEffect(() => {
     document.documentElement.dataset.accent = accent;

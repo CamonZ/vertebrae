@@ -87,7 +87,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       const measurement = measurementRef.current;
       if (!measurement || typeof ResizeObserver === "undefined") return;
 
-      // Panel resizing can rewrap a draft without changing its value.
+      // Watch the one-row measurement field for width and line-height changes.
       const observer = new ResizeObserver(resizeInput);
       observer.observe(measurement);
       return () => observer.disconnect();
@@ -133,8 +133,8 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     );
 
     const textareaClassName = hasFooter
-      ? "block w-full resize-none rounded-t-lg bg-transparent px-3 py-2 text-sm leading-6 text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-      : "block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 text-sm leading-6 text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
+      ? "block w-full resize-none rounded-t-lg bg-transparent px-3 py-2 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+      : "block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
 
     return (
       <div
@@ -174,7 +174,6 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
             position: "absolute",
             top: 0,
             left: 0,
-            height: 0,
             minHeight: 0,
             maxHeight: "none",
             overflow: "hidden",

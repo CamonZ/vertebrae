@@ -920,6 +920,17 @@ async getLocalFileEditors() : Promise<Result<LocalFileEditor[], CommandError>> {
 }
 },
 /**
+ * List installed font family names available to Appearance settings.
+ */
+async getLocalFontFamilies() : Promise<Result<string[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_local_font_families") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Return the canonical project and Git worktree roots that local-chat file
  * references may target.
  */

@@ -1,4 +1,10 @@
 import {
+  resolveCustomTypefaces,
+  resolveReadingTextSize,
+  type CustomTypefaces,
+  type ReadingTextSize,
+} from "../utils/readingAppearance";
+import {
   readInlineDiscussionPreference,
   type InlineDiscussionPreference,
 } from "../utils/inlineDiscussionModel";
@@ -97,6 +103,10 @@ export type ThinkingIndicatorStyle = "classic" | "futuristic";
 export type DensityPreference = "auto" | "comfortable" | "default" | "compact";
 
 interface UIState {
+  readingTextSize: ReadingTextSize;
+  customTypefaces: CustomTypefaces;
+  useCustomTypeface: boolean;
+  customTypefaceBase: TypePairing | null;
   inlineDiscussionPreference: InlineDiscussionPreference;
   /** Current theme preference */
   theme: Theme;
@@ -125,6 +135,10 @@ interface UIState {
 }
 
 interface UIActions {
+  setReadingTextSize: (size: ReadingTextSize) => void;
+  setCustomTypefaces: (fonts: CustomTypefaces) => void;
+  selectCustomTypeface: () => void;
+  setCustomTypefaceBase: (base: TypePairing) => void;
   setInlineDiscussionPreference: (
     preference: InlineDiscussionPreference
   ) => void;
@@ -167,12 +181,25 @@ export const useUIStore = create<UIStore>()(
       theme: "system",
       setTheme: (theme) => set({ theme }),
       typePairing: "editorial",
-      setTypePairing: (typePairing) => set({ typePairing }),
+      setTypePairing: (typePairing) => set({ typePairing, useCustomTypeface: false }),
       accent: "orchid",
       setAccent: (accent) => set({ accent }),
       thinkingIndicatorStyle: "classic",
       setThinkingIndicatorStyle: (thinkingIndicatorStyle) =>
         set({ thinkingIndicatorStyle }),
+      readingTextSize: "default",
+      setReadingTextSize: (size) =>
+        set({ readingTextSize: resolveReadingTextSize(size) }),
+      customTypefaces: {},
+      useCustomTypeface: false,
+      customTypefaceBase: null,
+      selectCustomTypeface: () =>
+        set((state) => ({
+          useCustomTypeface: true,
+          customTypefaceBase: state.customTypefaceBase ?? state.typePairing,
+        })),
+      setCustomTypefaceBase: (customTypefaceBase) => set({ customTypefaceBase }),
+      setCustomTypefaces: (fonts) => set({ customTypefaces: resolveCustomTypefaces(fonts) }),
       density: "auto",
       setDensity: (density) => set({ density }),
       externalEditor: "",
@@ -211,6 +238,10 @@ export const useUIStore = create<UIStore>()(
         typePairing: state.typePairing,
         accent: state.accent,
         thinkingIndicatorStyle: state.thinkingIndicatorStyle,
+        readingTextSize: state.readingTextSize,
+        customTypefaces: state.customTypefaces,
+        useCustomTypeface: state.useCustomTypeface,
+        customTypefaceBase: state.customTypefaceBase,
         density: state.density,
         externalEditor: state.externalEditor,
         gateSteeringThresholds: state.gateSteeringThresholds,
@@ -227,10 +258,20 @@ export const useUIStore = create<UIStore>()(
           stored.inlineDiscussionPreference
         );
 
+        const customTypefaces = resolveCustomTypefaces(stored.customTypefaces);
+
         return {
           ...current,
           ...stored,
           inlineDiscussionPreference,
+          readingTextSize: resolveReadingTextSize(stored.readingTextSize),
+          customTypefaces,
+          useCustomTypeface: typeof stored.useCustomTypeface === "boolean"
+            ? stored.useCustomTypeface
+            : Object.keys(customTypefaces).length > 0,
+          customTypefaceBase:
+            TYPE_PAIRINGS.find((pairing) => pairing.value === stored.customTypefaceBase)?.value
+            ?? (Object.keys(customTypefaces).length > 0 ? stored.typePairing ?? current.typePairing : null),
           diffPreferences: resolveDiffPreferences(stored.diffPreferences),
         };
       },

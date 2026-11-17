@@ -91,7 +91,8 @@ url = "2.5"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSWorkspace", "objc2-uniform-type-identifiers"] }
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSFontManager", "NSWorkspace", "objc2-uniform-type-identifiers"] }
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSURL"] }
 objc2-uniform-type-identifiers = { version = "0.3.2", default-features = false, features = ["std", "UTCoreTypes", "UTType"] }
 
