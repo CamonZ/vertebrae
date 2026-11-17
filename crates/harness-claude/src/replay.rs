@@ -7,11 +7,11 @@ use std::{
 
 use serde_json::Value;
 use vertebrae_harness_core::{
-    HarnessError, HarnessEventDraftV1, ProviderThreadRef, SessionId, TailReadOutcome,
-    TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache, TranscriptReplayPage,
-    TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision, TranscriptTailLines,
-    load_transcript_page, record_timestamp, safe_filename, sequence_replay_drafts,
-    tail_read_budget, validated_file,
+    HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, ProviderThreadRef, SessionId,
+    TailReadOutcome, TranscriptReplay, TranscriptReplayAdapter, TranscriptReplayCache,
+    TranscriptReplayPage, TranscriptReplayPageRequest, TranscriptReplayRequest, TranscriptRevision,
+    TranscriptTailLines, TurnStarted, load_transcript_page, record_timestamp, safe_filename,
+    sequence_replay_drafts, tail_read_budget, validated_file,
 };
 
 use crate::{ClaudeDecodeContext, ClaudeStreamDecoder};
@@ -43,7 +43,15 @@ impl ClaudeTranscriptReplay {
             return Ok(None);
         };
         let revision = TranscriptRevision::capture(&path)?;
-        Ok(Some(self.normalize(path, revision, request)?))
+        let projection_key = claude_projection_key(request);
+        let replay = claude_replay_cache().get_or_try_insert_with(
+            &path,
+            &revision,
+            &projection_key,
+            || self.normalize(path.clone(), revision.clone(), request),
+        )?;
+        revision.verify(&path)?;
+        Ok(Some(std::sync::Arc::unwrap_or_clone(replay)))
     }
 
     pub fn replay_page(
@@ -301,6 +309,10 @@ fn decode_claude_line(
 ) {
     let timestamp = record_timestamp(&value);
     let replay_user_text = (value.get("type").and_then(Value::as_str) == Some("user")
+        && value.get("agentId").is_none()
+        && value.get("agent_id").is_none()
+        && value.get("parent_tool_use_id").is_none()
+        && value.get("isSidechain").and_then(Value::as_bool) != Some(true)
         && value.get("isMeta").and_then(Value::as_bool) != Some(true)
         && value.get("isCompactSummary").and_then(Value::as_bool) != Some(true))
     .then(|| user_text(&value))
@@ -309,9 +321,65 @@ fn decode_claude_line(
         .decode_value_at_sequence(value, timestamp, source)
         .unwrap_or_default();
     if let Some(text) = replay_user_text {
-        line_drafts.insert(0, decoder.replay_user_input_draft(text, timestamp));
+        let input = decoder.replay_user_input_draft(text, timestamp);
+        // The durable human input is a boundary even when Claude's JSONL
+        // has no corresponding result record or normalized turn ID.
+        drafts.push(HarnessEventDraftV1 {
+            payload: HarnessEventPayloadV1::TurnStarted(TurnStarted {
+                input_summary: None,
+            }),
+            ..input.clone()
+        });
+        drafts.push(input);
     }
-    drafts.extend(line_drafts);
+    for draft in &mut line_drafts {
+        if let HarnessEventPayloadV1::TurnFinished(outcome) = &mut draft.payload
+            && outcome
+                .result_text
+                .as_deref()
+                .is_some_and(|result| result_repeats_reply(drafts, &draft.stream_id, result))
+        {
+            outcome.result_text = None;
+        }
+    }
+    let context = decoder.context();
+    drafts.extend(line_drafts.into_iter().map(|mut draft| {
+        // Persisted project JSONL often omits the live system/init record.
+        // The adapter has already selected the root thread by transcript ID.
+        if draft.stream_id == context.root_stream_id
+            && draft.correlation.parent_tool_call_id.is_none()
+            && matches!(draft.payload, HarnessEventPayloadV1::Text(_))
+        {
+            draft
+                .correlation
+                .thread_id
+                .get_or_insert_with(|| context.root_thread_id.clone());
+        }
+        draft
+    }));
+}
+
+// Some durable records include the final answer a second time in the result.
+// Only compare text from the same stream and an observed, still-open turn.
+fn result_repeats_reply(
+    drafts: &[HarnessEventDraftV1],
+    stream: &vertebrae_harness_core::StreamId,
+    result: &str,
+) -> bool {
+    let mut repeated = false;
+    for draft in drafts
+        .iter()
+        .rev()
+        .filter(|draft| &draft.stream_id == stream)
+    {
+        match &draft.payload {
+            HarnessEventPayloadV1::TurnStarted(_) => return repeated,
+            HarnessEventPayloadV1::TurnFinished(_) => return false,
+            HarnessEventPayloadV1::Text(text) => repeated |= text.text.trim() == result.trim(),
+            _ => {}
+        }
+    }
+    false
 }
 
 // A standalone child transcript carries its parent's sessionId and its own
@@ -346,7 +414,7 @@ fn claude_replay_cache() -> &'static TranscriptReplayCache {
 
 fn claude_projection_key(request: &TranscriptReplayRequest) -> String {
     format!(
-        "claude-v3:resume={:?}:stream={:?}:project={:?}:created={:?}",
+        "claude-v5:resume={:?}:stream={:?}:project={:?}:created={:?}",
         request.provider_resume_id.as_str(),
         request.stream_id.as_str(),
         request.project_path,
@@ -432,6 +500,57 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn replay_filters_non_root_user_records_and_suppresses_only_repeated_results() {
+        use serde_json::json;
+
+        let mut decoder = ClaudeStreamDecoder::new(ClaudeDecodeContext::interactive(
+            SessionId::new("session"),
+            StreamId::new("replay"),
+        ));
+        let mut drafts = Vec::new();
+        let records = [
+            json!({"type":"user", "message":{"content":"root prompt"}}),
+            json!({"type":"user", "agentId":"agent", "message":{"content":"agent prompt"}}),
+            json!({"type":"user", "agent_id":"agent", "message":{"content":"agent prompt"}}),
+            json!({"type":"user", "isSidechain":true, "message":{"content":"sidechain prompt"}}),
+            json!({"type":"user", "parent_tool_use_id":"tool", "message":{"content":"tool prompt"}}),
+            json!({"type":"assistant", "message":{"id":"reply","content":[{"type":"text","text":"answer"}]}}),
+            json!({"type":"result", "result":"answer", "duration_ms":25}),
+            json!({"type":"user", "message":{"content":"next prompt"}}),
+            json!({"type":"result", "result":"answer"}),
+        ];
+        for (index, record) in records.into_iter().enumerate() {
+            decode_claude_line(&mut decoder, record, index as u64 + 1, &mut drafts);
+        }
+        let prompts: Vec<_> = drafts
+            .iter()
+            .filter_map(|draft| match &draft.payload {
+                HarnessEventPayloadV1::TurnInput(input) => Some(input.content.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(prompts, ["root prompt", "next prompt"]);
+        assert_eq!(
+            drafts
+                .iter()
+                .filter(|draft| matches!(draft.payload, HarnessEventPayloadV1::TurnStarted(_)))
+                .count(),
+            2
+        );
+        let results: Vec<_> = drafts
+            .iter()
+            .filter_map(|draft| match &draft.payload {
+                HarnessEventPayloadV1::TurnFinished(result) => Some(result),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].result_text, None);
+        assert_eq!(results[0].metrics.duration_ms, Some(25));
+        assert_eq!(results[1].result_text.as_deref(), Some("answer"));
+    }
 
     fn assert_stable_events_equal(actual: &[HarnessEventV1], expected: &[HarnessEventV1]) {
         assert_eq!(actual.len(), expected.len());

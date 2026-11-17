@@ -822,3 +822,292 @@ fn the_store_itself_keeps_the_first_turn_even_without_a_recorder_cache() {
         "base\n"
     );
 }
+
+#[test]
+fn replay_pages_resolve_captured_contents_for_both_providers() {
+    use serde_json::json;
+    use vertebrae_core::StepHarness;
+    use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory};
+    use vertebrae_harness_core::{
+        HarnessEventPayloadV1, ProviderResumeId, StreamId, TranscriptReplayPageRequest,
+        TranscriptReplayRequest,
+    };
+
+    for provider in [StepHarness::Codex, StepHarness::Claude] {
+        let dir = TempDir::new().unwrap();
+        let checkout_a = dir.path().join("checkout-a");
+        let checkout_b = dir.path().join("checkout-b");
+        let _repo_a = repo(&checkout_a);
+        let _repo_b = repo(&checkout_b);
+        let annotations = dir.path().join("annotations");
+        let capture_store = store(&annotations);
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            transcript_home_dir: Some(dir.path().to_path_buf()),
+            ..Default::default()
+        });
+        let project = Path::new("/workspace/replay");
+        let transcript_path = match provider {
+            StepHarness::Codex => ".codex/sessions/rollout-replay-session.jsonl",
+            StepHarness::Claude => ".claude/projects/-workspace-replay/replay-session.jsonl",
+            _ => unreachable!(),
+        };
+        let transcript = dir.path().join(transcript_path);
+        fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+        let request = TranscriptReplayRequest {
+            provider_resume_id: ProviderResumeId::new("replay-session"),
+            stream_id: StreamId::new("local-replay/chat"),
+            project_path: Some(project.into()),
+            created_at: None,
+        };
+
+        let mut lines = Vec::new();
+        let mut put = |second, mut value: serde_json::Value| {
+            value["timestamp"] =
+                serde_json::Value::String(format!("2026-01-01T00:00:{second:02}Z"));
+            lines.push((second, value.to_string()));
+        };
+        if provider == StepHarness::Codex {
+            put(
+                0,
+                json!({"type":"session_meta","payload":{"id":"replay-session"}}),
+            );
+        }
+        for (number, checkout) in [(1, &checkout_a), (2, &checkout_b), (3, &checkout_b)] {
+            let second = number * 10;
+            let live = format!("live-{number}");
+            let message = format!("message-{number}");
+            let provider_turn = format!("provider-{number}");
+            let reply = format!("[a.txt](a.txt:{number})");
+            match provider {
+                StepHarness::Codex => {
+                    if number > 1 {
+                        put(
+                            second - 1,
+                            json!({"type":"event_msg","payload":{"type":"thread_settings_applied","thread_id":"replay-session","service_tier":"fast"}}),
+                        );
+                    }
+                    put(
+                        second,
+                        json!({"type":"event_msg","payload":{"type":"task_started","turn_id":provider_turn}}),
+                    );
+                    put(
+                        second + 2,
+                        json!({"type":"response_item","payload":{"type":"message","role":"assistant","id":message,"content":[{"type":"output_text","text":reply}]}}),
+                    );
+                    put(
+                        second + 3,
+                        json!({"type":"event_msg","payload":{"type":"task_complete","turn_id":provider_turn}}),
+                    );
+                }
+                StepHarness::Claude => {
+                    put(
+                        second,
+                        json!({"type":"user","sessionId":"replay-session","message":{"content":"Open a.txt"}}),
+                    );
+                    put(
+                        second + 2,
+                        json!({"type":"assistant","sessionId":"replay-session","message":{"id":message,"content":[{"type":"text","text":reply}]}}),
+                    );
+                }
+                _ => unreachable!(),
+            }
+            if number == 3 {
+                continue; // A replayed reply without a capture.
+            }
+            let history = HistoryRecorder::start(
+                "chat",
+                checkout,
+                &capture_store,
+                Some(&observe(checkout)),
+                &git::Limits::default(),
+            );
+            fs::write(checkout.join("a.txt"), format!("contents {number}\n")).unwrap();
+            if number == 2 {
+                history.record_origin(&live, &capture_store);
+                history.record_reply(&live, reply_key("replay-session", &message));
+                history.capture_checked(&live, &capture_store, Some(&observe(checkout)), || true);
+            } else {
+                // The recorder may write an origin after the provider starts.
+                let mut origin = LocalChatAnnotation::new(
+                    "chat",
+                    "",
+                    "worktree_origin",
+                    json!({"epoch":history.capture.epoch,"worktree":checkout}),
+                );
+                origin.subject = Some(AnnotationSubject::Turn(live.clone()));
+                origin.recorded_at = format!("2026-01-01T00:00:{:02}Z", second + 1);
+                capture_store.publish_record(origin, None, || true).unwrap();
+                let body = serde_json::to_value(Capture {
+                    state: history.state(Some(&observe(checkout))),
+                    ..history.capture.clone()
+                })
+                .unwrap();
+                let mut captured = LocalChatAnnotation::new("chat", "", HISTORY_KIND, body);
+                captured.subject = Some(AnnotationSubject::Turn(live));
+                captured.recorded_at = format!("2026-01-01T00:00:{:02}Z", second + 4);
+                capture_store
+                    .publish_record(captured, None, || true)
+                    .unwrap();
+            }
+            fs::write(checkout.join("a.txt"), "current contents\n").unwrap();
+        }
+        let first_revision = lines
+            .iter()
+            .filter(|(second, _)| *second < 29)
+            .map(|(_, line)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(&transcript, &first_revision).unwrap();
+        let before_new_turn = factory
+            .replay_transcript(provider, &request)
+            .unwrap()
+            .unwrap();
+        let added_turn = lines
+            .iter()
+            .filter(|(second, _)| *second >= 29)
+            .map(|(_, line)| line.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        use std::io::Write as _;
+        fs::OpenOptions::new()
+            .append(true)
+            .open(&transcript)
+            .unwrap()
+            .write_all(added_turn.as_bytes())
+            .unwrap();
+        drop(capture_store);
+        let reopened = store(&annotations);
+        let entries = reopened.load("chat").unwrap();
+        let captures = ReplayCaptureIndex::new(&entries);
+        let transcript = factory
+            .replay_transcript(provider, &request)
+            .unwrap()
+            .unwrap();
+        assert!(transcript.events.len() > before_new_turn.events.len());
+        let mut page_request = TranscriptReplayPageRequest {
+            limit: Some(1),
+            cursor: None,
+        };
+        let legacy_cache = LegacyReplayCache::default();
+        let mut seen = Vec::new();
+        let mut legacy_builds = 0;
+        loop {
+            let mut page = factory
+                .replay_transcript_page(provider, &request, &page_request)
+                .unwrap()
+                .unwrap();
+            assert_eq!(page.cache_key, transcript.cache_key());
+            let legacy = legacy_cache.get_or_build(&page.cache_key, &captures, || {
+                legacy_builds += 1;
+                Some(captures.legacy_replies(&request, &transcript.events))
+            });
+            captures.attach(&request, &mut page.events, legacy.as_deref());
+            for event in page.events {
+                let HarnessEventPayloadV1::Text(reply) = event.payload else {
+                    continue;
+                };
+                if let Some(turn) = event.correlation.turn_id {
+                    let contents = text(read(&reopened, "chat", turn.as_str(), "a.txt").unwrap());
+                    let expected = if turn.as_str() == "live-1" {
+                        1
+                    } else {
+                        assert_eq!(turn.as_str(), "live-2");
+                        2
+                    };
+                    assert_eq!(reply.text, format!("[a.txt](a.txt:{expected})"));
+                    assert_eq!(contents, format!("contents {expected}\n"));
+                    let capture = entries
+                        .iter()
+                        .find(|entry| {
+                            entry.kind == HISTORY_KIND
+                                && entry.subject == Some(AnnotationSubject::Turn(turn.to_string()))
+                        })
+                        .unwrap();
+                    let checkout = if expected == 1 {
+                        &checkout_a
+                    } else {
+                        &checkout_b
+                    };
+                    assert_eq!(capture.payload["worktree"], json!(checkout));
+                    seen.push(expected);
+                } else {
+                    assert_eq!(reply.text, "[a.txt](a.txt:3)");
+                    seen.push(3);
+                }
+            }
+            page_request.cursor = page.next_cursor;
+            if !page.has_more {
+                break;
+            }
+        }
+        assert_eq!(seen, vec![3, 2, 1], "{provider:?}");
+        assert_eq!(legacy_builds, 1, "{provider:?}");
+
+        // Another origin inside the legacy window makes that window
+        // ambiguous even when the other turn has no capture.
+        let mut entries = entries;
+        let mut conflicting = LocalChatAnnotation::new(
+            "chat",
+            "",
+            "worktree_origin",
+            json!({"worktree":checkout_b}),
+        );
+        conflicting.subject = Some(AnnotationSubject::Turn("other".into()));
+        conflicting.recorded_at = "2026-01-01T00:00:13Z".into();
+        entries.push(conflicting);
+        let mut events = transcript.events.clone();
+        let captures = ReplayCaptureIndex::new(&entries);
+        let legacy = captures.legacy_replies(&request, &transcript.events);
+        captures.attach(&request, &mut events, Some(&legacy));
+        let legacy = events
+            .iter()
+            .find(|event| {
+                matches!(&event.payload,
+            HarnessEventPayloadV1::Text(reply) if reply.text == "[a.txt](a.txt:1)")
+            })
+            .unwrap();
+        assert!(legacy.correlation.turn_id.is_none());
+    }
+}
+
+#[test]
+fn capture_keeps_newest_distinct_replies_when_the_header_budget_is_full() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("repo");
+    let _repo = repo(&path);
+    let annotation_path = dir.path().join("annotations");
+    let annotations = store(&annotation_path);
+    let snapshot = observe(&path);
+    let recorder = HistoryRecorder::start(
+        "chat",
+        &path,
+        &annotations,
+        Some(&snapshot),
+        &git::Limits::default(),
+    );
+    recorder.record_origin("turn", &annotations);
+    let key = |index: usize| reply_key("thread", &index.to_string());
+    for index in 0..MAX_REPLY_IDS {
+        recorder.record_reply("turn", key(index));
+    }
+    recorder.record_reply("turn", key(0));
+    recorder.record_reply("turn", key(MAX_REPLY_IDS));
+    recorder.capture_checked("turn", &annotations, Some(&snapshot), || true);
+
+    let payload = store(&annotation_path)
+        .read_record(
+            "chat",
+            HISTORY_KIND,
+            &AnnotationSubject::Turn("turn".into()),
+        )
+        .unwrap()
+        .unwrap();
+    let capture: Capture = serde_json::from_value(payload).unwrap();
+    let replies = capture.replies.unwrap();
+    assert_eq!(replies.len(), MAX_REPLY_IDS);
+    assert!(replies.contains(&key(0)));
+    assert!(replies.contains(&key(MAX_REPLY_IDS)));
+    assert!(!replies.contains(&key(1)));
+}

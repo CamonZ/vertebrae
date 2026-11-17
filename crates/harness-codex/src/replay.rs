@@ -62,7 +62,15 @@ impl CodexTranscriptReplay {
         };
 
         let revision = TranscriptRevision::capture(&path)?;
-        Ok(Some(self.normalize(path, revision, request)?))
+        let projection_key = codex_projection_key(request);
+        let replay = codex_replay_cache().get_or_try_insert_with(
+            &path,
+            &revision,
+            &projection_key,
+            || self.normalize(path.clone(), revision.clone(), request),
+        )?;
+        revision.verify(&path)?;
+        Ok(Some(std::sync::Arc::unwrap_or_clone(replay)))
     }
 
     pub fn replay_page(
@@ -199,7 +207,7 @@ fn codex_replay_cache() -> &'static TranscriptReplayCache {
 
 fn codex_projection_key(request: &TranscriptReplayRequest) -> String {
     format!(
-        "codex-v7:resume={:?}:stream={:?}:project={:?}:created={:?}",
+        "codex-v8:resume={:?}:stream={:?}:project={:?}:created={:?}",
         request.provider_resume_id.as_str(),
         request.stream_id.as_str(),
         request.project_path,

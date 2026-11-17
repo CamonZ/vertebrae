@@ -44,6 +44,10 @@ pub(crate) enum RecorderEvent {
     TurnIdentity {
         turn_id: String,
     },
+    Reply {
+        turn_id: String,
+        key: String,
+    },
     TurnEnded,
     TurnCheckpoint {
         turn_id: String,
@@ -467,6 +471,11 @@ impl Recorder {
                     }
                 }
                 RecorderEvent::Child { parent_tool_id } => windows.child(parent_tool_id.as_deref()),
+                RecorderEvent::Reply { turn_id, key } => {
+                    if let Some(history) = &history {
+                        history.record_reply(&turn_id, key);
+                    }
+                }
                 RecorderEvent::TurnStarted | RecorderEvent::TurnIdentity { .. } => {
                     if let RecorderEvent::TurnIdentity { turn_id } = &event {
                         if let Some(history) = history.as_ref() {

@@ -39,6 +39,7 @@ pub fn event(
             turn_id: Some(TurnId::from(format!("turn-{stream}"))),
             run_id: None,
             item_id: Some(ItemId::from(format!("item-{sequence}"))),
+            message_id: None,
             tool_call_id: None,
             parent_tool_call_id: Some(ToolCallId::from("parent")),
             provider_resume_id: Some(ProviderResumeId::from("resume-1")),
