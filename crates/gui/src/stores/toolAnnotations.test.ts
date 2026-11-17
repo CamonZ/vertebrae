@@ -325,3 +325,53 @@ describe("chat store tool annotations", () => {
     expect(useChatStore.getState().sessions).toEqual({});
   });
 });
+
+it("keeps turn, association and legacy tool annotations with identical IDs separate", () => {
+  const tool = annotation("chat-1", "same", "worktree_history", {
+    state: "tool",
+  });
+  const turn = {
+    ...annotation("chat-1", "", "worktree_history", { state: "turn" }),
+    subject: { kind: "turn" as const, id: "same" },
+  };
+  const association = {
+    ...turn,
+    subject: { kind: "association" as const, id: "same" },
+  };
+  const merged = mergeToolAnnotations("chat-1", undefined, [
+    tool,
+    turn,
+    association,
+  ]);
+  expect(merged.same.worktree_history).toEqual(tool);
+  expect(merged['["turn","same"]'].worktree_history).toEqual(turn);
+  expect(merged['["association","same"]'].worktree_history).toEqual(
+    association
+  );
+});
+
+it("keeps the first durable turn identity and capture while allowing ordinary tool updates", () => {
+  const turn = {
+    ...annotation("chat-1", "", "worktree_history", {
+      worktree: "/original",
+      state: "ready",
+    }),
+    subject: { kind: "turn" as const, id: "one" },
+  };
+  const origin = { ...turn, kind: "worktree_origin" };
+  const later = { ...turn, payload: { worktree: "/later", state: "ready" } };
+  const first = mergeToolAnnotations("chat-1", undefined, [origin, turn]);
+  const next = mergeToolAnnotations("chat-1", first, [
+    { ...origin, payload: { worktree: "/later" } },
+    later,
+  ]);
+  expect(next['["turn","one"]'].worktree_history).toEqual(turn);
+  expect(next['["turn","one"]'].worktree_origin).toEqual(origin);
+  const tool = annotation("chat-1", "tool", "worktree_delta", { version: 1 });
+  expect(
+    mergeToolAnnotations("chat-1", undefined, [
+      tool,
+      { ...tool, payload: { version: 2 } },
+    ]).tool.worktree_delta.payload
+  ).toEqual({ version: 2 });
+});

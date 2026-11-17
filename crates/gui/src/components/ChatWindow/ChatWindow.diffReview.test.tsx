@@ -205,6 +205,9 @@ vi.mock("../../bindings", async () => {
           ],
         },
       })),
+      worktreeFileExists: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: true }),
       readWorktreeFile: vi
         .fn()
         .mockImplementation(async (_root: string, path: string) => ({
@@ -1134,6 +1137,106 @@ describe("ChatWindow diff review comments", () => {
       "Why X here?"
     );
   });
+
+  it.each(["selection", "focused control"])(
+    "respects newer %s intent before restoring composer focus after a comment edit",
+    (intent) => {
+      vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+      const selection = window.getSelection()!;
+      try {
+        useChatStore.setState({
+          sessions: {
+            "test-session": createSession({
+              association,
+              messages: [
+                {
+                  kind: "assistant",
+                  itemId: "a1",
+                  text: "First paragraph has a key phrase. It also explains the result.",
+                  timestamp: "2024-01-01T12:00:00Z",
+                },
+              ],
+            }),
+          },
+          activeSessionId: "test-session",
+          panelOpen: true,
+        });
+        usePendingCommentsStore.setState({
+          byScope: {
+            "test-session:/worktree": [
+              {
+                kind: "text",
+                id: "c1",
+                responseId: "a1",
+                itemId: "a1",
+                quote: "key phrase",
+                contextBefore: "",
+                contextAfter: "",
+                body: "Explain this wording.",
+              },
+            ],
+          },
+        });
+        const view = render(
+          <>
+            <ChatWindow sessionId="test-session" />
+            <input aria-label="Another control" />
+          </>
+        );
+        fireEvent.mouseEnter(screen.getByTestId("local-chat-pending-comment"));
+        fireEvent.click(screen.getByRole("button", { name: "Edit comment 1" }));
+        fireEvent.change(screen.getByTestId("local-chat-comment-editor"), {
+          target: { value: "Please explain the key phrase." },
+        });
+        fireEvent.click(screen.getByTestId("local-chat-save-edited-comment"));
+
+        // New user intent can arrive before the edit's deferred focus callback.
+        const paragraph = view.container.querySelector(
+          "[data-local-chat-assistant-response-id] p"
+        )!;
+        const range = document.createRange();
+        range.selectNodeContents(paragraph);
+        const selectParagraph = () => {
+          selection.removeAllRanges();
+          selection.addRange(range);
+          fireEvent(document, new Event("selectionchange"));
+        };
+        if (intent === "selection") selectParagraph();
+        else screen.getByRole("textbox", { name: "Another control" }).focus();
+        act(() => vi.runOnlyPendingTimers());
+
+        expect(screen.getByTestId("local-chat-composer")).not.toHaveFocus();
+        if (intent === "focused control") {
+          expect(
+            screen.getByRole("textbox", { name: "Another control" })
+          ).toHaveFocus();
+          selectParagraph();
+        }
+        fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+        const draft = screen.getByTestId("local-chat-comment-draft");
+        expect(draft).toHaveFocus();
+        fireEvent.change(draft, {
+          target: { value: "Clarify the whole paragraph." },
+        });
+        fireEvent.click(screen.getByTestId("local-chat-save-comment"));
+        expect(
+          usePendingCommentsStore.getState().byScope["test-session:/worktree"]
+        ).toEqual([
+          expect.objectContaining({
+            id: "c1",
+            body: "Please explain the key phrase.",
+          }),
+          expect.objectContaining({
+            quote: paragraph.textContent,
+            body: "Clarify the whole paragraph.",
+          }),
+        ]);
+      } finally {
+        selection.removeAllRanges();
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it("keeps staged comments when the chat window is closed and reopened", async () => {
     seedSession();

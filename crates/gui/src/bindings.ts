@@ -931,6 +931,28 @@ async getLocalFileRoots(projectRoot: string) : Promise<Result<string[], CommandE
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Read a recorded turn's file without applying anything to the working directory.
+ */
+async readChatHistoryFile(sessionId: string, turnId: string, path: string) : Promise<Result<HistoryRead, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_chat_history_file", { sessionId, turnId, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * A metadata-only availability check for editor actions.
+ */
+async worktreeFileExists(worktreePath: string, path: string) : Promise<Result<boolean, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("worktree_file_exists", { worktreePath, path }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async resolveChatAssociation(input: AssociationInput) : Promise<Result<AssociationResult, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("resolve_chat_association", { input }) };
@@ -1606,6 +1628,10 @@ plugin_dirs?: string[];
  */
 json_schema: string | null }
 /**
+ * A durable annotation can describe a tool, an association, or a turn.
+ */
+export type AnnotationSubject = { kind: "association"; id: string } | { kind: "turn"; id: string }
+/**
  * A file projection returned from the project artifact list or Task.artifacts.
  */
 export type Artifact = { id: string; project_id: string | null; filename: string; body: string; logical_name: string | null; metadata: ArtifactLinkMetadata | null; created_at: string | null; updated_at: string | null }
@@ -1891,6 +1917,9 @@ multiple: boolean;
 format: string | null }
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
 export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
+export type HistoryFailure = { kind: HistoryFailureKind; message: string; retryable: boolean }
+export type HistoryFailureKind = "not_captured" | "capture_unavailable" | "unsupported" | "invalid_path" | "storage"
+export type HistoryRead = FileBody | { error: HistoryFailure }
 /**
  * Config of a `human_input` step. On a waiting execution `question` is
  * already rendered.
@@ -2004,7 +2033,7 @@ export type LocalBackendUpdateRelease = { channel: string; version: string; buil
 export type LocalBackendUpdateResult = { channel: string; version: string; build: string; image_ref: string; generated_at: string | null }
 export type LocalBackendUpdateStatus = { management: string; configured: boolean; channel: string | null; current_version: string | null; current_build: string | null; current_image_ref: string | null; current_generated_at: string | null; latest: LocalBackendUpdateRelease | null; available: boolean; adoption_message: string | null; diagnostic: LocalBackendUpdateDiagnostic | null }
 export type LocalChatActivityStatus = "idle" | "working"
-export type LocalChatAnnotation = { session_id: string; tool_id: string; kind: string; payload: JsonValue;
+export type LocalChatAnnotation = { session_id: string; tool_id: string; subject?: AnnotationSubject | null; kind: string; payload: JsonValue;
 /**
  * RFC 3339 timestamp of when Vertebrae recorded the entry.
  */

@@ -7,7 +7,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum FileStatus {
     Added,
@@ -16,12 +16,12 @@ pub(crate) enum FileStatus {
     Renamed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
 pub(crate) struct FileMarker {
     pub(crate) reason: MarkerReason,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, serde::Deserialize, specta::Type)]
 pub(crate) struct FileEntry {
     pub(crate) path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -131,7 +131,7 @@ fn marker(side: &Side) -> Option<MarkerReason> {
 /// A private, memory-only libgit2 repository. Its ODB has only a mempack
 /// backend, no path or disk backend. Neither blobs nor trees can reach the
 /// user's object store, refs, index or worktree. Dropping it frees everything.
-fn memory_repository() -> Result<git2::Repository, GitError> {
+pub(crate) fn memory_repository() -> Result<git2::Repository, GitError> {
     let odb = git2::Odb::new()?;
     {
         let _memory = odb.add_new_mempack_backend(1000)?;

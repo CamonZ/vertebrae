@@ -69,8 +69,7 @@ pub fn choices(root: &Path) -> Result<Vec<ComparisonChoice>, GitError> {
         }
     }
 
-    let primary = git2::Repository::open(repo.commondir())?;
-    if let Some(path) = primary.workdir() {
+    for path in git::worktree_roots(&repo)? {
         let path = path
             .to_str()
             .ok_or_else(|| GitError::Malformed("non-UTF-8 worktree path".into()))?;
@@ -78,21 +77,7 @@ pub fn choices(root: &Path) -> Result<Vec<ComparisonChoice>, GitError> {
             label: format!("Worktree · {path}"),
             endpoint: ComparisonEndpoint::Worktree(path.into()),
         });
-    }
 
-    for name in repo.worktrees()?.iter() {
-        let name = name
-            .map_err(|error| GitError::Failed(error.to_string()))?
-            .ok_or_else(|| GitError::Malformed("non-UTF-8 worktree name".into()))?;
-        let tree = repo.find_worktree(name)?;
-        let path = tree
-            .path()
-            .to_str()
-            .ok_or_else(|| GitError::Malformed("non-UTF-8 worktree path".into()))?;
-        choices.push(ComparisonChoice {
-            label: format!("Worktree · {path}"),
-            endpoint: ComparisonEndpoint::Worktree(path.into()),
-        });
         if choices.len() > 2_000 {
             return Err(GitError::TooManyEntries(choices.len()));
         }

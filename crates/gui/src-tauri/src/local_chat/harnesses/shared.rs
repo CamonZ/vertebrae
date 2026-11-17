@@ -222,12 +222,15 @@ impl EventSink for LocalChatHarnessEventSink {
         let item_id = event.correlation.item_id.as_ref().map(ToString::to_string);
         let event_id = event.event_id.to_string();
         let observed_at = event.timestamp.to_rfc3339();
-        self.recording.forward(
-            &event.payload,
-            event.semantics,
-            is_root_stream,
-            parent_tool_use_id.as_deref(),
-        );
+        self.recording
+            .forward(
+                &event.payload,
+                event.semantics,
+                is_root_stream,
+                parent_tool_use_id.as_deref(),
+                turn_id.as_deref(),
+            )
+            .await;
 
         match event.payload {
             HarnessEventPayloadV1::SessionStarted(started) => {

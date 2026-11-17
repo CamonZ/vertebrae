@@ -248,6 +248,7 @@ impl Session {
             .load(&self.chat)
             .unwrap()
             .into_iter()
+            .filter(|entry| entry.kind == "worktree_delta")
             .map(|annotation| (annotation.tool_id.clone(), annotation))
             .collect()
     }
@@ -690,7 +691,8 @@ fn tree_state(root: &Path) -> BTreeMap<PathBuf, (Vec<u8>, u32)> {
 }
 
 #[tokio::test]
-async fn recording_never_writes_the_index_refs_objects_or_worktree() {
+async fn tools_and_changes_never_write_the_index_refs_objects_or_worktree_after_baseline_retention()
+{
     let (_repo, root) = repo();
     let linked_dir = TempDir::new().unwrap();
     let linked = linked_dir.path().canonicalize().unwrap().join("linked");
@@ -714,6 +716,22 @@ async fn recording_never_writes_the_index_refs_objects_or_worktree() {
             fast_config(),
         );
         let session = Session::new("backend-1", CHAT, tap, store);
+        // Association setup intentionally retains a base commit with an
+        // app-owned ref. Tool recording and Changes remain read-only after it.
+        let deadline = tokio::time::Instant::now() + WAIT;
+        while !session
+            .store
+            .load(CHAT)
+            .unwrap()
+            .iter()
+            .any(|entry| entry.kind == "worktree_history")
+        {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "association baseline was not saved"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
         let mut expected_root = tree_state(&root);
         let mut expected_linked = tree_state(&linked);
 
@@ -1292,3 +1310,90 @@ mod recorder_attribution;
 mod branch_guard;
 
 mod library_git;
+
+#[tokio::test]
+async fn a_correlated_turn_terminal_persists_history_without_any_tool_call() {
+    let (_dir, worktree) = repo();
+    let (_annotations, store) = store();
+    let session = Session::recording(&worktree, store.clone(), fast_config());
+    tool_starts().await;
+    let mut started = event(
+        "backend-1",
+        0,
+        false,
+        None,
+        HarnessEventPayloadV1::TurnStarted(vertebrae_harness_core::TurnStarted {
+            input_summary: None,
+        }),
+    );
+    started.correlation.turn_id = Some(vertebrae_harness_core::TurnId::new("history-turn"));
+    session.sink.emit(started).await.unwrap();
+    write(&worktree, "edit.txt", "edited externally during turn\n");
+    let mut terminal = event("backend-1", 1, false, None, turn_finished());
+    terminal.correlation.turn_id = Some(vertebrae_harness_core::TurnId::new("history-turn"));
+    session.sink.emit(terminal).await.unwrap();
+    let body =
+        crate::local_chat::file_history::read(&store, CHAT, "history-turn", "edit.txt").unwrap();
+    assert!(
+        matches!(body, crate::local_chat::worktree_files::FileBody::Text { contents, .. }
+        if contents == "edited externally during turn\n")
+    );
+    // A duplicate terminal after further edits must not rewrite that turn.
+    write(&worktree, "edit.txt", "later edit\n");
+    let mut duplicate = event("backend-1", 2, false, None, turn_finished());
+    duplicate.correlation.turn_id = Some(vertebrae_harness_core::TurnId::new("history-turn"));
+    session.sink.emit(duplicate).await.unwrap();
+    let body =
+        crate::local_chat::file_history::read(&store, CHAT, "history-turn", "edit.txt").unwrap();
+    assert!(
+        matches!(body, crate::local_chat::worktree_files::FileBody::Text { contents, .. }
+        if contents == "edited externally during turn\n")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn terminal_wait_is_bounded_and_duplicates_do_not_wait_for_a_busy_recorder() {
+    let tap = RecordingTap::default();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(4);
+    *tap.lock() = Some(ActiveRecorder {
+        worktree: PathBuf::new(),
+        intended_branch: "main".into(),
+        sender,
+        gate: Arc::new(RecorderGate::new()),
+    });
+    let first = tap.clone();
+    let task = tokio::spawn(async move {
+        first
+            .forward(
+                &turn_finished(),
+                UpdateSemantics::Snapshot,
+                true,
+                None,
+                Some("one"),
+            )
+            .await;
+    });
+    let Some(RecorderEvent::TurnCheckpoint {
+        completion: Some(receipt),
+        ..
+    }) = receiver.recv().await
+    else {
+        panic!("missing capture receipt")
+    };
+    // The recorder is deliberately held: another terminal must be filtered at
+    // admission, rather than queue behind the first and incur a second wait.
+    tap.forward(
+        &turn_finished(),
+        UpdateSemantics::Snapshot,
+        true,
+        None,
+        Some("one"),
+    )
+    .await;
+    assert!(receiver.try_recv().is_err());
+    tokio::time::advance(Duration::from_millis(4999)).await;
+    assert!(!task.is_finished());
+    tokio::time::advance(Duration::from_millis(1)).await;
+    task.await.unwrap();
+    assert!(receipt.is_closed());
+}

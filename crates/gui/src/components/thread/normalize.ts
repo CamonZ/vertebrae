@@ -500,9 +500,7 @@ function activityMessage(
         at: clock(ev.timestamp),
         rel: rel(runStartMs, ms(ev.timestamp)),
         label: BACKGROUND_SUBJECT[work.kind],
-        text: [subject, outcome, detail]
-          .filter(Boolean)
-          .join(" · "),
+        text: [subject, outcome, detail].filter(Boolean).join(" · "),
       };
     }
     case "task_notification":
@@ -542,11 +540,13 @@ function agentMessage(
   model: string | undefined,
   reasoning: boolean,
   lifecycle?: AssistantMessageLifecycle,
-  itemId?: string
+  itemId?: string,
+  referenceReplyId?: string
 ): AgentMessage {
   const atMs = ms(timestamp);
   return {
     evt: nextEvt("agent"),
+    referenceReplyId: referenceReplyId ?? itemId ?? timestamp,
     type: "agent",
     at: clock(timestamp),
     rel: rel(runStartMs, atMs),
@@ -971,7 +971,8 @@ function eventsToMessages(
             model,
             false,
             ev.lifecycle,
-            ev.itemId
+            ev.itemId,
+            ev.referenceReplyId
           )
         );
         break;

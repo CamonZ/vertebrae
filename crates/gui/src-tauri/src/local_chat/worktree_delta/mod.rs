@@ -1,17 +1,16 @@
 //! Records, per root tool call of a live local chat runtime, the change it
 //! made to the session's associated Git worktree as a Git-format patch in the
 //! annotation sidecar. Recording is read-only toward the worktree and never
-//! blocks chat event delivery: the projection forwards tool boundaries through
-//! a bounded, non-blocking channel to one recorder task per runtime.
+//! blocks tool event delivery. Terminal events briefly await a durable turn
+//! capture before the UI can dispatch the next turn.
 
 pub(crate) mod git;
-pub(super) mod patch;
+pub(crate) mod patch;
 pub(crate) use patch::FileStatus;
-mod recorder;
+pub(super) mod recorder;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
@@ -43,40 +42,78 @@ impl RecordingTap {
     }
 
     /// Forward the recording-relevant part of a projected harness event.
-    /// Never waits: a full channel drops the open segment with a warning.
-    pub(crate) fn forward(
+    /// Tools never wait. A terminal event waits at most five seconds for its
+    /// capture before the UI may submit another turn.
+    pub(crate) async fn forward(
         &self,
         payload: &HarnessEventPayloadV1,
         semantics: UpdateSemantics,
         is_root_stream: bool,
         parent_tool_id: Option<&str>,
+        turn_id: Option<&str>,
     ) {
-        let active = self.lock();
-        let event = recorder_event(payload, semantics, is_root_stream, parent_tool_id);
-        let Some(recorder) = active.as_ref() else {
-            if matches!(event, Some(RecorderEvent::Started { .. })) {
-                log::info!("[WORKTREE_DELTA] tool start seen but no recorder is active");
+        let (completion, mut completed) = tokio::sync::oneshot::channel();
+        let checkpoint = is_root_stream
+            && parent_tool_id.is_none()
+            && turn_id.is_some()
+            && matches!(
+                payload,
+                HarnessEventPayloadV1::TurnFinished(_) | HarnessEventPayloadV1::RunFinished(_)
+            );
+        {
+            let active = self.lock();
+            let event = recorder_event(payload, semantics, is_root_stream, parent_tool_id);
+            let event = if is_root_stream && parent_tool_id.is_none() {
+                match (&event, turn_id) {
+                    (Some(RecorderEvent::TurnEnded), Some(id)) => {
+                        Some(RecorderEvent::TurnCheckpoint {
+                            turn_id: id.to_owned(),
+                            completion: Some(completion),
+                        })
+                    }
+                    (Some(RecorderEvent::TurnStarted), Some(id)) => {
+                        Some(RecorderEvent::TurnIdentity { turn_id: id.into() })
+                    }
+                    _ => event,
+                }
+            } else {
+                event
+            };
+            let Some(recorder) = active.as_ref() else {
+                if matches!(event, Some(RecorderEvent::Started { .. })) {
+                    log::info!("[WORKTREE_DELTA] tool start seen but no recorder is active");
+                }
+                return;
+            };
+            let Some(event) = event else {
+                return;
+            };
+            if let RecorderEvent::TurnCheckpoint { turn_id, .. } = &event {
+                if !recorder.gate.accept_terminal(turn_id) {
+                    return;
+                }
             }
-            return;
-        };
-        let Some(event) = event else {
-            return;
-        };
-        let start = matches!(event, RecorderEvent::Started { .. });
-        if start {
-            recorder.gate.start_queued();
-        }
-        let sent = recorder.sender.try_send(event);
-        if start && sent.is_err() {
-            recorder.gate.start_dequeued();
-        }
-        if let Err(mpsc::error::TrySendError::Full(_)) = sent {
-            if recorder.gate.mark_overflow() {
-                log::warn!(
-                    "[WORKTREE_DELTA] recorder for {} is behind; dropping the open segment",
-                    recorder.worktree.display()
-                );
+            let start = matches!(event, RecorderEvent::Started { .. });
+            if start {
+                recorder.gate.start_queued();
             }
+            let sent = recorder.sender.try_send(event);
+            if start && sent.is_err() {
+                recorder.gate.start_dequeued();
+            }
+            if let Err(mpsc::error::TrySendError::Full(_)) = sent {
+                if recorder.gate.mark_overflow() {
+                    log::warn!(
+                        "[WORKTREE_DELTA] recorder for {} is behind; dropping the open segment",
+                        recorder.worktree.display()
+                    );
+                }
+            }
+        }
+        if checkpoint {
+            // If the recorder is unhealthy, finish the turn rather than hang
+            // chat. The closed receipt prevents it publishing a late state.
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), &mut completed).await;
         }
     }
 
@@ -194,33 +231,22 @@ fn recorder_event(
 /// `git worktree list` entries.
 pub(crate) fn project_worktree_roots(project_root: &Path) -> Vec<PathBuf> {
     let mut roots = vec![project_root.to_path_buf()];
-    let output = Command::new("git")
-        .args([
-            "-C",
-            &project_root.to_string_lossy(),
-            "worktree",
-            "list",
-            "--porcelain",
-        ])
-        .output();
 
-    let Ok(output) = output else {
-        return roots;
-    };
-    if !output.status.success() {
-        return roots;
-    }
-
-    for worktree in String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter_map(|line| line.strip_prefix("worktree "))
+    // Legacy project roots may be subdirectories; preserve that discovery
+    // contract while exact worktree consumers use git::repository.
+    if let Ok(discovered) = git2::Repository::discover(project_root)
+        .map_err(git::GitError::from)
+        .and_then(|repo| git::worktree_roots(&repo))
     {
-        if let Ok(worktree) = fs::canonicalize(worktree) {
-            if worktree.is_dir() && !roots.contains(&worktree) {
-                roots.push(worktree);
+        for path in discovered {
+            if let Ok(path) = fs::canonicalize(path) {
+                if path.is_dir() && !roots.contains(&path) {
+                    roots.push(path);
+                }
             }
         }
     }
+
     roots
 }
 

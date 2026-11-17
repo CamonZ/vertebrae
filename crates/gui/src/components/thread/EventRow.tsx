@@ -70,7 +70,7 @@ function LogProse({
     (lifecycle ? lifecycle !== "completed" : !!streaming);
   const inner =
     typeof prose === "string" && !plain ? (
-      <MarkdownContent text={prose} />
+      <MarkdownContent text={prose} referenceReplyId={responseId} />
     ) : (
       prose
     );
@@ -563,7 +563,7 @@ export function EventRow(props: EventRowProps): ReactNode {
         lifecycle={m.lifecycle}
         tools={m.tools}
         streaming={m.streaming}
-        responseId={m.itemId ?? m.evt}
+        responseId={m.itemId ?? m.referenceReplyId ?? m.evt}
         itemId={m.itemId}
       />
     );

@@ -36,6 +36,8 @@ function referenceFromEvent(event: MouseEvent): HTMLElement | null {
 
 function referenceKey(reference: HTMLElement): string {
   if (reference.dataset.actionableReference === "file") {
+    if (reference.dataset.fileReferenceId)
+      return `file:${reference.dataset.fileReferenceId}`;
     return [
       "file",
       reference.dataset.filePath ?? "",

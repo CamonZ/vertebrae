@@ -1862,9 +1862,10 @@ describe("conversation speed tier recovery", () => {
       );
       useChatStore.getState().setSessionSpeedTier("session", null);
       routeLocalChatSessionInitEvent(payload);
-      expect(
-        useChatStore.getState().sessions.session.selectedSpeedTier
-      ).toBe("fast");
+
+      expect(useChatStore.getState().sessions.session.selectedSpeedTier).toBe(
+        "fast"
+      );
       expect(
         routeLocalChatSessionInitEvent({
           ...payload,

@@ -1,3 +1,4 @@
+import { withFileReferenceReplyIds } from "../../utils/fileReferenceReplyIds";
 /**
  * chatMessagesToThread — adapter: chatStore `ChatMessage[]` → canonical
  * `Thread` for the unified <Thread> primitive (chat surface).
@@ -184,7 +185,7 @@ export function chatMessagesToThread(
     return current;
   };
 
-  for (const m of messages) {
+  for (const m of withFileReferenceReplyIds(messages)) {
     switch (m.kind) {
       case "session_start":
       case "session_end":
@@ -219,6 +220,7 @@ export function chatMessagesToThread(
         const draft = openDraft();
         draft.events.push({
           kind: "assistant_message",
+          referenceReplyId: m.referenceReplyId,
           text: m.text,
           timestamp: m.timestamp,
           parentToolUseId: m.parentToolUseId,

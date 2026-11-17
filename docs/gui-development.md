@@ -1013,6 +1013,10 @@ snapshots to capture late writes. Watch registration failure disables recording
 with a warning instead of falling back to polling or using stale baselines.
 The recorder releases its subscription on shutdown or worktree replacement.
 
+Turn-based file history extends these observations with annotation-backed
+baselines and cumulative turn captures. See [Chat file references](chat-file-references.md)
+for historical/latest navigation, retention refs, capture limits and failure behavior.
+
 ## Diff review comments
 
 The Changes icon in the conversation header toggles a resizable side panel

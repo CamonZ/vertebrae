@@ -1,3 +1,7 @@
+import { annotationWorktree } from "../../../stores/toolAnnotations";
+import { useToolAnnotation } from "../../../hooks/useToolAnnotation";
+import { resolveTurnSource } from "./resolveTurnSource";
+import { OpenInExternalEditor } from "./OpenInExternalEditor";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
 import { resolveSource, type ResolvedSource } from "./resolveSource";
@@ -8,6 +12,7 @@ const SourceEvidenceCode = lazy(() => import("./SourceEvidenceCode"));
 export interface EvidenceTarget extends SourceLocation {
   /** Distinguishes repeated opens of the same location. */
   nonce: number;
+  history?: { sessionId: string; turnId: string | null };
 }
 
 type LoadState =
@@ -27,19 +32,51 @@ export function SourceEvidence({
   checkout,
   target,
   onClose,
+  exactPath = false,
 }: {
   checkout: string;
   target: EvidenceTarget;
   onClose(): void;
+  /** Chat references must not follow a renamed path implicitly. */
+  exactPath?: boolean;
 }) {
   const { path, base, head } = target;
   const [reload, setReload] = useState(0);
-  const key = JSON.stringify([checkout, path, base, head, reload]);
+  const [latestSelection, setLatestSelection] = useState<number | null>(null);
+  const latest = latestSelection === target.nonce;
+  const history = target.history;
+  const capture = useToolAnnotation(
+    history?.sessionId,
+    history?.turnId ? JSON.stringify(["turn", history.turnId]) : null,
+    "worktree_history"
+  );
+  const origin = useToolAnnotation(
+    history?.sessionId,
+    history?.turnId ? JSON.stringify(["turn", history.turnId]) : null,
+    "worktree_origin"
+  );
+  const effectiveCheckout = history?.turnId
+    ? (annotationWorktree(origin) ?? annotationWorktree(capture) ?? checkout)
+    : checkout;
+  const key = JSON.stringify([
+    effectiveCheckout,
+    path,
+    base,
+    head,
+    reload,
+    exactPath,
+    history,
+    latest,
+    target.nonce,
+  ]);
   const [state, setState] = useState<LoadState | null>(null);
 
   useEffect(() => {
     let current = true;
-    resolveSource(checkout, { path, base, head }).then(
+    const request = history
+      ? resolveTurnSource(effectiveCheckout, path, history, latest)
+      : resolveSource(checkout, { path, base, head }, { exactPath });
+    request.then(
       (source) => current && setState({ key, source }),
       (error: unknown) =>
         current &&
@@ -48,10 +85,22 @@ export function SourceEvidence({
           error: error instanceof Error ? error.message : String(error),
         })
     );
+
     return () => {
       current = false;
     };
-  }, [key, checkout, path, base, head]);
+  }, [
+    key,
+    checkout,
+    path,
+    base,
+    head,
+    exactPath,
+    history,
+    latest,
+    capture,
+    effectiveCheckout,
+  ]);
 
   const loaded = state?.key === key ? state : null;
   const source = loaded && "source" in loaded ? loaded.source : null;
@@ -72,6 +121,11 @@ export function SourceEvidence({
     body = (
       <p role="status" className="changes-file-fallback">
         {source?.kind === "unavailable" ? source.message : null}
+        {source?.kind === "unavailable" && source.retryable && (
+          <button type="button" onClick={() => setReload((value) => value + 1)}>
+            Retry
+          </button>
+        )}
       </p>
     );
   else
@@ -95,6 +149,33 @@ export function SourceEvidence({
       className="flex min-h-0 flex-1 flex-col gap-2 p-3 text-sm"
     >
       <div className="document-toolbar">
+        {history && (
+          <div role="group" aria-label="File version">
+            <button
+              type="button"
+              aria-pressed={!latest}
+              onClick={() => setLatestSelection(null)}
+            >
+              At this turn
+            </button>
+            <button
+              type="button"
+              aria-pressed={latest}
+              onClick={() => setLatestSelection(target.nonce)}
+            >
+              Latest file
+            </button>
+          </div>
+        )}
+        {(!history || latest) && (
+          <OpenInExternalEditor
+            root={effectiveCheckout}
+            path={shown?.path ?? path}
+            line={target.line}
+            column={target.column}
+            available={shown?.kind === "file"}
+          />
+        )}
         {shown?.kind === "diff" && (
           <span className={`evidence-status is-${shown.status}`}>
             {shown.status}

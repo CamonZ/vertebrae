@@ -1,6 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { commands } from "../../bindings";
-import { useUIStore } from "../../stores/uiStore";
+import type { ReactNode } from "react";
+import { useOpenLocalFile } from "../../hooks/useOpenLocalFile";
 import type { LocalFileReference } from "./localFileReference";
 
 interface LocalFileReferenceLinkProps {
@@ -14,45 +13,30 @@ export function LocalFileReferenceLink({
   projectRoot,
   children,
 }: LocalFileReferenceLinkProps) {
-  const [opening, setOpening] = useState(false);
-  const externalEditor = useUIStore((state) => state.externalEditor);
-
-  const openFile = async () => {
-    if (opening) return;
-    const selectedEditor = externalEditor.trim() || null;
-    setOpening(true);
-    try {
-      const result = await commands.openLocalFile(
-        projectRoot,
-        reference.path,
-        reference.line,
-        reference.column,
-        selectedEditor
-      );
-      if (result.status === "error") {
-        console.error("Could not open local file:", result.error);
-      }
-    } catch (error) {
-      console.error("Could not open local file:", error);
-    } finally {
-      setOpening(false);
-    }
-  };
+  const { open, opening, error } = useOpenLocalFile(
+    projectRoot,
+    reference.path,
+    reference.line,
+    reference.column
+  );
 
   return (
-    <button
-      type="button"
-      className="inline cursor-pointer rounded-sm bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-13 text-[var(--inline-code-fg)] underline decoration-current/30 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-      data-testid="local-file-reference-link"
-      data-actionable-reference="file"
-      data-file-path={reference.path}
-      data-file-line={reference.line ?? undefined}
-      data-file-column={reference.column ?? undefined}
-      aria-busy={opening}
-      title="Open in external editor"
-      onClick={() => void openFile()}
-    >
-      <span className="pointer-events-none">{children}</span>
-    </button>
+    <>
+      <button
+        type="button"
+        className="inline cursor-pointer rounded-sm bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-13 text-[var(--inline-code-fg)] underline decoration-current/30 hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        data-testid="local-file-reference-link"
+        data-actionable-reference="file"
+        data-file-path={reference.path}
+        data-file-line={reference.line ?? undefined}
+        data-file-column={reference.column ?? undefined}
+        aria-busy={opening}
+        title="Open in external editor"
+        onClick={() => void open()}
+      >
+        <span className="pointer-events-none">{children}</span>
+      </button>
+      {error && <span role="alert">{error}</span>}
+    </>
   );
 }

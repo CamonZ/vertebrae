@@ -1,3 +1,4 @@
+import { OpenInExternalEditor } from "./OpenInExternalEditor";
 import type { DiffPreferences } from "../../../utils/codeAppearance";
 import { lazy, Suspense, useEffect } from "react";
 import type { WorktreeChange } from "../../../bindings";
@@ -148,6 +149,16 @@ export function DocumentPane({
       className="flex min-h-0 flex-1 flex-col gap-2"
     >
       <div className="document-toolbar">
+        <OpenInExternalEditor
+          root={worktreePath}
+          path={path}
+          line={reveal?.line}
+          available={
+            document.disk.kind === "text" ||
+            document.disk.kind === "binary" ||
+            document.disk.kind === "too_large"
+          }
+        />
         <span className="document-path" title={path}>
           {path}
         </span>

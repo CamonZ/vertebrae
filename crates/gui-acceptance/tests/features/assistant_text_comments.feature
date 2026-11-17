@@ -35,6 +35,7 @@ Feature: Comments on selected local chat response text
     Then the GUI should show exactly 2 elements with test id "local-chat-pending-comment" within 5 seconds
     When I hover over the element with test id "local-chat-comment-icon-2"
     Then the GUI element with test id "local-chat-comment-popover" should contain text "This one will be removed." within 5 seconds
+    And the local chat comment popover should fit within the viewport
     When I click on the element with title "Remove comment 2"
     Then the GUI should show exactly 1 elements with test id "local-chat-pending-comment" within 5 seconds
 

@@ -4,7 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
 use std::io::{ErrorKind, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
@@ -66,7 +66,7 @@ impl std::fmt::Display for GitError {
 }
 
 /// Why a changed file is listed without hunks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MarkerReason {
     Binary,
@@ -170,6 +170,32 @@ pub(crate) fn repository(worktree: &Path) -> Result<git2::Repository, GitError> 
     }
 
     Ok(repo)
+}
+
+/// Primary checkout identity comes from Git's common repository, not cwd.
+pub(crate) fn main_worktree(repo: &git2::Repository) -> Result<Option<PathBuf>, GitError> {
+    Ok(git2::Repository::open(repo.commondir())?
+        .workdir()
+        .map(Path::to_path_buf))
+}
+
+/// Registered primary and linked worktrees, shared by Changes and recording target validation.
+/// Paths may be stale; each consumer decides whether availability is required.
+pub(crate) fn worktree_roots(repo: &git2::Repository) -> Result<Vec<PathBuf>, GitError> {
+    let mut roots: Vec<_> = main_worktree(repo)?.into_iter().collect();
+
+    for name in repo.worktrees()?.iter() {
+        let name = name
+            .map_err(|error| GitError::Failed(error.to_string()))?
+            .ok_or_else(|| GitError::Malformed("non-UTF-8 worktree name".into()))?;
+        roots.push(repo.find_worktree(name)?.path().to_path_buf());
+
+        if roots.len() > 2_000 {
+            return Err(GitError::TooManyEntries(roots.len()));
+        }
+    }
+
+    Ok(roots)
 }
 
 pub(crate) fn head_id(repo: &git2::Repository) -> Result<Option<String>, GitError> {

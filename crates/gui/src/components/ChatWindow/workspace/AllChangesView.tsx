@@ -35,6 +35,7 @@ export interface AllChangesViewProps {
   /** Scroll the shared viewport to this changed file. */
   jumpTarget: JumpTarget | null;
   onOpen(path: string): void;
+  renderExternalEditor?(path: string): ReactNode;
   diffStyle?: DiffPreferences["diffStyle"];
 }
 
@@ -51,6 +52,7 @@ export default function AllChangesView({
   parsedPatches,
   jumpTarget,
   onOpen,
+  renderExternalEditor,
   diffStyle,
 }: AllChangesViewProps): ReactNode {
   const options = usePierreDiffOptions();
@@ -364,6 +366,7 @@ export default function AllChangesView({
                     </span>
                   </span>
                 )}
+                {renderExternalEditor?.(path)}
                 <button
                   type="button"
                   className="changes-open-button"

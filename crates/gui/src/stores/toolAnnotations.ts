@@ -35,7 +35,16 @@ export function mergeToolAnnotations(
   const merged: ToolAnnotations = { ...base };
   for (const entry of entries) {
     if (entry.session_id !== sessionId) continue;
-    merged[entry.tool_id] = { ...merged[entry.tool_id], [entry.kind]: entry };
+    const key = entry.subject
+      ? JSON.stringify([entry.subject.kind, entry.subject.id])
+      : entry.tool_id;
+    if (
+      entry.subject?.kind === "turn" &&
+      ["worktree_history", "worktree_origin"].includes(entry.kind) &&
+      merged[key]?.[entry.kind]
+    )
+      continue;
+    merged[key] = { ...merged[key], [entry.kind]: entry };
   }
   return merged;
 }
@@ -47,4 +56,17 @@ export function toolAnnotationEntries(
   return Object.values(annotations ?? {}).flatMap((byKind) =>
     Object.values(byKind)
   );
+}
+
+export function annotationWorktree(
+  entry: LocalChatAnnotation | null | undefined
+): string | null {
+  const payload = entry?.payload;
+  return payload &&
+    typeof payload === "object" &&
+    !Array.isArray(payload) &&
+    typeof payload.worktree === "string" &&
+    payload.worktree.length > 0
+    ? payload.worktree
+    : null;
 }

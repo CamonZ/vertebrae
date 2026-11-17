@@ -1,3 +1,5 @@
+import { FileReferenceNavigationContext } from "../shared/FileReferenceNavigationContext";
+import type { FileTarget } from "../shared/FileReferenceNavigationContext";
 import {
   EvidenceNavigationContext,
   type SourceLocation,
@@ -188,7 +190,17 @@ export function ChatWindow({
   // After adding or editing a comment the user keeps writing the reply. Wait
   // a frame so the closing editor does not take focus back.
   const focusComposer = useCallback(() => {
-    requestAnimationFrame(() => inputRef.current?.focus());
+    const previousFocus = document.activeElement;
+    requestAnimationFrame(() => {
+      // A newer selection or focused control takes precedence over this save.
+      if (window.getSelection()?.isCollapsed === false) return;
+      if (
+        document.activeElement !== previousFocus &&
+        document.activeElement !== document.body
+      )
+        return;
+      inputRef.current?.focus();
+    });
   }, []);
   const handleAddComment = useCallback(
     (anchor: TextSelectionAnchor, body: string) => {
@@ -343,7 +355,26 @@ export function ChatWindow({
     sessionId: string;
     checkout: string;
     target: EvidenceTarget;
+    exactPath?: boolean;
   } | null>(null);
+
+  const openFileReference = (target: FileTarget) => {
+    setBackgroundSession(null);
+    setChangesSession(null);
+    setEvidence((previous) => ({
+      sessionId,
+      checkout: target.root ?? "",
+      exactPath: true,
+      target: {
+        path: target.path,
+        history: target.history,
+        line: target.line ?? undefined,
+        column: target.column ?? undefined,
+        nonce: (previous?.target.nonce ?? 0) + 1,
+      },
+    }));
+  };
+
   const openEvidence = useCallback(
     (location: SourceLocation) => {
       setBackgroundSession(null);
@@ -439,7 +470,7 @@ export function ChatWindow({
   const shownEvidence =
     !showChanges &&
     evidence?.sessionId === sessionId &&
-    evidence.checkout === evidenceCheckout
+    (evidence.exactPath || evidence.checkout === evidenceCheckout)
       ? evidence
       : null;
   const toggleChanges = useCallback(() => {
@@ -591,11 +622,16 @@ export function ChatWindow({
         )}
         {shownEvidence && (
           <aside
-            aria-label="Evidence panel"
+            aria-label={
+              shownEvidence.exactPath
+                ? "File reference panel"
+                : "Evidence panel"
+            }
             className="changes-side-panel"
             style={{ flexBasis: panelResize.width }}
           >
             <SourceEvidence
+              exactPath={shownEvidence.exactPath}
               checkout={shownEvidence.checkout}
               target={shownEvidence.target}
               onClose={() => setEvidence(null)}
@@ -784,7 +820,9 @@ export function ChatWindow({
           onAttach={attachSelection}
         >
           <DiscussionSnapshot snapshot={worktreeSnapshot} />
-          {content}
+          <FileReferenceNavigationContext.Provider value={openFileReference}>
+            {content}
+          </FileReferenceNavigationContext.Provider>
         </SelectionDiscussionProvider>
       </DiffReviewContext.Provider>
     </EvidenceNavigationContext.Provider>

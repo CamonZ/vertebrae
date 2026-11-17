@@ -27,11 +27,26 @@ function isContainedPath(path: string, root: string): boolean {
 
 function hasFileLikeName(path: string): boolean {
   const name = path.split("/").pop() ?? "";
+
+  // Dotfiles need stronger syntax than a method/property access.
+  if (/^\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$/.test(name))
+    return (
+      /^(?:\.(?:env|gitignore|gitattributes|gitmodules|npmrc|nvmrc|editorconfig|prettierrc|eslintrc)(?:\.[A-Za-z0-9_-]+)?)$/.test(
+        name
+      ) || path.includes("/")
+    );
+  if (/[(){};=]/.test(name)) return false;
   if (/^[^./][^/]*\.[A-Za-z0-9_-]+$/.test(name)) return true;
   if (/^(Dockerfile|Makefile|Procfile|LICENSE|README(?:\.md)?)$/i.test(name)) {
     return true;
   }
   return path.includes("/") && /^[A-Za-z0-9_.-]+$/.test(name);
+}
+
+/** A local line anchor must not be mistaken for a URI scheme. */
+export function isLocalFileLocation(value: string): boolean {
+  const path = value.match(LOCATION_RE)?.[1];
+  return Boolean(path && !path.includes(":") && hasFileLikeName(path));
 }
 
 /** Parse the narrow inline-code file contract used by local chat. */
@@ -79,4 +94,41 @@ export function parseLocalFileReference(
     line: Number.isSafeInteger(line) && line > 0 ? line : null,
     column: Number.isSafeInteger(column) && column > 0 ? column : null,
   };
+}
+
+export interface ParsedFileDestination extends LocalFileReference {
+  /** Explicit worktree identity, absent for an unqualified destination. */
+  root: string | null;
+}
+
+/** Decode, validate and establish path identity once for preparation/probing. */
+export function parseFileReferenceDestination(
+  occurrence: { destination: string; syntax?: "inline" | "link" },
+  projectRoot: string,
+  roots: readonly string[]
+): ParsedFileDestination | null {
+  let destination: string;
+
+  try {
+    destination =
+      occurrence.syntax === "inline"
+        ? occurrence.destination
+        : decodeURIComponent(occurrence.destination);
+  } catch {
+    return null;
+  }
+
+  const parsed = parseLocalFileReference(destination, projectRoot, roots);
+
+  if (!parsed) return null;
+
+  const path = normalizePath(parsed.path).replace(/^\.\//, "");
+
+  if (!isAbsolutePath(path)) return { ...parsed, path, root: null };
+
+  const root = roots
+    .filter((root) => isContainedPath(path, root) && path !== root)
+    .sort((a, b) => b.length - a.length)[0];
+
+  return root ? { ...parsed, root, path: path.slice(root.length + 1) } : null;
 }
