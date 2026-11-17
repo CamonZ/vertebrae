@@ -102,6 +102,11 @@ pub struct TailReadOutcome {
 }
 
 impl TranscriptReplay {
+    /// Identity shared with pages from this transcript revision and projection.
+    pub fn cache_key(&self) -> String {
+        transcript_cache_key(self)
+    }
+
     pub fn page(
         &self,
         request: &TranscriptReplayPageRequest,

@@ -966,6 +966,7 @@ pub async fn discover_local_chat_child_sessions(
 #[tauri::command]
 #[specta::specta]
 pub async fn load_local_chat_session_replay(
+    annotation_store: State<'_, LocalChatAnnotationStore>,
     input: LoadLocalChatSessionReplayInput,
 ) -> Result<LoadLocalChatSessionReplayOutput, CommandError> {
     let Some(provider_resume_id) = input
@@ -995,13 +996,41 @@ pub async fn load_local_chat_session_replay(
         cursor: input.cursor,
         limit: input.limit.map(|limit| limit as usize),
     };
+    let store = annotation_store.inner().clone();
+    let capture_session = session_id.clone();
     let replay = tauri::async_runtime::spawn_blocking(move || {
         let phase = if page_request.cursor.is_some() { "older" } else { "newest" };
-        let result = HarnessRuntimeFactory::new(HarnessFactoryConfig::default()).replay_transcript_page(
-            harness,
-            &request,
-            &page_request,
-        );
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig::default());
+        let captures = match store.load(&capture_session) {
+            Ok(entries) => entries,
+            Err(error) => {
+                log::warn!("[CHAT_HISTORY] could not load replay captures: {error}");
+                Vec::new()
+            }
+        };
+        let captures = crate::local_chat::file_history::ReplayCaptureIndex::new(&captures);
+        let result = (|| {
+            use crate::local_chat::file_history::LegacyReplayCache;
+            static LEGACY_REPLAY: std::sync::LazyLock<LegacyReplayCache> =
+                std::sync::LazyLock::new(LegacyReplayCache::default);
+            let mut page = factory.replay_transcript_page(harness, &request, &page_request)?;
+            if let Some(page) = page.as_mut().filter(|page| !page.events.is_empty()) {
+                let legacy = LEGACY_REPLAY.get_or_build(&page.cache_key, &captures, || {
+                    match factory.replay_transcript(harness, &request) {
+                        Ok(Some(transcript)) if transcript.cache_key() == page.cache_key => {
+                            Some(captures.legacy_replies(&request, &transcript.events))
+                        }
+                        Ok(_) => None,
+                        Err(error) => {
+                            log::warn!("[CHAT_HISTORY] legacy replay context unavailable: {error}");
+                            None
+                        }
+                    }
+                });
+                captures.attach(&request, &mut page.events, legacy.as_deref());
+            }
+            Ok::<_, vertebrae_harness_core::HarnessError>(page)
+        })();
         match &result {
             Ok(page) => log::debug!(
                 "[LOCAL_CHAT_REPLAY] provider={harness:?} session={} phase={phase} cursor={:?} cache_key={:?} next_cursor={:?} events={}",

@@ -58,6 +58,7 @@ impl LocalChatAnnotation {
                             | "repository"
                             | "worktree"
                             | "base_head"
+                            | "replies"
                             | "state"
                             | "message"
                     )

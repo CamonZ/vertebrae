@@ -297,6 +297,33 @@ fn turn_input_is_lossless_and_preserves_authorship_and_run_thread_correlation() 
 }
 
 #[test]
+fn text_message_identity_is_additive_for_v1_readers() {
+    let mut original = event(
+        "reply-event",
+        "stream",
+        1,
+        UpdateSemantics::Snapshot,
+        HarnessEventPayloadV1::Text(TextEvent {
+            text: "reply".into(),
+            completion_status: None,
+        }),
+    );
+    original.correlation.item_id = Some(ItemId::from("message:block:1"));
+    original.correlation.message_id = Some(ItemId::from("message"));
+
+    let encoded = serde_json::to_value(&original).unwrap();
+    assert_eq!(encoded["correlation"]["message_id"], "message");
+    let decoded: HarnessEventV1 = serde_json::from_value(encoded.clone()).unwrap();
+    assert_eq!(decoded, original);
+
+    let legacy: LegacyWireEventV1 = serde_json::from_value(encoded).unwrap();
+    assert_eq!(legacy.correlation.item_id, original.correlation.item_id);
+    let restored: HarnessEventV1 =
+        serde_json::from_value(serde_json::to_value(legacy).unwrap()).unwrap();
+    assert_eq!(restored.correlation.message_id, None);
+}
+
+#[test]
 fn legacy_v1_unknown_round_trip_preserves_turn_input_canonical_identity_in_data() {
     let mut original = event(
         "legacy-input",

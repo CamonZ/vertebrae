@@ -220,6 +220,11 @@ impl EventSink for LocalChatHarnessEventSink {
             .as_ref()
             .map(ToString::to_string);
         let item_id = event.correlation.item_id.as_ref().map(ToString::to_string);
+        let reply_id = event
+            .correlation
+            .message_id
+            .as_ref()
+            .or(event.correlation.item_id.as_ref());
         let event_id = event.event_id.to_string();
         let observed_at = event.timestamp.to_rfc3339();
         self.recording
@@ -229,6 +234,10 @@ impl EventSink for LocalChatHarnessEventSink {
                 is_root_stream,
                 parent_tool_use_id.as_deref(),
                 turn_id.as_deref(),
+                thread_id
+                    .as_deref()
+                    .zip(reply_id.map(|id| id.as_str()))
+                    .filter(|(thread, item)| !thread.is_empty() && !item.is_empty()),
             )
             .await;
 

@@ -1329,6 +1329,33 @@ async fn a_correlated_turn_terminal_persists_history_without_any_tool_call() {
     started.correlation.turn_id = Some(vertebrae_harness_core::TurnId::new("history-turn"));
     session.sink.emit(started).await.unwrap();
     write(&worktree, "edit.txt", "edited externally during turn\n");
+    let mut replayed = [
+        (Some("message"), "live-block", "replayed-block"),
+        (None, "stable-item", "stable-item"),
+    ]
+    .map(|(message_id, live_item, replayed_item)| {
+        let mut reply = event(
+            "backend-1",
+            1,
+            false,
+            None,
+            HarnessEventPayloadV1::Text(TextEvent {
+                text: "[edit.txt](edit.txt:1)".into(),
+                completion_status: Some(CompletionStatus::Completed),
+            }),
+        );
+        reply.correlation.turn_id = Some(vertebrae_harness_core::TurnId::new("history-turn"));
+        reply.correlation.thread_id = Some(vertebrae_harness_core::ThreadId::new("thread"));
+        reply.correlation.message_id = message_id.map(vertebrae_harness_core::ItemId::new);
+        reply.correlation.item_id = Some(vertebrae_harness_core::ItemId::new(live_item));
+        (reply, replayed_item)
+    });
+    for (reply, replayed_item) in &mut replayed {
+        session.sink.emit(reply.clone()).await.unwrap();
+        reply.stream_id = StreamId::new("replay");
+        reply.correlation.turn_id = None;
+        reply.correlation.item_id = Some(vertebrae_harness_core::ItemId::new(*replayed_item));
+    }
     let mut terminal = event("backend-1", 1, false, None, turn_finished());
     terminal.correlation.turn_id = Some(vertebrae_harness_core::TurnId::new("history-turn"));
     session.sink.emit(terminal).await.unwrap();
@@ -1338,6 +1365,21 @@ async fn a_correlated_turn_terminal_persists_history_without_any_tool_call() {
         matches!(body, crate::local_chat::worktree_files::FileBody::Text { contents, .. }
         if contents == "edited externally during turn\n")
     );
+    let entries = store.load(CHAT).unwrap();
+    let captures = crate::local_chat::file_history::ReplayCaptureIndex::new(&entries);
+    let request = vertebrae_harness_core::TranscriptReplayRequest {
+        provider_resume_id: vertebrae_harness_core::ProviderResumeId::new("thread"),
+        stream_id: StreamId::new("replay"),
+        project_path: None,
+        created_at: None,
+    };
+    let mut replies = replayed.map(|(event, _)| event);
+    captures.attach(&request, &mut replies, None);
+    assert!(replies.iter().all(|reply| reply
+        .correlation
+        .turn_id
+        .as_ref()
+        .is_some_and(|id| id.as_str() == "history-turn")));
     // A duplicate terminal after further edits must not rewrite that turn.
     write(&worktree, "edit.txt", "later edit\n");
     let mut duplicate = event("backend-1", 2, false, None, turn_finished());
@@ -1370,6 +1412,7 @@ async fn terminal_wait_is_bounded_and_duplicates_do_not_wait_for_a_busy_recorder
                 true,
                 None,
                 Some("one"),
+                None,
             )
             .await;
     });
@@ -1388,6 +1431,7 @@ async fn terminal_wait_is_bounded_and_duplicates_do_not_wait_for_a_busy_recorder
         true,
         None,
         Some("one"),
+        None,
     )
     .await;
     assert!(receiver.try_recv().is_err());

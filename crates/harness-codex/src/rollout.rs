@@ -18,8 +18,8 @@ use vertebrae_harness_core::{
     HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1, ItemId, PlanEntry, PlanEvent,
     ProviderResumeId, ProviderThreadRef, SessionId, SessionStarted, StreamId, TailReadOutcome,
     TextEvent, ThreadDeclared, ThreadId, ThreadKind, ToolCallEvent, ToolCallId, ToolOutputEvent,
-    ToolStatus, TranscriptReplayRequest, TranscriptTailLines, TurnInput, TurnInputProvenance,
-    UpdateSemantics, record_timestamp,
+    ToolStatus, TranscriptReplayRequest, TranscriptTailLines, TurnId, TurnInput,
+    TurnInputProvenance, TurnOutcome, TurnStarted, UpdateSemantics, record_timestamp,
 };
 
 #[derive(Debug)]
@@ -545,6 +545,39 @@ fn parse_event_msg(
         return Vec::new();
     };
     match string(payload, "type").as_deref() {
+        Some("task_started") => {
+            let mut draft = state.draft(
+                timestamp,
+                provider_sequence,
+                HarnessEventPayloadV1::TurnStarted(TurnStarted {
+                    input_summary: None,
+                }),
+            );
+            // Keep a malformed start as a boundary, but give it an
+            // unmatchable identity so it cannot certify a legacy capture.
+            draft.correlation.turn_id = Some(TurnId::new(
+                string(payload, "turn_id")
+                    .filter(|id| !id.is_empty())
+                    .unwrap_or_else(|| format!("missing-turn-at-{provider_sequence}")),
+            ));
+            vec![draft]
+        }
+        Some("task_complete") => {
+            let mut draft = state.draft(
+                timestamp,
+                provider_sequence,
+                HarnessEventPayloadV1::TurnFinished(TurnOutcome {
+                    status: CompletionStatus::Completed,
+                    result_text: None,
+                    structured_output: None,
+                    usage: None,
+                    metrics: Default::default(),
+                    error: None,
+                }),
+            );
+            draft.correlation.turn_id = string(payload, "turn_id").map(TurnId::new);
+            vec![draft]
+        }
         Some("thread_settings_applied" | "session_configured") => {
             let owner = payload.get("thread_id").and_then(Value::as_str);
             if owner.is_some_and(|id| id != state.thread_id.as_str()) {

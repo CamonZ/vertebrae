@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use vertebrae_harness_core::{HarnessEventPayloadV1, ToolStatus, UpdateSemantics};
 
-use crate::local_chat::LocalChatAnnotationStore;
+use crate::local_chat::{file_history::reply_key, LocalChatAnnotationStore};
 pub(crate) use recorder::RecorderConfig;
 use recorder::{Boundary, Recorder, RecorderEvent, RecorderGate};
 
@@ -51,6 +51,7 @@ impl RecordingTap {
         is_root_stream: bool,
         parent_tool_id: Option<&str>,
         turn_id: Option<&str>,
+        reply: Option<(&str, &str)>,
     ) {
         let (completion, mut completed) = tokio::sync::oneshot::channel();
         let checkpoint = is_root_stream
@@ -65,6 +66,16 @@ impl RecordingTap {
             let event = recorder_event(payload, semantics, is_root_stream, parent_tool_id);
             let event = if is_root_stream && parent_tool_id.is_none() {
                 match (&event, turn_id) {
+                    (None, Some(turn_id))
+                        if reply.is_some()
+                            && matches!(payload, HarnessEventPayloadV1::Text(_))
+                            && semantics == UpdateSemantics::Snapshot =>
+                    {
+                        reply.map(|(thread, item)| RecorderEvent::Reply {
+                            turn_id: turn_id.into(),
+                            key: reply_key(thread, item),
+                        })
+                    }
                     (Some(RecorderEvent::TurnEnded), Some(id)) => {
                         Some(RecorderEvent::TurnCheckpoint {
                             turn_id: id.to_owned(),

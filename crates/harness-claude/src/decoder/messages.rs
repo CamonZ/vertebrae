@@ -89,6 +89,7 @@ impl ClaudeStreamDecoder {
                             }),
                         );
                         draft.correlation.item_id = self.content_block_item_id(block_index);
+                        draft.correlation.message_id = self.current_item_id.clone();
                         drafts.push(draft);
                     }
                 }

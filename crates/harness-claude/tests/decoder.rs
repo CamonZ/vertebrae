@@ -1325,6 +1325,14 @@ fn text_after_a_per_block_thinking_snapshot_keeps_its_streamed_item_id() {
         .collect();
     assert_eq!(texts.len(), 1);
     assert_eq!(
+        texts[0]
+            .correlation
+            .message_id
+            .as_ref()
+            .map(|id| id.as_str()),
+        Some("msg")
+    );
+    assert_eq!(
         texts[0].correlation.item_id.as_ref().map(|id| id.as_str()),
         expected
     );

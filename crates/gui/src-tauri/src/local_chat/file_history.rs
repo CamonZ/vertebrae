@@ -1,10 +1,11 @@
 //! Durable, base-relative turn captures. Reconstruction touches only a private
 //! in-memory object database, never the live index or working directory.
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::annotations::{AnnotationSubject, PublishOutcome};
 use super::worktree_delta::recorder::RecorderGate;
@@ -14,6 +15,24 @@ use super::{LocalChatAnnotation, LocalChatAnnotationStore};
 
 pub(crate) const HISTORY_KIND: &str = "worktree_history";
 const VERSION: u32 = 1;
+const MAX_REPLY_IDS: usize = 128;
+
+mod replay;
+pub(crate) use replay::{LegacyReplayCache, ReplayCaptureIndex};
+
+pub(crate) fn reply_key(thread: &str, item: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update((thread.len() as u64).to_be_bytes());
+    hasher.update(thread);
+    hasher.update(item);
+    format!("{:x}", hasher.finalize())
+}
+
+#[derive(Default)]
+struct TurnReplies {
+    turn: String,
+    keys: VecDeque<String>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -38,6 +57,8 @@ struct Capture {
     base_head: Option<String>,
     #[serde(default = "default_side_bytes")]
     side_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    replies: Option<BTreeSet<String>>,
     #[serde(flatten)]
     state: CaptureState,
 }
@@ -49,6 +70,7 @@ pub(crate) struct HistoryRecorder {
     limits: git::Limits,
     baseline_ready: bool,
     attempted_turns: Arc<Mutex<HashSet<String>>>,
+    replies: Arc<Mutex<TurnReplies>>,
 }
 
 impl HistoryRecorder {
@@ -94,6 +116,7 @@ impl HistoryRecorder {
             worktree: worktree.to_owned(),
             base_head: snapshot.and_then(|s| s.head.clone()),
             side_bytes: limits.side_bytes,
+            replies: None,
             state: CaptureState::Unavailable {
                 message: "Initial state could not be captured".into(),
             },
@@ -128,6 +151,7 @@ impl HistoryRecorder {
             limits: *limits,
             baseline_ready: anchored.is_ok() && snapshot.is_some(),
             attempted_turns: Arc::new(Mutex::new(HashSet::new())),
+            replies: Arc::default(),
         };
         let state = if anchored.is_ok() {
             recorder.state(snapshot)
@@ -243,9 +267,38 @@ impl HistoryRecorder {
             serde_json::json!({"worktree":self.capture.worktree,"epoch":self.capture.epoch}),
         );
         entry.subject = Some(AnnotationSubject::Turn(turn.into()));
-        if let Err(error) = store.publish_record(entry, None, valid) {
-            log::warn!("[CHAT_HISTORY] origin write failed: {error}");
+        match store.publish_record(entry, None, valid) {
+            Ok(PublishOutcome::Written | PublishOutcome::Existing) => {
+                let mut active = self
+                    .replies
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if active.turn != turn {
+                    *active = TurnReplies {
+                        turn: turn.into(),
+                        keys: VecDeque::new(),
+                    };
+                }
+            }
+            Ok(PublishOutcome::Deleted | PublishOutcome::Expired) => {}
+            Err(error) => log::warn!("[CHAT_HISTORY] origin write failed: {error}"),
         }
+    }
+
+    pub(crate) fn record_reply(&self, turn: &str, key: String) {
+        let mut active = self
+            .replies
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if active.turn != turn {
+            return;
+        }
+        if let Some(position) = active.keys.iter().position(|existing| *existing == key) {
+            active.keys.remove(position);
+        } else if active.keys.len() == MAX_REPLY_IDS {
+            active.keys.pop_front();
+        }
+        active.keys.push_back(key);
     }
 
     pub(crate) fn capture_checked(
@@ -304,8 +357,20 @@ impl HistoryRecorder {
             }
         };
         after_prepare();
+        let replies = {
+            let mut active = self
+                .replies
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if active.turn == turn {
+                active.keys.drain(..).collect()
+            } else {
+                BTreeSet::new()
+            }
+        };
         let mut capture = Capture {
             state,
+            replies: Some(replies),
             ..self.capture.clone()
         };
         if !matches_origin {
