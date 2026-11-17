@@ -94,3 +94,32 @@ describe("shared destination identity", () => {
     ).toBeNull();
   });
 });
+
+it.each(["opus-5.5", "claude-opus-5.5", "v1.2.3", "123.456"])(
+  "does not infer file intent from the bare version identifier %s",
+  (value) => {
+    expect(parseLocalFileReference(value, "/repo")).toBeNull();
+    expect(
+      parseFileReferenceDestination(
+        { destination: value, syntax: "inline" },
+        "/repo",
+        ["/repo"]
+      )
+    ).toBeNull();
+  }
+);
+
+it.each(["src/archive.1", "/repo/archive.1", "./archive.1", "archive.1:12:3"])(
+  "preserves explicit path intent for %s",
+  (path) => expect(parseLocalFileReference(path, "/repo")).not.toBeNull()
+);
+
+it("preserves explicit link intent for a numeric extension", () => {
+  expect(
+    parseFileReferenceDestination(
+      { destination: "archive.1:12:3", syntax: "link" },
+      "/repo",
+      ["/repo"]
+    )
+  ).toEqual({ root: null, path: "archive.1", line: 12, column: 3 });
+});

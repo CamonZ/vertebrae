@@ -15,7 +15,7 @@ describe("Tooltip", () => {
     render(
       <Tooltip label="more info" delay={400}>
         <button type="button">Trigger</button>
-      </Tooltip>,
+      </Tooltip>
     );
     const trigger = screen.getByRole("button", { name: "Trigger" });
     const tip = screen.getByRole("tooltip", { hidden: true });
@@ -34,8 +34,29 @@ describe("Tooltip", () => {
     render(
       <Tooltip label="never" disabled>
         <button type="button">Solo</button>
-      </Tooltip>,
+      </Tooltip>
     );
-    expect(screen.queryByRole("tooltip", { hidden: true })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tooltip", { hidden: true })
+    ).not.toBeInTheDocument();
   });
+});
+
+it("preserves an explicit child description without duplicating it on focus", () => {
+  render(
+    <>
+      <span id="existing">Existing description</span>
+      <Tooltip label="More information">
+        <button aria-describedby="existing">Trigger</button>
+      </Tooltip>
+    </>
+  );
+  const trigger = screen.getByRole("button", { name: "Trigger" });
+  expect(trigger).toHaveAccessibleDescription("Existing description");
+  fireEvent.focus(trigger);
+  expect(trigger).toHaveAccessibleDescription("Existing description");
+  expect(trigger).toHaveAttribute("aria-describedby", "existing");
+  expect(screen.getByRole("tooltip")).toHaveTextContent("More information");
+  fireEvent.blur(trigger);
+  expect(trigger).toHaveAttribute("aria-describedby", "existing");
 });
