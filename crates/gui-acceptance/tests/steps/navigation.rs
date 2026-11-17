@@ -1,5 +1,8 @@
 use cucumber::{given, then, when};
-use fantoccini::Locator;
+use fantoccini::{
+    Locator,
+    actions::{InputSource, KeyAction, KeyActions},
+};
 
 use crate::GuiWorld;
 
@@ -1436,6 +1439,25 @@ async fn type_current_task_short_id_into_element_with_test_id(
     let task_id = world.task_id.as_ref().expect("no task ID stored").clone();
     let short_id: String = task_id.chars().take(8).collect();
     type_into_element_with_test_id(world, short_id, test_id).await;
+}
+
+#[when("I double-tap Alt")]
+async fn double_tap_alt(world: &mut GuiWorld) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+
+    let alt = '\u{E00A}';
+    let keys = KeyActions::new("chat-launcher-alt".into())
+        .then(KeyAction::Down { value: alt })
+        .then(KeyAction::Up { value: alt })
+        .then(KeyAction::Down { value: alt })
+        .then(KeyAction::Up { value: alt });
+    client.perform_actions(keys).await.expect("double-tap Alt");
+    client.release_actions().await.expect("release Alt actions");
 }
 
 #[when(expr = "I press the {string} key")]
