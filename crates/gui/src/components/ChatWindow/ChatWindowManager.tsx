@@ -1,3 +1,5 @@
+import { loadMainChatWorktree } from "../../utils/chatAssociation/defaultWorktree";
+import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 import { commands } from "../../bindings";
 import {
   useCallback,
@@ -9,6 +11,7 @@ import {
 } from "react";
 import {
   isRunPane,
+  MAX_CHAT_PANES,
   useChatStore,
   type RunChatPane,
 } from "../../stores/chatStore";
@@ -405,13 +408,21 @@ export function ChatWindowManager({
 
   const startFreshActiveSession = useCallback(
     async (paneId: string) => {
+      const generation = getProjectScopeGeneration();
       const projectPath = await loadCurrentProjectPath();
+      const mainWorktree = await loadMainChatWorktree(projectPath);
       const paneStillVisible = useChatStore
         .getState()
         .paneLayout.panes.some((pane) => pane.id === paneId);
-      if (!paneStillVisible) return false;
+      if (!paneStillVisible || generation !== getProjectScopeGeneration()) {
+        return false;
+      }
       commitCurrentProjectPath(projectPath);
-      const sessionId = startFreshSession("New Chat", projectPath);
+      const sessionId = startFreshSession(
+        "New Chat",
+        projectPath,
+        mainWorktree
+      );
       return bindPaneToSession(paneId, sessionId);
     },
     [
@@ -424,10 +435,15 @@ export function ChatWindowManager({
 
   const splitWithFreshSession = useCallback(async () => {
     if (!canAddSplitPane) return false;
+    const generation = getProjectScopeGeneration();
     const projectPath = await loadCurrentProjectPath();
-    if (!canAddSplitPane) return false;
+    const mainWorktree = await loadMainChatWorktree(projectPath);
+    if (
+      generation !== getProjectScopeGeneration() ||
+      useChatStore.getState().paneLayout.panes.length >= MAX_CHAT_PANES
+    ) return false;
     commitCurrentProjectPath(projectPath);
-    startFreshSessionInNewPane("New Chat", projectPath);
+    startFreshSessionInNewPane("New Chat", projectPath, mainWorktree);
     return true;
   }, [
     canAddSplitPane,
@@ -437,15 +453,18 @@ export function ChatWindowManager({
   ]);
 
   const startProjectChat = useCallback(
-    (group: LocalChatSessionGroup) => {
+    async (group: LocalChatSessionGroup) => {
       if (!group.projectId || !group.projectPath) {
         setDeleteError(
           `Cannot start a chat in ${group.label}: project directory unavailable`
         );
         return;
       }
+      const generation = getProjectScopeGeneration();
       try {
-        openProjectSession("New Chat", group.projectPath);
+        const mainWorktree = await loadMainChatWorktree(group.projectPath);
+        if (generation !== getProjectScopeGeneration()) return;
+        openProjectSession("New Chat", group.projectPath, mainWorktree);
         setDeleteError(null);
       } catch (error) {
         setDeleteError(
@@ -666,11 +685,15 @@ export function ChatWindowManager({
     if (!project) return startFreshActiveSession(paneId);
 
     const unavailable = `Cannot start a chat in ${project.label}: project directory unavailable. Restore the directory or update the saved project path.`;
+    const generation = getProjectScopeGeneration();
     try {
       const projectPath = normalizeProjectPath(project.projectPath);
       if (!projectPath) throw new Error(unavailable);
       const roots = await commands.getLocalFileRoots(projectPath);
+      if (generation !== getProjectScopeGeneration()) return false;
       if (roots.status !== "ok") throw new Error(unavailable);
+      const mainWorktree = await loadMainChatWorktree(projectPath);
+      if (generation !== getProjectScopeGeneration()) return false;
       if (
         !useChatStore
           .getState()
@@ -678,7 +701,11 @@ export function ChatWindowManager({
       ) {
         return false;
       }
-      const sessionId = openProjectSession("New Chat", projectPath);
+      const sessionId = openProjectSession(
+        "New Chat",
+        projectPath,
+        mainWorktree
+      );
       setDeleteError(null);
       return bindPaneToSession(paneId, sessionId);
     } catch {

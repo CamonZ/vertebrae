@@ -159,59 +159,75 @@ describe("useChatAssociation", () => {
     } as never);
   });
 
-  it("binds the worktree a requested creation reveals, then stops asking (conversation 2f611cd8)", async () => {
-    reply({ ...SELECT, create_worktree: true, worktrees: [main] });
-    seed([
-      user(
-        `Let's check the ${TICKET.id}, is what needs to be done clear? Let's create a worktree for it`,
-        1
-      ),
-    ]);
-    const { result } = renderHook(() => useDriven("s1"));
-    await waitFor(() => expect(result.current.record.ticketId).toBe(TICKET.id));
+  it.each([false, true])(
+    "binds the worktree a requested creation reveals (has main default: %s)",
+    async (hasDefault) => {
+      reply({ ...SELECT, create_worktree: true, worktrees: [main] });
+      const fallback = hasDefault ? main.path : null;
+      seed(
+        [
+          user(
+            `Let's check the ${TICKET.id}, is what needs to be done clear? Let's create a worktree for it`,
+            1
+          ),
+        ],
+        hasDefault
+          ? bound({
+              ticketId: null,
+              ticketTitle: null,
+              worktreePath: main.path,
+              branch: main.branch,
+              defaultWorktree: true,
+            })
+          : null
+      );
+      const { result } = renderHook(() => useDriven("s1"));
+      await waitFor(() => expect(result.current.record.ticketId).toBe(TICKET.id));
 
-    expect(result.current.record.awaitingWorktree).toEqual(["/p"]);
-    expect(resolve.mock.calls[0][0]).toMatchObject({
-      entity: null,
-      worktree_path: null,
-    });
+      expect(result.current.record.awaitingWorktree).toEqual(["/p"]);
+      expect(resolve.mock.calls[0][0]).toMatchObject({
+        entity: null,
+        worktree_path: null,
+      });
 
-    reply({ worktrees: [main] }); // inspecting the main checkout is not the new worktree
-    push(tool("vtb show f6f6bf5e", 2));
-    await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
+      reply({ worktrees: [main] }); // inspecting the main checkout is not the new worktree
+      push(tool("vtb show f6f6bf5e", 2));
+      await waitFor(() => expect(resolve).toHaveBeenCalledTimes(2));
 
-    expect(result.current.record.worktreePath).toBeNull();
+      expect(result.current.record.worktreePath).toBe(fallback);
 
-    reply({ worktrees: [created] });
-    push(
-      toolResult(
-        `Created worktree at “${created.path}” on branch “${created.branch}”.`,
-        3
-      )
-    );
-    await waitFor(() =>
-      expect(result.current.record.worktreePath).toBe(created.path)
-    );
+      reply({ worktrees: [created] });
+      push(
+        toolResult(
+          `Created worktree at “${created.path}” on branch “${created.branch}”.`,
+          3
+        )
+      );
+      await waitFor(() =>
+        expect(result.current.record.worktreePath).toBe(created.path)
+      );
 
-    expect(result.current.record.awaitingWorktree).toBeNull();
+      expect(result.current.record.awaitingWorktree).toBeNull();
+      expect(result.current.record.defaultWorktree).toBeUndefined();
 
-    // Once bound, user messages are still checked; tool events are not.
-    reply({});
-    push(user("ok, let's implement the ticket in the worktree", 4));
-    push(tool(`cat ${created.path}/a.rs`, 5));
-    await waitFor(() =>
-      expect(result.current.record.lastProcessedAt).toBe(at(5))
-    );
+      // Once bound, user messages are still checked; tool events are not.
+      reply({});
+      push(user("ok, let's implement the ticket in the worktree", 4));
+      push(tool(`cat ${created.path}/a.rs`, 5));
+      await waitFor(() =>
+        expect(result.current.record.lastProcessedAt).toBe(at(5))
+      );
 
-    expect(resolve).toHaveBeenCalledTimes(4);
-    expect(resolve.mock.calls[3][0]).toMatchObject({
-      event_kind: "user",
-      entity: TICKET,
-      worktree_path: created.path,
-    });
+      expect(resolve).toHaveBeenCalledTimes(4);
+      expect(resolve.mock.calls[3][0]).toMatchObject({
+        event_kind: "user",
+        entity: TICKET,
+        worktree_path: created.path,
+      });
 
-    expect(result.current.record.worktreePath).toBe(created.path);
-  });
+      expect(result.current.record.worktreePath).toBe(created.path);
+    }
+  );
 
   it("attaches a worktree touched before the ticket was known", async () => {
     reply({ worktrees: [created] });

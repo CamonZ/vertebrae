@@ -3,12 +3,17 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FloatingChatLauncher } from "./FloatingChatLauncher";
 import { useChatStore } from "../../stores/chatStore";
-import { clearPersistedLocalChatSessions } from "../../utils/localChatPersistence";
+import {
+  clearPersistedLocalChatSessions,
+  loadPersistedLocalChatSession,
+} from "../../utils/localChatPersistence";
 
 const mockGetCurrentProjectPath = vi.fn();
+const mockGetMainChatWorktree = vi.fn();
 
 vi.mock("../../bindings", () => ({
   commands: {
+    getMainChatWorktree: (path: string) => mockGetMainChatWorktree(path),
     getCurrentProjectPath: (...args: unknown[]) =>
       mockGetCurrentProjectPath(...args),
   },
@@ -17,6 +22,7 @@ vi.mock("../../bindings", () => ({
 describe("FloatingChatLauncher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetMainChatWorktree.mockResolvedValue(null);
     mockGetCurrentProjectPath.mockResolvedValue({
       status: "ok",
       data: "/test/project",
@@ -52,6 +58,34 @@ describe("FloatingChatLauncher", () => {
     expect(session).toBeDefined();
     expect(session?.label).toBe("New Chat");
     expect(session?.projectPath).toBe("/test/project");
+  });
+
+  it("creates and saves a main worktree association before the first message", async () => {
+    const secondary = "/test/feature";
+    const primary = { path: "/test/project", branch: "trunk" };
+    mockGetCurrentProjectPath.mockResolvedValueOnce({
+      status: "ok",
+      data: secondary,
+    });
+    mockGetMainChatWorktree.mockResolvedValueOnce(primary);
+
+    render(<FloatingChatLauncher />);
+    fireEvent.click(screen.getByRole("button", { name: "Open project chat" }));
+
+    await waitFor(() =>
+      expect(useChatStore.getState().activeSessionId).toBeTruthy()
+    );
+    const { activeSessionId, sessions } = useChatStore.getState();
+    const session = sessions[activeSessionId!];
+    expect(mockGetMainChatWorktree).toHaveBeenCalledWith(secondary);
+    expect(session.messages).toEqual([]);
+    expect(session.association).toMatchObject({
+      worktreePath: primary.path,
+      branch: primary.branch,
+    });
+    expect(loadPersistedLocalChatSession(session.id)?.association).toEqual(
+      session.association
+    );
   });
 
   it("opens the panel before the project lookup completes", async () => {

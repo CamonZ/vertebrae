@@ -974,6 +974,12 @@ async resolveChatAssociationEntity(projectRoot: string, id: string) : Promise<Re
 }
 },
 /**
+ * Resolve a new conversation's default checkout from its captured project path.
+ */
+async getMainChatWorktree(projectRoot: string) : Promise<AssociationWorktree | null> {
+    return await TAURI_INVOKE("get_main_chat_worktree", { projectRoot });
+},
+/**
  * Uses the configured decision role only. Disabled/unavailable models leave
  * commands unclassified. No transcript, result, or worktree delta is supplied.
  */

@@ -1,3 +1,5 @@
+import { loadMainChatWorktree } from "../../utils/chatAssociation/defaultWorktree";
+import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 import { useCallback, useEffect, useRef } from "react";
 import { commands } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
@@ -50,6 +52,7 @@ export function FloatingChatLauncher() {
     }
 
     const requestId = ++toggleRequestRef.current;
+    const generation = getProjectScopeGeneration();
     setPanelOpen(true);
     const projectPath = await loadCurrentProjectPath();
     if (
@@ -71,7 +74,13 @@ export function FloatingChatLauncher() {
       return;
     }
 
-    startFreshSession("New Chat", projectPath);
+    const mainWorktree = await loadMainChatWorktree(projectPath);
+    if (
+      toggleRequestRef.current !== requestId ||
+      generation !== getProjectScopeGeneration() ||
+      !useChatStore.getState().panelOpen
+    ) return;
+    startFreshSession("New Chat", projectPath, mainWorktree);
   }, [setPanelOpen, startFreshSession, togglePanel]);
 
   // Double-tap Alt to toggle. Ignore auto-repeat from a held key; use the

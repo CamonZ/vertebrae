@@ -72,7 +72,8 @@ import type {
   PermissionMode,
   UserQuestion,
 } from "../bindings";
-import { commands } from "../bindings";
+import { commands, type AssociationWorktree } from "../bindings";
+import { emptyChatAssociation } from "../utils/chatAssociation/defaultWorktree";
 import { usePendingCommentsStore } from "./pendingCommentsStore";
 import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
 import {
@@ -643,9 +644,17 @@ interface ChatStoreState {
 
 interface ChatStoreActions {
   /** Open or reuse a local chat session */
-  openSession: (label: string, projectPath?: string | null) => string;
+  openSession: (
+    label: string,
+    projectPath?: string | null,
+    mainWorktree?: AssociationWorktree | null
+  ) => string;
   /** Open a project chat, reusing only an eligible empty session. */
-  openProjectSession: (label: string, projectPath: string) => string;
+  openProjectSession: (
+    label: string,
+    projectPath: string,
+    mainWorktree?: AssociationWorktree | null
+  ) => string;
   /** Add a hidden read-only discussion session; `closeSession` discards it. */
   openDiscussionSession: (input: {
     harness: LocalChatHarnessKind;
@@ -663,7 +672,8 @@ interface ChatStoreActions {
   /** Create a fresh local chat in a new split pane */
   startFreshSessionInNewPane: (
     label: string,
-    projectPath?: string | null
+    projectPath?: string | null,
+    mainWorktree?: AssociationWorktree | null
   ) => string;
   /** Close a split pane without closing its underlying chat session */
   closePane: (paneId: string) => void;
@@ -749,9 +759,16 @@ interface ChatStoreActions {
     ownerSessionId?: string;
   }) => Promise<string | null>;
   /** Start a new local chat without reusing an existing session */
-  startFreshSession: (label: string, projectPath?: string | null) => string;
+  startFreshSession: (
+    label: string,
+    projectPath?: string | null,
+    mainWorktree?: AssociationWorktree | null
+  ) => string;
   /** Create a fresh conversation in the source pane, retaining its settings and history. */
-  clearConversation: (sessionId: string) => string | null;
+  clearConversation: (
+    sessionId: string,
+    mainWorktree?: AssociationWorktree | null
+  ) => string | null;
   /** Delete one local persisted session and any in-memory copy */
   deleteLocalSession: (
     sessionId: string,
@@ -1009,7 +1026,8 @@ function generateActiveTurnId(): string {
 
 function createLocalSession(
   label: string,
-  projectPath?: string | null
+  projectPath?: string | null,
+  mainWorktree?: AssociationWorktree | null
 ): ChatSession {
   const now = new Date().toISOString();
   return {
@@ -1030,6 +1048,14 @@ function createLocalSession(
     backendSessionId: null,
     providerResumeId: null,
     projectPath,
+    ...(mainWorktree && {
+      association: {
+        ...emptyChatAssociation,
+        worktreePath: mainWorktree.path,
+        branch: mainWorktree.branch,
+        defaultWorktree: true,
+      },
+    }),
     permissionMode: "default",
     lifecycle: "idle",
     lifecycleError: null,
@@ -2250,7 +2276,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     ...initialState,
 
     // Actions
-    openSession: (label, projectPath) => {
+    openSession: (label, projectPath, mainWorktree) => {
       const existing = findMatchingSession(get().sessions, projectPath);
       if (existing) {
         set((state) => ({
@@ -2287,7 +2313,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return hydrated.id;
       }
 
-      const session = createLocalSession(label, projectPath);
+      const session = createLocalSession(label, projectPath, mainWorktree);
       const id = session.id;
 
       persistLocalChatSession(session);
@@ -2322,7 +2348,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return session.id;
     },
 
-    openProjectSession: (label, projectPath) => {
+    openProjectSession: (label, projectPath, mainWorktree) => {
       const targetPath = normalizeProjectPath(projectPath) ?? projectPath;
       const existing = findEligibleEmptyProjectSession(
         get().sessions,
@@ -2361,7 +2387,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         return hydrated.id;
       }
 
-      const session = createLocalSession(label, targetPath);
+      const session = createLocalSession(label, targetPath, mainWorktree);
       persistLocalChatSession(session);
       set((state) => {
         const nextSessions = { ...state.sessions, [session.id]: session };
@@ -2455,8 +2481,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return bound;
     },
 
-    startFreshSessionInNewPane: (label, projectPath) => {
-      const session = createLocalSession(label, projectPath);
+    startFreshSessionInNewPane: (label, projectPath, mainWorktree) => {
+      const session = createLocalSession(label, projectPath, mainWorktree);
       persistLocalChatSession(session);
       set((state) => {
         const nextSessions = { ...state.sessions, [session.id]: session };
@@ -3209,7 +3235,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return runtimeSessionId;
     },
 
-    startFreshSession: (label, projectPath) => {
+    startFreshSession: (label, projectPath, mainWorktree) => {
       if (isAutomaticLocalChatLabel(label)) {
         const runtime = findReusableDefaultEmptySession(
           get().sessions,
@@ -3250,7 +3276,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }
       }
 
-      const session = createLocalSession(label, projectPath);
+      const session = createLocalSession(label, projectPath, mainWorktree);
       persistLocalChatSession(session);
       set((state) => {
         const nextSessions = { ...state.sessions, [session.id]: session };
@@ -3273,11 +3299,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return session.id;
     },
 
-    clearConversation: (sessionId) => {
+    clearConversation: (sessionId, mainWorktree) => {
       const source = get().sessions[sessionId];
       if (!source) return null;
       const fresh = {
-        ...createLocalSession("New chat", source.projectPath),
+        ...createLocalSession("New chat", source.projectPath, mainWorktree),
         harness: source.harness,
         providerId: source.providerId,
         selectedModelId: source.selectedModelId,

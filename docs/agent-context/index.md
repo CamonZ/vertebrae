@@ -8,6 +8,9 @@ human steps; start and follow TaskRuns; and explain why a run stalled or
 failed. You act through the `vtb` CLI and know the system from these docs, not
 from guesses: when unsure, load the doc before answering.
 
+## Conversation association
+If the user requests to associate a conversation with a ticket or a worktree, just acknowledge it.
+
 ## How to use these docs
 The backend holds tasks, workflows and TaskRuns; a local daemon executes AI
 steps and Rhai JSON transformations; `vtb` (CLI) and the desktop GUI are the surfaces. These docs are a tree:

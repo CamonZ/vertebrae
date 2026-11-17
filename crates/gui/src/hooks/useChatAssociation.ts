@@ -8,6 +8,7 @@ import { useChatStore, type ChatMessage } from "../stores/chatStore";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { cachedAssociationCandidates } from "../utils/chatAssociation/candidates";
 
+import { emptyChatAssociation } from "../utils/chatAssociation/defaultWorktree";
 import { creationEvidence } from "../utils/chatAssociation/creation";
 
 type Worktree = { path: string; branch: string | null };
@@ -24,6 +25,8 @@ export type AssociationRecord = {
   ticketTitle: string | null;
   worktreePath: string | null;
   branch: string | null;
+  /** The creation default is eligible for replacement by association inference. */
+  defaultWorktree?: boolean;
   lastProcessedAt: string | null;
   processedAtCount: number;
   awaitingWorktree: string[] | null;
@@ -31,16 +34,7 @@ export type AssociationRecord = {
   recentWorktrees: Worktree[];
 };
 
-const EMPTY: AssociationRecord = {
-  ticketId: null,
-  ticketTitle: null,
-  worktreePath: null,
-  branch: null,
-  lastProcessedAt: null,
-  processedAtCount: 0,
-  awaitingWorktree: null,
-  recentWorktrees: [],
-};
+const EMPTY: AssociationRecord = emptyChatAssociation;
 
 const RECENT_WORKTREES = 8;
 
@@ -64,6 +58,7 @@ export function readRecord(value: unknown): AssociationRecord {
   const valid =
     texts.every((k) => isText(v[k])) &&
     typeof v.processedAtCount === "number" &&
+    (v.defaultWorktree === undefined || typeof v.defaultWorktree === "boolean") &&
     (awaiting === null ||
       (Array.isArray(awaiting) &&
         awaiting.every((p) => typeof p === "string"))) &&
@@ -160,6 +155,7 @@ function attach(record: AssociationRecord, worktree: Worktree | undefined) {
   if (!worktree) return;
   record.worktreePath = worktree.path;
   record.branch = worktree.branch;
+  delete record.defaultWorktree;
   record.awaitingWorktree = null;
 }
 
@@ -252,12 +248,13 @@ export function useChatAssociationDriver(sessionId: string) {
       next.processedAtCount = last.n + 1;
       save(next);
     };
-    // A known worktree needs only user decisions or a pending creation at turn
-    // completion; skip everything before the next event that can change it.
+    // A confirmed worktree needs only user decisions or pending ticket creation.
+    // A creation default can still be replaced by an observed worktree.
     const needed = pending.findIndex(
       (e) =>
         e.kind === "user" ||
-        (e.kind === "tool" && !record.worktreePath) ||
+        (e.kind === "tool" &&
+          (!record.worktreePath || record.defaultWorktree)) ||
         (e.kind === "end" && !!record.awaitingTicket)
     );
     if (needed !== 0) {
@@ -361,7 +358,7 @@ export function useChatAssociationDriver(sessionId: string) {
                   level: record.entityLevel ?? "ticket",
                 }
               : null,
-            worktree_path: record.worktreePath,
+            worktree_path: record.defaultWorktree ? null : record.worktreePath,
           });
 
           if (response.status === "error") failure = response.error.message;
@@ -412,6 +409,7 @@ export function useChatAssociationDriver(sessionId: string) {
               branch: null,
               awaitingWorktree: null,
             });
+            delete next.defaultWorktree;
           }
           Object.assign(next, {
             ticketId: selection.id,
@@ -419,7 +417,7 @@ export function useChatAssociationDriver(sessionId: string) {
             entityLevel: selection.level,
           });
 
-          if (!next.worktreePath) {
+          if (!next.worktreePath || next.defaultWorktree) {
             const matchingWorktree = worktreeFor(
               selection.id,
               next.recentWorktrees
@@ -429,7 +427,10 @@ export function useChatAssociationDriver(sessionId: string) {
         }
         // An explicitly tied worktree never changes the entity.
         attach(next, result.worktree ?? undefined);
-        if (result.create_worktree && !next.worktreePath)
+        if (
+          result.create_worktree &&
+          (!next.worktreePath || next.defaultWorktree)
+        )
           next.awaitingWorktree = result.worktrees.map((w) => w.path);
       } else {
         const touched = result.worktrees;
@@ -562,6 +563,8 @@ export async function correctChatAssociation(sessionId: string, input: string) {
       awaitingWorktree: null,
       awaitingTicket: null,
     };
+
+    delete next.defaultWorktree;
 
     // Manual intent supersedes earlier user messages, including any inference
     // we just retired. Later tool events must still reveal the worktree.

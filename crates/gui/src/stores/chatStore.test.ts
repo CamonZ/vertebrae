@@ -1998,6 +1998,50 @@ describe("chatStore", () => {
   });
 
   describe("openProjectSession", () => {
+    it.each(["new", "saved", "unassociated"] as const)(
+      "keeps the creation or saved association for a %s conversation",
+      (kind) => {
+        const path = "/repo/main";
+        const main = { path, branch: "trunk" };
+        const secondary = { path: "/repo/secondary", branch: "feature" };
+        const store = useChatStore.getState();
+        const initial =
+          kind === "new"
+            ? null
+            : store.openProjectSession(
+                "New Chat",
+                path,
+                kind === "saved" ? secondary : null
+              );
+        if (initial) store.closeSession(initial);
+
+        const id = initial
+          ? store.openSession("New Chat", path, main)
+          : store.openProjectSession("New Chat", path, main);
+        if (initial) expect(id).toBe(initial);
+        const session = useChatStore.getState().sessions[id];
+        expect(session.messages).toEqual([]);
+        if (kind === "unassociated") {
+          expect(session.association).toBeNull();
+        } else {
+          const expected = kind === "saved" ? secondary : main;
+          expect(session.association).toMatchObject({
+            worktreePath: expected.path,
+            branch: expected.branch,
+          });
+        }
+        expect(loadPersistedLocalChatSession(id)?.association).toEqual(
+          session.association
+        );
+
+        store.closeSession(id);
+        expect(store.openSession("New Chat", path, main)).toBe(id);
+        expect(useChatStore.getState().sessions[id].association).toEqual(
+          session.association
+        );
+      }
+    );
+
     it("creates and focuses a project-scoped session in the active pane", () => {
       const existing = useChatStore
         .getState()
