@@ -209,10 +209,6 @@
   background: var(--color-bg-2);
 }
 
-.selection-mini-composer textarea::placeholder {
-  color: var(--color-fg-soft);
-}
-
 .selection-mini-actions {
   flex-wrap: wrap;
   align-items: center;

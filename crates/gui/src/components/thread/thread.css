@@ -478,7 +478,7 @@
   color: var(--color-fg);
 }
 .diff-comment-editor textarea::placeholder {
-  color: var(--color-fg-mute);
+  color: var(--color-fg-soft);
 }
 .diff-comment-editor textarea:focus {
   outline: none;
