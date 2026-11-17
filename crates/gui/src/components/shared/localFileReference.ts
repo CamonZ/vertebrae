@@ -25,7 +25,7 @@ function isContainedPath(path: string, root: string): boolean {
   );
 }
 
-function hasFileLikeName(path: string): boolean {
+function hasFileLikeName(path: string, explicitDestination = false): boolean {
   const name = path.split("/").pop() ?? "";
 
   // Dotfiles need stronger syntax than a method/property access.
@@ -36,7 +36,15 @@ function hasFileLikeName(path: string): boolean {
       ) || path.includes("/")
     );
   if (/[(){};=]/.test(name)) return false;
-  if (/^[^./][^/]*\.[A-Za-z0-9_-]+$/.test(name)) return true;
+  // Bare version/model identifiers are not file intent. Explicit Markdown
+  // destinations, paths and line anchors still support numeric extensions.
+  if (
+    /^[^./][^/]*\.[A-Za-z0-9_-]+$/.test(name) &&
+    (explicitDestination ||
+      path.includes("/") ||
+      /\.[A-Za-z][A-Za-z0-9_-]*$/.test(name))
+  )
+    return true;
   if (/^(Dockerfile|Makefile|Procfile|LICENSE|README(?:\.md)?)$/i.test(name)) {
     return true;
   }
@@ -46,14 +54,15 @@ function hasFileLikeName(path: string): boolean {
 /** A local line anchor must not be mistaken for a URI scheme. */
 export function isLocalFileLocation(value: string): boolean {
   const path = value.match(LOCATION_RE)?.[1];
-  return Boolean(path && !path.includes(":") && hasFileLikeName(path));
+  return Boolean(path && !path.includes(":") && hasFileLikeName(path, true));
 }
 
 /** Parse the narrow inline-code file contract used by local chat. */
 export function parseLocalFileReference(
   value: string,
   projectRoot: string | null | undefined,
-  allowedRoots: readonly string[] = []
+  allowedRoots: readonly string[] = [],
+  explicitDestination = false
 ): LocalFileReference | null {
   const root = projectRoot?.trim();
   if (!root) return null;
@@ -82,7 +91,7 @@ export function parseLocalFileReference(
     !normalizedAllowedRoots.some((allowedRoot) =>
       isContainedPath(candidate, allowedRoot)
     ) ||
-    !hasFileLikeName(normalizedPath)
+    !hasFileLikeName(normalizedPath, explicitDestination || Boolean(location))
   ) {
     return null;
   }
@@ -118,7 +127,12 @@ export function parseFileReferenceDestination(
     return null;
   }
 
-  const parsed = parseLocalFileReference(destination, projectRoot, roots);
+  const parsed = parseLocalFileReference(
+    destination,
+    projectRoot,
+    roots,
+    occurrence.syntax === "link"
+  );
 
   if (!parsed) return null;
 

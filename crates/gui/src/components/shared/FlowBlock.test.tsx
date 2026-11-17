@@ -267,11 +267,14 @@ describe("flow playback", () => {
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
     const seen = new Set<number>();
     const beats = new Set<number>();
+    // Keep all frame observations without repeatedly searching the SVG tree.
+    const flowPlayer = player();
     for (let i = 0; i < 1500; i++) {
       act(() => vi.advanceTimersByTime(16));
-      seen.add(shownT());
-      beats.add(shownBeat());
+      seen.add(Number(flowPlayer.getAttribute("data-t")));
+      beats.add(Number(flowPlayer.getAttribute("data-beat")));
     }
+    expect(player()).toBe(flowPlayer);
     for (const t of seen) expect(afterOutcomes).toContain(t);
     expect(beats.size).toBeGreaterThanOrEqual(3);
   });

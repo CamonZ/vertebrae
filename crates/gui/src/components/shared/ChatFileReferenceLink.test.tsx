@@ -252,13 +252,11 @@ it("matches a generated model of association changes, origin delivery, capture d
           } else if (op === 1 || op === 2) {
             const kind = op === 1 ? "worktree_origin" : "worktree_history";
             act(() =>
-              useChatStore
-                .getState()
-                .applyToolAnnotation("s", {
-                  ...capture,
-                  kind,
-                  payload: { worktree: "/original", state: "ready" },
-                })
+              useChatStore.getState().applyToolAnnotation("s", {
+                ...capture,
+                kind,
+                payload: { worktree: "/original", state: "ready" },
+              })
             );
             expectedRoot = "/original";
           } else {
@@ -289,3 +287,146 @@ it("matches a generated model of association changes, origin delivery, capture d
     { seed: 0x51eff010, testCases: 40 }
   );
 });
+
+it.each(
+  ["opus-5.5", "claude-opus-5.5"].flatMap((model) => [
+    `doesn’t recognize \`${model}\``,
+    `I’ll try the full model name, \`${model}\``,
+    `with model \`${model}\``,
+  ])
+)("keeps model prose unchanged: %s", (text) => {
+  const session = useChatStore.getState().sessions.s;
+  useChatStore.setState({
+    sessions: { s: { ...session, toolAnnotations: {} } },
+  });
+  const { container } = render(<Surface text={text} />);
+  expect(container.textContent).toBe(text.replace(/`/g, ""));
+  expect(container.querySelector("code")).toBeInTheDocument();
+  expect(
+    screen.queryByTestId("local-file-reference-link")
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/Historical context is unavailable/)
+  ).not.toBeInTheDocument();
+});
+
+it.each([
+  "src/main.ts:12:3",
+  "/main/src/main.ts#L12C3",
+  ".env.local",
+  "README.md",
+  "Dockerfile",
+  "archive.1:12:3",
+])(
+  "preserves legacy link navigation without history: %s",
+  async (destination) => {
+    const session = useChatStore.getState().sessions.s;
+    useChatStore.setState({
+      sessions: {
+        s: {
+          ...session,
+          messages: [
+            {
+              kind: "assistant",
+              itemId: "reply",
+              text: "legacy",
+              timestamp: "then",
+            },
+          ],
+          toolAnnotations: {},
+        },
+      },
+    });
+    render(<Surface text={`[source](${destination})`} />);
+    const button = screen.getByRole("button", { name: "source" });
+    expect(button).toHaveClass("text-[var(--warn)]", "bg-[var(--warn-wash)]");
+    expect(button).toHaveAccessibleDescription(
+      /Historical context is unavailable/
+    );
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    await userEvent.click(button);
+    expect(navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ history: { sessionId: "s", turnId: null } })
+    );
+  }
+);
+
+it("discloses missing history on hover and keyboard focus without visible inline warning prose", async () => {
+  const session = useChatStore.getState().sessions.s;
+  useChatStore.setState({
+    sessions: { s: { ...session, toolAnnotations: {} } },
+  });
+  const { container } = render(
+    <Surface text="Read [source](src/a.ts), then [other](src/b.ts)." />
+  );
+  const buttons = screen.getAllByRole("button");
+  const descriptions = container.querySelectorAll(".sr-only");
+  expect(descriptions).toHaveLength(2);
+  for (const description of descriptions)
+    expect(description).toHaveTextContent("Historical context is unavailable");
+  const prose = container.cloneNode(true) as HTMLElement;
+  prose
+    .querySelectorAll(".sr-only")
+    .forEach((description) => description.remove());
+  expect(prose.textContent).toBe("Read source, then other.");
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  await userEvent.hover(buttons[0]);
+  expect(await screen.findByRole("tooltip")).toHaveTextContent(
+    "Historical context is unavailable"
+  );
+  await userEvent.unhover(buttons[0]);
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  await userEvent.tab();
+  expect(buttons[0]).toHaveFocus();
+  expect(screen.getByRole("tooltip")).toHaveTextContent(
+    "Historical context is unavailable"
+  );
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  expect(buttons[0]).toHaveAccessibleDescription(
+    /Historical context is unavailable/
+  );
+  await userEvent.tab();
+  expect(buttons[1]).toHaveFocus();
+  expect(screen.getByRole("tooltip")).toHaveTextContent(
+    "Historical context is unavailable"
+  );
+});
+
+it.each([
+  "src/main.ts:12:3",
+  "/main/src/main.ts#L12C3",
+  ".env.local",
+  "README.md",
+  "Dockerfile",
+  "archive.1:12:3",
+])(
+  "preserves genuine legacy inline references without capture: %s",
+  async (destination) => {
+    const session = useChatStore.getState().sessions.s;
+    useChatStore.setState({
+      sessions: { s: { ...session, toolAnnotations: {} } },
+    });
+    render(<Surface text={`Edit \`${destination}\`.`} />);
+    const button = screen.getByRole("button", { name: destination });
+    expect(button).toHaveAccessibleDescription(
+      /Historical context is unavailable/
+    );
+    await userEvent.click(button);
+    const anchored = destination.includes(":") || destination.includes("#");
+    expect(navigate).toHaveBeenCalledExactlyOnceWith({
+      root: destination.startsWith("/main/") ? "/main" : null,
+      path: destination.startsWith("archive.1")
+        ? "archive.1"
+        : anchored
+          ? "src/main.ts"
+          : destination,
+      line: anchored ? 12 : null,
+      column: anchored ? 3 : null,
+      history: {
+        sessionId: "s",
+        turnId: destination.startsWith("/main/") ? null : "old",
+      },
+    });
+  }
+);

@@ -130,7 +130,9 @@ export function Tooltip({
           | undefined;
         handler?.(e);
       },
-      "aria-describedby": open ? id : undefined,
+      // An explicit description remains authoritative, including when focused.
+      "aria-describedby":
+        childProps["aria-describedby"] || (open ? id : undefined),
     } as Record<string, unknown>
   );
 
