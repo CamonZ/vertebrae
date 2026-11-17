@@ -1,3 +1,5 @@
+import { loadMainChatWorktree } from "../utils/chatAssociation/defaultWorktree";
+import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { flushPendingLocalChatText } from "../utils/localChatTextBatch";
 import { useCallback, useState } from "react";
 import { commands } from "../bindings";
@@ -79,6 +81,7 @@ export async function dispatchCodexChatCommand(
     feedback("Wait until the conversation is idle before using this command.");
     return true;
   }
+  const generation = getProjectScopeGeneration();
   const backendId = session.backendSessionId;
   if (content.trim() === "/compact" && !backendId) {
     feedback("Start the Codex conversation before compacting it.");
@@ -92,6 +95,8 @@ export async function dispatchCodexChatCommand(
     useChatStore.getState().sessions[sessionId]?.backendSessionId === backendId;
   try {
     if (content.trim() === "/clear") {
+      const mainWorktree = await loadMainChatWorktree(session.projectPath);
+      if (!current()) return true;
       if (backendId) {
         const result = await commands.closeLocalChatSession(backendId);
         if (result.status === "error") throw result.error;
@@ -99,7 +104,9 @@ export async function dispatchCodexChatCommand(
       if (current()) {
         store.setBackendSessionId(sessionId, null);
         store.setSessionLifecycle(sessionId, "idle");
-        store.clearConversation(sessionId);
+        if (generation === getProjectScopeGeneration()) {
+          store.clearConversation(sessionId, mainWorktree);
+        }
       }
     } else {
       store.setSessionCompaction(sessionId, true);
@@ -1383,6 +1390,7 @@ export function useOpenChat() {
 
   return useCallback(
     async (label = "New Chat", projectPathOverride?: string | null) => {
+      const generation = getProjectScopeGeneration();
       let projectPath: string | null = projectPathOverride ?? null;
       if (projectPathOverride === undefined) {
         try {
@@ -1394,7 +1402,9 @@ export function useOpenChat() {
           // Null is the no-project bucket; it reuses only null-path sessions.
         }
       }
-      return openSession(label, projectPath);
+      const mainWorktree = await loadMainChatWorktree(projectPath);
+      if (generation !== getProjectScopeGeneration()) return;
+      return openSession(label, projectPath, mainWorktree);
     },
     [openSession]
   );

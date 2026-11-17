@@ -167,6 +167,28 @@ fn project_worktrees(
     Ok(entries)
 }
 
+pub(super) fn main_chat_worktree(root: &str) -> Option<AssociationWorktree> {
+    use crate::local_chat::worktree_delta::git;
+
+    let root = std::fs::canonicalize(root).ok()?;
+    if let Ok(repo) = git::repository(&root) {
+        let main = git::main_worktree(&repo).ok()??.canonicalize().ok()?;
+        return Some(AssociationWorktree {
+            path: main.to_str()?.into(),
+            branch: git::branch(&main).ok()?,
+        });
+    }
+
+    // A project container has a default only when it owns a single main checkout.
+    let scope = scope(root.to_str()?).ok()?;
+    let mut primary = scope.worktrees.into_iter().filter(|entry| {
+        let path = Path::new(&entry.path);
+        path.parent() == Some(root.as_path()) && path.join(".git").is_dir()
+    });
+    let main = primary.next()?;
+    primary.next().is_none().then_some(main)
+}
+
 /// Resolve the conversation against registered project containers and their
 /// actual Git worktrees. More-specific registrations own their own repositories.
 pub(super) fn scope(root: &str) -> Result<Scope, CommandError> {
@@ -419,9 +441,12 @@ mod tests {
                 .unwrap();
             assert!(out.status.success());
         };
-        git(&["init"]);
+        git(&["init", "-b", "trunk"]);
         git(&["commit", "--allow-empty", "-m", "fixture"]);
         git(&["worktree", "add", "-b", "feature", other.to_str().unwrap()]);
+        let main = main_chat_worktree(other.to_str().unwrap()).expect("main checkout");
+        assert_eq!(Path::new(&main.path), std::fs::canonicalize(&repo).unwrap());
+        assert_eq!(main.branch.as_deref(), Some("trunk"));
         let all = worktrees(&repo, Instant::now() + GIT_TIMEOUT).unwrap();
         assert_eq!(all.len(), 2);
         assert!(all.iter().any(|w| w.branch.as_deref() == Some("feature")

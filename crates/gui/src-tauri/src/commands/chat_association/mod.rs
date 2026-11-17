@@ -33,6 +33,16 @@ pub struct AssociationWorktree {
     pub branch: Option<String>,
 }
 
+/// Resolve a new conversation's default checkout from its captured project path.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_main_chat_worktree(project_root: String) -> Option<AssociationWorktree> {
+    tokio::task::spawn_blocking(move || inventory::main_chat_worktree(&project_root))
+        .await
+        .ok()
+        .flatten()
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AssociationEventKind {

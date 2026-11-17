@@ -1,3 +1,5 @@
+import { loadMainChatWorktree } from "../../utils/chatAssociation/defaultWorktree";
+import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { commands } from "../../bindings";
@@ -49,6 +51,17 @@ function rankByLabel(items: PaletteItem[], query: string): PaletteItem[] {
 
 /** Per-scope cap so a long task list never buries navigation and actions. */
 const MAX_PER_SCOPE = 8;
+
+async function startFreshProjectChat() {
+  const generation = getProjectScopeGeneration();
+  const projectPath = await currentProjectPath();
+  const mainWorktree = await loadMainChatWorktree(projectPath);
+  if (generation === getProjectScopeGeneration() && useChatStore.getState().panelOpen) {
+    useChatStore
+      .getState()
+      .startFreshSession("New Chat", projectPath, mainWorktree);
+  }
+}
 
 async function currentProjectPath(): Promise<string | null> {
   try {
@@ -162,7 +175,7 @@ function PaletteDialog({
         run: async () => {
           const chat = useChatStore.getState();
           chat.setPanelOpen(true);
-          chat.startFreshSession("New Chat", await currentProjectPath());
+          await startFreshProjectChat();
         },
       },
       {
@@ -183,7 +196,7 @@ function PaletteDialog({
             ? chat.sessions[chat.activeSessionId]
             : undefined;
           if (!active) {
-            chat.startFreshSession("New Chat", await currentProjectPath());
+            await startFreshProjectChat();
           }
         },
       },

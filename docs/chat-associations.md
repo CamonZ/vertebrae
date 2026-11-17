@@ -12,6 +12,11 @@ in headers only when more than one chat pane is visible.
 
 ## Behavior
 
+- New project conversations save the main Git checkout path and branch at
+  creation. A project container with several repositories has no single default.
+  Reopening a conversation uses its saved association. The initial main
+  checkout can be replaced by a later worktree association.
+
 - A conversation associates with at most one epic, ticket or task, plus one
   worktree. New **user** messages ask the configured decision model about missing
   associations. Selection intent includes discussing, implementing and explicitly

@@ -331,6 +331,10 @@ mod tests {
         let instructions = developer_instructions(root);
 
         assert!(instructions.contains("# Vertebrae agent context"));
+        assert!(instructions.contains(concat!(
+            "## Conversation association\n",
+            "If the user requests to associate a conversation with a ticket or a worktree, just acknowledge it."
+        )));
         assert!(instructions.contains(
             "(</Users/example/Library/Application Support/Vertebrae/agent-context/permissions.md>)"
         ));
