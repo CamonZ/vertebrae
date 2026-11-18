@@ -46,3 +46,10 @@ Feature: Discuss code beside the main conversation
     Given a Changes selection fixture is open beside a drafted main conversation
     When I select fixture code with the real diff renderer
     Then inline discussion rows and pending feedback render correctly across themes and widths
+
+  Scenario: Review threads stream across GUI processes and recover after cache loss
+    When two GUI processes create, cascade-delete and recover review threads
+
+  @multi_project
+  Scenario: Reconnect delivers queued discussions in reference order and isolates rejections
+    When an offline GUI queues discussions, including under a parent deleted by another GUI

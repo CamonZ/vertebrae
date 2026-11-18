@@ -125,7 +125,11 @@ pub(super) fn queue(catalog: &mut Catalog, id: &str, payload: Value) {
 
 /// A mutation acknowledgement alone cannot retire a source file. Compare it
 /// with an independently fetched, complete backend snapshot before checkpointing.
-pub(super) fn reconcile(catalog: &mut Catalog, project: &str, snapshot: &BTreeMap<String, Entry>) {
+pub(super) fn reconcile(
+    catalog: &mut Catalog,
+    project: &str,
+    snapshot: &BTreeMap<EntityKey, Entry>,
+) {
     let prefix = format!("{project}/");
     let verified: Vec<_> = catalog
         .migration
@@ -133,8 +137,10 @@ pub(super) fn reconcile(catalog: &mut Catalog, project: &str, snapshot: &BTreeMa
         .iter()
         .filter(|(id, _)| id.starts_with(&prefix))
         .filter_map(|(id, expected)| {
-            let record = catalog.records.get(id)?;
-            let remote = snapshot.get(&record.remote.chat_id)?;
+            let (_, chat) = id.split_once('/')?;
+            let entity = EntityKey::chat(chat);
+            let record = catalog.record(project, &entity)?;
+            let remote = snapshot.get(&entity)?;
             if record.desired.is_some()
                 || record.conflicted
                 || remote.revision < record.remote.revision
@@ -160,11 +166,12 @@ pub(super) fn reconcile(catalog: &mut Catalog, project: &str, snapshot: &BTreeMa
 pub(super) fn can_retire(catalog: &Catalog, session: &LocalChatSessionIndexEntry) -> bool {
     catalog.migration.version == VERSION
         && catalog.sidecars.iter().any(|(id, sidecar)| {
-            id.split_once('/')
-                .is_some_and(|(_, chat)| chat == session.id)
-                && catalog.migration.verified.contains(id)
-                && *sidecar == Sidecar::from_session(session)
-                && catalog.records.contains_key(id)
+            id.split_once('/').is_some_and(|(project, chat)| {
+                chat == session.id
+                    && catalog.chat(project, chat).is_some()
+                    && catalog.migration.verified.contains(id)
+                    && *sidecar == Sidecar::from_session(session)
+            })
         })
 }
 
@@ -175,7 +182,7 @@ pub(super) async fn finish(
     catalog: &mut Catalog,
     path: &Path,
     root: &Path,
-    recovered: Option<&BTreeMap<String, Entry>>,
+    recovered: Option<&BTreeMap<EntityKey, Entry>>,
 ) -> Result<(), CommandError> {
     let prefix = format!("{project}/");
     if catalog
@@ -188,7 +195,7 @@ pub(super) async fn finish(
         let snapshot = match recovered {
             Some(snapshot) => snapshot,
             None => {
-                fetched = fetch_snapshot(client, project, machine).await?;
+                fetched = fetch_snapshot(client, project, machine, EntityKind::Chat).await?;
                 for entry in fetched.values() {
                     merge(catalog, project, entry.clone());
                 }

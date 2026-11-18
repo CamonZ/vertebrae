@@ -158,6 +158,12 @@ pub struct LocalChatSessionIndexEntry {
     #[specta(optional)]
     pub association: Option<serde_json::Value>,
     pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub parent_chat_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub review_thread_id: Option<uuid::Uuid>,
     pub label: String,
     pub title: Option<String>,
     pub title_status: Option<String>,
@@ -678,13 +684,14 @@ async fn read_session_index_and_sweep(
 #[tauri::command]
 #[specta::specta]
 pub async fn load_local_chat_session_index(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     local_chat_manager: State<'_, LocalChatSessionManager>,
     annotation_store: State<'_, LocalChatAnnotationStore>,
 ) -> Result<Vec<LocalChatSessionIndexEntry>, CommandError> {
     let _index_guard = INDEX_SERIAL.lock().await;
     let path = local_chat_session_index_path()?;
-    let _index_file = super::chat_catalog::lock_index(&path)?;
+    let _index_file = super::chat_catalog::lock_index(&path).await?;
     let mut sessions = read_session_index(&path)?;
     // The legacy index is not the complete session set after migration. In
     // backend mode annotation deletion is explicit, never inferred from it.
@@ -692,12 +699,13 @@ pub async fn load_local_chat_session_index(
         sweep_orphaned_annotations(&path, &annotation_store, &local_chat_manager, &sessions).await;
     }
 
-    super::chat_catalog::synchronize(&state, &mut sessions, false, &[], None).await?;
+    super::chat_catalog::synchronize(&state, &app, &mut sessions, false, &[], None).await?;
 
     let live = local_chat_manager.live_chat_session_ids().await;
     let changed = super::chat_catalog::reset_inactive_activity(&mut sessions, &live);
     if !changed.is_empty() {
-        super::chat_catalog::synchronize(&state, &mut sessions, true, &[], Some(&changed)).await?;
+        super::chat_catalog::synchronize(&state, &app, &mut sessions, true, &[], Some(&changed))
+            .await?;
     }
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -740,6 +748,7 @@ pub async fn load_local_chat_session_index(
 #[tauri::command]
 #[specta::specta]
 pub async fn save_local_chat_session_index(
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
     local_chat_manager: State<'_, LocalChatSessionManager>,
     annotation_store: State<'_, LocalChatAnnotationStore>,
@@ -747,10 +756,11 @@ pub async fn save_local_chat_session_index(
 ) -> Result<(), CommandError> {
     let _index_guard = INDEX_SERIAL.lock().await;
     let path = local_chat_session_index_path()?;
-    let _index_file = super::chat_catalog::lock_index(&path)?;
+    let _index_file = super::chat_catalog::lock_index(&path).await?;
     let previous = read_session_index(&path)?;
     super::chat_catalog::synchronize(
         &state,
+        &app,
         &mut input.sessions,
         true,
         &input.deleted_ids,

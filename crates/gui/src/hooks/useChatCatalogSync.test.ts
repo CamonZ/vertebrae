@@ -59,6 +59,13 @@ describe("chat catalog recovery", () => {
 
     act(() => mocks.handlers.get("chat-catalog-changed")!({ payload: "" }));
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(3));
+
+    act(() =>
+      mocks.handlers.get("review-thread-catalog-recovery-needed")!({
+        payload: { projectId: "project" },
+      })
+    );
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(4));
   });
 
   it("coalesces duplicate events but reads again after an in-flight snapshot", async () => {
@@ -97,7 +104,7 @@ describe("chat catalog recovery", () => {
 
     unmount();
     expect(newGuard()).toBe(false);
-    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(6));
+    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(8));
   });
 
   it("logs only a fixed diagnostic and retries after a transport failure", async () => {

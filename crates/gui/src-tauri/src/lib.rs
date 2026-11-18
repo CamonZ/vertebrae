@@ -173,6 +173,9 @@ fn create_builder() -> Builder {
             commands::infer_local_chat_session_title,
             commands::load_local_chat_session_index,
             commands::save_local_chat_session_index,
+            commands::chat_catalog::list_review_threads,
+            commands::chat_catalog::put_review_thread,
+            commands::chat_catalog::tombstone_review_thread,
             commands::load_local_chat_session_replay,
             commands::discover_local_chat_child_sessions,
             commands::load_local_chat_annotations,
@@ -213,6 +216,9 @@ fn create_builder() -> Builder {
             update::relaunch_application,
         ])
         .events(collect_events![
+            commands::chat_catalog::ReviewThreadChanged,
+            commands::chat_catalog::ReviewThreadCatalogRecovered,
+            commands::chat_catalog::ReviewThreadCatalogRecoveryNeeded,
             worktree_watch::WorktreeChangedEvent,
             ArtifactChangedEvent,
             NotificationChangedEvent,

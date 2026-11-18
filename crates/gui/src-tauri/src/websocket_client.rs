@@ -16,6 +16,7 @@ use tungstenite::Message;
 use url::Url;
 use uuid::Uuid;
 
+use crate::commands::chat_catalog::{self, CatalogChange, ReviewThreadChange};
 use crate::events::{
     ArtifactChangeType, ArtifactChangedEvent, DaemonChangeType, DaemonChangedEvent,
     DaemonMetricsEvent, NotificationChangeType, NotificationChangedEvent, PermissionRequestEvent,
@@ -27,6 +28,53 @@ use crate::events::{
     WorkflowChangedEvent, WorkflowTransitionChangeType, WorkflowTransitionChangedEvent,
 };
 use crate::types;
+
+enum CatalogEvent {
+    Chat(CatalogChange),
+    ReviewThread {
+        change: ReviewThreadChange,
+        deleted: bool,
+    },
+}
+
+impl CatalogEvent {
+    fn decode(event: &str, topic: &str, payload: &serde_json::Value) -> Option<Self> {
+        let channel_project = match topic.strip_prefix("project:") {
+            Some(id) => Some(id),
+            None if topic == ACCOUNTS_TOPIC => None,
+            None => return None,
+        };
+        let change = match event {
+            "chat_catalog_created" | "chat_catalog_updated" | "chat_catalog_deleted" => {
+                serde_json::from_value(payload.clone()).map(Self::Chat)
+            }
+            "review_thread_created" | "review_thread_updated" | "review_thread_deleted" => {
+                serde_json::from_value(payload.clone()).map(|change| Self::ReviewThread {
+                    change,
+                    deleted: event == "review_thread_deleted",
+                })
+            }
+            _ => return None,
+        };
+        match change {
+            Ok(change) if channel_project.is_none_or(|id| id == change.project_id()) => {
+                Some(change)
+            }
+            Ok(_) => None,
+            Err(_) => {
+                log::warn!("[WebSocket] catalog_event_malformed");
+                None
+            }
+        }
+    }
+
+    fn project_id(&self) -> &str {
+        match self {
+            Self::Chat(change) => &change.project_id,
+            Self::ReviewThread { change, .. } => &change.project_id,
+        }
+    }
+}
 
 /// Attempt to deserialize a WebSocket payload into a GUI type.
 /// Returns `None` and logs a warning if deserialization fails.
@@ -886,26 +934,30 @@ impl SacrumSocket {
                 return Ok(());
             }
 
-            // Sacrum mirrors project broadcasts onto accounts:me. Project stores
-            // consume only the selected project channel: forwarding account copies
-            // would double-apply deltas and leak other projects into those stores.
-            // The chat catalog is the exception: chats of every configured project
-            // stream concurrently, and revisions make the duplicate copy a no-op.
+            if topic == ACCOUNTS_TOPIC && !account_joined {
+                return Ok(());
+            }
+
+            // Catalog entries for every configured project stream concurrently.
+            // Revision checks make the duplicate project copy a no-op.
+            if let Some(change) = CatalogEvent::decode(event, topic, payload) {
+                Self::handle_catalog_event(change, app_handle);
+                return Ok(());
+            }
+
+            // Project stores consume only the selected project channel. Account
+            // copies would double-apply deltas and leak other projects into them.
             if topic == ACCOUNTS_TOPIC
-                && (!account_joined
-                    || !matches!(
-                        event,
-                        "daemon_created"
-                            | "daemon_updated"
-                            | "daemon_deleted"
-                            | "daemon_metrics"
-                            | "chat_catalog_created"
-                            | "chat_catalog_updated"
-                            | "chat_catalog_deleted"
-                            | "phx_reply"
-                            | "phx_error"
-                            | "phx_close"
-                    ))
+                && !matches!(
+                    event,
+                    "daemon_created"
+                        | "daemon_updated"
+                        | "daemon_deleted"
+                        | "daemon_metrics"
+                        | "phx_reply"
+                        | "phx_error"
+                        | "phx_close"
+                )
             {
                 return Ok(());
             }
@@ -918,13 +970,6 @@ impl SacrumSocket {
                 );
             }
             match event {
-                "chat_catalog_created" | "chat_catalog_updated" | "chat_catalog_deleted" => {
-                    // The account copy names its project in the payload; a project
-                    // channel copy must match its own topic.
-                    if let Some(change) = Self::chat_catalog_change(topic, payload) {
-                        Self::handle_chat_catalog_event(change, app_handle);
-                    }
-                }
                 "artifact_created" | "artifact_updated" | "artifact_deleted" => {
                     Self::handle_artifact_event(event, payload, app_handle)?;
                 }
@@ -1034,53 +1079,41 @@ impl SacrumSocket {
         })
     }
 
-    /// Typed catalog entry of a project or account channel message. The
-    /// account copy names its project in the payload; a project channel copy
-    /// must match its own topic.
-    fn chat_catalog_change(
-        topic: &str,
-        payload: &serde_json::Value,
-    ) -> Option<crate::commands::chat_catalog::CatalogChange> {
-        let channel_project = match topic.strip_prefix("project:") {
-            Some(id) => Some(id),
-            None if topic == ACCOUNTS_TOPIC => None,
-            None => return None,
-        };
-        match serde_json::from_value::<crate::commands::chat_catalog::CatalogChange>(
-            payload.clone(),
-        ) {
-            Ok(change) if channel_project.is_none_or(|id| id == change.project_id) => Some(change),
-            Ok(_) => None,
-            Err(_) => {
-                // Provider data must never enter diagnostics.
-                log::warn!("[WebSocket] chat_catalog_event_malformed");
-                None
-            }
-        }
-    }
-
-    /// Merge one entry incrementally, for any configured project. Entries for
-    /// another installation or an unconfigured project, and already-applied
-    /// revisions (own-write echoes, the duplicate account/project copy), are
-    /// dropped without reading the catalog.
-    fn handle_chat_catalog_event<R: Runtime>(
-        change: crate::commands::chat_catalog::CatalogChange,
-        app_handle: &tauri::AppHandle<R>,
-    ) {
+    fn handle_catalog_event<R: Runtime>(event: CatalogEvent, app_handle: &tauri::AppHandle<R>) {
         let app_handle = app_handle.clone();
         tauri::async_runtime::spawn(async move {
             let Some(state) = app_handle.try_state::<crate::commands::AppState>() else {
                 return;
             };
-            match crate::commands::chat_catalog::apply_change(&state, change).await {
-                Ok(Some(update)) => {
-                    let _ = app_handle.emit("chat-catalog-entry-changed", update);
+
+            match event {
+                CatalogEvent::Chat(change) => {
+                    match chat_catalog::apply_change(&state, &app_handle, change).await {
+                        Ok(Some(update)) => {
+                            let _ = app_handle.emit("chat-catalog-entry-changed", update);
+                        }
+                        Ok(None) => {}
+                        Err(_) => {
+                            let _ = app_handle.emit("chat-catalog-changed", ());
+                        }
+                    }
                 }
-                Ok(None) => {}
-                // A genuine change that could not be merged locally falls back
-                // to explicit recovery rather than being dropped.
-                Err(_) => {
-                    let _ = app_handle.emit("chat-catalog-changed", ());
+                CatalogEvent::ReviewThread { change, deleted } => {
+                    let project_id = change.project_id.clone();
+                    if chat_catalog::apply_review_thread_change(
+                        &state,
+                        &app_handle,
+                        change,
+                        deleted,
+                    )
+                    .await
+                    .is_err()
+                    {
+                        let _ = app_handle.emit(
+                            "review-thread-catalog-recovery-needed",
+                            chat_catalog::ReviewThreadCatalogRecoveryNeeded { project_id },
+                        );
+                    }
                 }
             }
         });
@@ -2066,9 +2099,13 @@ mod tests {
                 "payload": {"deleted": false}
             })
         };
-        let routed = |topic: &str, project: &str| {
-            SacrumSocket::chat_catalog_change(topic, &entry(project))
-                .map(|change| (change.project_id, change.revision))
+        let routed = |topic: &str, project: &str| match CatalogEvent::decode(
+            "chat_catalog_created",
+            topic,
+            &entry(project),
+        ) {
+            Some(CatalogEvent::Chat(change)) => Some((change.project_id, change.revision)),
+            _ => None,
         };
 
         // Chats of several projects stream concurrently through accounts:me.
@@ -2078,11 +2115,37 @@ mod tests {
         // A project channel copy cannot speak for another project.
         assert_eq!(routed("project:a", "b"), None);
         assert_eq!(routed("other:topic", "a"), None);
-        assert!(SacrumSocket::chat_catalog_change(
+        assert!(CatalogEvent::decode(
+            "chat_catalog_created",
             ACCOUNTS_TOPIC,
             &serde_json::json!({"project_id": "a"})
         )
         .is_none());
+    }
+
+    #[test]
+    fn review_thread_delete_routes_even_when_the_last_row_was_live() {
+        let thread_id = Uuid::new_v4();
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "project_id": "a",
+            "installation_id": "machine",
+            "thread_id": thread_id,
+            "revision": 3,
+            "updated_at": "2026-01-01T00:00:00Z",
+            "payload": {"deleted": false}
+        });
+
+        let event = "review_thread_deleted";
+        for topic in [ACCOUNTS_TOPIC, "project:a"] {
+            assert!(matches!(
+                CatalogEvent::decode(event, topic, &payload),
+                Some(CatalogEvent::ReviewThread { change, deleted: true })
+                    if change.thread_id == thread_id && change.revision == 3
+            ));
+        }
+
+        assert!(CatalogEvent::decode(event, "project:b", &payload).is_none());
     }
 
     use super::*;

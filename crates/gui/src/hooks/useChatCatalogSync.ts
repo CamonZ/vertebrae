@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { events } from "../bindings";
 import { useChatStore } from "../stores/chatStore";
 import {
   isCurrentProjectScopeGeneration,
@@ -67,6 +68,7 @@ export function useChatCatalogSync() {
       }),
       // Emitted only when a genuine entry could not be merged locally.
       listen("chat-catalog-changed", () => void recover()),
+      events.reviewThreadCatalogRecoveryNeeded.listen(() => void recover()),
     ];
 
     void recover();

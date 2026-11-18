@@ -1,4 +1,5 @@
 use super::*;
+use crate::commands::chat_catalog::entity::Remote;
 use std::sync::{Arc, Mutex};
 use vertebrae_sacrum_client::SacrumConfig;
 use wiremock::{matchers, Mock, MockServer, ResponseTemplate};
@@ -70,24 +71,28 @@ async fn interrupted_readback_retains_sources_then_restart_verifies_and_retires_
             if remote.offline {
                 return ResponseTemplate::new(503);
             }
-            if body["query"].as_str().unwrap().contains("putChatCatalog") {
+            let query = body["query"].as_str().unwrap();
+            if query.contains("reviewThreads(") {
+                return super::super::tests::empty_thread_snapshot();
+            }
+            if query.contains("putChatCatalog") {
                 remote.writes += 1;
                 let payload: Value =
                     serde_json::from_str(body["variables"]["v"].as_str().unwrap()).unwrap();
                 assert!(!payload.to_string().contains("private"));
                 remote.entry = Some(Entry {
-                    chat_id: "chat".into(),
+                    id: EntityKey::chat("chat"),
                     revision: 1,
                     payload,
                 });
                 let entry = remote.entry.as_ref().unwrap();
                 return ResponseTemplate::new(200).set_body_json(json!({
-                    "data": {"putChatCatalog": {"status": "accepted", "entry": entry}}
+                    "data": {"putChatCatalog": {"status": "accepted", "entry": {"chatId": entry.id.to_string(), "revision": entry.revision, "payload": entry.payload}}}
                 }));
             }
             ResponseTemplate::new(200).set_body_json(json!({
                 "data": {"chatCatalog": {
-                    "entries": remote.entry.iter().collect::<Vec<_>>(), "nextCursor": null
+                    "entries": remote.entry.iter().map(|entry| json!({"chatId": entry.id.to_string(), "revision": entry.revision, "payload": entry.payload})).collect::<Vec<_>>(), "nextCursor": null
                 }}
             }))
         })
@@ -137,7 +142,10 @@ async fn interrupted_readback_retains_sources_then_restart_verifies_and_retires_
 
     assert!(!index.exists());
     assert_eq!(remote.lock().unwrap().writes, 1);
-    assert_eq!(restarted.records["project/chat"].remote.payload, expected);
+    assert_eq!(
+        restarted.chat("project", "chat").unwrap().remote.payload,
+        expected
+    );
     assert_eq!(
         load(&path).unwrap().sidecars["project/chat"],
         Sidecar::from_session(&chat)
@@ -160,7 +168,7 @@ async fn interrupted_readback_retains_sources_then_restart_verifies_and_retires_
         9
     );
     assert_eq!(
-        restarted.records["project/chat"].remote.payload["classifications"][0]["labels"],
+        restarted.chat("project", "chat").unwrap().remote.payload["classifications"][0]["labels"],
         json!([])
     );
     assert_eq!(
@@ -197,16 +205,21 @@ fn reconciliation_refuses_missing_stale_changed_and_pending_records() {
     let chat = session("chat");
     let payload = queue_session(&mut catalog, &chat);
     let entry = Entry {
-        chat_id: "chat".into(),
+        id: EntityKey::chat("chat"),
         revision: 2,
         payload: payload.clone(),
     };
-    let snapshot = BTreeMap::from([("chat".into(), entry.clone())]);
+    let snapshot = BTreeMap::from([(EntityKey::chat("chat"), entry.clone())]);
 
     reconcile(&mut catalog, "project", &snapshot);
     assert!(catalog.migration.verified.is_empty());
-    let record = catalog.records.get_mut("project/chat").unwrap();
-    record.remote = entry.clone();
+    let record = catalog
+        .record_mut("project", &EntityKey::chat("chat"))
+        .unwrap();
+    record.remote = Remote {
+        revision: entry.revision,
+        payload: entry.payload.clone(),
+    };
     record.desired = None;
 
     reconcile(&mut catalog, "project", &BTreeMap::new());
@@ -216,7 +229,7 @@ fn reconciliation_refuses_missing_stale_changed_and_pending_records() {
     reconcile(
         &mut catalog,
         "project",
-        &BTreeMap::from([("chat".into(), wrong)]),
+        &BTreeMap::from([(EntityKey::chat("chat"), wrong)]),
     );
     assert!(catalog.migration.verified.is_empty());
     let mut stale = entry;
@@ -224,7 +237,7 @@ fn reconciliation_refuses_missing_stale_changed_and_pending_records() {
     reconcile(
         &mut catalog,
         "project",
-        &BTreeMap::from([("chat".into(), stale)]),
+        &BTreeMap::from([(EntityKey::chat("chat"), stale)]),
     );
     assert!(catalog.migration.verified.is_empty());
 
@@ -304,10 +317,11 @@ async fn a_failed_later_page_cannot_verify_a_matching_earlier_page() {
     let path = root.path().join("catalog.json");
     let mut catalog = Catalog::default();
     let payload = queue_session(&mut catalog, &chat);
-    let record = catalog.records.get_mut("project/chat").unwrap();
+    let record = catalog
+        .record_mut("project", &EntityKey::chat("chat"))
+        .unwrap();
     record.desired = None;
-    record.remote = Entry {
-        chat_id: "chat".into(),
+    record.remote = Remote {
         revision: 1,
         payload: payload.clone(),
     };
@@ -356,10 +370,13 @@ fn terminal_deletion_wins_during_import_without_retaining_a_conflict() {
     let mut catalog = Catalog::default();
     let chat = session("chat");
     let mut deleted = queue_session(&mut catalog, &chat);
-    catalog.records.get_mut("project/chat").unwrap().conflicted = true;
+    catalog
+        .record_mut("project", &EntityKey::chat("chat"))
+        .unwrap()
+        .conflicted = true;
     deleted["deleted"] = json!(true);
     let entry = Entry {
-        chat_id: "chat".into(),
+        id: EntityKey::chat("chat"),
         revision: 8,
         payload: deleted,
     };
@@ -368,24 +385,32 @@ fn terminal_deletion_wins_during_import_without_retaining_a_conflict() {
     reconcile(
         &mut catalog,
         "project",
-        &BTreeMap::from([("chat".into(), entry)]),
+        &BTreeMap::from([(EntityKey::chat("chat"), entry)]),
     );
 
     assert!(can_retire(&catalog, &chat));
-    assert!(catalog.records["project/chat"].desired.is_none());
-    assert!(!catalog.records["project/chat"].conflicted);
+    assert!(catalog.chat("project", "chat").unwrap().desired.is_none());
+    assert!(!catalog.chat("project", "chat").unwrap().conflicted);
     enqueue(&mut catalog, "project", "chat", projection(&chat));
-    assert!(catalog.records["project/chat"].desired.is_none());
+    assert!(catalog.chat("project", "chat").unwrap().desired.is_none());
 }
 
-#[test]
-fn competing_process_locks_fail_without_overwriting_state_and_release_on_drop() {
+#[tokio::test]
+async fn competing_process_locks_wait_for_the_current_writer_to_release() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("local-chat-session-index.json");
-    let guard = lock_index(&path).unwrap();
-    assert!(lock_index(&path).is_err());
+    let guard = lock_index(&path).await.unwrap();
+
+    let waiting = lock_index(&path);
+    tokio::pin!(waiting);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(40), &mut waiting)
+            .await
+            .is_err()
+    );
+
     drop(guard);
-    assert!(lock_index(&path).is_ok());
+    assert!(waiting.await.is_ok());
 }
 
 #[test]
