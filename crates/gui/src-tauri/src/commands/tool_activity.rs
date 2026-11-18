@@ -283,6 +283,7 @@ impl EventSink for DiscardEvents {
 #[tauri::command]
 #[specta::specta]
 pub async fn classify_tool_operations(
+    app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     commands: Vec<String>,
     project_path: Option<String>,
@@ -312,6 +313,7 @@ pub async fn classify_tool_operations(
     if !additions.is_empty() {
         super::chat_catalog::store_classifications(
             &state,
+            &app,
             &project_path,
             &session_id,
             additions,

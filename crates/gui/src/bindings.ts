@@ -1130,6 +1130,33 @@ async saveLocalChatSessionIndex(input: SaveLocalChatSessionIndexInput) : Promise
     else return { status: "error", error: e  as any };
 }
 },
+async listReviewThreads(projectId: string) : Promise<Result<ReviewThread[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_review_threads", { projectId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async putReviewThread(projectId: string, threadId: string, payload: ReviewThreadInput) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("put_review_thread", { projectId, threadId, payload }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * A known tombstone makes deletion idempotent. An unknown ID is an error.
+ */
+async tombstoneReviewThread(projectId: string, threadId: string) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("tombstone_review_thread", { projectId, threadId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Discover and replay a persisted provider transcript through the
  * provider-owned harness adapter. The GUI receives only normalized V1 event
@@ -1519,6 +1546,9 @@ taskRunStepChangedEvent: TaskRunStepChangedEvent,
 taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowTransitionChangedEvent: WorkflowTransitionChangedEvent,
+reviewThreadCatalogRecovered: ReviewThreadCatalogRecovered,
+reviewThreadCatalogRecoveryNeeded: ReviewThreadCatalogRecoveryNeeded,
+reviewThreadChanged: ReviewThreadChanged,
 worktreeChangedEvent: WorktreeChangedEvent
 }>({
 artifactChangedEvent: "artifact-changed-event",
@@ -1554,6 +1584,9 @@ taskRunStepChangedEvent: "task-run-step-changed-event",
 taskStepChangedEvent: "task-step-changed-event",
 workflowChangedEvent: "workflow-changed-event",
 workflowTransitionChangedEvent: "workflow-transition-changed-event",
+reviewThreadCatalogRecovered: "review-thread-catalog-recovered",
+reviewThreadCatalogRecoveryNeeded: "review-thread-catalog-recovery-needed",
+reviewThreadChanged: "review-thread-changed",
 worktreeChangedEvent: "worktree-changed-event"
 })
 
@@ -2176,7 +2209,7 @@ export type LocalChatSessionIndexEntry = { activityStatus?: LocalChatActivitySta
 /**
  * Optional association metadata; no raw tool payloads.
  */
-association?: JsonValue | null; id: string; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind;
+association?: JsonValue | null; id: string; parentChatId?: string | null; reviewThreadId?: string | null; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind;
 /**
  * Provider the session was started with; absent means the harness's
  * built-in provider.
@@ -2305,6 +2338,19 @@ export type ProviderSettings = { id: string; harness: string; endpoint: string; 
 export type ResolvePermissionRequestError = { kind: ResolvePermissionRequestErrorKind; message: string }
 export type ResolvePermissionRequestErrorKind = "unavailable" | "not_found" | "invalid" | "internal"
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
+export type ReviewThread = { threadId: string; revision: number; payload: ReviewThreadInput }
+export type ReviewThreadCatalogRecovered = { projectId: string }
+export type ReviewThreadCatalogRecoveryNeeded = { projectId: string }
+export type ReviewThreadChanged = { projectId: string; threadId: string; thread: ReviewThread | null }
+export type ReviewThreadHome = "worktree" | "tool_call"
+/**
+ * Complete anchor and current position. Snake-case aliases decode Sacrum rows;
+ * the desktop IPC contract uses camelCase.
+ */
+export type ReviewThreadInput = { parentChatId: string; path: string; side: ReviewThreadSide; homeKind: ReviewThreadHome; toolUseId: string | null; originalCommitId: string; originalBlobId: string; originalStartLine: number; originalLine: number; startLine: number | null; line: number | null; status: ReviewThreadStatus; outdatedNoted: boolean; originKind: ReviewThreadOrigin; originRef: string | null }
+export type ReviewThreadOrigin = "local"
+export type ReviewThreadSide = "LEFT" | "RIGHT"
+export type ReviewThreadStatus = "open" | "outdated"
 /**
  * Config of a `route` step.
  */

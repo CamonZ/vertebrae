@@ -10,65 +10,29 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, path::Path};
 use tokio::sync::Mutex;
+use uuid::Uuid;
 use vertebrae_sacrum_client::GraphqlClient;
 
 mod delivery;
+mod entity;
 mod migration;
+mod review_threads;
+mod storage;
+pub(crate) use review_threads::*;
 
 use delivery::deliver;
+use entity::{
+    enqueue, enqueue_entity, fetch_snapshot, merge, merge_entry, EntityKey, EntityKind, Entry,
+    MergeSource, Record, ThreadId,
+};
 
 static SERIAL: Mutex<()> = Mutex::const_new(());
-const FIELDS: &str = "chatId revision payload updatedAt";
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Entry {
-    chat_id: String,
-    revision: u64,
-    payload: Value,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Record {
-    remote: Entry,
-    desired: Option<Value>,
-    mutation_id: String,
-    #[serde(default)]
-    conflicted: bool,
-    #[serde(default)]
-    import_only: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    rejection_code: Option<String>,
-}
-
-impl Record {
-    fn new(chat: &str) -> Self {
-        Self {
-            remote: Entry {
-                chat_id: chat.into(),
-                revision: 0,
-                payload: Value::Null,
-            },
-            desired: None,
-            mutation_id: uuid::Uuid::new_v4().to_string(),
-            conflicted: false,
-            import_only: false,
-            rejection_code: None,
-        }
-    }
-
-    fn clear_intent(&mut self) {
-        self.desired = None;
-        self.conflicted = false;
-        self.rejection_code = None;
-    }
-}
 
 #[derive(Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Catalog {
-    records: BTreeMap<String, Record>,
+    #[serde(default)]
+    projects: BTreeMap<String, BTreeMap<EntityKey, Record>>,
     unmapped: Vec<String>,
     #[serde(default)]
     sidecars: BTreeMap<String, migration::Sidecar>,
@@ -78,11 +42,33 @@ struct Catalog {
     annotations: BTreeMap<String, migration::AnnotationInventory>,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Page {
-    entries: Vec<Entry>,
-    next_cursor: Option<String>,
+impl Catalog {
+    fn records(&self, project: &str) -> impl Iterator<Item = (&EntityKey, &Record)> {
+        self.projects
+            .get(project)
+            .into_iter()
+            .flat_map(|records| records.iter())
+    }
+
+    fn record(&self, project: &str, id: &EntityKey) -> Option<&Record> {
+        self.projects.get(project)?.get(id)
+    }
+
+    fn record_mut(&mut self, project: &str, id: &EntityKey) -> Option<&mut Record> {
+        self.projects.get_mut(project)?.get_mut(id)
+    }
+
+    fn upsert(&mut self, project: &str, id: &EntityKey) -> &mut Record {
+        self.projects
+            .entry(project.into())
+            .or_default()
+            .entry(id.clone())
+            .or_default()
+    }
+
+    fn chat(&self, project: &str, id: &str) -> Option<&Record> {
+        self.record(project, &EntityKey::chat(id))
+    }
 }
 
 fn error() -> CommandError {
@@ -143,31 +129,40 @@ pub(super) fn lock_index(path: &Path) -> Result<fs::File, CommandError> {
 }
 
 fn save(path: &Path, state: &Catalog) -> Result<(), CommandError> {
-    durable_write(path, &serde_json::to_vec(state).map_err(|_| error())?)?;
+    durable_write(path, &storage::encode(state)?)?;
 
     let mut projects: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let mut pending = Vec::new();
     let mut conflicted = Vec::new();
     let mut rejected = Vec::new();
 
-    for (id, record) in &state.records {
-        let (project, _) = id.split_once('/').ok_or_else(error)?;
-        let payload = record.desired.as_ref().unwrap_or(&record.remote.payload);
-        projects.entry(project.into()).or_default().push(json!({
-            "chat_id": record.remote.chat_id,
-            "revision": record.remote.revision,
-            "payload": payload
-        }));
-        if record.desired.is_some() {
-            pending.push(record.remote.chat_id.clone());
-        }
-        if record.conflicted {
-            conflicted.push(record.remote.chat_id.clone());
-        }
-        if let Some(code) = &record.rejection_code {
-            rejected.push(
-                json!({"project_id": project, "chat_id": record.remote.chat_id, "code": code}),
-            );
+    let mut pending_threads = Vec::new();
+    let mut conflicted_threads = Vec::new();
+    for (project, records) in &state.projects {
+        for (id, record) in records {
+            let (field, pending_list, conflicted_list) = match id {
+                EntityKey::Chat(chat) => {
+                    projects.entry(project.clone()).or_default().push(json!({
+                        "chat_id": chat.0,
+                        "revision": record.remote.revision,
+                        "payload": record.visible()
+                    }));
+                    ("chat_id", &mut pending, &mut conflicted)
+                }
+                EntityKey::Thread(_) => {
+                    ("thread_id", &mut pending_threads, &mut conflicted_threads)
+                }
+            };
+            if record.desired.is_some() {
+                pending_list.push(id.to_string());
+            }
+            if record.conflicted {
+                conflicted_list.push(id.to_string());
+            }
+            if let Some(code) = &record.rejection_code {
+                rejected
+                    .push(json!({"project_id": project, (field): id.to_string(), "code": code}));
+            }
         }
     }
 
@@ -180,6 +175,8 @@ fn save(path: &Path, state: &Catalog) -> Result<(), CommandError> {
         "projects": projects,
         "pending": pending,
         "conflicted": conflicted,
+        "pending_threads": pending_threads,
+        "conflicted_threads": conflicted_threads,
         "rejected": rejected,
         "unmapped": state.unmapped,
         "migration_version": state.migration.version,
@@ -197,13 +194,7 @@ fn save(path: &Path, state: &Catalog) -> Result<(), CommandError> {
 
 fn load(path: &Path) -> Result<Catalog, CommandError> {
     match fs::read(path) {
-        Ok(bytes) => {
-            let catalog: Catalog = serde_json::from_slice(&bytes).map_err(|_| error())?;
-            if catalog.migration.version > migration::VERSION {
-                return Err(error());
-            }
-            Ok(catalog)
-        }
+        Ok(bytes) => storage::decode(&bytes),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Catalog::default()),
         Err(_) => Err(error()),
     }
@@ -252,11 +243,15 @@ fn projection(session: &LocalChatSessionIndexEntry) -> Value {
         metadata.insert("entityLevel".into(), level.clone());
     }
 
+    if session.review_thread_id.is_some() {
+        metadata.insert("kind".into(), json!("discussion"));
+    }
     json!({
         "status": session.activity_status,
         "metadata": metadata,
         "task_id": association.get("ticketId"),
-        "parent_chat_id": null,
+        "parent_chat_id": session.parent_chat_id,
+        "review_thread_id": session.review_thread_id,
         "gate_execution_id": session.gate.as_ref().map(|g| &g.execution_id),
         "gate_task_run_id": session.gate.as_ref().map(|g| &g.task_run_id),
         "classifications": [],
@@ -283,105 +278,6 @@ pub(super) fn reset_inactive_activity(
     changed
 }
 
-fn enqueue(catalog: &mut Catalog, project: &str, chat: &str, payload: Value) {
-    if delivery::parent_deleted(catalog, project, &payload) {
-        return;
-    }
-
-    let record = catalog
-        .records
-        .entry(key(project, chat))
-        .or_insert_with(|| Record::new(chat));
-
-    if record.remote.payload["deleted"] == true
-        || record
-            .desired
-            .as_ref()
-            .is_some_and(|p| p["deleted"] == true)
-    {
-        return;
-    }
-
-    if record.desired.as_ref().unwrap_or(&record.remote.payload) != &payload {
-        record.import_only = false;
-        record.rejection_code = None;
-        record.desired = Some(payload);
-        record.mutation_id = uuid::Uuid::new_v4().to_string();
-    }
-}
-
-fn merge(catalog: &mut Catalog, project: &str, entry: Entry) {
-    let record = catalog
-        .records
-        .entry(key(project, &entry.chat_id))
-        .or_insert_with(|| Record::new(&entry.chat_id));
-
-    if entry.revision < record.remote.revision {
-        return;
-    }
-    if entry.payload["deleted"] == true
-        || (record.import_only && entry.revision > 0)
-        || record.desired.as_ref() == Some(&entry.payload)
-    {
-        // Tombstones are terminal, and an entry already carrying the local
-        // intent (for example after a lost acknowledgement) needs no write.
-        record.clear_intent();
-    }
-
-    let new_tombstone =
-        entry.payload["deleted"] == true && record.remote.payload["deleted"] != true;
-    let chat_id = new_tombstone.then(|| entry.chat_id.clone());
-    record.remote = entry;
-    if let Some(chat_id) = chat_id {
-        delivery::discard_children(catalog, project, &chat_id);
-    }
-}
-
-async fn fetch_snapshot(
-    client: &GraphqlClient,
-    project: &str,
-    machine: &str,
-) -> Result<BTreeMap<String, Entry>, CommandError> {
-    let mut snapshot = BTreeMap::new();
-    let mut seen_cursors = std::collections::BTreeSet::new();
-    let mut after: Option<String> = None;
-
-    // Read every page before replaying pending local mutations.
-    loop {
-        let query = format!(
-            concat!(
-                "query($p:Uuid4!,$m:Uuid4!,$after:String){{",
-                "chatCatalog(projectId:$p,installationId:$m,after:$after,",
-                "limit:100,includeCompleted:true){{entries{{{fields}}} nextCursor}}}}"
-            ),
-            fields = FIELDS,
-        );
-        let page: Page = client
-            .execute(
-                &query,
-                json!({"p": project, "m": machine, "after": after}),
-                "chatCatalog",
-            )
-            .await
-            .map_err(|_| error())?;
-
-        for entry in page.entries {
-            if snapshot.insert(entry.chat_id.clone(), entry).is_some() {
-                return Err(error());
-            }
-        }
-        after = page.next_cursor;
-        if after.is_none() {
-            break;
-        }
-        if !seen_cursors.insert(after.clone()) {
-            return Err(error());
-        }
-    }
-
-    Ok(snapshot)
-}
-
 /// Full recovery: read every page, merge it, then deliver pending writes.
 /// Reserved for startup, reconnect and explicit recovery.
 async fn exchange(
@@ -391,7 +287,13 @@ async fn exchange(
     catalog: &mut Catalog,
     path: &Path,
 ) -> Result<Recovery, CommandError> {
-    let snapshot = fetch_snapshot(client, project, machine).await?;
+    let (snapshot, threads) = tokio::try_join!(
+        fetch_snapshot(client, project, machine, EntityKind::Chat),
+        fetch_snapshot(client, project, machine, EntityKind::Thread),
+    )?;
+    for entry in threads.into_values() {
+        merge(catalog, project, entry);
+    }
     for entry in snapshot.values() {
         merge(catalog, project, entry.clone());
     }
@@ -405,7 +307,7 @@ async fn exchange(
 }
 
 struct Recovery {
-    snapshot: BTreeMap<String, Entry>,
+    snapshot: BTreeMap<EntityKey, Entry>,
     delivered: usize,
 }
 
@@ -465,26 +367,60 @@ async fn scope_identity(
         .ok_or_else(error)
 }
 
+/// One serialized read or write of the account-scoped catalog.
+struct CatalogAccess {
+    _serial: tokio::sync::MutexGuard<'static, ()>,
+    _disk: fs::File,
+    root: std::path::PathBuf,
+    client: std::sync::Arc<GraphqlClient>,
+    machine: String,
+}
+
+impl CatalogAccess {
+    async fn open(state: &AppState) -> Result<Option<Self>, CommandError> {
+        let _serial = SERIAL.lock().await;
+        let Some(client) = state.sacrum_client.read().await.clone() else {
+            return Ok(None);
+        };
+        let root = root()?;
+        let _disk = lock_file(&root, ".chat-catalog.lock")?;
+        let machine = installation(&root)?;
+        Ok(Some(Self {
+            _serial,
+            _disk,
+            root,
+            client,
+            machine,
+        }))
+    }
+
+    async fn path(&self, online: bool) -> Result<std::path::PathBuf, CommandError> {
+        let scope = scope_identity(&self.root, &self.client, &self.machine, online).await?;
+        Ok(state_path(&self.root, &scope))
+    }
+}
+
 /// Persist pending changes before attempting network IO. A failed exchange is
 /// recoverable on the next save/load and never discards the local snapshot.
 pub(super) async fn synchronize(
     state: &AppState,
+    app: &tauri::AppHandle,
     sessions: &mut Vec<LocalChatSessionIndexEntry>,
     editing: bool,
     deleted_ids: &[String],
     changed_ids: Option<&[String]>,
 ) -> Result<(), CommandError> {
-    let _guard = SERIAL.lock().await;
-    let client = state.sacrum_client.read().await.clone();
-    let Some(client) = client else {
+    let Some(access) = CatalogAccess::open(state).await? else {
         return Ok(());
     };
-
-    let root = root()?;
-    let _disk_guard = lock_file(&root, ".chat-catalog.lock")?;
-    let machine = installation(&root)?;
-    let identity = scope_identity(&root, &client, &machine, true).await?;
-    let path = state_path(&root, &identity);
+    let CatalogAccess {
+        client,
+        machine,
+        root,
+        ..
+    } = &access;
+    let identity = scope_identity(root, client, machine, true).await?;
+    let path = state_path(root, &identity);
     let mut catalog = load(&path)?;
 
     // Claim legacy sessions only within the authenticated owner scope.
@@ -519,6 +455,7 @@ pub(super) async fn synchronize(
         .collect();
 
     for project in &projects {
+        let before = review_threads::thread_views(&catalog, &project.project_id);
         let local: Vec<_> = sessions
             .iter()
             .filter(|s| s.project_path.as_deref() == Some(project.path.as_str()))
@@ -527,9 +464,10 @@ pub(super) async fn synchronize(
         // Queue explicit edits and previously unseen legacy sessions.
         for session in &local {
             let id = key(&project.project_id, &session.id);
+            let chat = EntityKey::chat(&session.id);
             catalog.annotations.insert(
                 id.clone(),
-                migration::inventory_annotations(&root, &session.id)
+                migration::inventory_annotations(root, &session.id)
                     .unwrap_or_else(|_| migration::AnnotationInventory::unavailable()),
             );
             if (editing && changed_ids.is_none_or(|ids| ids.contains(&session.id)))
@@ -539,27 +477,34 @@ pub(super) async fn synchronize(
                     .sidecars
                     .insert(id.clone(), migration::Sidecar::from_session(session));
             }
+
             let mut import_payload = projection(session);
-            if let Some(record) = catalog.records.get(&id) {
+            if let Some(record) = catalog.record(&project.project_id, &chat) {
                 import_payload["classifications"] =
                     record.desired.as_ref().unwrap_or(&record.remote.payload)["classifications"]
                         .clone();
             }
-            migration::queue(&mut catalog, &id, import_payload);
+
+            if delivery::parent_deleted(&catalog, &project.project_id, &chat, &import_payload) {
+                catalog.migration.pending.remove(&id);
+                continue;
+            }
+            migration::queue(&mut catalog, &id, import_payload.clone());
 
             if (editing && changed_ids.is_none_or(|ids| ids.contains(&session.id)))
-                || !catalog.records.contains_key(&id)
+                || catalog.record(&project.project_id, &chat).is_none()
             {
-                let mut payload = projection(session);
-                if let Some(record) = catalog.records.get(&id) {
-                    payload["classifications"] =
-                        record.desired.as_ref().unwrap_or(&record.remote.payload)
-                            ["classifications"]
-                            .clone();
-                }
-                let absent = !catalog.records.contains_key(&id);
-                enqueue(&mut catalog, &project.project_id, &session.id, payload);
-                if let (true, Some(record)) = (absent, catalog.records.get_mut(&id)) {
+                let absent = catalog.record(&project.project_id, &chat).is_none();
+                enqueue(
+                    &mut catalog,
+                    &project.project_id,
+                    &session.id,
+                    import_payload,
+                );
+
+                if let (true, Some(record)) =
+                    (absent, catalog.record_mut(&project.project_id, &chat))
+                {
                     record.import_only =
                         !editing || changed_ids.is_some_and(|ids| !ids.contains(&session.id));
                 }
@@ -568,37 +513,26 @@ pub(super) async fn synchronize(
 
         // Only explicit deletions create tombstones.
         if editing {
-            let prefix = format!("{}/", project.project_id);
-            let removed: Vec<_> = catalog
-                .records
-                .iter()
-                .filter(|(k, r)| k.starts_with(&prefix) && deleted_ids.contains(&r.remote.chat_id))
-                .map(|(_, r)| r.remote.chat_id.clone())
-                .collect();
-            for id in removed {
-                let mut payload = catalog.records[&key(&project.project_id, &id)]
-                    .desired
-                    .as_ref()
-                    .unwrap_or(
-                        &catalog.records[&key(&project.project_id, &id)]
-                            .remote
-                            .payload,
-                    )
-                    .clone();
+            for id in deleted_ids {
+                let Some(record) = catalog.chat(&project.project_id, id) else {
+                    continue;
+                };
+                let mut payload = record.visible().clone();
                 payload["deleted"] = json!(true);
                 payload["status"] = json!("idle");
-                enqueue(&mut catalog, &project.project_id, &id, payload);
+                enqueue(&mut catalog, &project.project_id, id, payload);
             }
         }
 
         save(&path, &catalog)?;
-        sync_project(
-            &client,
+
+        let recovered = sync_project(
+            client,
             &project.project_id,
-            &machine,
+            machine,
             &mut catalog,
             &path,
-            &root,
+            root,
             editing,
         )
         .await;
@@ -612,6 +546,13 @@ pub(super) async fn synchronize(
             != Some(client.connection_identity())
         {
             return Err(error());
+        }
+
+        catalog = load(&path)?;
+        review_threads::publish_thread_changes(app, &project.project_id, before, &catalog);
+
+        if recovered {
+            review_threads::publish_thread_recovered(app, &project.project_id);
         }
 
         // Rebuild visible summaries while retaining local-only sidecars.
@@ -633,7 +574,7 @@ async fn sync_project(
     path: &Path,
     root: &Path,
     editing: bool,
-) {
+) -> bool {
     let outcome = if editing {
         deliver(client, project, machine, catalog, path)
             .await
@@ -643,14 +584,14 @@ async fn sync_project(
             .await
             .map(Some)
     };
+
     let recovery = match outcome {
         Ok(recovery) => recovery,
         Err(_) => {
             tracing::info!(
                 pending = catalog
-                    .records
-                    .values()
-                    .filter(|r| r.desired.is_some())
+                    .records(project)
+                    .filter(|(_, record)| record.desired.is_some())
                     .count(),
                 unmapped = catalog.unmapped.len(),
                 "chat_catalog_offline"
@@ -673,6 +614,7 @@ async fn sync_project(
     if verified.is_err() {
         tracing::info!("chat_catalog_migration_pending");
     }
+    recovery.is_some()
 }
 
 fn hydrate_snapshot(
@@ -681,20 +623,34 @@ fn hydrate_snapshot(
     project_path: &str,
     sessions: &mut Vec<LocalChatSessionIndexEntry>,
 ) {
-    let prefix = format!("{project_id}/");
-    for (id, record) in &catalog.records {
-        if !id.starts_with(&prefix) {
+    // Discussion links support outbox transport. The regular chat index
+    // still hydrates only ordinary chats.
+    sessions.retain(|session| {
+        session.project_path.as_deref() != Some(project_path) || session.review_thread_id.is_none()
+    });
+
+    for (id, record) in catalog.records(project_id) {
+        let EntityKey::Chat(chat) = id else {
+            continue;
+        };
+        if delivery::is_discussion(record.visible()) {
+            sessions.retain(|s| s.id != chat.0);
             continue;
         }
 
-        let previous = sessions
-            .iter()
-            .find(|s| s.id == record.remote.chat_id)
-            .cloned();
-        match hydrate_record(catalog, id, record, project_path, previous.as_ref()) {
-            Hydrated::Deleted => sessions.retain(|s| s.id != record.remote.chat_id),
+        let previous = sessions.iter().find(|s| s.id == chat.0).cloned();
+        let scoped_id = key(project_id, &chat.0);
+        match hydrate_record(
+            catalog,
+            &scoped_id,
+            &chat.0,
+            record,
+            project_path,
+            previous.as_ref(),
+        ) {
+            Hydrated::Deleted => sessions.retain(|s| s.id != chat.0),
             Hydrated::Session(session) => {
-                sessions.retain(|s| s.id != record.remote.chat_id);
+                sessions.retain(|s| s.id != chat.0);
                 sessions.push(*session);
             }
             Hydrated::Invalid => {}
@@ -713,6 +669,7 @@ enum Hydrated {
 fn hydrate_record(
     catalog: &Catalog,
     id: &str,
+    chat_id: &str,
     record: &Record,
     project_path: &str,
     previous: Option<&LocalChatSessionIndexEntry>,
@@ -727,7 +684,7 @@ fn hydrate_record(
         .get("status")
         .cloned()
         .unwrap_or_else(|| json!("idle"));
-    value["id"] = json!(record.remote.chat_id);
+    value["id"] = json!(chat_id);
     value["projectPath"] = json!(project_path);
     let sidecar = catalog.sidecars.get(id);
     value["gate"] = previous
@@ -790,35 +747,36 @@ pub(crate) struct CatalogEntryChanged {
 /// visible update to publish, or `None` when the entry is unrelated, already
 /// applied (including own-write echoes) or leaves the visible projection
 /// unchanged. Never reads the remote catalog.
-pub(crate) async fn apply_change(
+pub(crate) async fn apply_change<R: tauri::Runtime>(
     state: &AppState,
+    app: &tauri::AppHandle<R>,
     change: CatalogChange,
 ) -> Result<Option<CatalogEntryChanged>, CommandError> {
-    let _guard = SERIAL.lock().await;
-    let client = state.sacrum_client.read().await.clone();
-    let Some(client) = client else {
+    let Some(access) = CatalogAccess::open(state).await? else {
         return Ok(None);
     };
-    let root = root()?;
-    let _disk_guard = lock_file(&root, ".chat-catalog.lock")?;
-    let machine = installation(&root)?;
-    let Some(project) = change_scope(&change, &machine, state.project_config.get_projects()) else {
+    let Some(project) = change_scope(
+        &change,
+        &access.machine,
+        state.project_config.get_projects(),
+    ) else {
         return Ok(None);
     };
-    // Unknown credentials never resolve another account's catalog; startup
-    // recovery registers this connection and reads the complete state.
-    let Ok(identity) = scope_identity(&root, &client, &change.installation_id, false).await else {
+    // Unknown credentials cannot resolve another account's catalog.
+    let Ok(path) = access.path(false).await else {
         return Ok(None);
     };
-    let path = state_path(&root, &identity);
     let mut catalog = load(&path)?;
-    apply_entry(
+    let before = review_threads::thread_views(&catalog, &project.project_id);
+    let update = apply_chat_entry(
         &mut catalog,
         &path,
         &project.project_id,
         &project.path,
         change,
-    )
+    )?;
+    review_threads::publish_thread_changes(app, &project.project_id, before, &catalog);
+    Ok(update)
 }
 
 /// The configured project an entry belongs to, if it targets this installation.
@@ -830,12 +788,17 @@ fn change_scope(
     if change.installation_id != machine {
         return None;
     }
-    projects
-        .into_iter()
-        .find(|p| p.project_id == change.project_id)
+    configured_project(projects, &change.project_id)
 }
 
-fn apply_entry(
+fn configured_project(
+    projects: Vec<crate::project_config::SavedProject>,
+    project_id: &str,
+) -> Option<crate::project_config::SavedProject> {
+    projects.into_iter().find(|p| p.project_id == project_id)
+}
+
+fn apply_chat_entry(
     catalog: &mut Catalog,
     path: &Path,
     project_id: &str,
@@ -843,48 +806,27 @@ fn apply_entry(
     change: CatalogChange,
 ) -> Result<Option<CatalogEntryChanged>, CommandError> {
     let id = key(project_id, &change.chat_id);
-    let previous = catalog.records.get(&id).map(|record| {
-        if change.revision <= record.remote.revision {
-            return None;
-        }
-        Some(
-            record
-                .desired
-                .as_ref()
-                .unwrap_or(&record.remote.payload)
-                .clone(),
-        )
-    });
-    let previous = match previous {
-        // Duplicate, out-of-order or acknowledged own-write echo.
-        Some(None) => return Ok(None),
-        Some(Some(payload)) => Some(payload),
-        None => None,
-    };
-
-    merge(
+    let hidden = delivery::is_discussion(&change.payload)
+        || catalog
+            .chat(project_id, &change.chat_id)
+            .is_some_and(|record| delivery::is_discussion(record.visible()));
+    if !apply_entry(
         catalog,
+        path,
         project_id,
         Entry {
-            chat_id: change.chat_id.clone(),
+            id: EntityKey::chat(&change.chat_id),
             revision: change.revision,
             payload: change.payload,
         },
-    );
-    save(path, catalog)?;
-
-    let record = &catalog.records[&id];
-    let current = record.desired.as_ref().unwrap_or(&record.remote.payload);
-    if previous.as_ref() == Some(current) {
+    )? || hidden
+    {
         return Ok(None);
     }
-    tracing::info!(
-        chat_id = %record.remote.chat_id,
-        revision = record.remote.revision,
-        "chat_catalog_cdc_applied"
-    );
-
-    let session = match hydrate_record(catalog, &id, record, project_path, None) {
+    let record = catalog
+        .chat(project_id, &change.chat_id)
+        .expect("merged chat");
+    let session = match hydrate_record(catalog, &id, &change.chat_id, record, project_path, None) {
         Hydrated::Deleted => None,
         Hydrated::Session(session) => Some(*session),
         Hydrated::Invalid => return Ok(None),
@@ -895,6 +837,35 @@ fn apply_entry(
     }))
 }
 
+/// Merge a CDC row and report whether the visible payload changed.
+fn apply_entry(
+    catalog: &mut Catalog,
+    path: &Path,
+    project: &str,
+    entry: Entry,
+) -> Result<bool, CommandError> {
+    let id = entry.id.clone();
+    let previous = catalog
+        .record(project, &id)
+        .map(|record| record.visible().clone());
+    if !merge_entry(catalog, project, entry, MergeSource::Observed) {
+        return Ok(false);
+    }
+    save(path, catalog)?;
+
+    let record = catalog.record(project, &id).expect("merged record");
+    if previous.as_ref() == Some(record.visible()) {
+        return Ok(false);
+    }
+    tracing::info!(
+        entity_id = %id,
+        kind = id.kind().field(),
+        revision = record.remote.revision,
+        "chat_catalog_cdc_applied"
+    );
+    Ok(true)
+}
+
 /// Return true when backend persistence handled the write. Do not recreate
 /// already retired legacy rows on subsequent saves, including offline edits.
 pub(super) async fn save_pending_legacy(
@@ -902,21 +873,15 @@ pub(super) async fn save_pending_legacy(
     path: &Path,
     mut sessions: Vec<LocalChatSessionIndexEntry>,
 ) -> Result<bool, CommandError> {
-    let _guard = SERIAL.lock().await;
-    let client = state.sacrum_client.read().await.clone();
-    let Some(client) = client else {
+    let Some(access) = CatalogAccess::open(state).await? else {
         return Ok(false);
     };
-    let root = root()?;
-    let _disk_guard = lock_file(&root, ".chat-catalog.lock")?;
-    let machine = installation(&root)?;
-    let identity = scope_identity(&root, &client, &machine, false).await?;
-    let catalog = load(&state_path(&root, &identity))?;
+    let catalog = load(&access.path(false).await?)?;
     sessions.retain(|session| !migration::can_retire(&catalog, session));
 
     if sessions.is_empty() {
         match fs::remove_file(path) {
-            Ok(()) => fs::File::open(&root)
+            Ok(()) => fs::File::open(&access.root)
                 .and_then(|directory| directory.sync_all())
                 .map_err(|_| error())?,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -940,18 +905,12 @@ pub(super) async fn preserve_sidecars(
     previous: Vec<LocalChatSessionIndexEntry>,
     deleted: &[String],
 ) -> Result<(), CommandError> {
-    let _guard = SERIAL.lock().await;
-    let client = state.sacrum_client.read().await.clone();
-    let Some(client) = client else {
+    let Some(access) = CatalogAccess::open(state).await? else {
         return Ok(());
     };
-
-    let root = root()?;
-    let _disk_guard = lock_file(&root, ".chat-catalog.lock")?;
-    let machine = installation(&root)?;
-    let scope = scope_identity(&root, &client, &machine, false).await?;
+    let scope = scope_identity(&access.root, &access.client, &access.machine, false).await?;
     let ownership: BTreeMap<String, String> = serde_json::from_slice(
-        &fs::read(root.join("chat-catalog-ownership.json")).map_err(|_| error())?,
+        &fs::read(access.root.join("chat-catalog-ownership.json")).map_err(|_| error())?,
     )
     .map_err(|_| error())?;
     merge_sidecars(sessions, previous, deleted, &ownership, &scope);
@@ -977,32 +936,14 @@ fn merge_sidecars(
     }
 }
 
-async fn classification_context(
-    state: &AppState,
-    project_path: &str,
-) -> Result<
-    (
-        std::sync::Arc<GraphqlClient>,
-        String,
-        std::path::PathBuf,
-        String,
-        fs::File,
-    ),
-    CommandError,
-> {
-    let client = state.sacrum_client.read().await.clone().ok_or_else(error)?;
-    let project = state
+fn project_id_for_path(state: &AppState, project_path: &str) -> Result<String, CommandError> {
+    state
         .project_config
         .get_projects()
         .into_iter()
         .find(|p| p.path == project_path)
-        .ok_or_else(error)?;
-    let root = root()?;
-    let _disk_guard = lock_file(&root, ".chat-catalog.lock")?;
-    let machine = installation(&root)?;
-    let identity = scope_identity(&root, &client, &machine, false).await?;
-    let path = state_path(&root, &identity);
-    Ok((client, project.project_id, path, machine, _disk_guard))
+        .map(|p| p.project_id)
+        .ok_or_else(error)
 }
 
 pub(super) async fn load_classifications(
@@ -1010,13 +951,10 @@ pub(super) async fn load_classifications(
     project_path: &str,
     chat_id: &str,
 ) -> Result<Vec<super::tool_activity::Classification>, CommandError> {
-    let _guard = SERIAL.lock().await;
-    let (_, project, path, _, _disk_guard) = classification_context(state, project_path).await?;
-    let catalog = load(&path)?;
-    let record = catalog
-        .records
-        .get(&key(&project, chat_id))
-        .ok_or_else(error)?;
+    let project = project_id_for_path(state, project_path)?;
+    let access = CatalogAccess::open(state).await?.ok_or_else(error)?;
+    let catalog = load(&access.path(false).await?)?;
+    let record = catalog.chat(&project, chat_id).ok_or_else(error)?;
     let payload = record.desired.as_ref().unwrap_or(&record.remote.payload);
     if payload["deleted"] == true {
         return Err(error());
@@ -1027,23 +965,21 @@ pub(super) async fn load_classifications(
 
 pub(super) async fn store_classifications(
     state: &AppState,
+    app: &tauri::AppHandle,
     project_path: &str,
     chat_id: &str,
     classifications: Vec<super::tool_activity::Classification>,
     expected_connection: &str,
 ) -> Result<(), CommandError> {
-    let _guard = SERIAL.lock().await;
-    let (client, project, path, machine, _disk_guard) =
-        classification_context(state, project_path).await?;
-    if client.connection_identity() != expected_connection {
+    let project = project_id_for_path(state, project_path)?;
+    let access = CatalogAccess::open(state).await?.ok_or_else(error)?;
+    if access.client.connection_identity() != expected_connection {
         return Err(error());
     }
 
+    let path = access.path(false).await?;
     let mut catalog = load(&path)?;
-    let record = catalog
-        .records
-        .get(&key(&project, chat_id))
-        .ok_or_else(error)?;
+    let record = catalog.chat(&project, chat_id).ok_or_else(error)?;
     let mut payload = record
         .desired
         .as_ref()
@@ -1068,20 +1004,37 @@ pub(super) async fn store_classifications(
         return Err(error());
     }
 
+    let before = review_threads::thread_views(&catalog, &project);
     payload["classifications"] = serde_json::to_value(all).map_err(|_| error())?;
     enqueue(&mut catalog, &project, chat_id, payload);
     save(&path, &catalog)?;
-    let _ = deliver(&client, &project, &machine, &mut catalog, &path).await;
+    let _ = deliver(
+        &access.client,
+        &project,
+        &access.machine,
+        &mut catalog,
+        &path,
+    )
+    .await;
+    let durable = load(&path)?;
+    review_threads::publish_thread_changes(app, &project, before, &durable);
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::entity::Remote;
     use super::*;
     use delivery::DELIVERY_ATTEMPTS;
     use hegel::{generators as gs, TestCase};
     use vertebrae_sacrum_client::SacrumConfig;
     use wiremock::{matchers, Mock, MockServer, ResponseTemplate};
+
+    pub(super) fn empty_thread_snapshot() -> ResponseTemplate {
+        ResponseTemplate::new(200).set_body_json(json!({
+            "data": {"reviewThreads": {"entries": [], "nextCursor": null}}
+        }))
+    }
 
     pub(super) fn payload(n: u8) -> Value {
         json!({
@@ -1158,12 +1111,27 @@ mod tests {
             original
         );
 
-        assert_ne!(
-            scope_identity(dir.path(), &client("account-b"), "machine", true)
-                .await
-                .unwrap(),
-            original
-        );
+        let other = scope_identity(dir.path(), &client("account-b"), "machine", true)
+            .await
+            .unwrap();
+        assert_ne!(other, original);
+        let thread = Uuid::new_v4();
+        let mut catalog = Catalog::default();
+        let thread = EntityKey::Thread(ThreadId(thread));
+        enqueue_entity(&mut catalog, "project", &thread, json!({"deleted": false}));
+        save(&state_path(dir.path(), &original), &catalog).unwrap();
+        assert!(load(&state_path(dir.path(), &other))
+            .unwrap()
+            .records("project")
+            .next()
+            .is_none());
+        let rotated = scope_identity(dir.path(), &client("account-a-new"), "machine", false)
+            .await
+            .unwrap();
+        assert!(load(&state_path(dir.path(), &rotated))
+            .unwrap()
+            .record("project", &thread)
+            .is_some());
 
         assert!(
             scope_identity(dir.path(), &client("unknown-offline"), "machine", false)
@@ -1203,7 +1171,7 @@ mod tests {
             }
         ]);
         let rejected_chat = format!("0-{chat}");
-        let rejected_id = key(&project, &rejected_chat);
+
         let mut invalid = data.clone();
         invalid["status"] = json!("unsupported");
         enqueue(&mut catalog, &project, &rejected_chat, invalid.clone());
@@ -1213,25 +1181,36 @@ mod tests {
         exchange(&client, &project, &machine, &mut catalog, &path)
             .await
             .unwrap();
-        let id = key(&project, &chat);
-        assert!(catalog.records[&id].desired.is_none());
-        assert_eq!(catalog.records[&id].remote.payload, data);
+
+        assert!(catalog.chat(&project, &chat).unwrap().desired.is_none());
+        assert_eq!(catalog.chat(&project, &chat).unwrap().remote.payload, data);
 
         let mut restarted = load(&path).unwrap();
         assert_eq!(
-            restarted.records[&rejected_id].desired.as_ref(),
+            restarted
+                .chat(&project, &rejected_chat)
+                .unwrap()
+                .desired
+                .as_ref(),
             Some(&invalid)
         );
         assert_eq!(
-            restarted.records[&rejected_id].rejection_code.as_deref(),
+            restarted
+                .chat(&project, &rejected_chat)
+                .unwrap()
+                .rejection_code
+                .as_deref(),
             Some("invalid_payload")
         );
 
         exchange(&client, &project, &machine, &mut restarted, &path)
             .await
             .unwrap();
-        assert_eq!(restarted.records[&id].remote.payload, data);
-        assert_eq!(restarted.records[&id].remote.revision, 1);
+        assert_eq!(
+            restarted.chat(&project, &chat).unwrap().remote.payload,
+            data
+        );
+        assert_eq!(restarted.chat(&project, &chat).unwrap().remote.revision, 1);
 
         data["deleted"] = json!(true);
         enqueue(&mut restarted, &project, &chat, data);
@@ -1241,8 +1220,11 @@ mod tests {
             .await
             .unwrap();
         enqueue(&mut restarted, &project, &chat, payload(22));
-        assert!(restarted.records[&id].desired.is_none());
-        assert_eq!(restarted.records[&id].remote.payload["deleted"], true);
+        assert!(restarted.chat(&project, &chat).unwrap().desired.is_none());
+        assert_eq!(
+            restarted.chat(&project, &chat).unwrap().remote.payload["deleted"],
+            true
+        );
         println!(
             "real_backend_catalog_roundtrip_restart_and_tombstone: accepted/reloaded/empty-labels/terminal-delete passed"
         );
@@ -1284,7 +1266,10 @@ mod tests {
     fn repeated_legacy_import_prefers_already_acknowledged_server_record() {
         let mut catalog = Catalog::default();
         enqueue(&mut catalog, "project", "chat", payload(1));
-        catalog.records.get_mut("project/chat").unwrap().import_only = true;
+        catalog
+            .record_mut("project", &EntityKey::chat("chat"))
+            .unwrap()
+            .import_only = true;
 
         let mut canonical = payload(9);
         canonical["classifications"] = json!([{"labels": []}]);
@@ -1292,14 +1277,17 @@ mod tests {
             &mut catalog,
             "project",
             Entry {
-                chat_id: "chat".into(),
+                id: EntityKey::chat("chat"),
                 revision: 7,
                 payload: canonical.clone(),
             },
         );
 
-        assert!(catalog.records["project/chat"].desired.is_none());
-        assert_eq!(catalog.records["project/chat"].remote.payload, canonical);
+        assert!(catalog.chat("project", "chat").unwrap().desired.is_none());
+        assert_eq!(
+            catalog.chat("project", "chat").unwrap().remote.payload,
+            canonical
+        );
     }
 
     #[tokio::test]
@@ -1315,6 +1303,10 @@ mod tests {
             .respond_with(move |request: &wiremock::Request| {
                 let body: Value = serde_json::from_slice(&request.body).unwrap();
                 let query = body["query"].as_str().unwrap();
+                if query.contains("reviewThreads(") {
+                    return empty_thread_snapshot();
+                }
+
                 let variables = &body["variables"];
 
                 if query.contains("registerChatInstallation") {
@@ -1343,7 +1335,7 @@ mod tests {
                     "data": {"chatCatalog": {"entries": [], "nextCursor": null}}
                 }))
             })
-            .expect(3)
+            .expect(4)
             .mount(&server)
             .await;
         let client = GraphqlClient::new(SacrumConfig {
@@ -1362,7 +1354,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(catalog.records["project/chat"].desired.is_none());
+        assert!(catalog.chat("project", "chat").unwrap().desired.is_none());
         assert_eq!(installation(root.path()).unwrap(), installation_id);
         server.verify().await;
     }
@@ -1451,7 +1443,7 @@ mod tests {
             let value = tc.draw(gs::integers::<u8>());
             let p = project.to_string();
             let c = chat.to_string();
-            let id = key(&p, &c);
+            let id = EntityKey::chat(&c);
 
             match operation {
                 0..=2 => {
@@ -1462,9 +1454,9 @@ mod tests {
                 }
                 3 => {
                     // deletion, including offline/imported records
-                    if expected.contains_key(&(project, chat)) {
-                        expected.insert((project, chat), None);
-                        let record = &state.records[&id];
+                    if let Some(expected) = expected.get_mut(&(project, chat)) {
+                        *expected = None;
+                        let record = state.record(&p, &id).unwrap();
                         let mut deleted = record
                             .desired
                             .as_ref()
@@ -1476,27 +1468,30 @@ mod tests {
                 }
                 4 => {
                     // serialize/restart at any boundary
-                    state = serde_json::from_slice(&serde_json::to_vec(&state).unwrap()).unwrap();
+                    state = storage::decode(&storage::encode(&state).unwrap()).unwrap();
                 }
                 5 => {
                     // delivery and ack, then duplicated/reordered older event
-                    if let Some(record) = state.records.get_mut(&id) {
+                    if let Some(record) = state.record_mut(&p, &id) {
                         if let Some(desired) = record.desired.take() {
                             revision += 1;
-                            record.remote = Entry {
-                                chat_id: c.clone(),
+                            record.remote = Remote {
                                 revision,
                                 payload: desired,
                             };
                         }
-                        let current = record.remote.clone();
+                        let current = Entry {
+                            id: id.clone(),
+                            revision: record.remote.revision,
+                            payload: record.remote.payload.clone(),
+                        };
                         merge(&mut state, &p, current);
                         if revision > 0 {
                             merge(
                                 &mut state,
                                 &p,
                                 Entry {
-                                    chat_id: c.clone(),
+                                    id: EntityKey::chat(c),
                                     revision: 0,
                                     payload: payload(0),
                                 },
@@ -1506,7 +1501,7 @@ mod tests {
                 }
                 _ => {
                     // remote delete racing a pending inference or manual correction
-                    if state.records.contains_key(&id) {
+                    if state.record(&p, &id).is_some() {
                         revision += 1;
                         expected.insert((project, chat), None);
                         let mut deleted = payload(0);
@@ -1515,7 +1510,7 @@ mod tests {
                             &mut state,
                             &p,
                             Entry {
-                                chat_id: c,
+                                id: EntityKey::chat(c),
                                 revision,
                                 payload: deleted,
                             },
@@ -1525,7 +1520,7 @@ mod tests {
             }
 
             for ((project, chat), intent) in &expected {
-                let record = &state.records[&key(&project.to_string(), &chat.to_string())];
+                let record = &state.chat(&project.to_string(), &chat.to_string()).unwrap();
                 let actual = record.desired.as_ref().unwrap_or(&record.remote.payload);
                 match intent {
                     None => assert_eq!(actual["deleted"], true),
@@ -1547,6 +1542,9 @@ mod tests {
         Mock::given(matchers::method("POST"))
             .respond_with(move |request: &wiremock::Request| {
                 let body: Value = serde_json::from_slice(&request.body).unwrap();
+                if body["query"].as_str().unwrap().contains("reviewThreads(") {
+                    return empty_thread_snapshot();
+                }
                 assert!(body["query"]
                     .as_str()
                     .unwrap()
@@ -1570,7 +1568,7 @@ mod tests {
                     }
                 }))
             })
-            .expect(3)
+            .expect(4)
             .mount(&server)
             .await;
 
@@ -1592,10 +1590,13 @@ mod tests {
             vec![Value::Null, json!("a"), json!("b")]
         );
         assert_eq!(
-            catalog.records.keys().cloned().collect::<Vec<_>>(),
-            ["project/a", "project/b", "project/c"]
+            catalog
+                .records("project")
+                .map(|(id, _)| id.to_string())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
         );
-        assert_eq!(load(&path).unwrap().records.len(), 3);
+        assert_eq!(load(&path).unwrap().records("project").count(), 3);
         server.verify().await;
     }
 
@@ -1617,6 +1618,10 @@ mod tests {
             .respond_with(move |request: &wiremock::Request| {
                 let body: Value = serde_json::from_slice(&request.body).unwrap();
                 let query = body["query"].as_str().unwrap();
+                if query.contains("reviewThreads(") {
+                    return empty_thread_snapshot();
+                }
+
                 let vars = &body["variables"];
 
                 if query.contains("registerChatInstallation") {
@@ -1635,7 +1640,7 @@ mod tests {
                         .iter()
                         .map(|entry| {
                             json!({
-                                "chatId": entry.chat_id,
+                                "chatId": entry.id.to_string(),
                                 "revision": entry.revision,
                                 "payload": entry.payload
                             })
@@ -1660,7 +1665,7 @@ mod tests {
                     let revision = model.entry.as_ref().map_or(1, |e| e.revision + 1);
                     assert_eq!(vars["r"].as_u64().unwrap(), revision - 1);
                     model.entry = Some(Entry {
-                        chat_id: vars["c"].as_str().unwrap().into(),
+                        id: EntityKey::chat(vars["c"].as_str().unwrap()),
                         revision,
                         payload,
                     });
@@ -1679,7 +1684,7 @@ mod tests {
                         "putChatCatalog": {
                             "status": "accepted",
                             "entry": {
-                                "chatId": row.chat_id,
+                                "chatId": row.id.to_string(),
                                 "revision": row.revision,
                                 "payload": row.payload
                             }
@@ -1700,19 +1705,25 @@ mod tests {
         let mut catalog = Catalog::default();
         enqueue(&mut catalog, "project", "chat", payload(7));
         save(&path, &catalog).unwrap();
-        let mutation = catalog.records["project/chat"].mutation_id.clone();
+        let mutation = catalog.chat("project", "chat").unwrap().mutation_id.clone();
         assert!(exchange(&client, "project", "machine", &mut catalog, &path)
             .await
             .is_err());
 
         let mut restarted = load(&path).unwrap();
-        assert_eq!(restarted.records["project/chat"].mutation_id, mutation);
+        assert_eq!(
+            restarted.chat("project", "chat").unwrap().mutation_id,
+            mutation
+        );
 
         exchange(&client, "project", "machine", &mut restarted, &path)
             .await
             .unwrap();
-        assert!(restarted.records["project/chat"].desired.is_none());
-        assert_eq!(restarted.records["project/chat"].remote.revision, 1);
+        assert!(restarted.chat("project", "chat").unwrap().desired.is_none());
+        assert_eq!(
+            restarted.chat("project", "chat").unwrap().remote.revision,
+            1
+        );
 
         let expected: Value =
             serde_json::from_slice(&fs::read(path.with_extension("expected.json")).unwrap())
@@ -1734,6 +1745,10 @@ mod tests {
             .respond_with(move |request: &wiremock::Request| {
                 let body: Value = serde_json::from_slice(&request.body).unwrap();
                 let query = body["query"].as_str().unwrap();
+                if query.contains("reviewThreads(") {
+                    return empty_thread_snapshot();
+                }
+
                 observed
                     .lock()
                     .unwrap()
@@ -1769,7 +1784,7 @@ mod tests {
             catalog,
             project,
             Entry {
-                chat_id: chat.into(),
+                id: EntityKey::chat(chat),
                 revision,
                 payload: payload(n),
             },
@@ -1815,8 +1830,8 @@ mod tests {
         }
 
         assert_eq!(*requests.lock().unwrap(), ["put"]);
-        assert!(catalog.records["edited/chat"].desired.is_none());
-        assert_eq!(catalog.records["edited/chat"].remote.revision, 4);
+        assert!(catalog.chat("edited", "chat").unwrap().desired.is_none());
+        assert_eq!(catalog.chat("edited", "chat").unwrap().remote.revision, 4);
 
         // Repeating the save with nothing pending issues zero requests.
         sync_project(
@@ -1878,7 +1893,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(*requests.lock().unwrap(), ["put", "put"]);
-        let record = &catalog.records["project/chat"];
+        let record = &catalog.chat("project", "chat").unwrap();
         assert!(record.desired.is_none() && !record.conflicted);
         assert_eq!(record.remote.revision, 5);
         assert_eq!(record.remote.payload, payload(2));
@@ -1899,8 +1914,11 @@ mod tests {
             .unwrap();
         assert_eq!(requests.lock().unwrap().len(), DELIVERY_ATTEMPTS);
         let restarted = load(&path).unwrap();
-        assert!(restarted.records["project/chat"].conflicted);
-        assert_eq!(restarted.records["project/chat"].desired, Some(payload(3)));
+        assert!(restarted.chat("project", "chat").unwrap().conflicted);
+        assert_eq!(
+            restarted.chat("project", "chat").unwrap().desired,
+            Some(payload(3))
+        );
 
         // A remote tombstone wins and can never be resurrected.
         let (_server, client, requests) = counting_server(|_| {
@@ -1917,9 +1935,9 @@ mod tests {
             .unwrap();
         assert_eq!(requests.lock().unwrap().len(), 1);
         enqueue(&mut catalog, "project", "chat", payload(4));
-        assert!(catalog.records["project/chat"].desired.is_none());
+        assert!(catalog.chat("project", "chat").unwrap().desired.is_none());
         assert_eq!(
-            catalog.records["project/chat"].remote.payload["deleted"],
+            catalog.chat("project", "chat").unwrap().remote.payload["deleted"],
             true
         );
     }
@@ -1975,7 +1993,7 @@ mod tests {
         CatalogChange {
             project_id: "project".into(),
             installation_id: "machine".into(),
-            chat_id: chat.into(),
+            chat_id: chat.to_owned(),
             revision,
             payload,
         }
@@ -1991,7 +2009,7 @@ mod tests {
         let before = fs::read(&path).unwrap();
 
         for revision in [4, 3, 0] {
-            let update = apply_entry(
+            let update = apply_chat_entry(
                 &mut catalog,
                 &path,
                 "project",
@@ -2005,7 +2023,10 @@ mod tests {
             before,
             "no durable write for echoes"
         );
-        assert_eq!(catalog.records["project/chat"].remote.payload, payload(1));
+        assert_eq!(
+            catalog.chat("project", "chat").unwrap().remote.payload,
+            payload(1)
+        );
     }
 
     #[test]
@@ -2023,7 +2044,7 @@ mod tests {
             },
         );
 
-        let update = apply_entry(
+        let update = apply_chat_entry(
             &mut catalog,
             &path,
             "project",
@@ -2038,12 +2059,17 @@ mod tests {
         assert_eq!(session.project_path.as_deref(), Some("/repo"));
         assert_eq!(session.association.unwrap()["worktreePath"], "local-only");
         assert_eq!(
-            load(&path).unwrap().records["project/chat"].remote.revision,
+            load(&path)
+                .unwrap()
+                .chat("project", "chat")
+                .unwrap()
+                .remote
+                .revision,
             2
         );
 
         // A remote creation is also merged incrementally.
-        let created = apply_entry(
+        let created = apply_chat_entry(
             &mut catalog,
             &path,
             "project",
@@ -2057,7 +2083,7 @@ mod tests {
         // A tombstone publishes a deletion and cannot be resurrected locally.
         let mut deleted = payload(5);
         deleted["deleted"] = json!(true);
-        let update = apply_entry(
+        let update = apply_chat_entry(
             &mut catalog,
             &path,
             "project",
@@ -2068,7 +2094,41 @@ mod tests {
         .unwrap();
         assert!(update.session.is_none());
         enqueue(&mut catalog, "project", "chat", payload(7));
-        assert!(catalog.records["project/chat"].desired.is_none());
+        assert!(catalog.chat("project", "chat").unwrap().desired.is_none());
+    }
+
+    #[test]
+    fn discussion_cdc_persists_transport_state_without_hydrating_regular_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("catalog.json");
+        let mut catalog = Catalog::default();
+        acknowledged(&mut catalog, "project", "main", 1, 1);
+
+        let mut discussion = payload(2);
+        discussion["metadata"]["kind"] = json!("discussion");
+        discussion["parent_chat_id"] = json!("main");
+        discussion["review_thread_id"] = json!(Uuid::new_v4());
+
+        let update = apply_chat_entry(
+            &mut catalog,
+            &path,
+            "project",
+            "/repo",
+            change("discussion", 1, discussion.clone()),
+        )
+        .unwrap();
+
+        assert!(update.is_none());
+        let disk = load(&path).unwrap();
+        assert_eq!(
+            disk.chat("project", "discussion").unwrap().remote.payload,
+            discussion
+        );
+
+        let mut sessions = Vec::new();
+        hydrate_snapshot(&disk, "project", "/repo", &mut sessions);
+        let ids: Vec<_> = sessions.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["main"]);
     }
 
     #[test]
@@ -2080,11 +2140,15 @@ mod tests {
         enqueue(&mut catalog, "project", "edited", payload(2));
         acknowledged(&mut catalog, "project", "lost", 1, 1);
         enqueue(&mut catalog, "project", "lost", payload(3));
-        let mutation = catalog.records["project/edited"].mutation_id.clone();
+        let mutation = catalog
+            .chat("project", "edited")
+            .unwrap()
+            .mutation_id
+            .clone();
 
         // A concurrent remote change advances the expected revision but the
         // local intent stays visible and pending with its stable mutation id.
-        let update = apply_entry(
+        let update = apply_chat_entry(
             &mut catalog,
             &path,
             "project",
@@ -2092,13 +2156,13 @@ mod tests {
             change("edited", 2, payload(9)),
         );
         assert!(update.unwrap().is_none());
-        let record = &catalog.records["project/edited"];
+        let record = &catalog.chat("project", "edited").unwrap();
         assert_eq!(record.desired, Some(payload(2)));
         assert_eq!(record.remote.revision, 2);
         assert_eq!(record.mutation_id, mutation);
 
         // The echo of a write whose acknowledgement was lost settles the outbox.
-        let update = apply_entry(
+        let update = apply_chat_entry(
             &mut catalog,
             &path,
             "project",
@@ -2106,8 +2170,11 @@ mod tests {
             change("lost", 2, payload(3)),
         );
         assert!(update.unwrap().is_none());
-        assert!(catalog.records["project/lost"].desired.is_none());
-        assert!(load(&path).unwrap().records["project/lost"]
+        assert!(catalog.chat("project", "lost").unwrap().desired.is_none());
+        assert!(load(&path)
+            .unwrap()
+            .chat("project", "lost")
+            .unwrap()
             .desired
             .is_none());
     }

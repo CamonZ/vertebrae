@@ -1145,3 +1145,19 @@ Artifact JSON and workflow source/configuration panels use the lazy shared
 `PanelCode` surface. See [Panel code surfaces](panel-code-surfaces.md) for its
 draft/reset contract, language policy, migrated inventory and ranked follow-up
 candidates.
+
+### Review thread catalog IPC
+
+`putReviewThread` accepts a complete typed anchor and position. Use the same
+thread UUID for updates. `tombstoneReviewThread` is idempotent for a known
+tombstone and reports an error for an unknown thread. Updates to a known
+tombstone fail locally. `listReviewThreads` reads the account-scoped cache for
+a configured project. The standard chat history excludes discussion sessions.
+
+Subscribe to `reviewThreadChanged` for durable changes to visible threads. The
+event identifies the project and thread and carries the current thread or
+`null` when it is removed. Local writes, remote writes, and the removal of
+queued descendants use the same event. Use `reviewThreadCatalogRecovered` to
+reload the complete project projection after startup or reconnect, including
+an empty snapshot. A failed CDC merge emits `reviewThreadCatalogRecoveryNeeded`;
+the global catalog listener requests recovery for the current account.
