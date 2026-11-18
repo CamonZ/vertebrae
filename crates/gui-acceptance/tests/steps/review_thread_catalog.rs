@@ -51,13 +51,14 @@ async fn save_session(
     project_path: &Path,
     discussion: Option<(&str, Uuid)>,
 ) {
-    let (parent, thread) = discussion.unzip();
+    let binding = discussion
+        .map(|(parent, thread)| json!({"parentChatId": parent, "reviewThreadId": thread}));
     ipc(
         client,
         "save_local_chat_session_index",
         json!({"input": {"changedIds": [id], "sessions": [{
             "id": id, "label": id, "harness": "claude", "projectPath": project_path,
-            "parentChatId": parent, "reviewThreadId": thread,
+            "discussionBinding": binding,
             "titleUserMessageCount": 0, "messageCount": 1, "lifecycle": "idle", "status": "open",
             "createdAt": "2026-11-01T00:00:00Z", "updatedAt": "2026-11-01T00:00:00Z"
         }]}}),

@@ -259,20 +259,25 @@ fn projection(session: &LocalChatSessionIndexEntry) -> Value {
         }
     }
 
-    let association = session.association.as_ref().unwrap_or(&Value::Null);
+    let discussion = session.discussion_binding.as_ref();
+    let association = session
+        .association
+        .as_ref()
+        .filter(|_| discussion.is_none())
+        .unwrap_or(&Value::Null);
     if let Some(level) = association.get("entityLevel") {
         metadata.insert("entityLevel".into(), level.clone());
     }
 
-    if session.review_thread_id.is_some() {
+    if discussion.is_some() {
         metadata.insert("kind".into(), json!("discussion"));
     }
     json!({
         "status": session.activity_status,
         "metadata": metadata,
         "task_id": association.get("ticketId"),
-        "parent_chat_id": session.parent_chat_id,
-        "review_thread_id": session.review_thread_id,
+        "parent_chat_id": discussion.map(|binding| &binding.parent_chat_id),
+        "review_thread_id": discussion.map(|binding| binding.review_thread_id),
         "gate_execution_id": session.gate.as_ref().map(|g| &g.execution_id),
         "gate_task_run_id": session.gate.as_ref().map(|g| &g.task_run_id),
         "classifications": [],
@@ -652,21 +657,10 @@ fn hydrate_snapshot(
     project_path: &str,
     sessions: &mut Vec<LocalChatSessionIndexEntry>,
 ) {
-    // Discussion links support outbox transport. The regular chat index
-    // still hydrates only ordinary chats.
-    sessions.retain(|session| {
-        session.project_path.as_deref() != Some(project_path) || session.review_thread_id.is_none()
-    });
-
     for (id, record) in catalog.records(project_id) {
         let EntityKey::Chat(chat) = id else {
             continue;
         };
-        if delivery::is_discussion(record.visible()) {
-            sessions.retain(|s| s.id != chat.0);
-            continue;
-        }
-
         let previous = sessions.iter().find(|s| s.id == chat.0).cloned();
         let scoped_id = key(project_id, &chat.0);
         match hydrate_record(
@@ -716,37 +710,56 @@ fn hydrate_record(
     value["id"] = json!(chat_id);
     value["projectPath"] = json!(project_path);
     let sidecar = catalog.sidecars.get(id);
-    value["gate"] = previous
-        .and_then(|s| s.gate.as_ref())
-        .or_else(|| sidecar.and_then(|s| s.gate.as_ref()))
-        .map(|g| serde_json::to_value(g).unwrap())
-        .unwrap_or(Value::Null);
+    let discussion = delivery::is_discussion(payload);
+    value["discussionBinding"] = if discussion {
+        let worktree_path = previous
+            .and_then(|session| session.discussion_binding.as_ref())
+            .or_else(|| sidecar.and_then(|sidecar| sidecar.discussion.as_ref()))
+            .and_then(|binding| binding.worktree_path.as_deref());
+        json!({
+            "worktreePath": worktree_path,
+            "parentChatId": payload["parent_chat_id"],
+            "reviewThreadId": payload["review_thread_id"],
+        })
+    } else {
+        Value::Null
+    };
+    if discussion {
+        value["association"] = Value::Null;
+        value["gate"] = Value::Null;
+    } else {
+        value["gate"] = previous
+            .and_then(|s| s.gate.as_ref())
+            .or_else(|| sidecar.and_then(|s| s.gate.as_ref()))
+            .map(|g| serde_json::to_value(g).unwrap())
+            .unwrap_or(Value::Null);
 
-    let mut association = previous
-        .and_then(|s| s.association.clone())
-        .or_else(|| sidecar.and_then(|s| s.association.clone()))
-        .unwrap_or_else(|| {
-            json!({
-                "ticketId": null,
-                "ticketTitle": null,
-                "worktreePath": null,
-                "branch": null,
-                "lastProcessedAt": null,
-                "processedAtCount": 0,
-                "awaitingWorktree": null,
-                "recentWorktrees": []
-            })
-        });
-    association["ticketId"] = payload["task_id"].clone();
-    // The association reader requires an explicit nullable title. Titles are
-    // not stored in local sidecars and must not survive an entity rebind.
-    association["ticketTitle"] = Value::Null;
-    association["entityLevel"] = payload["metadata"]
-        .get("entityLevel")
-        .cloned()
-        .filter(|v| v.is_string())
-        .unwrap_or_else(|| json!("ticket"));
-    value["association"] = association;
+        let mut association = previous
+            .and_then(|s| s.association.clone())
+            .or_else(|| sidecar.and_then(|s| s.association.clone()))
+            .unwrap_or_else(|| {
+                json!({
+                    "ticketId": null,
+                    "ticketTitle": null,
+                    "worktreePath": null,
+                    "branch": null,
+                    "lastProcessedAt": null,
+                    "processedAtCount": 0,
+                    "awaitingWorktree": null,
+                    "recentWorktrees": []
+                })
+            });
+        association["ticketId"] = payload["task_id"].clone();
+        // The association reader requires an explicit nullable title. Titles are
+        // not stored in local sidecars and must not survive an entity rebind.
+        association["ticketTitle"] = Value::Null;
+        association["entityLevel"] = payload["metadata"]
+            .get("entityLevel")
+            .cloned()
+            .filter(|v| v.is_string())
+            .unwrap_or_else(|| json!("ticket"));
+        value["association"] = association;
+    }
 
     match serde_json::from_value(value) {
         Ok(session) => Hydrated::Session(Box::new(session)),
@@ -1434,6 +1447,7 @@ mod tests {
         raw["messages"] = json!([marker]);
         raw["association"] = json!({
             "ticketId": task_id,
+            "entityLevel": "task",
             "worktreePath": marker,
             "worktreeBranch": marker,
             "lastEventId": marker,
@@ -1451,6 +1465,10 @@ mod tests {
 
         assert!(!wire.to_string().contains(&marker));
         assert_eq!(wire["task_id"], task_id);
+        assert_eq!(wire["metadata"]["entityLevel"], "task");
+        assert!(wire["metadata"].get("kind").is_none());
+        assert!(wire["parent_chat_id"].is_null());
+        assert!(wire["review_thread_id"].is_null());
         assert!(wire.get("entity_id").is_none());
         assert_eq!(wire["metadata"]["label"], "chat-1");
         assert_eq!(wire["classifications"], json!([]));
@@ -2069,6 +2087,7 @@ mod tests {
             "project/chat".into(),
             migration::Sidecar {
                 project_path: Some("/repo".into()),
+                discussion: None,
                 association: Some(json!({"worktreePath": "local-only"})),
                 gate: None,
             },
@@ -2134,10 +2153,19 @@ mod tests {
         let mut catalog = Catalog::default();
         acknowledged(&mut catalog, "project", "main", 1, 1);
 
-        let mut discussion = payload(2);
-        discussion["metadata"]["kind"] = json!("discussion");
-        discussion["parent_chat_id"] = json!("main");
-        discussion["review_thread_id"] = json!(Uuid::new_v4());
+        let thread_id = Uuid::new_v4();
+        let mut index_entry = payload(2)["metadata"].clone();
+        index_entry["id"] = json!("discussion");
+        index_entry["discussionBinding"] = json!({
+            "parentChatId": "main", "reviewThreadId": thread_id, "worktreePath": "/checkout",
+        });
+        let original: LocalChatSessionIndexEntry = serde_json::from_value(index_entry).unwrap();
+        let discussion = projection(&original);
+        assert!(!discussion.to_string().contains("/checkout"));
+        catalog.sidecars.insert(
+            key("project", "discussion"),
+            migration::Sidecar::from_session(&original),
+        );
 
         let update = apply_chat_entry(
             &mut catalog,
@@ -2157,8 +2185,21 @@ mod tests {
 
         let mut sessions = Vec::new();
         hydrate_snapshot(&disk, "project", "/repo", &mut sessions);
-        let ids: Vec<_> = sessions.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, ["main"]);
+        assert_eq!(sessions.len(), 2);
+        let session = sessions.iter_mut().find(|s| s.id == "discussion").unwrap();
+        assert_eq!(session.discussion_binding, original.discussion_binding);
+        assert!(session.association.is_none());
+        assert!(session.gate.is_none());
+        session.title = Some("Updated discussion".into());
+        session.thread_total_tokens = Some(12);
+        session.association = Some(json!({"ticketId": "should-not-project"}));
+        let update = projection(session);
+        assert_eq!(update["metadata"]["kind"], "discussion");
+        assert_eq!(update["metadata"]["title"], "Updated discussion");
+        assert_eq!(update["metadata"]["threadTotalTokens"], 12);
+        assert_eq!(update["review_thread_id"], discussion["review_thread_id"]);
+        assert_eq!(update["parent_chat_id"], "main");
+        assert!(update["task_id"].is_null());
     }
 
     #[test]

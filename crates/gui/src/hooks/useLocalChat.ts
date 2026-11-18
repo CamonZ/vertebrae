@@ -1,3 +1,4 @@
+import { discussionBinding } from "../utils/localChatDiscussion";
 import { loadMainChatWorktree } from "../utils/chatAssociation/defaultWorktree";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { flushPendingLocalChatText } from "../utils/localChatTextBatch";
@@ -789,7 +790,7 @@ export async function doStartSession(
       });
     }
 
-    let workingDir: string | null = session.projectPath ?? null;
+    let workingDir = discussionBinding(session.discussion)?.worktreePath ?? session.projectPath ?? null;
     if (workingDir === null) {
       const pathResult = await commands.getCurrentProjectPath();
       if (pathResult.status === "ok" && pathResult.data) {

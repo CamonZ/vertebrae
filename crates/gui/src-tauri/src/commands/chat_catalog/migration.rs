@@ -96,6 +96,8 @@ pub(super) fn inventory_annotations(
 #[serde(deny_unknown_fields)]
 pub(super) struct Sidecar {
     pub project_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discussion: Option<super::super::local_chat::LocalChatDiscussionBinding>,
     pub association: Option<Value>,
     pub gate: Option<crate::local_chat::LocalChatGateBinding>,
 }
@@ -111,6 +113,7 @@ impl Sidecar {
 
         Self {
             project_path: session.project_path.clone(),
+            discussion: session.discussion_binding.clone(),
             association,
             gate: session.gate.clone(),
         }

@@ -258,6 +258,9 @@ describe("palette helpers", () => {
         { id: "b", label: "B", updatedAt: "2026-11-03", hasUserMessage: true },
         { id: "empty", label: "Empty", updatedAt: "2026-11-04", hasUserMessage: false },
         { id: "a", label: "A", status: "open" },
+        { id: "inline", label: "Inline", status: "open", hasUserMessage: true,
+          discussion: { parentChatId: "a", reviewThreadId: "thread", worktreePath: "/checkout" } },
+        { id: "unbound", label: "Transient", status: "open", discussion: "unbound" },
         {
           id: "c",
           label: "C",

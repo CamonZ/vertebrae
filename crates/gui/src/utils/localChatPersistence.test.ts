@@ -1,3 +1,4 @@
+import { flattenLocalChatTicketGroups, groupLocalChatSessionsByHierarchy } from "./localChatSessionGroups";
 import { waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "../stores/chatStore";
@@ -63,6 +64,58 @@ describe("localChatPersistence", () => {
       "working"
     );
     expect(normalizeLocalChatSession(persisted)?.backendSessionId).toBeNull();
+  });
+
+  it("persists only captured discussions and excludes them from conversation lookups", async () => {
+    vi.resetModules();
+    const { commands } = await import("../bindings");
+    vi.spyOn(commands, "loadLocalChatSessionIndex").mockResolvedValue({ status: "ok", data: [] });
+    const save = vi.spyOn(commands, "saveLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: null });
+    const persistence = await import("./localChatPersistence");
+    const discussionBinding = {
+      parentChatId: "s-1",
+      worktreePath: "/checkout",
+      reviewThreadId: "b8c10d15-8f68-43a8-a527-f6243d663cb2",
+    };
+    const association = { ticketId: "shared-task", entityLevel: "task" };
+    await persistence.persistLocalChatSession(makeSession({ association }));
+    await persistence.persistLocalChatSession(makeSession({ id: "unbound", discussion: "unbound" }));
+    await persistence.persistLocalChatSession(makeSession({
+      id: "bound",
+      discussion: discussionBinding,
+      association,
+      updatedAt: "2026-01-02T00:00:00Z",
+    }));
+
+    const saved = save.mock.lastCall?.[0].sessions ?? [];
+    expect(saved.map(({ id }) => id)).toEqual(["s-1", "bound"]);
+    const bound = saved.find(({ id }) => id === "bound");
+    expect(bound?.discussionBinding).toEqual(discussionBinding);
+    expect(persistence.normalizeLocalChatSession(bound))
+      .toMatchObject({ discussion: discussionBinding, providerResumeId: "conv-1" });
+    expect(persistence.listPersistedLocalChatSessions("/repo").map(({ id }) => id)).toEqual(["s-1"]);
+    const groups = groupLocalChatSessionsByHierarchy(persistence.listPersistedLocalChatSessions("/repo"), new Map());
+    expect(flattenLocalChatTicketGroups(groups).flatMap(({ sessions }) => sessions.map(({ id }) => id)))
+      .toEqual(["s-1"]);
+    expect(persistence.findPersistedLocalChatSession("/repo")?.id).toBe("s-1");
+    expect(persistence.loadPersistedLocalChatSession("bound")).toBeNull();
+    expect(Object.keys(persistence.loadPersistedLocalChatSessions())).toEqual(["s-1"]);
+  });
+
+  it("never sends an unbound discussion to the session index command", async () => {
+    vi.resetModules();
+    const { commands } = await import("../bindings");
+    vi.spyOn(commands, "loadLocalChatSessionIndex").mockResolvedValue({ status: "ok", data: [] });
+    const save = vi.spyOn(commands, "saveLocalChatSessionIndex")
+      .mockResolvedValue({ status: "ok", data: null });
+    const persistence = await import("./localChatPersistence");
+
+    await persistence.persistLocalChatSession(makeSession({ id: "unbound", discussion: "unbound" }));
+    expect(save).not.toHaveBeenCalled();
+    await persistence.persistLocalChatSession(makeSession({ id: "main" }));
+    expect(save.mock.calls[0][0].changedIds).toEqual(["main"]);
+    expect(save.mock.calls[0][0].sessions.map(({ id }) => id)).toEqual(["main"]);
   });
 
   it("round-trips resumable local chat metadata", () => {

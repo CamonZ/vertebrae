@@ -2156,6 +2156,7 @@ observed_at: string }
  */
 export type LocalChatChildSession = { provider_resume_id: string; spawn_tool_call_id: string | null; label: string; is_active: boolean | null }
 export type LocalChatCompactionEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; state: string; trigger?: string | null; pre_tokens?: number | null }
+export type LocalChatDiscussionBinding = { worktreePath: string | null; reviewThreadId: string; parentChatId: string }
 export type LocalChatFileChange = { path: string; kind: string; diff: string | null }
 export type LocalChatFileChangeEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; status: string; changes: LocalChatFileChange[]; parent_tool_use_id: string | null }
 /**
@@ -2242,7 +2243,7 @@ export type LocalChatSessionIndexEntry = { activityStatus?: LocalChatActivitySta
 /**
  * Optional association metadata; no raw tool payloads.
  */
-association?: JsonValue | null; id: string; parentChatId?: string | null; reviewThreadId?: string | null; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind;
+association?: JsonValue | null; id: string; discussionBinding?: LocalChatDiscussionBinding | null; label: string; title: string | null; titleStatus: string | null; titleConfidence: number | null; titleUserMessageCount: number; harness: LocalChatHarnessKind;
 /**
  * Provider the session was started with; absent means the harness's
  * built-in provider.

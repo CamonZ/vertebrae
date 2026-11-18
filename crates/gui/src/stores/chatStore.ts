@@ -1,3 +1,4 @@
+import { discussionBinding, isOpenLocalChatConversation, type LocalChatDiscussion } from "../utils/localChatDiscussion";
 import { replaySpeedTier } from "../utils/localChatSpeedTier";
 import { localChatActivityStatus } from "../utils/localChatActivity";
 import {
@@ -72,7 +73,7 @@ import type {
   PermissionMode,
   UserQuestion,
 } from "../bindings";
-import { commands, type AssociationWorktree } from "../bindings";
+import { commands, type AssociationWorktree, type LocalChatDiscussionBinding } from "../bindings";
 import { emptyChatAssociation } from "../utils/chatAssociation/defaultWorktree";
 import { usePendingCommentsStore } from "./pendingCommentsStore";
 import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
@@ -501,10 +502,10 @@ export interface ChatSession {
   /** Runtime-only progressive provider transcript replay state. */
   providerReplay?: ProviderReplayState;
   /**
-   * Runtime-only read-only selection discussion. It runs through the local
-   * chat lifecycle but is never persisted, listed, reused or opened in a pane.
+   * Read-only selection discussion. It runs through the local
+   * chat lifecycle, and only the inline review thread can open it.
    */
-  discussion?: boolean;
+  discussion?: LocalChatDiscussion;
   /** Runtime-only Vertebrae annotations keyed by provider tool id, then kind. */
   toolAnnotations?: ToolAnnotations;
   /** Runtime-only token of the annotation load allowed to write this session. */
@@ -657,8 +658,9 @@ interface ChatStoreActions {
     projectPath: string,
     mainWorktree?: AssociationWorktree | null
   ) => string;
-  /** Add a hidden read-only discussion session; `closeSession` discards it. */
+  /** Add a hidden read-only discussion session. */
   openDiscussionSession: (input: {
+    discussionBinding?: LocalChatDiscussionBinding;
     harness: LocalChatHarnessKind;
     providerId?: string | null;
     projectPath: string;
@@ -1146,17 +1148,11 @@ function hydrateLocalSession(session: ChatSession): ChatSession {
   };
 }
 
-/** An open chat the user can see, list or reopen, unlike a discussion. */
-function isConversationSession(session: ChatSession): boolean {
-  return session.status === "open" && !session.discussion;
-}
-
 function localSessionSummaryFor(
   session: ChatSession
 ): LocalChatSessionSummary | null {
   if (
-    session.status !== "open" ||
-    session.discussion ||
+    !isOpenLocalChatConversation(session) ||
     isDisposableClosedLocalChatSession(session)
   ) {
     return null;
@@ -1239,7 +1235,7 @@ function findReusableDefaultEmptySession(
     Object.values(sessions)
       .filter(
         (session) =>
-          isConversationSession(session) &&
+          isOpenLocalChatConversation(session) &&
           isDefaultEmptyLocalChatSession(session) &&
           projectPathMatches(session.projectPath, projectPath)
       )
@@ -1292,7 +1288,7 @@ function findMatchingSession(
     Object.values(sessions)
       .filter(
         (session) =>
-          isConversationSession(session) &&
+          isOpenLocalChatConversation(session) &&
           projectPathMatches(session.projectPath, projectPath)
       )
       .sort(compareLocalChatSessionRecency)[0]?.id ?? null
@@ -1301,7 +1297,7 @@ function findMatchingSession(
 
 function isEligibleEmptyProjectSession(session: ChatSession): boolean {
   return (
-    isConversationSession(session) &&
+    isOpenLocalChatConversation(session) &&
     !session.providerResumeId?.trim() &&
     session.messages.length === 0 &&
     (session.messageCount ?? 0) === 0
@@ -1326,7 +1322,7 @@ function findEligibleEmptyProjectSession(
 function latestSessionId(sessions: Record<string, ChatSession>): string | null {
   return (
     Object.values(sessions)
-      .filter(isConversationSession)
+      .filter(isOpenLocalChatConversation)
       .sort(compareLocalChatSessionRecency)[0]?.id ?? null
   );
 }
@@ -1354,7 +1350,7 @@ export function normalizePaneLayout(
   const panes = (paneLayout?.panes ?? []).filter((pane) => {
     if (isRunPane(pane)) return true;
     const session = sessions[pane.sessionId];
-    if (!session || session.status !== "open") {
+    if (!isOpenLocalChatConversation(session)) {
       return false;
     }
     return true;
@@ -1374,7 +1370,7 @@ function focusSessionInPaneLayout(
   preferredPaneId?: string
 ): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
   const session = state.sessions[sessionId];
-  if (!session || session.status !== "open") {
+  if (!isOpenLocalChatConversation(session)) {
     return {
       activeSessionId: state.activeSessionId,
       paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
@@ -1447,7 +1443,7 @@ function addSessionPane(
   sessionId: string
 ): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
   const session = state.sessions[sessionId];
-  if (!session || session.status !== "open") {
+  if (!isOpenLocalChatConversation(session)) {
     return {
       activeSessionId: state.activeSessionId,
       paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
@@ -1728,7 +1724,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         session_id: session.id,
         harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
         provider_resume_id: session.providerResumeId,
-        project_path: session.projectPath ?? null,
+        project_path: discussionBinding(session.discussion)?.worktreePath ?? session.projectPath ?? null,
         created_at: session.createdAt ?? null,
         cursor,
         limit: 200,
@@ -2337,12 +2333,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return id;
     },
 
-    openDiscussionSession: ({ harness, providerId, projectPath }) => {
+    openDiscussionSession: ({ harness, providerId, projectPath, discussionBinding }) => {
       const session: ChatSession = {
         ...createLocalSession("Selection discussion", projectPath),
         harness,
         providerId: providerId ?? null,
-        discussion: true,
+        discussion: discussionBinding ?? "unbound",
       };
 
       set((state) => ({
@@ -2446,7 +2442,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       let bound = false;
       set((state) => {
         const session = state.sessions[sessionId];
-        if (!session || session.status !== "open") {
+        if (!isOpenLocalChatConversation(session)) {
           return {
             paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
           };
@@ -2641,8 +2637,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           if (
             !loaded[id] &&
             sessions[id] === before[id] &&
-            !sessions[id]?.backendSessionId &&
-            !sessions[id]?.discussion
+            !sessions[id]?.backendSessionId
           ) {
             delete sessions[id];
           }
@@ -2701,6 +2696,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     selectPersistedSession: async (sessionId, preferredPaneId) => {
       const existing = get().sessions[sessionId];
       if (existing) {
+        if (existing.discussion) return false;
         void hydrateProviderMessagesInPlace(sessionId, existing);
         set((state) => {
           const current = state.sessions[sessionId];
@@ -4274,10 +4270,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     setSessionAssociation: (sessionId, association) => {
-      updateSession(sessionId, (session) => ({
-        ...session,
-        association,
-      })).catch((error) => {
+      updateSession(sessionId, (session) =>
+        session.discussion ? session : { ...session, association }
+      ).catch((error) => {
         console.warn("Failed to persist chat association", error);
       });
     },

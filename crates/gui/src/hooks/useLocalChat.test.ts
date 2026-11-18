@@ -1245,7 +1245,7 @@ describe("doStartSession", () => {
 
     await doStartSession(
       // An automatic label would otherwise infer a title.
-      makeSession({ label: "New Chat", discussion: true }),
+      makeSession({ label: "New Chat", discussion: "unbound" }),
       SESSION_ID,
       deps,
       "Why is this here?"

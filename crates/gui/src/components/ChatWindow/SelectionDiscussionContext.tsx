@@ -1,3 +1,5 @@
+import { loadWorktreeDiscussions, placeWorktreeDiscussions } from "./restoreSelectionDiscussions";
+import { discussionBinding } from "../../utils/localChatDiscussion";
 import { useUIStore } from "../../stores/uiStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { useDiscussionModel } from "../../hooks/useDiscussionModel";
@@ -165,8 +167,7 @@ export function SelectionDiscussionProvider({
     return () => unsubscribe.forEach((unsubscribe) => unsubscribe());
   }, [controller]);
 
-  // Discussions live as long as the provider: unmounting (a session or
-  // worktree switch) closes their processes and discards their sessions.
+  // A bound session keeps its conversation after the worktree closes.
   useEffect(
     () => () => {
       const store = useChatStore.getState();
@@ -175,11 +176,14 @@ export function SelectionDiscussionProvider({
         const session = thread.sessionId && store.sessions[thread.sessionId];
         if (!session) continue;
 
-        if (session.backendSessionId)
-          void commands
-            .closeLocalChatSession(session.backendSessionId)
-            .catch(() => {});
-        store.closeSession(session.id);
+        if (discussionBinding(session.discussion)) {
+          if (session.backendSessionId)
+            void closeProcess(session.id, session.backendSessionId);
+        } else {
+          if (session.backendSessionId)
+            void commands.closeLocalChatSession(session.backendSessionId).catch(() => {});
+          store.closeSession(session.id);
+        }
       }
     },
     [controller]
@@ -193,9 +197,7 @@ export function SelectionDiscussionProvider({
       if (choice.error !== null || !thread || !question) return;
 
       const store = useChatStore.getState();
-      let session = thread.sessionId
-        ? store.sessions[thread.sessionId]
-        : undefined;
+      let session = thread.sessionId ? store.sessions[thread.sessionId] : undefined;
       // One turn at a time, and never into a process that is closing.
       if (
         session &&
@@ -204,12 +206,11 @@ export function SelectionDiscussionProvider({
       )
         return;
 
-      // A conversation cannot move to another provider: start a new one.
-      if (
-        session &&
-        (session.harness !== choice.harness ||
-          (session.providerId ?? null) !== (choice.providerId ?? null))
-      ) {
+      const sameProvider =
+        session?.harness === choice.harness &&
+        (session.providerId ?? null) === (choice.providerId ?? null);
+      // A captured thread keeps its original provider and resume ID.
+      if (session && !sameProvider && session.discussion === "unbound") {
         if (session.backendSessionId)
           void commands
             .closeLocalChatSession(session.backendSessionId)
@@ -218,17 +219,23 @@ export function SelectionDiscussionProvider({
         session = undefined;
       }
 
+      const applyChoice = !session || sameProvider;
+      const sessionLocation = parentChatId && projectPath && thread.git
+        ? { projectPath, discussionBinding: { parentChatId, reviewThreadId: thread.id, worktreePath } }
+        : { projectPath: worktreePath };
       const sessionId =
         session?.id ??
         store.openDiscussionSession({
           harness: choice.harness,
           providerId: choice.providerId,
-          projectPath: worktreePath,
+          ...sessionLocation,
         });
-      store.setSessionSelectedModel(sessionId, choice.modelId);
-      store.setSessionReasoningEffort(sessionId, choice.reasoningEffort);
-      store.setSessionSpeedTier(sessionId, choice.speedTier);
-      store.setSessionPersonality(sessionId, choice.personality);
+      if (applyChoice) {
+        store.setSessionSelectedModel(sessionId, choice.modelId);
+        store.setSessionReasoningEffort(sessionId, choice.reasoningEffort);
+        store.setSessionSpeedTier(sessionId, choice.speedTier);
+        store.setSessionPersonality(sessionId, choice.personality);
+      }
 
       const continues =
         !!session && (!!session.backendSessionId || !!session.providerResumeId);
@@ -247,7 +254,7 @@ export function SelectionDiscussionProvider({
       if (started?.activeTurn?.phase === "stopping" && started.backendSessionId)
         void interrupt(sessionId, started.backendSessionId);
     },
-    [controller, choice, worktreePath]
+    [controller, choice, parentChatId, projectPath, worktreePath]
   );
 
   const cancel = useCallback(
@@ -266,10 +273,17 @@ export function SelectionDiscussionProvider({
     [controller]
   );
 
+  const savedDiscussions = useRef<Awaited<ReturnType<typeof loadWorktreeDiscussions>>>([]);
+  const placeSavedDiscussions = useCallback(
+    (snapshot: WorktreeSnapshot) =>
+      controller.restore(placeWorktreeDiscussions(savedDiscussions.current, snapshot)),
+    [controller]
+  );
   const reconcile = useCallback((snapshot: WorktreeSnapshot) => {
     const version = ++mappingVersion.current;
     const changed = snapshotRef.current !== snapshot;
     snapshotRef.current = snapshot;
+    placeSavedDiscussions(snapshot);
     controller.reconcile(snapshot);
     if (changed) void checkAvailability();
     if (!parentChatId) return;
@@ -295,7 +309,30 @@ export function SelectionDiscussionProvider({
           if (mounted.current && mappingVersion.current === version) setMappingError(errorMessage(error));
         });
     }
-  }, [checkAvailability, controller, parentChatId, worktreePath]);
+  }, [checkAvailability, controller, parentChatId, placeSavedDiscussions, worktreePath]);
+
+  useEffect(() => {
+    if (!parentChatId || !projectPath || !worktreePath) return;
+    let current = true;
+    void useChatStore.getState().hydrateLocalSessionIndex()
+      .then(() => current ? loadWorktreeDiscussions(
+        worktreePath, projectPath, parentChatId,
+        Object.values(useChatStore.getState().sessions)
+      ) : [])
+      .then((records) => {
+        if (!current) return;
+        savedDiscussions.current = records;
+        const snapshot = snapshotRef.current;
+        if (snapshot && placeSavedDiscussions(snapshot)) reconcile(snapshot);
+      })
+      .catch((error: unknown) => {
+        if (current) setAnchorError(errorMessage(error));
+      });
+    return () => {
+      current = false;
+      savedDiscussions.current = [];
+    };
+  }, [parentChatId, placeSavedDiscussions, projectPath, reconcile, worktreePath]);
 
   const begin = useCallback(async (anchor: CodeSelection, question?: string) => {
     if (!canAsk || capturing.current || !supportsInlineDiscussion(anchor)) return false;
@@ -350,6 +387,12 @@ export function SelectionDiscussionProvider({
         const thread = id ? controller.thread(id) : undefined;
 
         if (thread?.anchor.home.kind === "worktree") callbacks.current.onOpen();
+        if (thread?.sessionId) {
+          const store = useChatStore.getState();
+          const session = store.sessions[thread.sessionId];
+          if (session && !session.backendSessionId && !session.messages.length)
+            store.refreshProviderThreadSession(session.id);
+        }
       },
       send: (id, text) => {
         void send(id, text);
@@ -403,6 +446,8 @@ function closeProcess(sessionId: string, backendSessionId: string) {
     setSessionLifecycle: store.setSessionLifecycle,
     setBackendSessionId: store.setBackendSessionId,
     getBackendSessionId: currentBackendSessionId,
+    clearStreamingAssistant: store.clearStreamingAssistant,
+    settleActiveTurn: store.settleActiveTurn,
   });
 }
 
