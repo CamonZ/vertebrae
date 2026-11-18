@@ -38,6 +38,29 @@ pub(crate) struct Delta {
     pub(crate) head_changed: bool,
     pub(crate) patch: String,
     pub(crate) files: Vec<FileEntry>,
+    pub(crate) review_post_images: BTreeMap<String, String>,
+}
+
+fn review_post_images(
+    files: &[FileEntry],
+    after: &BTreeMap<String, Side>,
+    mut remaining: usize,
+) -> BTreeMap<String, String> {
+    let mut images = BTreeMap::new();
+    for file in files.iter().filter(|file| file.marker.is_none()) {
+        let Some(Side::Content { bytes, .. }) = after.get(&file.path) else {
+            continue;
+        };
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            continue;
+        };
+        let cost = serde_json::to_vec(&(&file.path, text)).map_or(usize::MAX, |bytes| bytes.len());
+        if cost <= remaining {
+            remaining -= cost;
+            images.insert(file.path.clone(), text.into());
+        }
+    }
+    images
 }
 
 /// Resolve clean paths from immutable commit objects, dirty paths from the
@@ -111,12 +134,27 @@ pub(crate) fn compute(
     let before = sides(worktree, start, &paths, limits)?;
     let after = sides(worktree, end, &paths, limits)?;
     let rendered = compare(&before, &after, limits)?;
+    let patch = rendered
+        .iter()
+        .map(|(_, text)| text.as_str())
+        .collect::<String>();
+    let files = rendered
+        .into_iter()
+        .map(|(file, _)| file)
+        .collect::<Vec<_>>();
+    // Leave room for the patch, its file inventory and the annotation envelope.
+    let occupied = serde_json::to_vec(&(&patch, &files)).map_or(usize::MAX, |bytes| bytes.len());
+    let remaining = super::super::annotations::MAX_ANNOTATION_LINE_BYTES
+        .saturating_sub(occupied)
+        .saturating_sub(4096);
+    let review_post_images = review_post_images(&files, &after, remaining);
 
     Ok(Delta {
         base_head: start.head.clone(),
         head_changed,
-        patch: rendered.iter().map(|(_, text)| text.as_str()).collect(),
-        files: rendered.into_iter().map(|(file, _)| file).collect(),
+        patch,
+        files,
+        review_post_images,
     })
 }
 

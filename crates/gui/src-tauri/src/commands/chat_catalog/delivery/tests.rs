@@ -581,11 +581,20 @@ async fn durable_mixed_intents_replay_in_reference_order_across_passes() {
     let durable = path.clone();
     let thread = Uuid::new_v4();
     let mut catalog = Catalog::default();
+    let thread_input: super::super::ReviewThreadInput = serde_json::from_value(json!({
+        "parentChatId": "z-parent", "path": "src/lib.rs", "side": "RIGHT",
+        "homeKind": "worktree", "toolUseId": null,
+        "originalCommitId": "a".repeat(40), "originalBlobId": "b".repeat(40),
+        "originalStartLine": 2, "originalLine": 4, "startLine": 2, "line": 4,
+        "status": "open", "outdatedNoted": false, "originKind": "local", "originRef": null,
+        "selectedText": "private selection", "review_images": "private file"
+    }))
+    .unwrap();
     super::super::enqueue_entity(
         &mut catalog,
         "project",
         &EntityKey::Thread(ThreadId(thread)),
-        thread_payload("z-parent"),
+        thread_input.into_wire(),
     );
     enqueue(
         &mut catalog,
@@ -612,6 +621,39 @@ async fn durable_mixed_intents_replay_in_reference_order_across_passes() {
                 .desired
                 .is_some());
             return ResponseTemplate::new(503);
+        }
+        if body["query"].as_str().unwrap().contains("putReviewThread") {
+            let wire: Value =
+                serde_json::from_str(body["variables"]["v"].as_str().unwrap()).unwrap();
+            let fields: std::collections::BTreeSet<_> = wire
+                .as_object()
+                .unwrap()
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(
+                fields,
+                [
+                    "deleted",
+                    "home_kind",
+                    "line",
+                    "origin_kind",
+                    "origin_ref",
+                    "original_blob_id",
+                    "original_commit_id",
+                    "original_line",
+                    "original_start_line",
+                    "outdated_noted",
+                    "parent_chat_id",
+                    "path",
+                    "side",
+                    "start_line",
+                    "status",
+                    "tool_use_id",
+                ]
+                .into_iter()
+                .collect()
+            );
         }
         accept_catalog_entry(body)
     })

@@ -865,14 +865,21 @@ pub async fn load_local_chat_annotations(
     session_id: String,
 ) -> Result<Vec<LocalChatAnnotation>, CommandError> {
     let store = annotation_store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || store.load(&session_id))
-        .await
-        .map_err(|error| CommandError {
-            message: format!("Failed to load local chat annotations: {error}"),
-        })?
-        .map_err(|error| CommandError {
-            message: format!("Failed to load local chat annotations: {error}"),
+    tauri::async_runtime::spawn_blocking(move || {
+        store.load(&session_id).map(|entries| {
+            entries
+                .into_iter()
+                .map(LocalChatAnnotation::frontend)
+                .collect()
         })
+    })
+    .await
+    .map_err(|error| CommandError {
+        message: format!("Failed to load local chat annotations: {error}"),
+    })?
+    .map_err(|error| CommandError {
+        message: format!("Failed to load local chat annotations: {error}"),
+    })
 }
 
 /// Delete a chat session's annotations; deleting absent annotations succeeds.

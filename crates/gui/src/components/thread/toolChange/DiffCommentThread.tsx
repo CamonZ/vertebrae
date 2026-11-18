@@ -169,11 +169,13 @@ export function DiffCommentThread({
   onSaveDraft,
   onCancelDraft,
   onDiscussDraft,
+  onAttachDraft,
 }: {
   annotation: ReviewAnnotation;
   onSaveDraft(body: string): void;
   onCancelDraft(): void;
   onDiscussDraft?(body: string): void;
+  onAttachDraft?(body: string): void;
 }): ReactNode {
   const review = useContext(DiffReviewContext);
   const choice = useContext(SelectionDiscussionModelContext);
@@ -187,11 +189,7 @@ export function DiffCommentThread({
 
     submit(body);
   };
-  const sendDraftToMain = () => {
-    const body = draft.trim();
-
-    onSaveDraft(body);
-  };
+  const sendDraftToMain = () => onAttachDraft?.(draft.trim());
 
   return (
     <div className="diff-comment-thread" data-owns-escape="">
@@ -217,7 +215,7 @@ export function DiffCommentThread({
             submitLabel={onDiscussDraft ? "Discuss inline" : "Add comment"}
             testIdPrefix="diff-comment-draft"
             onSubmit={submitDraft}
-            onSendToMain={onDiscussDraft ? sendDraftToMain : undefined}
+            onSendToMain={onAttachDraft ? sendDraftToMain : undefined}
             onCancel={onCancelDraft}
           />
         </div>

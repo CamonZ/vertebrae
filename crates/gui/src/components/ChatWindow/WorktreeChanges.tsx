@@ -324,6 +324,7 @@ export function WorktreeChanges({
     onChangesLoadedRef.current?.({
       wholeBranch: state.wholeBranch,
       comparisonIdentity: JSON.stringify(state.data.comparison),
+      comparison: state.data.comparison,
       files: state.parsed.flatMap((file) => file.reviewFiles),
     });
   }, [state]);

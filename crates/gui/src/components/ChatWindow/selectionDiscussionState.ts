@@ -7,9 +7,9 @@ import type {
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 
 export interface DiscussionActions {
+  canAsk: boolean;
   select(anchor: CodeSelection | null): void;
-  ask(): void;
-  discuss(anchor: CodeSelection, question: string): void;
+  discuss(anchor: CodeSelection, question: string): Promise<boolean>;
   attach(anchor: CodeSelection, outdated?: boolean, question?: string): void;
   reopen(id: string | null): void;
   send(id: string, text: string): void;
@@ -18,7 +18,7 @@ export interface DiscussionActions {
 }
 
 export type DiscussionValue = DiscussionState &
-  DiscussionActions & { projectPath?: string };
+  DiscussionActions & { projectPath?: string; anchorError: string | null };
 
 export const SelectionDiscussionActionsContext =
   createContext<DiscussionActions | null>(null);

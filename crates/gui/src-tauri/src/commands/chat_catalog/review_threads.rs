@@ -62,7 +62,7 @@ pub struct ReviewThreadInput {
 }
 
 impl ReviewThreadInput {
-    fn into_wire(self) -> Value {
+    pub(super) fn into_wire(self) -> Value {
         json!({
             "parent_chat_id": self.parent_chat_id,
             "path": self.path,
@@ -145,11 +145,53 @@ pub(super) fn thread_views(catalog: &Catalog, project: &str) -> BTreeMap<Uuid, R
         .collect()
 }
 
-pub(super) fn publish_thread_changes<R: Runtime>(
+pub(super) struct ThreadChanges {
+    visible: BTreeMap<Uuid, ReviewThread>,
+    // Acknowledged tombstones and unsent local children discarded when
+    // their parent deletion was acknowledged.
+    acknowledged: std::collections::BTreeSet<Uuid>,
+}
+
+pub(super) fn thread_changes(catalog: &Catalog, project: &str) -> ThreadChanges {
+    ThreadChanges {
+        visible: thread_views(catalog, project),
+        acknowledged: catalog
+            .anchor_repositories
+            .get(project)
+            .into_iter()
+            .flat_map(|paths| paths.keys().copied())
+            .filter(|id| {
+                catalog
+                    .record(project, &EntityKey::Thread(ThreadId(*id)))
+                    .is_none_or(|record| record.remote.payload["deleted"] == true)
+            })
+            .collect(),
+    }
+}
+
+pub(super) async fn publish_thread_changes<R: Runtime>(
     app: &AppHandle<R>,
     project: &str,
-    mut before: BTreeMap<Uuid, ReviewThread>,
-    catalog: &Catalog,
+    path: &Path,
+    before: ThreadChanges,
+    catalog: &mut Catalog,
+) {
+    let after = thread_changes(catalog, project);
+    let released: Vec<_> = after
+        .acknowledged
+        .difference(&before.acknowledged)
+        .copied()
+        .collect();
+    release_anchors(catalog, project, path, released).await;
+
+    publish_thread_delta(app, project, before.visible, after.visible);
+}
+
+fn publish_thread_delta<R: Runtime>(
+    app: &AppHandle<R>,
+    project: &str,
+    mut visible: BTreeMap<Uuid, ReviewThread>,
+    after: BTreeMap<Uuid, ReviewThread>,
 ) {
     let publish = |thread_id, thread| {
         let _ = app.emit(
@@ -161,15 +203,78 @@ pub(super) fn publish_thread_changes<R: Runtime>(
             },
         );
     };
-
-    for (id, thread) in thread_views(catalog, project) {
-        if before.remove(&id).as_ref() != Some(&thread) {
+    for (id, thread) in after {
+        if visible.remove(&id).as_ref() != Some(&thread) {
             publish(id, Some(thread));
         }
     }
-    for id in before.into_keys() {
+    for id in visible.into_keys() {
         publish(id, None);
     }
+}
+
+async fn release_anchors(catalog: &mut Catalog, project: &str, path: &Path, threads: Vec<Uuid>) {
+    let Some(repositories) = catalog.anchor_repositories.get_mut(project) else {
+        return;
+    };
+    let mut by_repository = BTreeMap::<_, Vec<_>>::new();
+    for id in threads {
+        if let Some(directory) = repositories.get(&id) {
+            by_repository.entry(directory.clone()).or_default().push(id);
+        }
+    }
+    if by_repository.is_empty() {
+        return;
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        let mut released = Vec::new();
+        for (directory, ids) in by_repository {
+            let repo = match git2::Repository::open(directory) {
+                Ok(repo) => repo,
+                Err(error) => {
+                    tracing::warn!(code = ?error.code(), "review_anchor_repository_unavailable");
+                    continue;
+                }
+            };
+            for id in ids {
+                match super::review_anchors::release(&repo, id) {
+                    Ok(()) => released.push(id),
+                    Err(error) => tracing::warn!(thread_id = %id, code = ?error.code(), "review_anchor_release_failed"),
+                }
+            }
+        }
+        released
+    }).await;
+    match result {
+        Ok(released) if !released.is_empty() => {
+            for id in released {
+                repositories.remove(&id);
+            }
+            if repositories.is_empty() {
+                catalog.anchor_repositories.remove(project);
+            }
+            // Only the authoritative catalog contains the local Git directory
+            // index. The public diagnostic projections are unchanged.
+            if storage::encode(catalog)
+                .and_then(|bytes| durable_write(path, &bytes))
+                .is_err()
+            {
+                tracing::warn!(project_id = project, "review_anchor_cleanup_save_failed");
+            }
+        }
+        Ok(_) => {}
+        Err(error) => tracing::warn!(%error, "review_anchor_cleanup_failed"),
+    }
+}
+
+/// A crash after deleting a ref can leave its index entry; release is
+/// idempotent and the next recovery prunes it.
+pub(super) async fn recover_anchor_cleanup(catalog: &mut Catalog, project: &str, path: &Path) {
+    let threads = thread_changes(catalog, project)
+        .acknowledged
+        .into_iter()
+        .collect();
+    release_anchors(catalog, project, path, threads).await;
 }
 
 pub(super) fn publish_thread_recovered<R: Runtime>(app: &AppHandle<R>, project: &str) {
@@ -190,9 +295,10 @@ pub(crate) async fn apply_review_thread_change<R: Runtime>(
     let Some(access) = CatalogAccess::open(state).await? else {
         return Ok(());
     };
-    if change.installation_id != access.machine
-        || configured_project(state.project_config.get_projects(), &change.project_id).is_none()
-    {
+    if change.installation_id != access.machine {
+        return Ok(());
+    }
+    if configured_project(state.project_config.get_projects(), &change.project_id).is_none() {
         return Ok(());
     }
     let Ok(path) = access.path(false).await else {
@@ -209,7 +315,7 @@ pub(crate) async fn apply_review_thread_change<R: Runtime>(
     }
     u32::try_from(change.revision).map_err(|_| error())?;
 
-    let before = thread_views(&catalog, &change.project_id);
+    let before = thread_changes(&catalog, &change.project_id);
     apply_entry(
         &mut catalog,
         &path,
@@ -221,7 +327,7 @@ pub(crate) async fn apply_review_thread_change<R: Runtime>(
         },
     )?;
 
-    publish_thread_changes(app, &change.project_id, before, &catalog);
+    publish_thread_changes(app, &change.project_id, &path, before, &mut catalog).await;
     Ok(())
 }
 
@@ -294,6 +400,103 @@ fn thread_error(message: &str) -> CommandError {
     }
 }
 
+pub(super) struct ThreadWrite {
+    access: CatalogAccess,
+    path: std::path::PathBuf,
+    catalog: Catalog,
+    project: String,
+    id: EntityKey,
+    anchor_repository: Option<std::path::PathBuf>,
+}
+
+impl ThreadWrite {
+    pub(super) async fn open(
+        state: &AppState,
+        project: &str,
+        id: Uuid,
+    ) -> Result<Self, CommandError> {
+        configured_project(state.project_config.get_projects(), project).ok_or_else(error)?;
+        let access = CatalogAccess::open(state).await?.ok_or_else(error)?;
+        let path = access.path(false).await?;
+        let catalog = load(&path)?;
+        Ok(Self {
+            access,
+            path,
+            catalog,
+            project: project.into(),
+            id: EntityKey::Thread(ThreadId(id)),
+            anchor_repository: None,
+        })
+    }
+
+    pub(super) fn can_create(&self, parent: &str) -> bool {
+        self.catalog.record(&self.project, &self.id).is_none()
+            && self
+                .catalog
+                .chat(&self.project, parent)
+                .is_some_and(|record| !record.tombstoned())
+    }
+
+    pub(super) fn retain_in(&mut self, common_dir: std::path::PathBuf) {
+        self.anchor_repository = Some(common_dir);
+    }
+
+    /// A failed save can occur after activation. Release a staged ref only
+    /// after confirming that this exact catalog has no record for the thread.
+    pub(super) fn registration_absent(&self) -> bool {
+        load(&self.path).is_ok_and(|catalog| catalog.record(&self.project, &self.id).is_none())
+    }
+
+    pub(super) async fn persist(
+        &mut self,
+        app: &AppHandle,
+        payload: Value,
+    ) -> Result<(), CommandError> {
+        let project = &self.project;
+        let catalog = &mut self.catalog;
+        if delivery::parent_deleted(catalog, project, &self.id, &payload) {
+            return Err(thread_error("The parent chat has been deleted."));
+        }
+        let before = thread_changes(catalog, project);
+        enqueue_entity(catalog, project, &self.id, payload);
+        if let (EntityKey::Thread(ThreadId(id)), Some(path)) =
+            (&self.id, self.anchor_repository.take())
+        {
+            catalog
+                .anchor_repositories
+                .entry(project.clone())
+                .or_default()
+                .insert(*id, path);
+        }
+        save(&self.path, catalog)?;
+        let queued = thread_views(catalog, project);
+
+        // Reconnect replays transport failures with the same durable mutation ID.
+        if deliver(
+            &self.access.client,
+            project,
+            &self.access.machine,
+            catalog,
+            &self.path,
+        )
+        .await
+        .is_err()
+        {
+            tracing::info!(project_id = project, "review_thread_catalog_offline");
+            if let Ok(durable) = load(&self.path) {
+                *catalog = durable;
+            } else {
+                tracing::warn!(project_id = project, "review_thread_catalog_reload_failed");
+                publish_thread_delta(app, project, before.visible, queued);
+                return Ok(());
+            }
+        }
+
+        publish_thread_changes(app, project, &self.path, before, catalog).await;
+        Ok(())
+    }
+}
+
 async fn write_thread(
     app: &AppHandle,
     state: &AppState,
@@ -301,45 +504,10 @@ async fn write_thread(
     id: Uuid,
     edit: impl FnOnce(Option<&Record>) -> Result<Option<Value>, CommandError>,
 ) -> Result<(), CommandError> {
-    if configured_project(state.project_config.get_projects(), project).is_none() {
-        return Err(error());
+    let mut write = ThreadWrite::open(state, project, id).await?;
+    if let Some(payload) = edit(write.catalog.record(project, &write.id))? {
+        write.persist(app, payload).await?;
     }
-
-    let access = CatalogAccess::open(state).await?.ok_or_else(error)?;
-
-    // Startup recovery authenticates and resolves the account before writes.
-    // A thread write never makes a network request until its intent is on disk.
-    let path = access.path(false).await?;
-    let mut catalog = load(&path)?;
-    let id = EntityKey::Thread(ThreadId(id));
-
-    let Some(payload) = edit(catalog.record(project, &id))? else {
-        return Ok(());
-    };
-    if delivery::parent_deleted(&catalog, project, &id, &payload) {
-        return Err(thread_error("The parent chat has been deleted."));
-    }
-
-    let before = thread_views(&catalog, project);
-    enqueue_entity(&mut catalog, project, &id, payload);
-    save(&path, &catalog)?;
-
-    // Reconnect replays transport failures with the same durable mutation ID.
-    if deliver(
-        &access.client,
-        project,
-        &access.machine,
-        &mut catalog,
-        &path,
-    )
-    .await
-    .is_err()
-    {
-        tracing::info!(project_id = project, "review_thread_catalog_offline");
-        catalog = load(&path)?;
-    }
-
-    publish_thread_changes(app, project, before, &catalog);
     Ok(())
 }
 
@@ -396,6 +564,46 @@ mod tests {
 
         let decoded: ReviewThreadInput = serde_json::from_value(wire).unwrap();
         assert_eq!(serde_json::to_value(decoded).unwrap(), ipc);
+    }
+
+    #[tokio::test]
+    async fn only_an_acknowledged_tombstone_releases_an_anchor() {
+        let directory = tempfile::tempdir().unwrap();
+        let repo = git2::Repository::init(directory.path()).unwrap();
+        let project_directory = tempfile::tempdir().unwrap();
+        let other_repo = git2::Repository::init(project_directory.path()).unwrap();
+        let id = Uuid::new_v4();
+        let name = format!("refs/vertebrae/threads/{id}");
+        let blob = repo.blob(b"selected\n").unwrap();
+        repo.reference(&name, blob, false, "fixture anchor")
+            .unwrap();
+
+        other_repo
+            .reference(
+                &name,
+                other_repo.blob(b"other repository").unwrap(),
+                false,
+                "fixture",
+            )
+            .unwrap();
+        let mut catalog = Catalog::default();
+        let key = EntityKey::Thread(ThreadId(id));
+        catalog
+            .anchor_repositories
+            .entry("project".into())
+            .or_default()
+            .insert(id, repo.commondir().to_path_buf());
+        let catalog_path = project_directory.path().join("catalog.json");
+        catalog.upsert("project", &key).desired = Some(json!({"deleted": true}));
+        recover_anchor_cleanup(&mut catalog, "project", &catalog_path).await;
+        assert_eq!(repo.refname_to_id(&name).unwrap(), blob);
+
+        let mut catalog = storage::decode(&storage::encode(&catalog).unwrap()).unwrap();
+        catalog.upsert("project", &key).remote.payload = json!({"deleted": true});
+        recover_anchor_cleanup(&mut catalog, "project", &catalog_path).await;
+        assert!(repo.find_reference(&name).is_err());
+        assert!(other_repo.find_reference(&name).is_ok());
+        assert!(load(&catalog_path).unwrap().anchor_repositories.is_empty());
     }
 
     #[tokio::test]

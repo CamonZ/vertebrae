@@ -16,8 +16,10 @@ use vertebrae_sacrum_client::GraphqlClient;
 mod delivery;
 mod entity;
 mod migration;
+mod review_anchors;
 mod review_threads;
 mod storage;
+pub(crate) use review_anchors::*;
 pub(crate) use review_threads::*;
 
 use delivery::deliver;
@@ -40,6 +42,9 @@ struct Catalog {
     migration: migration::Migration,
     #[serde(default)]
     annotations: BTreeMap<String, migration::AnnotationInventory>,
+    // Local-only Git common directories, keyed by project and thread.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    anchor_repositories: BTreeMap<String, BTreeMap<Uuid, std::path::PathBuf>>,
 }
 
 impl Catalog {
@@ -471,7 +476,7 @@ pub(super) async fn synchronize(
         .collect();
 
     for project in &projects {
-        let before = review_threads::thread_views(&catalog, &project.project_id);
+        let before = review_threads::thread_changes(&catalog, &project.project_id);
         let local: Vec<_> = sessions
             .iter()
             .filter(|s| s.project_path.as_deref() == Some(project.path.as_str()))
@@ -565,9 +570,17 @@ pub(super) async fn synchronize(
         }
 
         catalog = load(&path)?;
-        review_threads::publish_thread_changes(app, &project.project_id, before, &catalog);
+        review_threads::publish_thread_changes(
+            app,
+            &project.project_id,
+            &path,
+            before,
+            &mut catalog,
+        )
+        .await;
 
         if recovered {
+            review_threads::recover_anchor_cleanup(&mut catalog, &project.project_id, &path).await;
             review_threads::publish_thread_recovered(app, &project.project_id);
         }
 
@@ -783,7 +796,7 @@ pub(crate) async fn apply_change<R: tauri::Runtime>(
         return Ok(None);
     };
     let mut catalog = load(&path)?;
-    let before = review_threads::thread_views(&catalog, &project.project_id);
+    let before = review_threads::thread_changes(&catalog, &project.project_id);
     let update = apply_chat_entry(
         &mut catalog,
         &path,
@@ -791,7 +804,8 @@ pub(crate) async fn apply_change<R: tauri::Runtime>(
         &project.path,
         change,
     )?;
-    review_threads::publish_thread_changes(app, &project.project_id, before, &catalog);
+    review_threads::publish_thread_changes(app, &project.project_id, &path, before, &mut catalog)
+        .await;
     Ok(update)
 }
 
@@ -1020,7 +1034,7 @@ pub(super) async fn store_classifications(
         return Err(error());
     }
 
-    let before = review_threads::thread_views(&catalog, &project);
+    let before = review_threads::thread_changes(&catalog, &project);
     payload["classifications"] = serde_json::to_value(all).map_err(|_| error())?;
     enqueue(&mut catalog, &project, chat_id, payload);
     save(&path, &catalog)?;
@@ -1032,8 +1046,8 @@ pub(super) async fn store_classifications(
         &path,
     )
     .await;
-    let durable = load(&path)?;
-    review_threads::publish_thread_changes(app, &project, before, &durable);
+    let mut durable = load(&path)?;
+    review_threads::publish_thread_changes(app, &project, &path, before, &mut durable).await;
     Ok(())
 }
 
