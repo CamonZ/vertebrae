@@ -38,7 +38,7 @@ class ColimaRunnerTests(unittest.TestCase):
                     patch.object(runner.acceptance, "prepare_images", return_value=0), \
                     patch.object(runner.acceptance, "run", side_effect=run), \
                     patch.object(runner, "cleanup_backend", side_effect=cleanup):
-                self.assertEqual(runner.main(), 7)
+                self.assertEqual(runner.main([]), 7)
 
             self.assertEqual([phase for phase, _, _ in calls], ["image", "gui"])
             self.assertTrue(all(destination == output for _, _, destination in calls))
@@ -47,11 +47,35 @@ class ColimaRunnerTests(unittest.TestCase):
             self.assertEqual(len(homes), 1)
             self.assertFalse(homes[0].exists())
 
+    def test_prebuilt_runtime_is_validated_and_mounted_read_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            prebuilt = root / "runtime.tar.gz"
+            prepared = "vtb-acceptance-gui:" + "a" * 64
+            with patch.dict(os.environ, {"VTB_ACCEPTANCE_OUTPUT": str(root), "VTB_ACCEPTANCE_PREPARED_IMAGE": prepared}), \
+                    patch.object(runner.Path, "home", return_value=root), \
+                    patch.object(runner.subprocess, "check_output", side_effect=["colima\n", "unix:///colima.sock\n"]), \
+                    patch.object(runner.subprocess, "run") as docker, \
+                    patch.object(runner.acceptance, "exclusive_lock", side_effect=lambda _: nullcontext()), \
+                    patch.object(runner.acceptance, "validate_runtime") as validate, \
+                    patch.object(runner.acceptance, "prepare_images", return_value=0), \
+                    patch.object(runner.acceptance, "run", return_value=0) as run, \
+                    patch.object(runner, "cleanup_backend"):
+                self.assertEqual(runner.main(["--prebuilt", str(prebuilt)]), 0)
+
+            bundle, suite, env = validate.call_args.args
+            self.assertEqual((bundle, suite, env[runner.acceptance.image_env("gui")]), (prebuilt, "gui", prepared))
+            command = run.call_args.args[0]
+            self.assertIn(f"{prebuilt}:/acceptance-runtime.tar.gz:ro", command)
+            self.assertIn("VTB_ACCEPTANCE_PREBUILT=1", command)
+            self.assertIn("/app/target", command)
+            self.assertNotIn("volume", [arg for call in docker.call_args_list for arg in call.args[0]])
+
     def test_does_not_substitute_plain_docker_for_colima(self):
         with patch.object(runner.subprocess, "check_output", side_effect=["default\n", "unix:///var/run/docker.sock\n"]), \
                 patch.object(runner.acceptance, "prepare_images") as prepare:
             with self.assertRaisesRegex(SystemExit, "Colima Docker context"):
-                runner.main()
+                runner.main([])
             prepare.assert_not_called()
 
 

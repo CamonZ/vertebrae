@@ -135,6 +135,85 @@ def docker_platform(env):
     return f"linux/{arch}"
 
 
+def archive_checksum(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as archive:
+        for chunk in iter(lambda: archive.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def prepare_ci_image(suite, env, output, handoff):
+    """Resolve a published digest or build one archive for the run."""
+    ref = env[image_env(suite)]
+    platform = docker_platform(env)
+    published = run(["docker", "pull", "--platform", platform, ref], env, output, f"image-{suite}") == 0
+    digest_ref = archive_sha256 = None
+    if published:
+        repository = ref.rsplit(":", 1)[0]
+        digests = json.loads(subprocess.check_output(
+            ["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", ref],
+            cwd=ROOT, env=env, text=True))
+        digest_ref = next(digest for digest in digests if digest.startswith(f"{repository}@"))
+    elif status := build_image(suite, ref, env, output):
+        return status
+
+    handoff.mkdir(parents=True, exist_ok=True)
+    if not published:
+        archive = handoff / "runner.tar"
+        status = run(["docker", "save", "--output", str(archive), ref],
+                     env, output, f"image-{suite}-save")
+        if status:
+            return status
+        archive_sha256 = archive_checksum(archive)
+    metadata = {"suite": suite, "platform": platform, "tag": ref, "digest": digest_ref,
+                "archive_sha256": archive_sha256, "build_count": int(not published)}
+    body = json.dumps(metadata)
+    (handoff / "runner.json").write_text(body + "\n")
+    print(body, flush=True)
+    return 0
+
+
+def load_ci_image(suite, env, output, handoff, *, publish=False):
+    metadata = json.loads((handoff / "runner.json").read_text())
+    ref = env[image_env(suite)]
+    platform = docker_platform(env)
+    if (metadata["suite"], metadata["tag"], metadata["platform"]) != (suite, ref, platform):
+        raise ValueError("prepared runner does not match this suite, Dockerfile or Docker platform")
+    # A Docker image ID can depend on the local image store. Use the portable
+    # registry digest or archive checksum for the identity in runtime manifests.
+    digest_ref = metadata["digest"]
+    if digest_ref:
+        repository = ref.rsplit(":", 1)[0]
+        match = re.fullmatch(rf"{re.escape(repository)}@sha256:([0-9a-f]{{64}})", digest_ref)
+        if not match:
+            raise ValueError("invalid prepared runner digest")
+        if publish:
+            return 0
+        identity = match[1]
+        status = run(["docker", "pull", "--platform", platform, digest_ref], env, output, f"image-{suite}")
+        loaded_ref = digest_ref
+    else:
+        if publish and succeeds(["docker", "manifest", "inspect", ref], env):
+            return 0
+        archive = handoff / "runner.tar"
+        identity = archive_checksum(archive)
+        if identity != metadata["archive_sha256"]:
+            raise ValueError("prepared runner archive checksum does not match")
+        status = run(["docker", "load", "--input", str(archive)], env, output, f"image-{suite}-load")
+        loaded_ref = ref
+    if status:
+        return status
+    if publish:
+        return run(["docker", "push", ref], env, output, f"image-{suite}-push")
+
+    local_ref = f"vtb-acceptance-{suite}:{identity}"
+    subprocess.run(["docker", "tag", loaded_ref, local_ref], cwd=ROOT, env=env, check=True)
+    with Path(env["GITHUB_ENV"]).open("a") as github_env:
+        github_env.write(f"VTB_ACCEPTANCE_PREPARED_IMAGE={local_ref}\n")
+    return 0
+
+
 def prepare_images(suites, env, output):
     """Reuse a local or published runner image; build only when neither exists."""
     # Published images match the CI runners. Pull only that platform so other
@@ -144,6 +223,9 @@ def prepare_images(suites, env, output):
         ref = env[image_env(suite)]
         if succeeds(["docker", "image", "inspect", ref], env):
             continue
+        if ref == env.get("VTB_ACCEPTANCE_PREPARED_IMAGE"):
+            print(f"Prepared runner is missing locally: {ref}", flush=True)
+            return 1
         if run(["docker", "pull", "--platform", platform, ref], env, output, f"image-{suite}") == 0:
             continue
         status = build_image(suite, ref, env, output)
@@ -399,10 +481,14 @@ def execute(suites, env, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--cleanup", action="store_true", help="Dispose a recorded run using VTB_ACCEPTANCE_OUTPUT")
-    parser.add_argument("--build-only", action="store_true", help="Build one suite runtime bundle without starting a backend")
-    parser.add_argument("--prebuilt", type=Path, help="Run shards from a matching runtime bundle, without compiling")
-    parser.add_argument("--publish-images", action="store_true", help="Build and push unpublished runner images")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--cleanup", action="store_true", help="Dispose a recorded run using VTB_ACCEPTANCE_OUTPUT")
+    mode.add_argument("--build-only", action="store_true", help="Build one suite runtime bundle without starting a backend")
+    mode.add_argument("--prebuilt", type=Path, help="Run shards from a matching runtime bundle, without compiling")
+    mode.add_argument("--publish-images", action="store_true", help="Build and push unpublished runner images")
+    mode.add_argument("--prepare-image", type=Path, help="Prepare a CI runner image handoff")
+    mode.add_argument("--load-image", type=Path, help="Load a CI runner image handoff")
+    mode.add_argument("--publish-prepared-image", type=Path, help="Publish a cold CI runner image handoff")
     # Older argparse versions validate the entire default list as one choice.
     # Validate supplied names separately and apply the default after parsing.
     parser.add_argument("suites", nargs="*", metavar="{cli,gui,daemon}")
@@ -411,10 +497,11 @@ def main():
     args = parser.parse_args()
     if not 1 <= args.shard_index <= args.shard_count:
         parser.error("shard index must be between 1 and shard count")
-    if args.build_only and (args.prebuilt or args.shard_count != 1 or args.cleanup or args.publish_images):
-        parser.error("--build-only cannot be combined with sharding, --prebuilt, --cleanup or --publish-images")
-    if (args.build_only or args.prebuilt) and len(args.suites) != 1:
-        parser.error("prebuilt runtime operations require exactly one suite")
+    if args.build_only and args.shard_count != 1:
+        parser.error("--build-only cannot be combined with sharding")
+    image_handoff = args.prepare_image or args.load_image or args.publish_prepared_image
+    if (args.build_only or args.prebuilt or image_handoff) and len(args.suites) != 1:
+        parser.error("runtime and image handoff operations require exactly one suite")
     if args.shard_count > 1 and len(args.suites) != 1:
         parser.error("sharding requires exactly one suite")
     for suite in args.suites:
@@ -444,9 +531,20 @@ def main():
         env["VTB_ACCEPTANCE_FEATURE_GLOB"] = pattern
         (output / "shard-manifest.json").write_text(json.dumps({"suite": args.suites[0],
             "index": args.shard_index, "count": args.shard_count, "features": features}, indent=2))
+    if args.prepare_image:
+        return prepare_ci_image(args.suites[0], env, output, args.prepare_image.resolve())
+    if image_handoff:
+        return load_ci_image(args.suites[0], env, output, image_handoff.resolve(),
+                             publish=bool(args.publish_prepared_image))
+    prepared = env.get("VTB_ACCEPTANCE_PREPARED_IMAGE")
+    if prepared and not args.cleanup:
+        suite = args.suites[0]
+        if len(args.suites) != 1 or not re.fullmatch(rf"vtb-acceptance-{suite}:[0-9a-f]{{64}}", prepared):
+            parser.error("prepared image must match the selected suite")
+        env[image_env(suite)] = prepared
     context_file = output / "runner-context.json"
     context_keys = ("COMPOSE_PROJECT_NAME", "VTB_ACCEPTANCE_CACHE_KEY", "VTB_ACCEPTANCE_OUTPUT",
-                    "VTB_ACCEPTANCE_BUILD_CACHE_DIR")
+                    "VTB_ACCEPTANCE_BUILD_CACHE_DIR", *(image_env(suite) for suite in SUITES))
     if args.publish_images:
         return publish_images(env, output)
     if args.cleanup:

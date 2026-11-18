@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Exercise project setup via the real GUI, using a disposable Colima stack."""
+import argparse
 import importlib.util
 import json
 import os
@@ -35,7 +36,11 @@ def cleanup_backend(home, context):
     print("Verified removal of test-owned containers and database volume", flush=True)
 
 
-def main():
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--prebuilt", type=Path, help="Run from a matching GUI runtime bundle")
+    args = parser.parse_args(argv)
+    prebuilt = args.prebuilt.resolve() if args.prebuilt else None
     context = subprocess.check_output(["docker", "context", "show"], text=True).strip()
     endpoint = subprocess.check_output(["docker", "context", "inspect", context, "--format", "{{.Endpoints.docker.Host}}"], text=True).strip()
     if not context.startswith("colima") or not endpoint.startswith("unix://"):
@@ -45,11 +50,13 @@ def main():
     env = os.environ.copy()
     output = Path(env.get("VTB_ACCEPTANCE_OUTPUT", ROOT / "test-output" / run_id)).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    base = acceptance.image_ref("gui")
+    base = env.get("VTB_ACCEPTANCE_PREPARED_IMAGE") or acceptance.image_ref("gui")
     env[acceptance.image_env("gui")] = base
     cache = acceptance.cache_key(env.get("VTB_ACCEPTANCE_CACHE_KEY", str(ROOT)))
     print(f"Output: {output}", flush=True)
     with acceptance.exclusive_lock(str(ROOT)), acceptance.exclusive_lock(cache):
+        if prebuilt:
+            acceptance.validate_runtime(prebuilt, "gui", env)
         status = acceptance.prepare_images(["gui"], env, output)
         if status:
             return status
@@ -64,10 +71,16 @@ def main():
                    "-v", f"{output}:/app/test-output", "-e", f"HOME={home}", "-e", "CARGO_HOME=/cargo",
                    "-e", "RUSTUP_HOME=/usr/local/rustup", "-e", "npm_config_cache=/npm-cache",
                    "-e", "GUI_ACCEPTANCE_SCREENSHOTS=all", "-e", "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1"]
-        for kind, target in [("cargo", "/cargo"), ("target", "/app/target"), ("rustup", "/usr/local/rustup"), ("npm", "/npm-cache"), ("colima-node", "/app/crates/gui/node_modules")]:
-            volume = f"{cache}-{kind}"
-            subprocess.run(["docker", "volume", "create", volume], check=True, stdout=subprocess.DEVNULL)
-            command.extend(["-v", f"{volume}:{target}"])
+        if prebuilt:
+            # Each prebuilt run owns its extracted runtime. The container removes
+            # these anonymous volumes on exit.
+            command.extend(["-v", "/app/target", "-v", "/app/crates/gui/node_modules",
+                            "-v", f"{prebuilt}:/acceptance-runtime.tar.gz:ro", "-e", "VTB_ACCEPTANCE_PREBUILT=1"])
+        else:
+            for kind, target in [("cargo", "/cargo"), ("target", "/app/target"), ("rustup", "/usr/local/rustup"), ("npm", "/npm-cache"), ("colima-node", "/app/crates/gui/node_modules")]:
+                volume = f"{cache}-{kind}"
+                subprocess.run(["docker", "volume", "create", volume], check=True, stdout=subprocess.DEVNULL)
+                command.extend(["-v", f"{volume}:{target}"])
         command.extend([image, "bash", "/app/docker/gui-colima-entrypoint.sh"])
         try:
             return acceptance.run(command, env, output, "gui")

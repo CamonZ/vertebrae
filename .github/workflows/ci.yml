@@ -15,23 +15,19 @@ concurrency:
 
 jobs:
   rust:
-    name: Rust checks and coverage
+    name: Rust checks
     runs-on: ubuntu-24.04
+    container:
+      # Reuse the published Linux GUI environment for the Tauri system packages.
+      # Update the digest when changing the system dependency baseline.
+      image: ghcr.io/camonz/vtb-acceptance-gui@sha256:ef33ca07e2cc413d5912c9a18dd7efc2c039aff9683fe70af81b03eef2ca3ef8
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev pkg-config
 
       - name: Install Rust 1.97.0
         uses: dtolnay/rust-toolchain@1.97.0
         with:
           components: rustfmt, clippy, llvm-tools-preview
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -40,15 +36,85 @@ jobs:
           cache: npm
           cache-dependency-path: crates/gui/package-lock.json
 
-      - uses: actions/setup-python@v5
+      - name: Restore Rust checks cache
+        id: rust-checks-cache
+        uses: actions/cache/restore@v4
         with:
-          python-version: '3.12'
+          path: |
+            /usr/local/cargo/registry
+            /usr/local/cargo/git
+            target/debug/deps
+            target/debug/build
+            target/debug/.fingerprint
+          key: rust-checks-v1-${{ runner.arch }}-ef33ca07-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config*') }}-${{ github.sha }}
+          restore-keys: rust-checks-v1-${{ runner.arch }}-ef33ca07-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config*') }}-
+
+      - name: Allow the unprivileged build user to write build outputs
+        run: chown -R podmantest:podmantest "$GITHUB_WORKSPACE" "$CARGO_HOME"
 
       - name: Stage Tauri sidecars
-        run: SIDECAR_PROFILE=debug npm --prefix crates/gui run tauri:prepare-sidecars
+        run: |
+          runuser --preserve-environment -u podmantest -- env HOME=/home/podmantest \
+            SIDECAR_PROFILE=debug npm --prefix crates/gui run tauri:prepare-sidecars
 
-      - name: Run Rust validation
-        run: scripts/validate.sh rust
+      - name: Run Rust checks
+        run: |
+          runuser --preserve-environment -u podmantest -- env HOME=/home/podmantest \
+            scripts/validate.sh rust-checks
+
+      - name: Save Rust checks cache on master
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.rust-checks-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /usr/local/cargo/registry
+            /usr/local/cargo/git
+            target/debug/deps
+            target/debug/build
+            target/debug/.fingerprint
+          key: ${{ steps.rust-checks-cache.outputs.cache-primary-key }}
+
+  rust-coverage:
+    name: Rust coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust 1.97.0
+        uses: dtolnay/rust-toolchain@1.97.0
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Restore instrumented Rust cache
+        id: rust-coverage-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/llvm-cov-target/debug/deps
+            target/llvm-cov-target/debug/build
+            target/llvm-cov-target/debug/.fingerprint
+          key: rust-coverage-v1-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config*') }}-${{ github.sha }}
+          restore-keys: rust-coverage-v1-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '.cargo/config*') }}-
+
+      - name: Run instrumented tests and require 75% line coverage
+        run: scripts/validate.sh rust-coverage
+
+      - name: Save instrumented Rust cache on master
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master' && steps.rust-coverage-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/llvm-cov-target/debug/deps
+            target/llvm-cov-target/debug/build
+            target/llvm-cov-target/debug/.fingerprint
+          key: ${{ steps.rust-coverage-cache.outputs.cache-primary-key }}
 
   gui-static:
     name: GUI static checks
@@ -90,7 +156,7 @@ jobs:
   ci:
     name: Check & Test
     if: always()
-    needs: [rust, gui-static, gui-tests]
+    needs: [rust, rust-coverage, gui-static, gui-tests]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every validation job

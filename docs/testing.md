@@ -10,6 +10,12 @@ scripts/validate.sh gui   # focused GUI iteration
 scripts/validate.sh       # full completion profile
 ```
 
+CI runs `scripts/validate.sh rust-checks` and `scripts/validate.sh rust-coverage`
+in parallel. The checks job uses a digest-pinned Linux GUI runner for its Tauri
+system dependencies. The coverage job uses a separate instrumented build cache
+and keeps the workspace-wide 75% line threshold. Both jobs must pass
+`Check & Test`. The local `rust` profile still runs both parts.
+
 The script resolves paths from the repository root, fails on the first failed
 profile command, and does not run acceptance tests or mutate the local Sacrum
 database. GUI prerequisites are installed with `npm ci` in `crates/gui`.
@@ -291,9 +297,11 @@ containers and the database volume are removed; build caches are retained.
 The `Colima GUI project setup` job in `.github/workflows/acceptance.yml` runs
 this same scenario on PRs targeting master, master pushes and manual runs.
 On an Ubuntu 24.04 runner it starts a real Colima QEMU VM accelerated by KVM
-with pinned Colima and Lima versions, then invokes the same runner; it does
-not substitute the host's Docker engine. CI supplies
-`VTB_ACCEPTANCE_OUTPUT=test-output/colima` for artifact collection. The runner
+with pinned Colima and Lima versions. The job downloads and validates the same
+GUI runtime archive as the shards, then runs the prebuilt test against the
+Colima engine without compiling inside the VM. Local runs can still compile
+from the checkout. CI saves diagnostics and timings under `test-output/colima`.
+The runner
 cleans up its stack, and an always-run job step deletes the disposable Colima
 VM and its data even after a test failure. This validates the Linux webview
 against Colima, not the native macOS webview or first-install component flow.
@@ -481,11 +489,25 @@ require an image rebuild. Each image is tagged
 local copy, then pulls the published tag for the Docker host's platform, and
 builds locally only when neither exists. Published images are amd64, matching
 the CI runners, so other hosts build natively.
-`.github/workflows/acceptance-images.yml` publishes new digests from `master`
-and from PRs that change image inputs with
-`python3 scripts/acceptance.py --publish-images`; later runs pull them. Set
-`VTB_ACCEPTANCE_REGISTRY` to use another registry. If a Dockerfile starts to
-`COPY` files, include them in `image_ref()` in `scripts/acceptance.py`.
+
+In CI, the reusable `.github/workflows/acceptance-images.yml` workflow resolves
+one image per suite before the suite builds, shards, and Colima job use it. A
+registry hit hands off a pinned digest. A miss builds once and uploads a
+Docker archive for that run. Consumers pull by digest or verify the archive
+checksum. The suite runtime manifest binds the build to that portable identity. On pushes to
+`master`, a separate job publishes the already-built image to GHCR. Pull
+requests use read-only registry access for preparation and can load the
+workflow artifact without publishing.
+
+For timing comparisons, sum `build_count` in each suite's handoff
+`runner.json`. On the previous workflow, count `image-<suite>-build` phases
+across the acceptance run and its independent publisher. Measure time to first
+shard from the run attempt's start to the earliest `Run acceptance suites`
+step start. Compare cold and warm runs on the same runner pool and record the
+run IDs and changed image inputs.
+
+Set `VTB_ACCEPTANCE_REGISTRY` to use another registry locally. If a Dockerfile
+starts to `COPY` files, include them in `image_ref()` in `scripts/acceptance.py`.
 
 The backend image defaults to `ghcr.io/camonz/sacrum:master`. To test an
 unmerged Sacrum branch, build its checkout under a local tag and select it with

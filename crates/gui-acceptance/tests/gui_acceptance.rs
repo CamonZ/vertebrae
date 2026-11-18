@@ -58,6 +58,9 @@ pub struct GuiWorld {
     /// All task IDs created during this scenario (for cleanup).
     created_task_ids: Vec<String>,
 
+    /// Run and execution IDs captured before opening a Resolve chat.
+    resolvable_gate_ids: Option<(String, String)>,
+
     /// The most recently created artifact ID.
     artifact_id: Option<String>,
 
@@ -149,6 +152,7 @@ impl GuiWorld {
             env: HashMap::new(),
             task_id: None,
             created_task_ids: Vec::new(),
+            resolvable_gate_ids: None,
             artifact_id: None,
             workflow_id: None,
             created_workflow_ids: Vec::new(),
