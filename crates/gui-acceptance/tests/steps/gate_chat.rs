@@ -351,7 +351,7 @@ async fn gate_offers_resolve(world: &mut GuiWorld, timeout: u64) {
         r#"
           const gate = document.querySelector('[data-testid="human-input-gate"]');
           const resolve = gate?.querySelector('[data-testid="human-input-gate-resolve"]');
-          return !!gate?.dataset.executionId && !!resolve && !resolve.disabled;
+          return !!gate?.dataset.runId && !!gate.dataset.executionId && !!resolve && !resolve.disabled;
         "#,
         vec![],
         Duration::from_secs(timeout),
@@ -360,6 +360,9 @@ async fn gate_offers_resolve(world: &mut GuiWorld, timeout: u64) {
     world
         .screenshot(&client, "after-assert-gate-resolvable")
         .await;
+    drop(client);
+    // Resolve can replace the run pane with the chat before the next step.
+    world.resolvable_gate_ids = Some(waiting_gate_ids(world).await);
 }
 
 #[then("the local chat should show no user messages")]
@@ -516,7 +519,10 @@ async fn harness_started_gate_chats(
     question: String,
     artifact: String,
 ) {
-    let (task_run_id, execution_id) = waiting_gate_ids(world).await;
+    let (task_run_id, execution_id) = world
+        .resolvable_gate_ids
+        .as_ref()
+        .expect("the gate's Resolve action was checked before opening the chat");
     let started = gui_acceptance::wait_until(
         "gate chat session start",
         Duration::from_secs(10),
@@ -651,7 +657,10 @@ async fn harness_started_draft_gate_chats(
         );
         return;
     }
-    let (_, execution_id) = waiting_gate_ids(world).await;
+    let (_, execution_id) = world
+        .resolvable_gate_ids
+        .as_ref()
+        .expect("the gate's Resolve action was checked before opening the chat");
     let started = gui_acceptance::wait_until(
         "draft gate chat session start",
         Duration::from_secs(10),

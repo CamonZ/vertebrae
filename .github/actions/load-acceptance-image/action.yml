@@ -1,0 +1,21 @@
+name: Load acceptance runner image
+description: Install the exact runner image prepared for this suite
+inputs:
+  suite:
+    description: Acceptance suite
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: acceptance-image-${{ inputs.suite }}-${{ github.sha }}
+        path: ${{ runner.temp }}/acceptance-image
+
+    - name: Load prepared runner image
+      shell: bash
+      env:
+        VTB_ACCEPTANCE_OUTPUT: ${{ runner.temp }}/acceptance-image-load
+        SUITE: ${{ inputs.suite }}
+        HANDOFF: ${{ runner.temp }}/acceptance-image
+      run: python3 scripts/acceptance.py "$SUITE" --load-image "$HANDOFF"

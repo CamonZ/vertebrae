@@ -12,7 +12,45 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  acceptance-images:
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/acceptance-images.yml
+
+  publish-images:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    needs: [acceptance-images]
+    name: Publish ${{ matrix.suite }} runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [cli, daemon, gui]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: acceptance-image-${{ matrix.suite }}-${{ github.sha }}
+          path: ${{ runner.temp }}/acceptance-image
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish prepared runner if missing
+        run: python3 scripts/acceptance.py ${{ matrix.suite }} --publish-prepared-image "${{ runner.temp }}/acceptance-image"
+
   colima:
+    needs: [acceptance-build]
     name: Colima GUI project setup
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -62,10 +100,21 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          password: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.GHCR_TOKEN || github.token }}
+
+      - name: Load prepared runner image
+        uses: ./.github/actions/load-acceptance-image
+        with:
+          suite: gui
+
+      - name: Download GUI suite runtime
+        uses: actions/download-artifact@v4
+        with:
+          name: acceptance-runtime-gui-${{ github.sha }}
+          path: ${{ runner.temp }}/acceptance-runtime
 
       - name: Run GUI project setup through Colima
-        run: python3 scripts/acceptance-colima.py
+        run: python3 scripts/acceptance-colima.py --prebuilt "${{ runner.temp }}/acceptance-runtime/runtime.tar.gz"
 
       - name: Remove Colima VM and its test data
         if: always()
@@ -85,6 +134,7 @@ jobs:
           if-no-files-found: warn
 
   acceptance-build:
+    needs: [acceptance-images]
     name: Build acceptance ${{ matrix.suite }}
     # Keep fork pull requests on GitHub-hosted runners.
     runs-on: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository && 'ubuntu-24.04' || matrix.runner }}
@@ -119,7 +169,12 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          password: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.GHCR_TOKEN || github.token }}
+
+      - name: Load prepared runner image
+        uses: ./.github/actions/load-acceptance-image
+        with:
+          suite: ${{ matrix.suite }}
 
       # Each job restores a private copy; shards never write a shared target.
       # A successful shard saves the suite's identical build outputs for later runs.
@@ -237,7 +292,12 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          password: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && secrets.GHCR_TOKEN || github.token }}
+
+      - name: Load prepared runner image
+        uses: ./.github/actions/load-acceptance-image
+        with:
+          suite: ${{ matrix.suite }}
 
       - name: Download suite runtime
         uses: actions/download-artifact@v4

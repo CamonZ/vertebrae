@@ -8,6 +8,9 @@ cleanup() {
 }
 trap cleanup EXIT
 export PATH="$HOME/.local/bin:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin"
+export ACCEPTANCE_SUITE=gui
+source /app/docker/acceptance-timing.sh
+source /app/docker/acceptance-runtime.sh
 export DISPLAY=:99 GUI_ACCEPTANCE_COLIMA=1 GSETTINGS_BACKEND=memory
 export XDG_CACHE_HOME=/tmp/colima-gui-cache XDG_RUNTIME_DIR=/tmp/colima-gui-runtime
 mkdir -p "$XDG_CACHE_HOME" "$XDG_RUNTIME_DIR"
@@ -23,13 +26,17 @@ for attempt in $(seq 1 50); do
     sleep 0.1
 done
 cd /app/crates/gui
-npm ci --prefer-offline
+if [ "${VTB_ACCEPTANCE_PREBUILT:-0}" != 1 ]; then
+    acceptance_time npm-install npm ci --prefer-offline
+fi
 npm run dev -- --host 127.0.0.1 &
 vite_pid=$!
 cd /app
-env SIDECAR_PROFILE=debug node crates/gui/scripts/prepare-sidecars.mjs
-env VERTEBRAE_BUNDLE_SIDECARS=1 cargo build --locked -p gui --bin gui --quiet
-cargo build --locked -p daemon-acceptance --bin mock-claude --bin mock-codex --quiet
+if [ "${VTB_ACCEPTANCE_PREBUILT:-0}" != 1 ]; then
+    acceptance_time build-sidecars env SIDECAR_PROFILE=debug node crates/gui/scripts/prepare-sidecars.mjs
+    acceptance_time build-gui env VERTEBRAE_BUNDLE_SIDECARS=1 cargo build --locked -p gui --bin gui --quiet
+    acceptance_time build-mocks cargo build --locked -p daemon-acceptance --bin mock-claude --bin mock-codex --quiet
+fi
 # Component installation is a fixture; backend/project setup remains entirely UI-driven.
 mkdir -p "$HOME/.local/share/vertebrae/bin" "$HOME/.local/bin" /mocks
 for component in vtb vtb-daemon vtb-gate; do
@@ -46,4 +53,9 @@ for attempt in $(seq 1 100); do
     if (echo > /dev/tcp/127.0.0.1/4444) 2>/dev/null; then break; fi
     sleep 0.1
 done
-cargo test --locked -p gui-acceptance --test gui_acceptance -- --tags @colima
+if [ "${VTB_ACCEPTANCE_PREBUILT:-0}" = 1 ]; then
+    cd /app/crates/gui-acceptance
+    acceptance_time scenarios "$VTB_ACCEPTANCE_TEST_BINARY" --tags @colima
+else
+    acceptance_time scenarios cargo test --locked -p gui-acceptance --test gui_acceptance -- --tags @colima
+fi

@@ -2,6 +2,7 @@
 from contextlib import nullcontext
 import importlib.util
 import io
+import hashlib
 import tarfile
 import json
 import re
@@ -213,6 +214,9 @@ class RunnerTests(unittest.TestCase):
 
         self.assertEqual(set(build_entries), expected_builds)
         self.assertEqual(len(build_entries), len(expected_builds))
+        self.assertIn("needs: [acceptance-images]", build)
+        for consumer in (build, shards):
+            self.assertIn("uses: ./.github/actions/load-acceptance-image", consumer)
         self.assertIn("--build-only", build)
         self.assertIn(artifact_name, build)
         self.assertIn(artifact_name, shards)
@@ -395,6 +399,73 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual([p for p, _ in self.calls], ["image-gui", "image-daemon", "image-daemon-build"])
         self.assertEqual(self.calls[0][1], ["docker", "pull", "--platform", "linux/amd64", "registry/gui:tag"])
         self.assertEqual(self.calls[-1][1][-3:], ["-t", "registry/daemon:tag", "docker"])
+
+    def test_ci_image_handoff_resolves_warm_digest_or_builds_one_cold_archive(self):
+        archive_body = b"docker archive fixture"
+        digest = "registry/gui@sha256:" + "b" * 64
+        for warm in (False, True):
+            with self.subTest(warm=warm), tempfile.TemporaryDirectory() as directory:
+                handoff = Path(directory)
+                self.calls.clear()
+                self.env["GITHUB_ENV"] = str(handoff / "github-env")
+
+                def docker(args, env, output, phase):
+                    self.calls.append((phase, args))
+                    if phase == "image-gui-save":
+                        (handoff / "runner.tar").write_bytes(archive_body)
+                    return int(args[-1] == "registry/gui:tag" and phase == "image-gui" and not warm)
+
+                with patch.object(runner, "run", side_effect=docker), \
+                        patch.object(runner.subprocess, "check_output", return_value=json.dumps([digest])) as inspect, \
+                        patch.object(runner.subprocess, "run") as tag:
+                    self.assertEqual(runner.prepare_ci_image("gui", self.env, handoff, handoff), 0)
+                    metadata = json.loads((handoff / "runner.json").read_text())
+                    self.assertEqual(metadata["build_count"], int(not warm))
+                    self.assertEqual(metadata["digest"], digest if warm else None)
+                    # Simulate a clean suite builder and clean shard loading the same handoff.
+                    for _ in range(2):
+                        self.assertEqual(runner.load_ci_image("gui", self.env, handoff, handoff), 0)
+                        identity = "b" * 64 if warm else hashlib.sha256(archive_body).hexdigest()
+                        ref = f"vtb-acceptance-gui:{identity}"
+                        self.assertEqual(tag.call_args.args[0],
+                                         ["docker", "tag", digest if warm else "registry/gui:tag", ref])
+
+                    self.assertEqual((handoff / "github-env").read_text(),
+                                     f"VTB_ACCEPTANCE_PREPARED_IMAGE={ref}\n" * 2)
+                    if warm:
+                        # Docker IDs can differ by image store. Only preparation inspects the registry digest.
+                        self.assertEqual([args[-1] for _, args in self.calls], ["registry/gui:tag", digest, digest])
+                        inspect.assert_called_once()
+                    else:
+                        self.assertEqual([phase for phase, _ in self.calls],
+                                         ["image-gui", "image-gui-build", "image-gui-save",
+                                          "image-gui-load", "image-gui-load"])
+
+                        (handoff / "runner.tar").write_bytes(b"corrupt")
+                        with self.assertRaisesRegex(ValueError, "archive checksum does not match"):
+                            runner.load_ci_image("gui", self.env, handoff, handoff)
+
+    def test_ci_publisher_pushes_cold_archive_without_rebuilding(self):
+        self.succeeds.return_value = False
+        with tempfile.TemporaryDirectory() as directory:
+            handoff = Path(directory)
+            archive_body = b"docker archive fixture"
+            (handoff / "runner.tar").write_bytes(archive_body)
+            metadata = {"suite": "gui", "platform": "linux/amd64", "archive_sha256": hashlib.sha256(archive_body).hexdigest(),
+                        "tag": self.env[runner.image_env("gui")], "digest": None, "build_count": 1}
+            (handoff / "runner.json").write_text(json.dumps(metadata))
+            with patch.object(runner, "run", side_effect=self.fake_run):
+                self.assertEqual(runner.load_ci_image("gui", self.env, handoff, handoff, publish=True), 0)
+
+        self.assertEqual([phase for phase, _ in self.calls], ["image-gui-load", "image-gui-push"])
+
+    def test_missing_prepared_image_fails_without_pull_or_build(self):
+        prepared = "vtb-acceptance-gui:" + "a" * 64
+        self.env.update({runner.image_env("gui"): prepared, "VTB_ACCEPTANCE_PREPARED_IMAGE": prepared})
+        self.succeeds.return_value = False
+        with patch.object(runner, "run") as docker:
+            self.assertEqual(runner.prepare_images(["gui"], self.env, Path("unused")), 1)
+        docker.assert_not_called()
 
     def test_publish_pushes_only_unpublished_images(self):
         self.succeeds.side_effect = lambda args, env: args[-1] != "registry/gui:tag"

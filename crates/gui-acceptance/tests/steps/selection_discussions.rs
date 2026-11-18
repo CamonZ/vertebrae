@@ -720,7 +720,7 @@ async fn open_comment_dialog_on(world: &mut GuiWorld, surface: &str) {
 
     gui_acceptance::wait_for_js(
         &client,
-        "gutter plus visible",
+        &format!("gutter plus visible on {surface}"),
         &gutter_visible_script,
         vec![json!(surface)],
         Duration::from_secs(5),
@@ -1878,6 +1878,9 @@ async fn first_commit_enables_inline_ask(world: &mut GuiWorld) {
     let wd = world.webdriver.as_ref().unwrap().clone();
     {
         let client = wd.lock().await;
+        // This fixture exercises both panes together. Keep the tool patch and
+        // Changes panel inside the WebDriver viewport before selecting a line.
+        client.set_window_rect(0, 0, 1280, 1024).await.unwrap();
         gui_acceptance::click_when_ready(
             &client,
             Locator::Css(".tool-activity-summary[aria-expanded='false']"),
