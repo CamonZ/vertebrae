@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 export interface DropdownOption {
   value: string;
@@ -81,13 +81,14 @@ export function Dropdown({
   const rootRef = useRef<HTMLSpanElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
   const listId = useId();
   const selected = options.find((option) => option.value === value);
 
   const close = useCallback((refocus: boolean) => {
     setOpen(false);
-    if (refocus) triggerRef.current?.focus();
+    if (refocus) triggerRef.current?.focus({ preventScroll: true });
   }, []);
 
   const openMenu = () => {
@@ -99,7 +100,6 @@ export function Dropdown({
 
   useEffect(() => {
     if (!open) return;
-    (searchRef.current ?? listRef.current)?.focus();
     const onPointerDown = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) close(false);
     };
@@ -107,12 +107,53 @@ export function Dropdown({
     return () => document.removeEventListener("mousedown", onPointerDown);
   }, [open, close]);
 
-  useEffect(() => {
-    if (!open) return;
-    listRef.current
-      ?.querySelector<HTMLElement>(`[data-index="${active}"]`)
-      ?.scrollIntoView?.({ block: "nearest" });
-  }, [active, open]);
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    const menu = menuRef.current;
+    if (!open || !root || !menu) return;
+
+    const positionMenu = () => {
+      let top = 0;
+      let bottom = window.innerHeight;
+      for (let ancestor = root.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        if (getComputedStyle(ancestor).overflowY === "visible") continue;
+        const bounds = ancestor.getBoundingClientRect();
+        const contentTop = bounds.top + ancestor.clientTop;
+        top = Math.max(top, contentTop);
+        bottom = Math.min(bottom, contentTop + ancestor.clientHeight);
+      }
+
+      const anchor = root.getBoundingClientRect();
+      const above = anchor.top - top;
+      const below = bottom - anchor.bottom;
+      const preferred = placement === "up" ? above : below;
+      const other = placement === "up" ? below : above;
+      menu.style.removeProperty("--dd-available-height");
+      const flip = preferred < menu.offsetHeight && other > preferred;
+      menu.toggleAttribute("data-up", flip ? placement === "down" : placement === "up");
+      menu.style.setProperty("--dd-available-height", `${Math.max(0, flip ? other : preferred)}px`);
+    };
+
+    positionMenu();
+    (searchRef.current ?? listRef.current)?.focus({ preventScroll: true });
+    window.addEventListener("resize", positionMenu);
+    return () => window.removeEventListener("resize", positionMenu);
+  }, [open, placement]);
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    const option = listRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`);
+    if (!open || !menu || !option) return;
+
+    const menuBounds = menu.getBoundingClientRect();
+    const menuTop = menuBounds.top + menu.clientTop;
+    const visibleTop = searchRef.current?.parentElement?.getBoundingClientRect().bottom ?? menuTop;
+    const visibleBottom = menuTop + menu.clientHeight;
+    const bounds = option.getBoundingClientRect();
+    // Keep the active row visible without scrolling any enclosing pane.
+    if (bounds.top < visibleTop) menu.scrollTop += bounds.top - visibleTop;
+    else if (bounds.bottom > visibleBottom) menu.scrollTop += bounds.bottom - visibleBottom;
+  }, [active, open, search]);
 
   const move = (delta: number) => {
     if (visibleOptions.length === 0) return;
@@ -218,9 +259,9 @@ export function Dropdown({
       </button>
       {open && (
         <div
+          ref={menuRef}
           className={[
             "ovf-menu dd-menu",
-            placement === "up" ? "up" : "",
             align === "end" ? "end" : "",
           ]
             .filter(Boolean)
