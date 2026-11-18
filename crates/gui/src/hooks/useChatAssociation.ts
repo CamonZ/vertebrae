@@ -209,7 +209,10 @@ const setDiagnostic = (sessionId: string, diagnostic: string | null) =>
  */
 export function useChatAssociationDriver(sessionId: string) {
   const messages = useChatStore((s) => s.sessions[sessionId]?.messages);
-  const root = useChatStore((s) => s.sessions[sessionId]?.projectPath) ?? "";
+  const root = useChatStore((s) => {
+    const session = s.sessions[sessionId];
+    return session?.discussion ? null : session?.projectPath;
+  }) ?? "";
   const stored = useChatStore((s) => s.sessions[sessionId]?.association);
   const replayLoading = useChatStore(
     (s) => s.sessions[sessionId]?.providerReplay?.loading
@@ -526,6 +529,7 @@ export function useChatAssociationDriver(sessionId: string) {
 /** Blank clears; otherwise resolve one eligible entity in this session's project. */
 export async function correctChatAssociation(sessionId: string, input: string) {
   const session = useChatStore.getState().sessions[sessionId];
+  if (session?.discussion) return;
   if (!session?.projectPath)
     throw new Error("The conversation has no project.");
   const mine = {};

@@ -1,3 +1,4 @@
+import type { LocalChatDiscussion } from "../../utils/localChatDiscussion";
 export type PaletteScope =
   | "all"
   | "navigate"
@@ -67,6 +68,7 @@ export interface PaletteChatSource {
   updatedAt?: string;
   status?: "open" | "closed";
   hasUserMessage?: boolean;
+  discussion?: LocalChatDiscussion;
   messageCount?: number;
 }
 
@@ -110,9 +112,10 @@ export function paletteChatEntries(
   return [...byId.values()]
     .filter(
       (chat) =>
-        chat.status === "open" ||
-        chat.hasUserMessage === true ||
-        (chat.hasUserMessage === undefined && (chat.messageCount ?? 0) > 0)
+        !chat.discussion &&
+        (chat.status === "open" ||
+          chat.hasUserMessage === true ||
+          (chat.hasUserMessage === undefined && (chat.messageCount ?? 0) > 0))
     )
     .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))
     .map((chat) => {

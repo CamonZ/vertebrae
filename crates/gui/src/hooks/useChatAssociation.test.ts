@@ -159,6 +159,15 @@ describe("useChatAssociation", () => {
     } as never);
   });
 
+  it("ignores ticket IDs in an inline discussion", async () => {
+    seed([user(`Look at ticket ${TICKET.id}`, 1)], null, { discussion: "unbound" });
+    const { result } = renderHook(() => useDriven("s1"));
+    await act(async () => result.current.correct(TICKET.id));
+    expect(resolve).not.toHaveBeenCalled();
+    expect(commands.resolveChatAssociationEntity).not.toHaveBeenCalled();
+    expect(useChatStore.getState().sessions.s1.association).toBeNull();
+  });
+
   it.each([false, true])(
     "binds the worktree a requested creation reveals (has main default: %s)",
     async (hasDefault) => {

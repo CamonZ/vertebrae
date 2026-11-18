@@ -1,3 +1,4 @@
+import { discussionBinding, isOpenLocalChatConversation, normalizeDiscussionBinding } from "./localChatDiscussion";
 import { localChatActivityStatus } from "./localChatActivity";
 import type {
   ChatMessage,
@@ -7,6 +8,7 @@ import type {
 } from "../stores/chatStore";
 import type {
   JsonValue,
+  LocalChatDiscussionBinding,
   LocalChatGateBinding,
   LocalChatHarnessKind,
   PermissionMode,
@@ -41,6 +43,7 @@ type LocalChatSessionIndexEntry = LocalChatSessionSummary & {
   status: "open" | "closed";
   permissionMode?: PermissionMode | null;
   gate?: LocalChatGateBinding | null;
+  discussionBinding?: LocalChatDiscussionBinding;
 };
 
 type LocalChatSessionIndexCommands = typeof commands & {
@@ -103,7 +106,7 @@ export interface LocalChatSessionSummary {
   lifecycle: LocalChatLifecycle;
 }
 
-type LocalChatSessionRecord = Partial<ChatSession>;
+type LocalChatSessionRecord = Partial<ChatSession> & Pick<LocalChatSessionIndexEntry, "discussionBinding">;
 
 function canUseStorage(): boolean {
   return typeof localStorage !== "undefined";
@@ -209,7 +212,10 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
       ? Math.max(0, Math.floor(candidate.titleUserMessageCount))
       : 0;
 
+  const discussion = normalizeDiscussionBinding(candidate.discussionBinding);
+
   return {
+    ...(discussion && { discussion }),
     id: candidate.id,
     label: candidate.label,
     title,
@@ -418,6 +424,7 @@ function serializeSession(
   const updatedAt = session.updatedAt ?? previous?.updatedAt ?? createdAt;
 
   return {
+    discussion: session.discussion,
     id: session.id,
     label: session.label,
     title: session.title ?? null,
@@ -464,6 +471,7 @@ function readSessions(): Record<string, ChatSession> {
 }
 
 function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
+  const binding = discussionBinding(session.discussion);
   return {
     activityStatus: session.activityStatus ?? localChatActivityStatus(session),
     association: session.association ?? null,
@@ -495,6 +503,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     lifecycle: session.lifecycle ?? "idle",
     status: session.status,
     ...(session.gate ? { gate: session.gate } : {}),
+    ...(binding && { discussionBinding: binding }),
   };
 }
 
@@ -767,7 +776,7 @@ export function loadPersistedLocalChatSessions(): Record<string, ChatSession> {
   return Object.fromEntries(
     Object.entries(readSessions()).filter(
       (entry): entry is [string, ChatSession] =>
-        entry[1].status === "open" &&
+        isOpenLocalChatConversation(entry[1]) &&
         !isDisposableClosedLocalChatSession(entry[1])
     )
   );
@@ -813,7 +822,7 @@ export function listPersistedLocalChatSessions(
   return Object.values(readSessions())
     .filter(
       (session) =>
-        session.status === "open" &&
+        isOpenLocalChatConversation(session) &&
         !isDisposableClosedLocalChatSession(session) &&
         hasLocalChatUserMessage(session) &&
         projectPathMatches(session.projectPath, projectPath)
@@ -826,7 +835,9 @@ export function loadPersistedLocalChatSession(
   sessionId: string
 ): ChatSession | null {
   const session = readSessions()[sessionId] ?? null;
-  if (!session || isDisposableClosedLocalChatSession(session)) return null;
+  if (!session || session.discussion || isDisposableClosedLocalChatSession(session)) {
+    return null;
+  }
   return session;
 }
 
@@ -837,7 +848,7 @@ export function findPersistedLocalChatSession(
     Object.values(readSessions())
       .filter(
         (session) =>
-          session.status === "open" &&
+          isOpenLocalChatConversation(session) &&
           !isDisposableClosedLocalChatSession(session) &&
           projectPathMatches(session.projectPath, projectPath)
       )
@@ -853,7 +864,7 @@ export function findPersistedGateChatSession(
     Object.values(readSessions())
       .filter(
         (session) =>
-          session.status === "open" &&
+          isOpenLocalChatConversation(session) &&
           session.gate?.task_run_id === gate.task_run_id &&
           session.gate.step_name === gate.step_name
       )
@@ -868,7 +879,7 @@ export function findPersistedDefaultEmptyLocalChatSession(
     Object.values(readSessions())
       .filter(
         (session) =>
-          session.status === "open" &&
+          isOpenLocalChatConversation(session) &&
           isDefaultEmptyLocalChatSession(session) &&
           projectPathMatches(session.projectPath, projectPath)
       )
@@ -879,8 +890,7 @@ export function findPersistedDefaultEmptyLocalChatSession(
 export function persistLocalChatSession(
   session: ChatSession
 ): Promise<boolean> {
-  // A selection discussion lives only as long as its inline thread.
-  if (session.discussion) return Promise.resolve(true);
+  if (session.discussion === "unbound") return Promise.resolve(true);
 
   const sessions = readSessions();
   const serialized = serializeSession(session, sessions[session.id]);

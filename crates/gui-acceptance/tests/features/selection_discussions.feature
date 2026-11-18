@@ -16,6 +16,14 @@ Feature: Discuss code beside the main conversation
     When I close and reopen the discussion through its diff marker
     Then the anchored discussion and main draft are preserved
 
+  Scenario: A captured discussion stays hidden and resumes after restarting the GUI
+    Given a Changes selection fixture is open beside a drafted main conversation
+    When I select fixture code with the real diff renderer
+    And I ask about that selection and follow up
+    Then the captured discussion has a resumable catalog entry
+    When I restart the GUI application
+    Then the discussion stays out of chat history and resumes from its diff marker
+
   Scenario: Inline discussion reads the file with a read-only tool
     Given a Changes selection fixture is open beside a drafted main conversation
     And the inline discussion agent reads the selected file with the Read tool

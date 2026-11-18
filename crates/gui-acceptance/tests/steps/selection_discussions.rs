@@ -918,6 +918,226 @@ async fn discussion_context(_world: &mut GuiWorld) {
     );
 }
 
+async fn persisted_discussion(
+    client: &fantoccini::Client,
+    project_path: &std::path::Path,
+) -> Value {
+    client
+        .execute_async(
+            r#"
+            const [projectPath, done] = arguments;
+            window.__TAURI_INTERNALS__.invoke("load_local_chat_session_index")
+              .then((sessions) => {
+                const discussions = sessions.filter((session) =>
+                  session.projectPath === projectPath && session.discussionBinding);
+                done(discussions.length === 1 && discussions[0].providerResumeId
+                  ? discussions[0] : null);
+              }, () => done(null));
+            "#,
+            vec![json!(project_path)],
+        )
+        .await
+        .unwrap()
+}
+
+#[then("the captured discussion has a resumable catalog entry")]
+async fn persisted_before_restart(world: &mut GuiWorld) {
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    gui_acceptance::wait_until(
+        "the discussion has a resume ID",
+        Duration::from_secs(20),
+        || async {
+            Ok(
+                !persisted_discussion(&client, world.temp_dir.as_deref().unwrap())
+                    .await
+                    .is_null(),
+            )
+        },
+    )
+    .await
+    .unwrap();
+    let mut updated = persisted_discussion(&client, world.temp_dir.as_deref().unwrap()).await;
+    updated["title"] = json!("Persisted inline question");
+    updated["titleStatus"] = json!("manual");
+    updated["threadTotalTokens"] = json!(34);
+    let saved = client
+        .execute_async(
+            r#"
+        const done = arguments[arguments.length - 1];
+        const session = arguments[0];
+        window.__TAURI_INTERNALS__.invoke("save_local_chat_session_index", {
+            input: { sessions: [session], changedIds: [session.id] },
+        }).then(() => done(true), error => done(String(error)));
+    "#,
+            vec![updated.clone()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(saved, true);
+
+    let project = world.project_id.as_deref().unwrap();
+    let installation = std::fs::read_to_string(
+        std::path::PathBuf::from(std::env::var_os("HOME").unwrap())
+            .join(".local/share/vertebrae/chat-installation-id"),
+    )
+    .unwrap();
+    let graphql = world.graphql_client.as_ref().unwrap();
+    let scope = json!({"project": project, "installation": installation.trim()});
+    let result: Value = graphql.execute(
+        "query($project:Uuid4!,$installation:Uuid4!){chatCatalog(projectId:$project,installationId:$installation,includeCompleted:true){entries{chatId payload}}}",
+        scope.clone(),
+        "chatCatalog",
+    ).await.unwrap();
+    let binding = &updated["discussionBinding"];
+    let entries: Vec<_> = result["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| {
+            entry["payload"]["review_thread_id"] == binding["reviewThreadId"]
+                && entry["payload"]["deleted"] == false
+        })
+        .collect();
+    assert_eq!(entries.len(), 1);
+    let entry = entries[0];
+    assert_eq!(entry["chatId"], updated["id"]);
+    assert_eq!(entry["payload"]["parent_chat_id"], binding["parentChatId"]);
+    assert!(entry["payload"]["task_id"].is_null());
+    assert_eq!(entry["payload"]["metadata"]["kind"], "discussion");
+    assert_eq!(entry["payload"]["metadata"]["title"], updated["title"]);
+    assert_eq!(entry["payload"]["metadata"]["threadTotalTokens"], 34);
+    let threads: Value = graphql.execute(
+        "query($project:Uuid4!,$installation:Uuid4!){reviewThreads(projectId:$project,installationId:$installation){entries{threadId payload}}}",
+        scope,
+        "reviewThreads",
+    ).await.unwrap();
+    assert!(threads["entries"].as_array().unwrap().iter().any(|entry| {
+        entry["threadId"] == binding["reviewThreadId"]
+            && entry["payload"]["parent_chat_id"] == binding["parentChatId"]
+    }));
+}
+
+#[then("the discussion stays out of chat history and resumes from its diff marker")]
+async fn resume_after_restart(world: &mut GuiWorld) {
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    gui_acceptance::wait_for_page(&client, "/tasks", world.project_slug.as_deref()).await;
+    let before = persisted_discussion(&client, world.temp_dir.as_deref().unwrap()).await;
+    let resume_id = before["providerResumeId"]
+        .as_str()
+        .expect("persisted resume ID");
+    if client
+        .find(Locator::Css("[data-testid='local-chat-mini-panel']"))
+        .await
+        .is_err()
+    {
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::Css("[data-testid='local-chat-launcher']"),
+            "open main chat",
+        )
+        .await;
+    }
+    if client
+        .find(Locator::Css("[data-testid='local-chat-history-drawer']"))
+        .await
+        .is_err()
+    {
+        gui_acceptance::click_pane_action(
+            &client,
+            "[title='Toggle chat history']",
+            "open conversation history",
+        )
+        .await;
+    }
+    gui_acceptance::wait_for_js(
+        &client,
+        "the saved parent conversation appears in history",
+        r#"return [...document.querySelectorAll('[data-testid="local-chat-history-drawer"] .hc-mini-history-open')]
+            .some(row => !["Selection discussion", arguments[0]].includes(row.innerText.trim()));"#,
+        vec![before["title"].clone()],
+        Duration::from_secs(10),
+    )
+    .await;
+    let completed_toggle = "[role='switch'][aria-label='Show completed'][aria-checked='false']";
+    if client.find(Locator::Css(completed_toggle)).await.is_ok() {
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::Css(completed_toggle),
+            "include completed conversations",
+        )
+        .await;
+    }
+    gui_acceptance::wait_for_js(
+        &client,
+        "no discussion history row or restored conversation pane",
+        r#"
+        const panel = document.querySelector('[data-testid="local-chat-mini-panel"]');
+        const history = panel?.querySelector('[data-testid="local-chat-history-drawer"]');
+        return history && panel.querySelector('[aria-label="Show completed"][aria-checked="true"]') &&
+          history.querySelectorAll('.hc-mini-history-open').length === 1 &&
+          !history.querySelector('.hc-mini-history-ticket-toggle') &&
+          !panel.innerText.includes(arguments[0]) &&
+          !panel.innerText.includes("Selection discussion") &&
+          !document.querySelector('[data-testid="selection-mini-thread"]');
+        "#,
+        vec![json!(
+            before["title"].as_str().unwrap_or("Selection discussion")
+        )],
+        Duration::from_secs(10),
+    )
+    .await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[data-testid='local-chat-history-drawer'] .hc-mini-history-open"),
+        "open the saved parent conversation",
+    )
+    .await;
+    if client
+        .find(Locator::Css("[aria-label='Changes panel']"))
+        .await
+        .is_err()
+    {
+        gui_acceptance::click_pane_action(
+            &client,
+            "[data-testid=local-chat-view-changes]",
+            "open Changes after restart",
+        )
+        .await;
+    }
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[aria-label='Reopen selection discussion']"),
+        "reopen the saved discussion",
+    )
+    .await;
+    client
+        .find(Locator::Css("[aria-label='Ask about selected code']"))
+        .await
+        .unwrap()
+        .send_keys("Continue after restart")
+        .await
+        .unwrap();
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath("//button[normalize-space(.)='Ask']"),
+        "send a resumed follow-up",
+    )
+    .await;
+    gui_acceptance::wait_until("the provider resumed", Duration::from_secs(20), || async {
+        Ok(discussion_prompts()
+            .last()
+            .is_some_and(|prompt| prompt == "Continue after restart"))
+    })
+    .await
+    .unwrap();
+    let launches = discussion_launches();
+    assert_eq!(launches.len(), 2);
+    assert!(launches[1].contains(&format!("--resume={resume_id}")));
+    let after = persisted_discussion(&client, world.temp_dir.as_deref().unwrap()).await;
+    assert_eq!(after["id"], before["id"]);
+    assert_eq!(after["discussionBinding"], before["discussionBinding"]);
+}
+
 #[when("I close and reopen the discussion through its diff marker")]
 async fn reopen(world: &mut GuiWorld) {
     let wd = world.webdriver.as_ref().unwrap().clone();

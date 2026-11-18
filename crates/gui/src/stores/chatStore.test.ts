@@ -1949,7 +1949,7 @@ describe("chatStore", () => {
       const store = useChatStore.getState();
 
       expect(store.sessions[id]).toMatchObject({
-        discussion: true,
+        discussion: "unbound",
         harness: "codex",
         providerId: "custom",
         projectPath: "/repo",
@@ -1973,6 +1973,19 @@ describe("chatStore", () => {
       expect(
         useChatStore.getState().openProjectSession("Chat", "/repo")
       ).not.toBe(id);
+    });
+
+    it("refuses direct association writes to a bound discussion", () => {
+      const store = useChatStore.getState();
+      const id = store.openDiscussionSession({
+        harness: "claude",
+        projectPath: "/repo",
+        discussionBinding: { parentChatId: "main", reviewThreadId: "thread", worktreePath: "/checkout" },
+      });
+      const before = useChatStore.getState().sessions[id].association;
+      store.setSessionAssociation(id, { ticketId: "ticket", entityLevel: "task" });
+      expect(useChatStore.getState().sessions[id].association).toBe(before);
+      expect(useChatStore.getState().listLocalSessions("/repo")).toEqual([]);
     });
 
     it("never becomes the active chat and is discarded by closeSession", () => {

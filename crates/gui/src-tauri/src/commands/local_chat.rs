@@ -147,6 +147,14 @@ pub enum LocalChatActivityStatus {
     Working,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalChatDiscussionBinding {
+    pub worktree_path: Option<String>,
+    pub review_thread_id: uuid::Uuid,
+    pub parent_chat_id: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalChatSessionIndexEntry {
@@ -158,12 +166,9 @@ pub struct LocalChatSessionIndexEntry {
     #[specta(optional)]
     pub association: Option<serde_json::Value>,
     pub id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     #[specta(optional)]
-    pub parent_chat_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[specta(optional)]
-    pub review_thread_id: Option<uuid::Uuid>,
+    pub discussion_binding: Option<LocalChatDiscussionBinding>,
     pub label: String,
     pub title: Option<String>,
     pub title_status: Option<String>,
@@ -723,7 +728,12 @@ pub async fn load_local_chat_session_index(
             let request = TranscriptReplayRequest {
                 provider_resume_id: ProviderResumeId::new(id.clone()),
                 stream_id: StreamId::new(format!("local-history/{}", session.id)),
-                project_path: session.project_path.as_ref().map(PathBuf::from),
+                project_path: session
+                    .discussion_binding
+                    .as_ref()
+                    .and_then(|binding| binding.worktree_path.as_ref())
+                    .or(session.project_path.as_ref())
+                    .map(PathBuf::from),
                 created_at: Some(session.created_at.clone()),
             };
 

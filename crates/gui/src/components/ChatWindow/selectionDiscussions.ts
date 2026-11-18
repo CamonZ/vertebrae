@@ -182,6 +182,19 @@ export class SelectionDiscussions {
     return id;
   }
 
+  restore(restored: readonly SelectionThread[]) {
+    const ids = new Set(this.state.threads.map(({ id }) => id));
+    const newThreads = restored.filter(({ id }) => {
+      if (ids.has(id)) return false;
+      ids.add(id);
+      return true;
+    });
+    if (!newThreads.length) return false;
+    this.anchors = [...this.anchors, ...newThreads.map(({ id, anchor }) => ({ id, anchor }))];
+    this.publish({ ...this.state, threads: [...this.state.threads, ...newThreads] });
+    return true;
+  }
+
   reopen(id: string | null) {
     const thread = this.state.threads.find((thread) => thread.id === id);
 

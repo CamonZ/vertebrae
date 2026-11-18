@@ -78,6 +78,7 @@ vi.mock("../../bindings", () => {
       interruptLocalChatTurn: vi.fn(async () => ({ status: "ok", data: null })),
       closeLocalChatSession: vi.fn(async () => ({ status: "ok" })),
       checkReviewAnchorWorktree: vi.fn(),
+      getProjects: vi.fn(async () => ({ status: "ok", data: [] })),
       captureReviewAnchor: vi.fn(),
       mapReviewThreads: vi.fn(),
     },
@@ -156,12 +157,13 @@ function Router() {
   return null;
 }
 
-function fixture(scope = "A", onAttach = vi.fn(), parentChatId?: string) {
+function fixture(scope = "A", onAttach = vi.fn(), parentChatId?: string, projectPath?: string) {
   return (
     <SelectionDiscussionProvider
       key={scope}
       worktreePath={`/${scope}`}
       parentChatId={parentChatId}
+      projectPath={projectPath}
       harness="claude"
       onOpen={vi.fn()}
       onAttach={onAttach}
@@ -459,6 +461,34 @@ it("switching worktree discards the discussion session and ignores its late even
   expect(screen.queryByTestId("selection-mini-thread")).toBeNull();
   expect(screen.queryByText(/wrong scope|old failure/)).toBeNull();
   expect(discussionSessions()).toEqual([]);
+});
+
+it("keeps a captured discussion when the checkout changes and closes its process", async () => {
+  vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({ status: "ok", data: null });
+  vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
+    status: "ok", data: { originalBlobId: "blob", originalCommitId: "commit" },
+  });
+  vi.mocked(commands.mapReviewThreads).mockResolvedValue({ status: "ok", data: [] });
+  const view = render(fixture("A", vi.fn(), "main", "/project"));
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+  open();
+  await screen.findByTestId("selection-mini-thread");
+  const backendId = await send();
+  const session = discussionSessions()[0];
+  expect(session.discussion).toMatchObject({ parentChatId: "main", worktreePath: "/A" });
+  expect(commands.createLocalChatSession).toHaveBeenCalledWith(expect.objectContaining({
+    working_dir: "/A",
+  }));
+  await act(async () => {
+    liveDiscussion.reconcile({ wholeBranch: false, files: [fixtureFile] });
+    liveDiscussion.reconcile({ wholeBranch: true, files: [fixtureFile] });
+  });
+  expect(commands.getProjects).toHaveBeenCalledOnce();
+
+  view.rerender(fixture("B"));
+  await waitFor(() => expect(commands.closeLocalChatSession).toHaveBeenCalledWith(backendId));
+  await waitFor(() => expect(useChatStore.getState().sessions[session.id]?.backendSessionId).toBeNull());
+  expect(useChatStore.getState().sessions[session.id].discussion).toEqual(session.discussion);
 });
 
 const selectionCallbacks: ReturnType<
@@ -1417,6 +1447,57 @@ it("captures dedicated choice per request and applies a settings change only to 
   expect(prompt).toContain('"code":"selected"');
   expect(prompt).not.toContain("Dedicated answer");
   expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
+});
+
+it("resumes a bound discussion with its original provider and model after switching settings", async () => {
+  vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({ status: "ok", data: null });
+  vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
+    status: "ok", data: { originalBlobId: "blob", originalCommitId: "commit" },
+  });
+  const parentChatId = "provider-switch-parent";
+  render(fixture("A", vi.fn(), parentChatId, "/project"));
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+  open();
+  await screen.findByTestId("selection-mini-thread");
+
+  const backendId = await send();
+  const sessionId = vi.mocked(commands.createLocalChatSession).mock.lastCall![0].chat_session_id;
+  act(() => {
+    transport.init?.({
+      payload: {
+        backend_session_id: backendId,
+        harness: "claude",
+        provider_resume_id: "original-resume",
+        model: "sonnet",
+        tools: ["Read"],
+      },
+    });
+    end(backendId);
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Close discussion" }));
+  await waitFor(() =>
+    expect(useChatStore.getState().sessions[sessionId].backendSessionId).toBeNull()
+  );
+
+  act(() => useUIStore.getState().setInlineDiscussionPreference({
+    mode: "dedicated", providerId: "custom", modelId: "dedicated",
+  }));
+  fireEvent.click(screen.getByRole("button", { name: "Reopen selection discussion" }));
+  await send("Follow up using the saved discussion");
+
+  const boundSessions = discussionSessions().filter(({ discussion }) =>
+    discussion && discussion !== "unbound" && discussion.parentChatId === parentChatId
+  );
+  expect(boundSessions.map(({ id }) => id)).toEqual([sessionId]);
+  expect(commands.createLocalChatSession).toHaveBeenCalledTimes(2);
+  expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(expect.objectContaining({
+    harness: "claude",
+    provider_id: "anthropic",
+    provider_resume_id: "original-resume",
+    model_id: "sonnet",
+    working_dir: "/A",
+    initial_prompt: "Follow up using the saved discussion",
+  }));
 });
 
 it("applies a changed model to a follow-up in the same session as turn settings", async () => {
