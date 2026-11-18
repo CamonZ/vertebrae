@@ -12,7 +12,10 @@ use std::{collections::BTreeMap, fs, path::Path};
 use tokio::sync::Mutex;
 use vertebrae_sacrum_client::GraphqlClient;
 
+mod delivery;
 mod migration;
+
+use delivery::deliver;
 
 static SERIAL: Mutex<()> = Mutex::const_new(());
 const FIELDS: &str = "chatId revision payload updatedAt";
@@ -35,6 +38,31 @@ struct Record {
     conflicted: bool,
     #[serde(default)]
     import_only: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rejection_code: Option<String>,
+}
+
+impl Record {
+    fn new(chat: &str) -> Self {
+        Self {
+            remote: Entry {
+                chat_id: chat.into(),
+                revision: 0,
+                payload: Value::Null,
+            },
+            desired: None,
+            mutation_id: uuid::Uuid::new_v4().to_string(),
+            conflicted: false,
+            import_only: false,
+            rejection_code: None,
+        }
+    }
+
+    fn clear_intent(&mut self) {
+        self.desired = None;
+        self.conflicted = false;
+        self.rejection_code = None;
+    }
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -55,12 +83,6 @@ struct Catalog {
 struct Page {
     entries: Vec<Entry>,
     next_cursor: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct Ack {
-    status: String,
-    entry: Entry,
 }
 
 fn error() -> CommandError {
@@ -126,20 +148,26 @@ fn save(path: &Path, state: &Catalog) -> Result<(), CommandError> {
     let mut projects: BTreeMap<String, Vec<Value>> = BTreeMap::new();
     let mut pending = Vec::new();
     let mut conflicted = Vec::new();
+    let mut rejected = Vec::new();
 
     for (id, record) in &state.records {
         let (project, _) = id.split_once('/').ok_or_else(error)?;
+        let payload = record.desired.as_ref().unwrap_or(&record.remote.payload);
         projects.entry(project.into()).or_default().push(json!({
             "chat_id": record.remote.chat_id,
             "revision": record.remote.revision,
-            "payload": record.desired.as_ref().unwrap_or(&record.remote.payload)
+            "payload": payload
         }));
-
         if record.desired.is_some() {
             pending.push(record.remote.chat_id.clone());
         }
         if record.conflicted {
             conflicted.push(record.remote.chat_id.clone());
+        }
+        if let Some(code) = &record.rejection_code {
+            rejected.push(
+                json!({"project_id": project, "chat_id": record.remote.chat_id, "code": code}),
+            );
         }
     }
 
@@ -152,6 +180,7 @@ fn save(path: &Path, state: &Catalog) -> Result<(), CommandError> {
         "projects": projects,
         "pending": pending,
         "conflicted": conflicted,
+        "rejected": rejected,
         "unmapped": state.unmapped,
         "migration_version": state.migration.version,
         "migration_pending": state.migration.pending.keys().collect::<Vec<_>>(),
@@ -255,20 +284,14 @@ pub(super) fn reset_inactive_activity(
 }
 
 fn enqueue(catalog: &mut Catalog, project: &str, chat: &str, payload: Value) {
+    if delivery::parent_deleted(catalog, project, &payload) {
+        return;
+    }
+
     let record = catalog
         .records
         .entry(key(project, chat))
-        .or_insert_with(|| Record {
-            remote: Entry {
-                chat_id: chat.into(),
-                revision: 0,
-                payload: Value::Null,
-            },
-            desired: None,
-            mutation_id: uuid::Uuid::new_v4().to_string(),
-            conflicted: false,
-            import_only: false,
-        });
+        .or_insert_with(|| Record::new(chat));
 
     if record.remote.payload["deleted"] == true
         || record
@@ -281,6 +304,7 @@ fn enqueue(catalog: &mut Catalog, project: &str, chat: &str, payload: Value) {
 
     if record.desired.as_ref().unwrap_or(&record.remote.payload) != &payload {
         record.import_only = false;
+        record.rejection_code = None;
         record.desired = Some(payload);
         record.mutation_id = uuid::Uuid::new_v4().to_string();
     }
@@ -290,13 +314,7 @@ fn merge(catalog: &mut Catalog, project: &str, entry: Entry) {
     let record = catalog
         .records
         .entry(key(project, &entry.chat_id))
-        .or_insert_with(|| Record {
-            remote: entry.clone(),
-            desired: None,
-            mutation_id: uuid::Uuid::new_v4().to_string(),
-            conflicted: false,
-            import_only: false,
-        });
+        .or_insert_with(|| Record::new(&entry.chat_id));
 
     if entry.revision < record.remote.revision {
         return;
@@ -307,11 +325,16 @@ fn merge(catalog: &mut Catalog, project: &str, entry: Entry) {
     {
         // Tombstones are terminal, and an entry already carrying the local
         // intent (for example after a lost acknowledgement) needs no write.
-        record.desired = None;
-        record.conflicted = false;
+        record.clear_intent();
     }
 
+    let new_tombstone =
+        entry.payload["deleted"] == true && record.remote.payload["deleted"] != true;
+    let chat_id = new_tombstone.then(|| entry.chat_id.clone());
     record.remote = entry;
+    if let Some(chat_id) = chat_id {
+        delivery::discard_children(catalog, project, &chat_id);
+    }
 }
 
 async fn fetch_snapshot(
@@ -372,6 +395,7 @@ async fn exchange(
     for entry in snapshot.values() {
         merge(catalog, project, entry.clone());
     }
+    delivery::retry_rejections(catalog, project);
     save(path, catalog)?;
     let delivered = deliver(client, project, machine, catalog, path).await?;
     Ok(Recovery {
@@ -383,89 +407,6 @@ async fn exchange(
 struct Recovery {
     snapshot: BTreeMap<String, Entry>,
     delivered: usize,
-}
-
-/// Bounded conflict retries per entry. Each conflict adopts the authoritative
-/// entry returned by the backend before retrying the local intent.
-const DELIVERY_ATTEMPTS: usize = 2;
-
-/// Outbox delivery: send only pending entries of `project`, using the cached
-/// remote revision as the expected revision. Never reads the catalog.
-async fn deliver(
-    client: &GraphqlClient,
-    project: &str,
-    machine: &str,
-    catalog: &mut Catalog,
-    path: &Path,
-) -> Result<usize, CommandError> {
-    let prefix = format!("{project}/");
-    let pending: Vec<_> = catalog
-        .records
-        .iter()
-        .filter(|(k, r)| k.starts_with(&prefix) && r.desired.is_some())
-        .map(|(k, _)| k.clone())
-        .collect();
-    let mut sent = 0;
-
-    for id in pending {
-        for _ in 0..DELIVERY_ATTEMPTS {
-            let record = catalog.records.get(&id).expect("record retained");
-            let Some(payload) = record.desired.clone() else {
-                break;
-            };
-
-            let mutation = record.mutation_id.clone();
-            let mutation_query = format!(
-                concat!(
-                    "mutation($p:Uuid4!,$m:Uuid4!,$c:String!,$r:Int!,$n:Uuid4!,$v:Json!){{",
-                    "putChatCatalog(projectId:$p,installationId:$m,chatId:$c,",
-                    "expectedRevision:$r,mutationId:$n,payload:$v)",
-                    "{{status entry{{{fields}}}}}}}"
-                ),
-                fields = FIELDS,
-            );
-            sent += 1;
-            let ack: Ack = client
-                .execute(
-                    &mutation_query,
-                    json!({
-                        "p": project,
-                        "m": machine,
-                        "c": record.remote.chat_id,
-                        "r": record.remote.revision,
-                        "n": mutation,
-                        "v": payload.to_string()
-                    }),
-                    "putChatCatalog",
-                )
-                .await
-                .map_err(|_| error())?;
-
-            let record = catalog.records.get_mut(&id).expect("record retained");
-            if ack.status == "accepted" || ack.entry.payload["deleted"] == true {
-                record.desired = None;
-                record.conflicted = false;
-            } else {
-                record.conflicted = true;
-                record.mutation_id = uuid::Uuid::new_v4().to_string();
-                tracing::info!(
-                    chat_id = %record.remote.chat_id,
-                    "chat_catalog_conflict"
-                );
-            }
-
-            record.remote = ack.entry;
-            tracing::info!(
-                chat_id = %record.remote.chat_id,
-                revision = record.remote.revision,
-                pending = record.desired.is_some(),
-                imported = record.import_only,
-                "chat_catalog_ack"
-            );
-            save(path, catalog)?;
-        }
-    }
-    Ok(sent)
 }
 
 fn root() -> Result<std::path::PathBuf, CommandError> {
@@ -618,8 +559,8 @@ pub(super) async fn synchronize(
                 }
                 let absent = !catalog.records.contains_key(&id);
                 enqueue(&mut catalog, &project.project_id, &session.id, payload);
-                if absent {
-                    catalog.records.get_mut(&id).expect("enqueued").import_only =
+                if let (true, Some(record)) = (absent, catalog.records.get_mut(&id)) {
+                    record.import_only =
                         !editing || changed_ids.is_some_and(|ids| !ids.contains(&session.id));
                 }
             }
@@ -1137,11 +1078,12 @@ pub(super) async fn store_classifications(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use delivery::DELIVERY_ATTEMPTS;
     use hegel::{generators as gs, TestCase};
     use vertebrae_sacrum_client::SacrumConfig;
     use wiremock::{matchers, Mock, MockServer, ResponseTemplate};
 
-    fn payload(n: u8) -> Value {
+    pub(super) fn payload(n: u8) -> Value {
         json!({
             "status": "idle",
             "metadata": {
@@ -1251,6 +1193,7 @@ mod tests {
         let path = dir.path().join("catalog.json");
         let mut catalog = Catalog::default();
         let mut data = payload(17);
+        data["review_thread_id"] = Value::Null;
         data["classifications"] = json!([
             {
                 "tool_id": "c".repeat(64),
@@ -1259,6 +1202,11 @@ mod tests {
                 "labels": []
             }
         ]);
+        let rejected_chat = format!("0-{chat}");
+        let rejected_id = key(&project, &rejected_chat);
+        let mut invalid = data.clone();
+        invalid["status"] = json!("unsupported");
+        enqueue(&mut catalog, &project, &rejected_chat, invalid.clone());
         enqueue(&mut catalog, &project, &chat, data.clone());
         save(&path, &catalog).unwrap();
 
@@ -1270,6 +1218,14 @@ mod tests {
         assert_eq!(catalog.records[&id].remote.payload, data);
 
         let mut restarted = load(&path).unwrap();
+        assert_eq!(
+            restarted.records[&rejected_id].desired.as_ref(),
+            Some(&invalid)
+        );
+        assert_eq!(
+            restarted.records[&rejected_id].rejection_code.as_deref(),
+            Some("invalid_payload")
+        );
 
         exchange(&client, &project, &machine, &mut restarted, &path)
             .await
@@ -1799,7 +1755,7 @@ mod tests {
         (server, client, requests)
     }
 
-    fn accept(body: &Value, revision: u64) -> Value {
+    pub(super) fn accept(body: &Value, revision: u64) -> Value {
         let vars = &body["variables"];
         let payload: Value = serde_json::from_str(vars["v"].as_str().unwrap()).unwrap();
         json!({"putChatCatalog": {
