@@ -2794,19 +2794,27 @@ html.light ::selection {
   outline: none;
 }
 
-/* Focus lifts the composer instead of outlining it: a tinted edge and a
-   soft halo, so typing never draws a hard accent rectangle. */
-.chat-input-shell:focus-within {
-  border-color: color-mix(in oklch, var(--color-accent) 32%, var(--color-line-strong));
-  background-color: var(--color-bg);
-  box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--color-accent) 9%, transparent),
-    0 6px 18px -8px rgba(0, 0, 0, 0.45);
+/* The composer and its comment chips share the same soft focus treatment. */
+:root {
+  --chat-focus-edge: color-mix(in oklch, var(--color-accent) 32%, var(--color-line-strong));
+  --chat-focus-halo-opacity: 9%;
+  --chat-focus-depth: 0 6px 18px -8px rgba(0, 0, 0, 0.45);
 }
-.light .chat-input-shell:focus-within {
+.light {
+  --chat-focus-halo-opacity: 10%;
+  --chat-focus-depth: 0 6px 18px -10px rgba(68, 52, 31, 0.25);
+}
+.chat-input-shell:focus-within,
+.chat-comment-chips .chat-comment-chip:focus-visible {
+  border-color: var(--chat-focus-edge);
   box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--color-accent) 10%, transparent),
-    0 6px 18px -10px rgba(68, 52, 31, 0.25);
+    0 0 0 3px color-mix(in oklch, var(--color-accent) var(--chat-focus-halo-opacity), transparent),
+    var(--chat-focus-depth);
+  outline: 2px solid transparent;
+  outline-offset: 1px;
+}
+.chat-input-shell:focus-within {
+  background-color: var(--color-bg);
 }
 
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
