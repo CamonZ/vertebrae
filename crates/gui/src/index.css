@@ -5685,8 +5685,9 @@ input.no-spin {
   left: 0;
   right: auto;
   min-width: max(100%, 10rem);
-  max-height: 18rem;
+  max-height: min(18rem, calc(var(--dd-available-height, 100vh) - var(--s-1)));
   overflow-y: auto;
+  overscroll-behavior: contain;
   margin: 0;
   list-style: none;
   outline: none;
@@ -5705,7 +5706,7 @@ input.no-spin {
   left: auto;
   right: 0;
 }
-.dd-menu.up {
+.dd-menu[data-up] {
   top: auto;
   bottom: calc(100% + var(--s-1));
 }
