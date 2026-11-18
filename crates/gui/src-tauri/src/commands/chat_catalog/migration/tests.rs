@@ -395,14 +395,22 @@ fn terminal_deletion_wins_during_import_without_retaining_a_conflict() {
     assert!(catalog.chat("project", "chat").unwrap().desired.is_none());
 }
 
-#[test]
-fn competing_process_locks_fail_without_overwriting_state_and_release_on_drop() {
+#[tokio::test]
+async fn competing_process_locks_wait_for_the_current_writer_to_release() {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("local-chat-session-index.json");
-    let guard = lock_index(&path).unwrap();
-    assert!(lock_index(&path).is_err());
+    let guard = lock_index(&path).await.unwrap();
+
+    let waiting = lock_index(&path);
+    tokio::pin!(waiting);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(40), &mut waiting)
+            .await
+            .is_err()
+    );
+
     drop(guard);
-    assert!(lock_index(&path).is_ok());
+    assert!(waiting.await.is_ok());
 }
 
 #[test]

@@ -691,7 +691,7 @@ pub async fn load_local_chat_session_index(
 ) -> Result<Vec<LocalChatSessionIndexEntry>, CommandError> {
     let _index_guard = INDEX_SERIAL.lock().await;
     let path = local_chat_session_index_path()?;
-    let _index_file = super::chat_catalog::lock_index(&path)?;
+    let _index_file = super::chat_catalog::lock_index(&path).await?;
     let mut sessions = read_session_index(&path)?;
     // The legacy index is not the complete session set after migration. In
     // backend mode annotation deletion is explicit, never inferred from it.
@@ -756,7 +756,7 @@ pub async fn save_local_chat_session_index(
 ) -> Result<(), CommandError> {
     let _index_guard = INDEX_SERIAL.lock().await;
     let path = local_chat_session_index_path()?;
-    let _index_file = super::chat_catalog::lock_index(&path)?;
+    let _index_file = super::chat_catalog::lock_index(&path).await?;
     let previous = read_session_index(&path)?;
     super::chat_catalog::synchronize(
         &state,

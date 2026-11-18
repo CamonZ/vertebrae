@@ -109,7 +109,7 @@ fn durable_write(path: &Path, bytes: &[u8]) -> Result<(), CommandError> {
     result
 }
 
-fn lock_file(root: &Path, name: &str) -> Result<fs::File, CommandError> {
+async fn lock_file(root: &Path, name: &str) -> Result<fs::File, CommandError> {
     use fs2::FileExt;
 
     let mut options = fs::OpenOptions::new();
@@ -120,12 +120,28 @@ fn lock_file(root: &Path, name: &str) -> Result<fs::File, CommandError> {
         options.mode(0o600);
     }
     let file = options.open(root.join(name)).map_err(|_| error())?;
-    file.try_lock_exclusive().map_err(|_| error())?;
-    Ok(file)
+    // A closing GUI or another window's process can still own the disk lock.
+    // Give it time to finish without blocking the async runtime.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match FileExt::try_lock_exclusive(&file) {
+            Ok(()) => return Ok(file),
+            Err(err)
+                if err.kind() == std::io::ErrorKind::WouldBlock
+                    && tokio::time::Instant::now() < deadline =>
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            Err(err) => {
+                tracing::warn!(lock = name, error = %err, "chat_catalog_lock_failed");
+                return Err(error());
+            }
+        }
+    }
 }
 
-pub(super) fn lock_index(path: &Path) -> Result<fs::File, CommandError> {
-    lock_file(path.parent().ok_or_else(error)?, ".chat-index.lock")
+pub(super) async fn lock_index(path: &Path) -> Result<fs::File, CommandError> {
+    lock_file(path.parent().ok_or_else(error)?, ".chat-index.lock").await
 }
 
 fn save(path: &Path, state: &Catalog) -> Result<(), CommandError> {
@@ -383,7 +399,7 @@ impl CatalogAccess {
             return Ok(None);
         };
         let root = root()?;
-        let _disk = lock_file(&root, ".chat-catalog.lock")?;
+        let _disk = lock_file(&root, ".chat-catalog.lock").await?;
         let machine = installation(&root)?;
         Ok(Some(Self {
             _serial,
