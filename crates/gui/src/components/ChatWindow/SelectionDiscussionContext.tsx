@@ -12,6 +12,8 @@ import {
   type ReactNode,
 } from "react";
 import { commands, type LocalChatHarnessKind } from "../../bindings";
+import { errorMessage } from "../../query/commandResult";
+import { reviewLocation, reviewRange, supportsInlineDiscussion, unwrapAnchor } from "./reviewAnchors";
 import {
   getLocalChatLifecycle,
   isLocalChatLifecycleBusy,
@@ -45,6 +47,8 @@ import {
 export function SelectionDiscussionProvider({
   children,
   worktreePath,
+  parentChatId,
+  projectPath,
   harness,
   providerId,
   modelId,
@@ -56,6 +60,8 @@ export function SelectionDiscussionProvider({
 }: {
   children: ReactNode;
   worktreePath: string;
+  parentChatId?: string;
+  projectPath?: string | null;
   harness: LocalChatHarnessKind;
   providerId?: string;
   modelId?: string | null;
@@ -70,6 +76,42 @@ export function SelectionDiscussionProvider({
     controller.subscribe,
     controller.getSnapshot
   );
+
+  const [readyWorktree, setReadyWorktree] = useState<string | null>(null);
+  const [anchorError, setAnchorError] = useState<string | null>(null);
+  const [mappingError, setMappingError] = useState<string | null>(null);
+  const capabilityVersion = useRef(0);
+  const mappingVersion = useRef(0);
+  const snapshotRef = useRef<WorktreeSnapshot | null>(null);
+  const capturing = useRef(false);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const checkAvailability = useCallback(async () => {
+    const version = ++capabilityVersion.current;
+    if (!parentChatId || !worktreePath) return;
+    let ready = false;
+    try {
+      await unwrapAnchor(commands.checkReviewAnchorWorktree(worktreePath));
+      ready = true;
+    } catch {
+      // A non-Git folder and an unborn branch are normal capability states.
+    }
+    if (mounted.current && capabilityVersion.current === version) {
+      setReadyWorktree(ready ? worktreePath : null);
+    }
+  }, [parentChatId, worktreePath]);
+
+  useEffect(() => {
+    void checkAvailability();
+    const onFocus = () => void checkAvailability();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [checkAvailability]);
+
+  const canAsk = !parentChatId || readyWorktree === worktreePath;
 
   const mainSelection = {
     harness,
@@ -224,18 +266,84 @@ export function SelectionDiscussionProvider({
     [controller]
   );
 
+  const reconcile = useCallback((snapshot: WorktreeSnapshot) => {
+    const version = ++mappingVersion.current;
+    const changed = snapshotRef.current !== snapshot;
+    snapshotRef.current = snapshot;
+    controller.reconcile(snapshot);
+    if (changed) void checkAvailability();
+    if (!parentChatId) return;
+    const requests = controller.getSnapshot().threads.flatMap(({ id, git }) =>
+      git?.original.home.kind === "worktree"
+        ? [{
+            threadId: id,
+            ...git.capture,
+            range: reviewRange(git.original),
+            location: reviewLocation(git.original, parentChatId, snapshot.comparison),
+          }]
+        : []
+    );
+    if (requests.length) {
+      void unwrapAnchor(commands.mapReviewThreads(worktreePath, requests))
+        .then((positions) => {
+          if (mounted.current && mappingVersion.current === version) {
+            controller.applyMappings(snapshot, positions);
+            setMappingError(null);
+          }
+        })
+        .catch((error: unknown) => {
+          if (mounted.current && mappingVersion.current === version) setMappingError(errorMessage(error));
+        });
+    }
+  }, [checkAvailability, controller, parentChatId, worktreePath]);
+
+  const begin = useCallback(async (anchor: CodeSelection, question?: string) => {
+    if (!canAsk || capturing.current || !supportsInlineDiscussion(anchor)) return false;
+    let id: string | null;
+    if (parentChatId) {
+      capturing.current = true;
+      setAnchorError(null);
+      try {
+        const comparison = snapshotRef.current?.comparison;
+        const threadId = crypto.randomUUID();
+        const range = reviewRange(anchor);
+        const capture = await unwrapAnchor(commands.captureReviewAnchor({
+          worktree: worktreePath,
+          threadId,
+          location: reviewLocation(anchor, parentChatId, comparison),
+          range,
+          selectedText: anchor.code,
+          parent: { chatId: parentChatId, projectPath: projectPath ?? null },
+        }));
+        if (!mounted.current) return false;
+        id = controller.ask(anchor, threadId, capture);
+        if (snapshotRef.current) reconcile(snapshotRef.current);
+      } catch (error) {
+        if (mounted.current) setAnchorError(errorMessage(error));
+        return false;
+      } finally {
+        capturing.current = false;
+      }
+    } else {
+      id = controller.ask(anchor);
+    }
+    if (!id) return false;
+    if (question) {
+      void send(id, question).catch((error: unknown) => {
+        if (mounted.current) setAnchorError(errorMessage(error));
+      });
+    }
+    return true;
+  }, [canAsk, controller, parentChatId, projectPath, reconcile, send, worktreePath]);
+
   const actions = useMemo<DiscussionActions>(
     () => ({
-      select: (anchor) => controller.select(anchor),
-      ask: () => {
-        controller.ask();
-      },
-      discuss: (anchor, question) => {
+      canAsk,
+      select: (anchor) => {
         controller.select(anchor);
-        const id = controller.ask();
-
-        if (id) void send(id, question);
+        if (anchor) void checkAvailability();
       },
+      discuss: begin,
       attach: (...args) => callbacks.current.onAttach(...args),
       reopen: (id) => {
         controller.reopen(id);
@@ -247,14 +355,14 @@ export function SelectionDiscussionProvider({
         void send(id, text);
       },
       cancel,
-      reconcile: (snapshot) => controller.reconcile(snapshot),
+      reconcile,
     }),
-    [controller, send, cancel]
+    [controller, send, cancel, canAsk, begin, reconcile, checkAvailability]
   );
 
   const value = useMemo<DiscussionValue>(
-    () => ({ ...state, ...actions, projectPath: worktreePath }),
-    [state, actions, worktreePath]
+    () => ({ ...state, ...actions, projectPath: worktreePath, anchorError: anchorError ?? mappingError }),
+    [state, actions, worktreePath, anchorError, mappingError]
   );
 
   return (
@@ -314,7 +422,7 @@ export function InlineSelectionDiscussion({ threadId }: { threadId: string }) {
       onClick={() => discussion.reopen(thread.id)}
     >
       Discussion · {selectionLabel(thread.anchor)}
-      {thread.outdated ? " · outdated" : ""}
+      {thread.outdated ? " · outdated" : thread.unavailable ? " · anchor unavailable" : ""}
     </button>
   );
 }
@@ -343,11 +451,10 @@ function MiniThread({
       aria-label="Selection discussion"
       data-testid="selection-mini-thread"
       onClick={(event) => {
-        if (
-          event.target instanceof Element &&
-          event.target.closest("button, a, input, textarea, select, pre")
-        )
-          return;
+        if (thread.detached ||
+          (event.target instanceof Element &&
+            event.target.closest("button, a, input, textarea, select, pre"))
+        ) return;
         discussion.select(thread.anchor);
       }}
     >
@@ -355,6 +462,7 @@ function MiniThread({
         <button
           type="button"
           className="selection-mini-anchor"
+          disabled={thread.detached}
           aria-label={`Highlight selected code: ${selectionLabel(thread.anchor)}`}
           title="Highlight selected code"
           onClick={() => discussion.select(thread.anchor)}
@@ -373,9 +481,9 @@ function MiniThread({
           <span>{selectionLabel(thread.anchor)}</span>
         </button>
         <span className="selection-mini-badge">Read only</span>
-        {thread.outdated && (
+        {(thread.outdated || thread.unavailable) && (
           <span className="selection-mini-outdated" role="status">
-            Outdated context
+            {thread.outdated ? "Outdated context" : "Anchor unavailable"}
           </span>
         )}
         <button
@@ -399,6 +507,9 @@ function MiniThread({
           </svg>
         </button>
       </header>
+      {thread.outdated && thread.git && (
+        <pre aria-label="Original selected code">{thread.git.original.code}</pre>
+      )}
       <DiscussionModelNotice />
       <div className="selection-mini-messages">
         {session && (
@@ -517,7 +628,15 @@ export function DiscussionSnapshot({
     if (snapshot) reconcile.current?.(snapshot);
   }, [snapshot]);
 
-  return null;
+  if (!discussion) return null;
+  const detached = discussion.threads.filter((thread) => thread.detached);
+  if (!discussion.anchorError && !detached.length) return null;
+  return (
+    <div className="selection-discussion-notices">
+      {discussion.anchorError && <p role="alert">{discussion.anchorError}</p>}
+      {detached.map(({ id }) => <InlineSelectionDiscussion key={id} threadId={id} />)}
+    </div>
+  );
 }
 
 /** Shared by the initial comment dialog and each follow-up composer. */

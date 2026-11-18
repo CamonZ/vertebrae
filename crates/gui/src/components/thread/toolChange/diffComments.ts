@@ -4,6 +4,7 @@
  * from a gutter selection, and marking All Changes comments outdated when
  * their patch changes. Line arithmetic lives in `diffLineMapper`.
  */
+import type { ComparisonSnapshot } from "../../../bindings";
 import type {
   DiffCommentHome,
   PendingComment,
@@ -30,6 +31,7 @@ import { parseWorktreeDelta } from "./worktreeDelta";
 export interface WorktreeSnapshot {
   wholeBranch: boolean;
   comparisonIdentity?: string;
+  comparison?: ComparisonSnapshot;
   files: readonly FilePatch[];
 }
 

@@ -86,6 +86,15 @@ fn flag_values<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
 
 #[given("a Changes selection fixture is open beside a drafted main conversation")]
 async fn fixture(world: &mut GuiWorld) {
+    selection_fixture(world, false).await;
+}
+
+#[given("an unborn Git checkout is open with a recorded tool patch")]
+async fn unborn_fixture(world: &mut GuiWorld) {
+    selection_fixture(world, true).await;
+}
+
+async fn selection_fixture(world: &mut GuiWorld, unborn: bool) {
     let path = world.temp_dir.as_ref().expect("fixture project").clone();
     let selection_path = path.join("selection.ts");
 
@@ -110,22 +119,24 @@ async fn fixture(world: &mut GuiWorld) {
     )
     .unwrap();
 
-    for args in [vec!["add", "."], vec!["commit", "-m", "fixture"]] {
-        let status = tokio::process::Command::new("git")
-            .args(args)
-            .current_dir(&path)
-            .status()
-            .await
-            .unwrap();
+    if !unborn {
+        for args in [vec!["add", "."], vec!["commit", "-m", "fixture"]] {
+            let status = tokio::process::Command::new("git")
+                .args(args)
+                .current_dir(&path)
+                .status()
+                .await
+                .unwrap();
 
-        assert!(status.success());
+            assert!(status.success());
+        }
+
+        std::fs::write(
+            &selection_path,
+            "const first = 1;\nconst selected = 42;\nconst third = 3;\n",
+        )
+        .unwrap();
     }
-
-    std::fs::write(
-        &selection_path,
-        "const first = 1;\nconst selected = 42;\nconst third = 3;\n",
-    )
-    .unwrap();
 
     let mock_response = "Fixture answer.\n\n".repeat(80);
     std::fs::write(gui_acceptance::MOCK_CHAT_RESPONSE_FILE, mock_response).unwrap();
@@ -188,6 +199,10 @@ async fn fixture(world: &mut GuiWorld) {
 
     assert_eq!(result, json!(true));
 
+    if unborn {
+        std::fs::write(gui_acceptance::MOCK_CHAT_TURN_FIXTURE_FILE, READ_TOOL_TURN).unwrap();
+    }
+
     client.refresh().await.unwrap();
     let project_slug = world.project_slug.as_deref();
     gui_acceptance::wait_for_page(&client, "/tasks", project_slug).await;
@@ -233,12 +248,58 @@ async fn fixture(world: &mut GuiWorld) {
     )
     .await;
 
+    if unborn {
+        let annotation = json!({
+            "tool_id": "toolu_read_selection",
+            "kind": "worktree_delta",
+            "recorded_at": "2026-11-06T00:00:00Z",
+            "payload": {
+                "patch": "diff --git a/selection.ts b/selection.ts\n--- a/selection.ts\n+++ b/selection.ts\n@@ -1,3 +1,3 @@\n const first = 1;\n-const second = 2;\n+const selected = 42;\n const third = 3;\n",
+                "files": [{"path": "selection.ts", "status": "modified"}],
+                "worktree": path,
+                "aggregate": false,
+                "overlapping": false
+            }
+        });
+        // Simulate the recorder publishing a tool patch through the same
+        // native event the GUI receives when a tool actually edits a file.
+        let emitted = client
+            .execute_async(
+                r#"
+            const [annotation, done] = arguments;
+            import("/src/stores/chatStore.ts").then(({useChatStore}) => {
+                const {activeSessionId: id, sessions} = useChatStore.getState();
+                const call = sessions[id]?.messages.find(message => message.kind === "tool_call");
+                if (!id || !call) throw new Error("The fixture chat has no recorded tool call");
+                annotation.session_id = id;
+                annotation.tool_id = call.toolId;
+                return window.__TAURI_INTERNALS__.invoke("plugin:event|emit", {
+                    event: "local-chat-annotation-event",
+                    payload: {session_id: id, annotation},
+                });
+            })
+                .then(() => done(true))
+                .catch(error => done(String(error)));
+        "#,
+                vec![annotation],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            emitted,
+            json!(true),
+            "publish the native tool patch fixture"
+        );
+    }
+
     composer
         .send_keys("Explain selected code before implementation")
         .await
         .unwrap();
 
-    scroll_into_earlier_history(&client).await;
+    if !unborn {
+        scroll_into_earlier_history(&client).await;
+    }
 
     // The initial conversation is fixture setup. Observe only subsequent turns.
     for filename in ["stdin_turns.jsonl", "invocations.jsonl"] {
@@ -253,6 +314,9 @@ async fn fixture(world: &mut GuiWorld) {
     )
     .await;
 
+    if unborn {
+        return;
+    }
     let diff_mounted_script = format!(
         r#"{DEEP}
             return !!deep(
@@ -394,12 +458,16 @@ async fn scroll_into_earlier_history(client: &fantoccini::Client) {
 }
 
 async fn gesture(world: &mut GuiWorld, drag: bool, shift: bool) {
+    gesture_on(world, "[aria-label='Changes panel']", drag, shift).await;
+}
+
+async fn gesture_on(world: &mut GuiWorld, surface: &str, drag: bool, shift: bool) {
     let wd = world.webdriver.as_ref().unwrap().clone();
     let client = wd.lock().await;
 
     let selection_point_script = format!(
         r#"{DEEP}
-            const panel = document.querySelector('[aria-label="Changes panel"]');
+            const panel = document.querySelector(arguments[0]);
             const node = deep(
               panel,
               '[data-column-number="2"][data-line-type="change-addition"]',
@@ -420,7 +488,7 @@ async fn gesture(world: &mut GuiWorld, drag: bool, shift: bool) {
     );
 
     let point = client
-        .execute(&selection_point_script, vec![])
+        .execute(&selection_point_script, vec![json!(surface)])
         .await
         .unwrap();
     let x = point[0].as_i64().unwrap();
@@ -629,12 +697,16 @@ async fn main_context(_world: &mut GuiWorld) {
 }
 
 async fn open_comment_dialog(world: &mut GuiWorld) {
+    open_comment_dialog_on(world, "[aria-label='Changes panel']").await;
+}
+
+async fn open_comment_dialog_on(world: &mut GuiWorld, surface: &str) {
     let wd = world.webdriver.as_ref().unwrap().clone();
     let client = wd.lock().await;
 
     let gutter_visible_script = format!(
         r#"{DEEP}
-            const panel = document.querySelector('[aria-label="Changes panel"]');
+            const panel = document.querySelector(arguments[0]);
             const node = deep(
               panel,
               "[data-gutter-utility-slot] button",
@@ -650,14 +722,14 @@ async fn open_comment_dialog(world: &mut GuiWorld) {
         &client,
         "gutter plus visible",
         &gutter_visible_script,
-        vec![],
+        vec![json!(surface)],
         Duration::from_secs(5),
     )
     .await;
 
     let gutter_point_script = format!(
         r#"{DEEP}
-            const panel = document.querySelector('[aria-label="Changes panel"]');
+            const panel = document.querySelector(arguments[0]);
             const node = deep(
               panel,
               "[data-gutter-utility-slot] button",
@@ -674,7 +746,10 @@ async fn open_comment_dialog(world: &mut GuiWorld) {
         "#
     );
 
-    let point = client.execute(&gutter_point_script, vec![]).await.unwrap();
+    let point = client
+        .execute(&gutter_point_script, vec![json!(surface)])
+        .await
+        .unwrap();
 
     let x = point[0].as_i64().unwrap();
     let y = point[1].as_i64().unwrap();
@@ -725,7 +800,7 @@ async fn open_comment_dialog(world: &mut GuiWorld) {
 
     let highlighted_selection_script = format!(
         r#"{DEEP}
-            const panel = document.querySelector('[aria-label="Changes panel"]');
+            const panel = document.querySelector(arguments[0]);
             return !!deep(panel, "[data-selected-line]");
         "#
     );
@@ -734,7 +809,7 @@ async fn open_comment_dialog(world: &mut GuiWorld) {
         &client,
         "selected lines remain highlighted in the comment dialog",
         &highlighted_selection_script,
-        vec![],
+        vec![json!(surface)],
         Duration::from_secs(5),
     )
     .await;
@@ -1756,5 +1831,157 @@ async fn type_inline_question(
         }
 
         input.send_keys(line).await.unwrap();
+    }
+}
+
+#[then("the discussion follows shifted lines and shows the original snippet when edited")]
+async fn moved_and_outdated_discussion(world: &mut GuiWorld) {
+    let file = world.temp_dir.as_deref().unwrap().join("selection.ts");
+    let original = std::fs::read_to_string(&file).unwrap();
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+
+    std::fs::write(&file, format!("// shift the discussion\n{original}")).unwrap();
+    gui_acceptance::wait_for_js(
+        &client,
+        "discussion moves to line three",
+        r#"
+        const thread = document.querySelector('[data-testid="selection-mini-thread"]');
+        return thread?.closest('.diff-comment-thread') &&
+          !!thread.querySelector('button[aria-label^="Highlight selected code: selection.ts:3 "]') &&
+          !thread.textContent.includes('Outdated context');
+        "#,
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+
+    std::fs::write(&file, original.replace("42", "43")).unwrap();
+    gui_acceptance::wait_for_js(
+        &client,
+        "outdated discussion displays the original snippet",
+        r#"
+        const thread = document.querySelector('[data-testid="selection-mini-thread"]');
+        return thread?.textContent.includes('Outdated context') &&
+          !thread.closest('.diff-comment-thread') &&
+          [...thread.querySelectorAll('pre')].some(pre => pre.textContent === 'const selected = 42;');
+        "#,
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+}
+
+#[then("Changes and tool patches offer inline Ask only after the first commit")]
+async fn first_commit_enables_inline_ask(world: &mut GuiWorld) {
+    const CHANGES: &str = "[aria-label='Changes panel']";
+    const TOOL: &str = "[data-testid='tool-change-block']";
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    {
+        let client = wd.lock().await;
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::Css(".tool-activity-summary[aria-expanded='false']"),
+            "expand recorded tool activity",
+        )
+        .await;
+        let ready = format!(
+            r#"{DEEP}
+            const changes = document.querySelector(arguments[0]);
+            const tool = document.querySelector(arguments[1]);
+            return !!changes?.querySelector('[role="alert"]') &&
+                !changes.querySelector('[aria-label="All file diffs"]') &&
+                !!tool && !!deep(tool, '[data-column-number="2"][data-line-type="change-addition"]');
+        "#
+        );
+        gui_acceptance::wait_for_js(
+            &client,
+            "unborn Changes and recorded tool patch",
+            &ready,
+            vec![json!(CHANGES), json!(TOOL)],
+            Duration::from_secs(15),
+        )
+        .await;
+    }
+    gesture_on(world, TOOL, false, false).await;
+    open_comment_dialog_on(world, TOOL).await;
+    {
+        let client = wd.lock().await;
+        assert!(
+            client
+                .find_all(Locator::XPath(
+                    "//button[normalize-space(.)='Discuss inline']"
+                ))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::XPath("//div[@role='dialog']//button[normalize-space(.)='Cancel']"),
+            "close tool draft",
+        )
+        .await;
+    }
+
+    let path = world.temp_dir.as_deref().unwrap();
+    for args in [
+        vec!["add", "selection.ts"],
+        vec!["commit", "-m", "first commit"],
+    ] {
+        assert!(
+            tokio::process::Command::new("git")
+                .args(args)
+                .current_dir(path)
+                .status()
+                .await
+                .unwrap()
+                .success()
+        );
+    }
+    std::fs::write(
+        path.join("selection.ts"),
+        "const first = 1;\nconst selected = 42;\nconst third = 3;\n",
+    )
+    .unwrap();
+    {
+        let client = wd.lock().await;
+        for name in ["close Changes", "reopen Changes"] {
+            gui_acceptance::click_pane_action(
+                &client,
+                "[data-testid=local-chat-view-changes]",
+                name,
+            )
+            .await;
+        }
+        let ready = format!(
+            r#"{DEEP}
+            const changes = document.querySelector(arguments[0]);
+            return !!changes && !!deep(changes, '[data-column-number="2"][data-line-type="change-addition"]');
+        "#
+        );
+        gui_acceptance::wait_for_js(
+            &client,
+            "first-commit Changes diff",
+            &ready,
+            vec![json!(CHANGES)],
+            Duration::from_secs(15),
+        )
+        .await;
+    }
+    for surface in [CHANGES, TOOL] {
+        gesture_on(world, surface, false, false).await;
+        open_comment_dialog_on(world, surface).await;
+        let client = wd.lock().await;
+        gui_acceptance::wait_for_js(&client, "inline Ask is available",
+            r#"const dialog = document.querySelector('[role=dialog][aria-label="Comment on selected code"]');
+            return [...(dialog?.querySelectorAll('button') ?? [])]
+                .some(button => button.textContent.trim() === 'Discuss inline');"#,
+            vec![], Duration::from_secs(10)).await;
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::XPath("//div[@role='dialog']//button[normalize-space(.)='Cancel']"),
+            "close selection draft",
+        )
+        .await;
     }
 }

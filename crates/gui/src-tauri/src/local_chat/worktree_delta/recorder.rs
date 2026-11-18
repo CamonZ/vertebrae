@@ -274,6 +274,7 @@ struct WorktreeDeltaPayload {
     overlapping: bool,
     patch: String,
     files: Vec<FileEntry>,
+    review_post_images: std::collections::BTreeMap<String, String>,
 }
 
 pub(crate) struct Recorder {
@@ -720,6 +721,7 @@ impl Recorder {
                 overlapping: window.overlapping,
                 patch: delta.patch,
                 files: delta.files,
+                review_post_images: delta.review_post_images,
             };
             let payload = serde_json::to_value(payload)
                 .map_err(|error| GitError::Malformed(error.to_string()))?;

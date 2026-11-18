@@ -46,10 +46,9 @@ pub struct LocalChatAnnotation {
 }
 
 impl LocalChatAnnotation {
-    fn frontend(&self) -> Self {
-        let mut entry = self.clone();
+    pub(crate) fn frontend(mut self) -> Self {
         if self.kind == "worktree_history" {
-            if let Some(payload) = entry.payload.as_object_mut() {
+            if let Some(payload) = self.payload.as_object_mut() {
                 payload.retain(|key, _| {
                     matches!(
                         key.as_str(),
@@ -65,7 +64,12 @@ impl LocalChatAnnotation {
                 });
             }
         }
-        entry
+        if self.kind == "worktree_delta" {
+            if let Some(payload) = self.payload.as_object_mut() {
+                payload.remove("review_post_images");
+            }
+        }
+        self
     }
     pub(crate) fn new(
         session_id: impl Into<String>,
@@ -286,7 +290,7 @@ impl LocalChatAnnotationStore {
                         entries
                             .into_iter()
                             .filter(|entry| entry.kind == "worktree_history")
-                            .map(|entry| entry.frontend()),
+                            .map(LocalChatAnnotation::frontend),
                     ),
                     Err(error) => {
                         log::warn!("[LOCAL_CHAT] could not read legacy retention metadata: {error}")

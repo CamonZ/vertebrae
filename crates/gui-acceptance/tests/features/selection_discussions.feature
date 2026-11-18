@@ -53,3 +53,21 @@ Feature: Discuss code beside the main conversation
   @multi_project
   Scenario: Reconnect delivers queued discussions in reference order and isolates rejections
     When an offline GUI queues discussions, including under a parent deleted by another GUI
+
+  Scenario: Git anchors follow the selected lines and retain the original snippet
+    Given a Changes selection fixture is open beside a drafted main conversation
+    When a review anchor encounters working-tree edits, commits, a branch switch and a rebase
+    Then acknowledged review thread deletes release their Git refs
+
+  Scenario: Review anchor creation requires a repository with a first commit
+    When review anchors are requested before and after the first Git commit
+
+  Scenario: A live discussion moves with its lines and shows stale context after an edit
+    Given a Changes selection fixture is open beside a drafted main conversation
+    When I select fixture code with the real diff renderer
+    And I ask about that selection and follow up
+    Then the discussion follows shifted lines and shows the original snippet when edited
+
+  Scenario: Inline Ask becomes available on both surfaces after the first commit
+    Given an unborn Git checkout is open with a recorded tool patch
+    Then Changes and tool patches offer inline Ask only after the first commit

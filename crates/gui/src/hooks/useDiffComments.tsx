@@ -16,6 +16,7 @@ import {
   captureCodeSelection,
   type CodeSelection,
 } from "../components/ChatWindow/selectionDiscussions";
+import { supportsInlineDiscussion } from "../components/ChatWindow/reviewAnchors";
 import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs";
 import {
   DiffCommentThread,
@@ -81,6 +82,8 @@ export function useDiffComments(
   const threadAnchors = useContext(SelectionDiscussionAnchorsContext);
   const sharedSelection = useContext(SelectionDiscussionSelectionContext);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const currentDraft = useRef(draft);
+  currentDraft.current = draft;
   const [selection, setSelection] = useState<{
     path: string;
     range: SelectedLineRange;
@@ -125,6 +128,7 @@ export function useDiffComments(
         (home.kind === "tool_call" && home.toolUseId !== toolUseId)
       )
         continue;
+      if (thread.detached) continue;
       const metadata = at(
         thread.anchor.path,
         thread.anchor.side === "old" ? "deletions" : "additions",
@@ -213,38 +217,48 @@ export function useDiffComments(
   );
 
   const renderAnnotation = useCallback(
-    (annotation: { metadata: ReviewAnnotation }): ReactNode => (
-      <DiffCommentThread
-        annotation={annotation.metadata}
-        onCancelDraft={() => setDraft(null)}
-        onDiscussDraft={
-          discussion && draft
-            ? (body) => {
-                discussion.discuss(draft.anchor, body);
-                setSelection(null);
-                discussion.select(null);
-                setDraft(null);
-              }
-            : undefined
-        }
-        onSaveDraft={(body) => {
-          if (!draft || (!body && !discussion)) return;
+    (annotation: { metadata: ReviewAnnotation }): ReactNode => {
+      const clearDraft = () => {
+        setSelection(null);
+        discussion?.select(null);
+        setDraft(null);
+      };
 
-          if (discussion) discussion.attach(draft.anchor, false, body);
-          else
+      return (
+        <DiffCommentThread
+          annotation={annotation.metadata}
+          onCancelDraft={() => setDraft(null)}
+          onDiscussDraft={
+            discussion?.canAsk && draft &&
+            supportsInlineDiscussion(draft.anchor)
+              ? (body) => {
+                  void discussion.discuss(draft.anchor, body).then((started) => {
+                    if (started && currentDraft.current === draft) clearDraft();
+                  });
+                }
+              : undefined
+          }
+          onAttachDraft={
+            discussion && draft
+              ? (body) => {
+                  discussion.attach(draft.anchor, false, body);
+                  clearDraft();
+                }
+              : undefined
+          }
+          onSaveDraft={(body) => {
+            if (!draft || !body) return;
             addComment?.({
               home: draft.anchor.home,
               file: draft.anchor.file,
               span: draft.span,
               body,
             });
-
-          setSelection(null);
-          discussion?.select(null);
-          setDraft(null);
-        }}
-      />
-    ),
+            clearDraft();
+          }}
+        />
+      );
+    },
     [addComment, draft, discussion]
   );
 

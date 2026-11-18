@@ -596,6 +596,7 @@ export function ChatWindow({
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
       />
+      <DiscussionSnapshot snapshot={worktreeSnapshot} />
       <div
         ref={panelResize.containerRef}
         className="chat-with-changes min-h-0 flex-1"
@@ -812,6 +813,8 @@ export function ChatWindow({
         <SelectionDiscussionProvider
           key={`${sessionId}:${worktreePath ?? ""}`}
           worktreePath={worktreePath ?? ""}
+          parentChatId={sessionId}
+          projectPath={chat.session.projectPath}
           harness={chat.session.harness}
           providerId={chat.session.providerId ?? undefined}
           modelId={chat.session.selectedModelId}
@@ -821,7 +824,6 @@ export function ChatWindow({
           onOpen={() => setChangesSession(sessionId)}
           onAttach={attachSelection}
         >
-          <DiscussionSnapshot snapshot={worktreeSnapshot} />
           <FileReferenceNavigationContext.Provider value={openFileReference}>
             {content}
           </FileReferenceNavigationContext.Provider>

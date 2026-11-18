@@ -646,3 +646,235 @@ async fn review_thread_outbox_reconnect(world: &mut GuiWorld) {
     gui_acceptance::screenshot(&peer, "review-thread-catalog", 1, "regular-chat-history").await;
     peer.close().await.unwrap();
 }
+
+async fn anchor_git(path: &Path, args: &[&str]) -> String {
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "user.name=Review fixture",
+            "-c",
+            "user.email=review@example.test",
+        ])
+        .args(args)
+        .current_dir(path)
+        .output()
+        .await
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{args:?}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap().trim().to_owned()
+}
+
+fn anchor_args(path: &Path, thread: Uuid, parent: Option<&str>) -> Value {
+    json!({
+        "worktree": path,
+        "threadId": thread,
+        "location": {
+            "path": "selection.ts",
+            "side": "RIGHT",
+            "source": {"kind": "worktree", "commit": null}
+        },
+        "range": {"startLine": 2, "line": 2},
+        "selectedText": "const selected = 42;",
+        "parent": parent.map(|chat| json!({"chatId": chat, "projectPath": path}))
+    })
+}
+
+async fn capture_anchor(client: &Client, args: Value) -> Value {
+    ipc(client, "capture_review_anchor", json!({"request": args})).await
+}
+
+async fn assert_anchor_position(client: &Client, capture: &Value, blob: &Value, line: Option<u32>) {
+    let expected_status = if line.is_some() { "open" } else { "outdated" };
+    let args = json!({
+        "worktree": capture["worktree"],
+        "threads": [{
+            "threadId": capture["threadId"],
+            "originalBlobId": blob,
+            "location": capture["location"],
+            "range": capture["range"]
+        }]
+    });
+    let expected = json!([{
+        "threadId": capture["threadId"],
+        "status": expected_status,
+        "startLine": line,
+        "line": line
+    }]);
+    assert_eq!(
+        ipc(client, "map_review_threads", args.clone()).await,
+        expected
+    );
+    assert_eq!(ipc(client, "map_review_threads", args).await, expected);
+}
+
+#[when("a review anchor encounters working-tree edits, commits, a branch switch and a rebase")]
+async fn git_anchor_mapping(world: &mut GuiWorld) {
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    let path = world.temp_dir.as_deref().unwrap();
+    let parent = format!("anchor-{}", Uuid::new_v4());
+    save_chat(&client, &parent, path).await;
+    let thread = Uuid::new_v4();
+    let capture = anchor_args(path, thread, Some(&parent));
+    let status = anchor_git(path, &["status", "--porcelain"]).await;
+    let staged = anchor_git(path, &["diff", "--cached"]).await;
+    let anchor = capture_anchor(&client, capture.clone()).await;
+    assert_anchor_position(&client, &capture, &anchor["originalBlobId"], Some(2)).await;
+    assert_eq!(anchor_git(path, &["status", "--porcelain"]).await, status);
+    assert_eq!(anchor_git(path, &["diff", "--cached"]).await, staged);
+    let blob = &anchor["originalBlobId"];
+    let reference = format!("refs/vertebrae/threads/{thread}");
+    assert_eq!(
+        anchor_git(path, &["rev-parse", &reference]).await,
+        blob.as_str().unwrap()
+    );
+
+    let original = fs::read_to_string(path.join("selection.ts")).unwrap();
+    fs::write(path.join("selection.ts"), format!("// shifted\n{original}")).unwrap();
+    assert_anchor_position(&client, &capture, blob, Some(3)).await;
+
+    anchor_git(path, &["switch", "-c", "shifted"]).await;
+    anchor_git(path, &["add", "selection.ts"]).await;
+    anchor_git(path, &["commit", "-m", "shift the selection"]).await;
+    assert_anchor_position(&client, &capture, blob, Some(3)).await;
+
+    anchor_git(path, &["switch", "main"]).await;
+    assert_anchor_position(&client, &capture, blob, None).await;
+    fs::write(path.join("other"), "new baseline\n").unwrap();
+    anchor_git(path, &["add", "other"]).await;
+    anchor_git(path, &["commit", "-m", "new baseline"]).await;
+    anchor_git(path, &["switch", "shifted"]).await;
+    assert_anchor_position(&client, &capture, blob, Some(3)).await;
+    anchor_git(path, &["rebase", "main"]).await;
+    assert_anchor_position(&client, &capture, blob, Some(3)).await;
+
+    fs::write(path.join("selection.ts"), original.replace("42", "43")).unwrap();
+    assert_anchor_position(&client, &capture, blob, None).await;
+    anchor_git(path, &["gc", "--prune=now"]).await;
+    assert_eq!(
+        ipc(
+            &client,
+            "read_review_anchor",
+            json!({
+                "worktree": path,
+                "threadId": thread,
+                "range": capture["range"]
+            })
+        )
+        .await,
+        "const selected = 42;\n"
+    );
+    let project = world.project_id.as_deref().unwrap();
+    ipc(
+        &client,
+        "tombstone_review_thread",
+        json!({"projectId": project, "threadId": thread}),
+    )
+    .await;
+    assert!(
+        anchor_git(path, &["for-each-ref", &reference])
+            .await
+            .is_empty()
+    );
+
+    // The parent stays in the project while the second anchor is captured
+    // in a nested Git repository with a different object database.
+    let nested = path.join("nested-anchor-repo");
+    fs::create_dir(&nested).unwrap();
+    anchor_git(&nested, &["init", "-b", "main"]).await;
+    anchor_git(
+        &nested,
+        &["commit", "--allow-empty", "-m", "nested baseline"],
+    )
+    .await;
+    fs::write(nested.join("selection.ts"), original).unwrap();
+    let thread = Uuid::new_v4();
+    let mut nested_capture = anchor_args(path, thread, Some(&parent));
+    nested_capture["worktree"] = json!(nested);
+    capture_anchor(&client, nested_capture).await;
+    assert!(
+        !anchor_git(&nested, &["for-each-ref", "refs/vertebrae/threads"])
+            .await
+            .is_empty()
+    );
+    delete_chat(&client, &parent).await;
+}
+
+#[cucumber::then("acknowledged review thread deletes release their Git refs")]
+async fn review_anchor_cascade_released(world: &mut GuiWorld) {
+    let path = world
+        .temp_dir
+        .as_deref()
+        .unwrap()
+        .join("nested-anchor-repo");
+    gui_acceptance::wait_until(
+        "cascade removes retained review anchors",
+        TIMEOUT,
+        || async {
+            Ok(
+                anchor_git(&path, &["for-each-ref", "refs/vertebrae/threads"])
+                    .await
+                    .is_empty(),
+            )
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[when("review anchors are requested before and after the first Git commit")]
+async fn review_anchor_requires_head(world: &mut GuiWorld) {
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    let path = world.temp_dir.as_deref().unwrap();
+    let project = world.project_id.as_deref().unwrap();
+    let parent = format!("anchor-{}", Uuid::new_v4());
+    save_chat(&client, &parent, path).await;
+    let thread = Uuid::new_v4();
+    let args = anchor_args(path, thread, Some(&parent));
+    fs::write(
+        path.join("selection.ts"),
+        "const first = 1;\nconst selected = 42;\n",
+    )
+    .unwrap();
+    assert_eq!(
+        ipc_reply(&client, "capture_review_anchor", json!({"request": &args})).await["error"],
+        "not_repository"
+    );
+
+    assert_eq!(threads(&client, project).await, json!([]));
+    anchor_git(path, &["init", "-b", "main"]).await;
+    assert_eq!(
+        ipc_reply(&client, "capture_review_anchor", json!({"request": &args})).await["error"],
+        "unborn_head"
+    );
+    assert!(
+        anchor_git(path, &["for-each-ref", "refs/vertebrae/threads"])
+            .await
+            .is_empty()
+    );
+    assert!(
+        anchor_git(path, &["cat-file", "--batch-all-objects", "--batch-check"])
+            .await
+            .is_empty()
+    );
+
+    assert_eq!(threads(&client, project).await, json!([]));
+    let sessions = ipc(&client, "load_local_chat_session_index", json!({})).await;
+    assert!(
+        sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["id"] == parent)
+    );
+    anchor_git(path, &["commit", "--allow-empty", "-m", "first commit"]).await;
+    let anchor = capture_anchor(&client, args).await;
+    assert!(anchor["originalBlobId"].is_string());
+    assert_eq!(
+        threads(&client, project).await[0]["threadId"],
+        json!(thread)
+    );
+}

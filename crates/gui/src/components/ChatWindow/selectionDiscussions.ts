@@ -1,3 +1,4 @@
+import type { CapturedReviewAnchor, MappedReviewThread } from "../../bindings";
 import type { SelectedLineRange } from "@pierre/diffs";
 import type { DiffCommentHome } from "./assistantTextComments";
 import {
@@ -20,13 +21,16 @@ export interface SelectionThread {
   id: string;
   anchor: CodeSelection;
   outdated: boolean;
+  detached?: boolean;
+  unavailable?: boolean;
+  git?: { original: CodeSelection; capture: CapturedReviewAnchor };
   /** Whether the agent has been told the context is outdated. */
   outdatedNoted: boolean;
   /** The read-only chat session the conversation runs in, once asked. */
   sessionId: string | null;
 }
 
-export type ThreadAnchor = Pick<SelectionThread, "id" | "anchor">;
+export type ThreadAnchor = Pick<SelectionThread, "id" | "anchor" | "detached">;
 
 export interface DiscussionState {
   selection: CodeSelection | null;
@@ -155,13 +159,16 @@ export class SelectionDiscussions {
     this.publish({ ...this.state, selection });
   }
 
-  ask(): string | null {
-    if (!this.state.selection) return null;
-
-    const id = crypto.randomUUID();
+  ask(
+    anchor = this.state.selection,
+    id = crypto.randomUUID(),
+    capture?: CapturedReviewAnchor
+  ): string | null {
+    if (!anchor) return null;
     const thread: SelectionThread = {
       id,
-      anchor: this.state.selection,
+      anchor,
+      ...(capture && { git: { original: anchor, capture } }),
       outdated: false,
       outdatedNoted: false,
       sessionId: null,
@@ -169,7 +176,7 @@ export class SelectionDiscussions {
     const threads = [...this.state.threads, thread];
     const nextState = { ...this.state, activeId: id, threads };
 
-    this.anchors = [...this.anchors, { id, anchor: this.state.selection }];
+    this.anchors = [...this.anchors, { id, anchor }];
     this.publish(nextState);
 
     return id;
@@ -182,7 +189,7 @@ export class SelectionDiscussions {
       this.publish({
         ...this.state,
         activeId: id,
-        selection: thread?.anchor ?? this.state.selection,
+        selection: thread && !thread.detached ? thread.anchor : this.state.selection,
       });
   }
 
@@ -210,6 +217,46 @@ export class SelectionDiscussions {
     }));
   }
 
+  applyMappings(
+    snapshot: WorktreeSnapshot,
+    mappings: readonly MappedReviewThread[]
+  ) {
+    if (this.snapshot !== snapshot) return;
+    const positions = new Map(mappings.map((row) => [row.threadId, row]));
+    const threads = this.state.threads.map((thread) => {
+      const position = positions.get(thread.id);
+      if (!position || thread.git?.original.home.kind !== "worktree") return thread;
+      const original = thread.git.original;
+      const file = snapshot.files.find((file) => canonicalPath(file) === original.path);
+      // A LEFT-side path can still exist in the base after a rename.
+      const renamed = !file && snapshot.files.some(({ oldPath, newPath }) =>
+        oldPath !== null && newPath !== null &&
+        (oldPath === original.path || oldPath === original.file.oldPath)
+      );
+      const outdated = position.status === "outdated" || renamed;
+      const unavailable = !outdated && position.status === "unavailable";
+      const anchor =
+        outdated || position.startLine === null || position.line === null
+          ? original
+          : {
+              ...original,
+              file: file ?? original.file,
+              startLine: position.startLine,
+              endLine: position.line,
+            };
+      return {
+        ...thread,
+        anchor,
+        outdated,
+        unavailable,
+        detached: outdated || unavailable || !file || !spanRows(file, anchor),
+      };
+    });
+
+    this.anchors = threads.map(({ id, anchor, detached }) => ({ id, anchor, detached }));
+    this.publish({ ...this.state, threads });
+  }
+
   reconcile(snapshot: WorktreeSnapshot) {
     const previous = this.snapshot;
     this.snapshot = snapshot;
@@ -227,6 +274,7 @@ export class SelectionDiscussions {
     }
 
     const threads = this.state.threads.map((thread) => {
+      if (thread.git) return thread;
       const anchor = thread.anchor;
       const currentFile = patchFor(snapshot, anchor.path);
       const currentPatch = JSON.stringify(currentFile);

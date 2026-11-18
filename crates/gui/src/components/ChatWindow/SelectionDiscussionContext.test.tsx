@@ -34,6 +34,7 @@ import {
 } from "../../hooks/useLocalChatEventRouter";
 import {
   SelectionDiscussionProvider,
+  DiscussionSnapshot,
   InlineSelectionDiscussion,
 } from "./SelectionDiscussionContext";
 import { captureCodeSelection } from "./selectionDiscussions";
@@ -76,6 +77,9 @@ vi.mock("../../bindings", () => {
       sendLocalChatMessage: vi.fn(async () => ({ status: "ok", data: null })),
       interruptLocalChatTurn: vi.fn(async () => ({ status: "ok", data: null })),
       closeLocalChatSession: vi.fn(async () => ({ status: "ok" })),
+      checkReviewAnchorWorktree: vi.fn(),
+      captureReviewAnchor: vi.fn(),
+      mapReviewThreads: vi.fn(),
     },
     events: {
       localChatTextEvent: listener("text"),
@@ -109,7 +113,7 @@ let liveDiscussion!: NonNullable<
   ContextType<typeof SelectionDiscussionContext>
 >;
 
-function Controls() {
+function Controls({ showThreads = true }: { showThreads?: boolean }) {
   const context = useContext(SelectionDiscussionContext)!;
 
   liveDiscussion = context;
@@ -117,9 +121,11 @@ function Controls() {
   return (
     <>
       <button onClick={() => context.select(anchor)}>Select fixture</button>
-      <button onClick={context.ask}>Open mini</button>
+      <button onClick={() => {
+        if (context.selection) void context.discuss(context.selection, "");
+      }}>Open mini</button>
       <button onClick={() => context.attach(anchor)}>Attach fixture</button>
-      {context.threads.map((thread) => (
+      {showThreads && context.threads.map((thread) => (
         <InlineSelectionDiscussion key={thread.id} threadId={thread.id} />
       ))}
     </>
@@ -150,11 +156,12 @@ function Router() {
   return null;
 }
 
-function fixture(scope = "A", onAttach = vi.fn()) {
+function fixture(scope = "A", onAttach = vi.fn(), parentChatId?: string) {
   return (
     <SelectionDiscussionProvider
       key={scope}
       worktreePath={`/${scope}`}
+      parentChatId={parentChatId}
       harness="claude"
       onOpen={vi.fn()}
       onAttach={onAttach}
@@ -460,16 +467,24 @@ const selectionCallbacks: ReturnType<
 
 const codeSelections: unknown[] = [];
 
-function CodeFixture() {
+function CodeFixture({
+  surface = "tool_call",
+  files = fixtureFiles,
+  side = "additions",
+}: {
+  surface?: "worktree" | "tool_call";
+  files?: typeof fixtureFiles;
+  side?: "additions" | "deletions";
+}) {
   const review = useDiffComments(
-    { kind: "tool_call", toolUseId: "fixture-tool" },
-    fixtureFiles
+    surface === "worktree" ? { kind: "worktree" } : { kind: "tool_call", toolUseId: "fixture-tool" },
+    files
   );
 
   selectionCallbacks.push(review.onSelectionChange);
   codeSelections.push(review.selectedLinesFor("a"));
 
-  const range = { start: 1, end: 1, side: "additions" as const };
+  const range = { start: 1, end: 1, side };
 
   return (
     <div data-testid="code-fixture">
@@ -487,7 +502,10 @@ function CodeFixture() {
         +
       </button>
       {review.annotationsFor("a").map((annotation) => (
-        <div key={`${annotation.side}:${annotation.lineNumber}`}>
+        <div
+          key={`${annotation.side}:${annotation.lineNumber}`}
+          data-testid={`fixture-line-${annotation.lineNumber}`}
+        >
           {review.renderAnnotation(annotation)}
         </div>
       ))}
@@ -497,10 +515,17 @@ function CodeFixture() {
 
 const fixtureFiles = [anchor.file];
 
-function codeFixture(onAttach = vi.fn(), onOpen = vi.fn()) {
+function codeFixture(
+  onAttach = vi.fn(),
+  onOpen = vi.fn(),
+  parentChatId?: string,
+  surface?: "worktree" | "tool_call",
+  side?: "additions" | "deletions"
+) {
   return (
     <SelectionDiscussionProvider
       worktreePath="/A"
+      parentChatId={parentChatId}
       harness="claude"
       onOpen={onOpen}
       onAttach={onAttach}
@@ -517,7 +542,7 @@ function codeFixture(onAttach = vi.fn(), onOpen = vi.fn()) {
           removeComment: vi.fn(),
         }}
       >
-        <CodeFixture />
+        <CodeFixture surface={surface} side={side} />
       </DiffReviewContext.Provider>
     </SelectionDiscussionProvider>
   );
@@ -859,7 +884,10 @@ it("generated provider journeys observe command dispatch and retire responses ac
           }
 
           if (operation === 1) {
-            await act(async () => liveDiscussion.ask());
+            await act(async () => {
+              const selection = liveDiscussion.selection;
+              if (selection) await liveDiscussion.discuss(selection, "");
+            });
 
             if (selected) {
               active = facts.length;
@@ -1128,7 +1156,7 @@ it("keeps the code highlight through dialog focus and clears it only on submissi
   });
   fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
 
-  expect(codeSelections.at(-1)).toBeNull();
+  await waitFor(() => expect(codeSelections.at(-1)).toBeNull());
 
   await waitFor(() =>
     expect(commands.createLocalChatSession).toHaveBeenCalledOnce()
@@ -1984,4 +2012,200 @@ it("renders a discussion's tool calls, results and errors with the main chat's T
   ).toHaveTextContent("provider overloaded");
 
   view.unmount();
+});
+
+it.each(["worktree", "tool_call"] as const)(
+  "hides inline Ask on %s until the worktree has a first commit",
+  async (surface) => {
+    vi.mocked(commands.checkReviewAnchorWorktree)
+      .mockReset()
+      .mockResolvedValueOnce({ status: "error", error: "not_repository" })
+      .mockResolvedValueOnce({ status: "error", error: "unborn_head" })
+      .mockResolvedValue({ status: "ok", data: null });
+    render(codeFixture(vi.fn(), vi.fn(), "main-chat", surface));
+    await act(async () => {});
+    expect(commands.checkReviewAnchorWorktree).toHaveBeenCalledTimes(1);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add code comment" })));
+    expect(screen.queryByRole("button", { name: "Discuss inline" })).toBeNull();
+    await act(async () => fireEvent(window, new Event("focus")));
+    expect(screen.getByRole("button", { name: "Discuss inline" })).toBeVisible();
+    expect(commands.captureReviewAnchor).not.toHaveBeenCalled();
+  }
+);
+
+it("captures the selected range before starting an inline thread", async () => {
+  vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({
+    status: "ok", data: null,
+  });
+  vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
+    status: "ok",
+    data: { originalCommitId: "commit", originalBlobId: "blob" },
+  });
+  render(codeFixture(vi.fn(), vi.fn(), "main-chat"));
+  fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));
+  const submit = await screen.findByRole("button", { name: "Discuss inline" });
+  fireEvent.change(screen.getByRole("textbox", { name: "New diff comment" }), {
+    target: { value: "Why?" },
+  });
+  await waitFor(() => expect(submit).toBeEnabled());
+  fireEvent.click(submit);
+  expect(await screen.findByRole("region", { name: "Selection discussion" })).toBeVisible();
+  expect(commands.captureReviewAnchor).toHaveBeenCalledWith({
+    worktree: "/A",
+    threadId: expect.any(String),
+    location: {
+      path: "a",
+      side: "RIGHT",
+      source: { kind: "tool_call", chatId: "main-chat", toolUseId: "fixture-tool" },
+    },
+    range: { startLine: 1, line: 1 },
+    selectedText: "selected",
+    parent: { chatId: "main-chat", projectPath: null },
+  });
+});
+
+it("moves a Git-anchored discussion and displays the captured lines when outdated", async () => {
+  vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({
+    status: "ok",
+    data: null,
+  });
+  vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
+    status: "ok",
+    data: { originalCommitId: "commit", originalBlobId: "blob" },
+  });
+  vi.mocked(commands.mapReviewThreads)
+    .mockImplementationOnce(async (_worktree, [request]) => ({
+      status: "ok",
+      data: [{ threadId: request.threadId, status: "open", startLine: 3, line: 3 }],
+    }))
+    .mockImplementationOnce(async (_worktree, [request]) => ({
+      status: "ok",
+      data: [{ threadId: request.threadId, status: "outdated", startLine: null, line: null }],
+    }));
+
+  const shifted = parsePatch(
+    "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,1 +1,3 @@\n-old\n+first\n+second\n+selected\n"
+  );
+  const tree = (files: typeof fixtureFiles) => (
+    <SelectionDiscussionProvider
+      worktreePath="/A"
+      parentChatId="main-chat"
+      harness="claude"
+      onOpen={vi.fn()}
+      onAttach={vi.fn()}
+    >
+      <Controls showThreads={false} />
+      <CodeFixture surface="worktree" files={files} />
+      <DiscussionSnapshot snapshot={null} />
+    </SelectionDiscussionProvider>
+  );
+  const view = render(tree(fixtureFiles));
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "Select fixture" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open mini" }));
+  const original = await screen.findByRole("button", { name: "Highlight selected code: a:1 (new)" });
+  expect(screen.getByTestId("fixture-line-1")).toContainElement(original);
+
+  view.rerender(tree(shifted));
+  await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: shifted }));
+  const moved = await screen.findByRole("button", { name: "Highlight selected code: a:3 (new)" });
+  expect(screen.getByTestId("fixture-line-3")).toContainElement(moved);
+
+  const edited = parsePatch(
+    "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,1 +1,3 @@\n-old\n+edited\n+second\n+first\n"
+  );
+  view.rerender(tree(edited));
+  await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: edited }));
+  expect(await screen.findByText("Outdated context")).toBeVisible();
+  const snippet = screen.getByLabelText("Original selected code");
+  expect(snippet).toHaveTextContent("selected");
+  expect(screen.getByTestId("code-fixture")).not.toContainElement(snippet);
+});
+
+it("keeps the newest mapping and clears a transient mapping error", async () => {
+  vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({ status: "ok", data: null });
+  vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
+    status: "ok",
+    data: { originalCommitId: "commit", originalBlobId: "blob" },
+  });
+  type Mapping = Awaited<ReturnType<typeof commands.mapReviewThreads>>;
+  let resolveOlder!: (result: Mapping) => void;
+  const older = new Promise<Mapping>((resolve) => { resolveOlder = resolve; });
+  vi.mocked(commands.mapReviewThreads)
+    .mockReset()
+    .mockResolvedValueOnce({ status: "error", error: "git" })
+    .mockReturnValueOnce(older)
+    .mockImplementationOnce(async (_worktree, [request]) => ({
+      status: "ok",
+      data: [{ threadId: request.threadId, status: "open", startLine: 4, line: 4 }],
+    }));
+
+  render(fixture("A", vi.fn(), "main-chat"));
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "Select fixture" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open mini" }));
+  await screen.findByRole("button", { name: "Highlight selected code: a:1 (new)" });
+  await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: [] }));
+  expect(liveDiscussion.anchorError).toBe("Git could not load the review anchor.");
+  act(() => liveDiscussion.reconcile({ wholeBranch: false, files: [] }));
+  await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: [] }));
+  expect(liveDiscussion.anchorError).toBeNull();
+  await act(async () => resolveOlder({ status: "error", error: "git" }));
+  expect(liveDiscussion.anchorError).toBeNull();
+  expect(screen.getByRole("button", { name: "Highlight selected code: a:4 (new)" })).toBeVisible();
+});
+
+it("keeps an unavailable anchor separate from a confirmed outdated selection", async () => {
+  vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({ status: "ok", data: null });
+  vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
+    status: "ok",
+    data: { originalCommitId: "commit", originalBlobId: "blob" },
+  });
+  vi.mocked(commands.mapReviewThreads)
+    .mockReset()
+    .mockImplementationOnce(async (_worktree, [request]) => ({
+      status: "ok",
+      data: [{ threadId: request.threadId, status: "unavailable", startLine: null, line: null }],
+    }))
+    .mockImplementationOnce(async (_worktree, [request]) => ({
+      status: "ok",
+      data: [{ threadId: request.threadId, status: "open", startLine: 1, line: 1 }],
+    }));
+  render(fixture("A", vi.fn(), "main-chat"));
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "Select fixture" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open mini" }));
+  await screen.findByRole("region", { name: "Selection discussion" });
+  await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: fixtureFiles }));
+  expect(await screen.findByText("Anchor unavailable")).toBeVisible();
+  expect(liveDiscussion.threads[0]).toMatchObject({ outdated: false, outdatedNoted: false, detached: true });
+  await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: fixtureFiles }));
+  expect(screen.queryByText("Anchor unavailable")).toBeNull();
+  expect(liveDiscussion.threads[0]).toMatchObject({ outdated: false, outdatedNoted: false, detached: false });
+});
+
+it("keeps deleted tool-patch lines available for the main chat composer", async () => {
+  vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({ status: "ok", data: null });
+  const attach = vi.fn();
+  render(codeFixture(attach, vi.fn(), "main-chat", "tool_call", "deletions"));
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));
+  expect(screen.queryByRole("button", { name: "Discuss inline" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Send to main chat" }));
+  expect(attach).toHaveBeenCalledWith(expect.objectContaining({ side: "old", code: "old" }), false, "");
+});
+
+it("rejects a direct discussion request for the deleted side of a tool patch", async () => {
+  vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({ status: "ok", data: null });
+  render(fixture("A", vi.fn(), "main-chat"));
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+
+  await act(async () => {
+    expect(await liveDiscussion.discuss({
+      ...anchor,
+      side: "old",
+      home: { kind: "tool_call", toolUseId: "fixture-tool" },
+    }, "Why?")).toBe(false);
+  });
+  expect(commands.captureReviewAnchor).not.toHaveBeenCalled();
 });

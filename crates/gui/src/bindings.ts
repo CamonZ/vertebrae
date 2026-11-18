@@ -1130,6 +1130,38 @@ async saveLocalChatSessionIndex(input: SaveLocalChatSessionIndexInput) : Promise
     else return { status: "error", error: e  as any };
 }
 },
+async checkReviewAnchorWorktree(worktree: string) : Promise<Result<null, ReviewAnchorError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_review_anchor_worktree", { worktree }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async captureReviewAnchor(request: ReviewAnchorRequest) : Promise<Result<CapturedReviewAnchor, ReviewAnchorError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("capture_review_anchor", { request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async mapReviewThreads(worktree: string, threads: ReviewMappingRequest[]) : Promise<Result<MappedReviewThread[], ReviewAnchorError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("map_review_threads", { worktree, threads }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async readReviewAnchor(worktree: string, threadId: string, range: ReviewLineRange) : Promise<Result<string, ReviewAnchorError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("read_review_anchor", { worktree, threadId, range }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listReviewThreads(projectId: string) : Promise<Result<ReviewThread[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_review_threads", { projectId }) };
@@ -1534,6 +1566,9 @@ localChatToolResultEvent: LocalChatToolResultEvent,
 localChatTurnStartedEvent: LocalChatTurnStartedEvent,
 notificationChangedEvent: NotificationChangedEvent,
 permissionRequestEvent: PermissionRequestEvent,
+reviewThreadCatalogRecovered: ReviewThreadCatalogRecovered,
+reviewThreadCatalogRecoveryNeeded: ReviewThreadCatalogRecoveryNeeded,
+reviewThreadChanged: ReviewThreadChanged,
 sectionChangedEvent: SectionChangedEvent,
 sessionLogCreatedEvent: SessionLogCreatedEvent,
 sessionLogUpdatedEvent: SessionLogUpdatedEvent,
@@ -1546,9 +1581,6 @@ taskRunStepChangedEvent: TaskRunStepChangedEvent,
 taskStepChangedEvent: TaskStepChangedEvent,
 workflowChangedEvent: WorkflowChangedEvent,
 workflowTransitionChangedEvent: WorkflowTransitionChangedEvent,
-reviewThreadCatalogRecovered: ReviewThreadCatalogRecovered,
-reviewThreadCatalogRecoveryNeeded: ReviewThreadCatalogRecoveryNeeded,
-reviewThreadChanged: ReviewThreadChanged,
 worktreeChangedEvent: WorktreeChangedEvent
 }>({
 artifactChangedEvent: "artifact-changed-event",
@@ -1572,6 +1604,9 @@ localChatToolResultEvent: "local-chat-tool-result-event",
 localChatTurnStartedEvent: "local-chat-turn-started-event",
 notificationChangedEvent: "notification-changed-event",
 permissionRequestEvent: "permission-request-event",
+reviewThreadCatalogRecovered: "review-thread-catalog-recovered",
+reviewThreadCatalogRecoveryNeeded: "review-thread-catalog-recovery-needed",
+reviewThreadChanged: "review-thread-changed",
 sectionChangedEvent: "section-changed-event",
 sessionLogCreatedEvent: "session-log-created-event",
 sessionLogUpdatedEvent: "session-log-updated-event",
@@ -1584,9 +1619,6 @@ taskRunStepChangedEvent: "task-run-step-changed-event",
 taskStepChangedEvent: "task-step-changed-event",
 workflowChangedEvent: "workflow-changed-event",
 workflowTransitionChangedEvent: "workflow-transition-changed-event",
-reviewThreadCatalogRecovered: "review-thread-catalog-recovered",
-reviewThreadCatalogRecoveryNeeded: "review-thread-catalog-recovery-needed",
-reviewThreadChanged: "review-thread-changed",
 worktreeChangedEvent: "worktree-changed-event"
 })
 
@@ -1730,6 +1762,7 @@ create_ticket: boolean;
 diagnostic: string | null }
 export type AssociationSelection = { kind: "keep" } | { kind: "unknown" } | { kind: "entity"; id: string; title: string; level: TaskLevel }
 export type AssociationWorktree = { path: string; branch: string | null }
+export type CapturedReviewAnchor = { originalCommitId: string; originalBlobId: string }
 /**
  * Code reference - file location reference
  */
@@ -2249,6 +2282,7 @@ export type LocalChatTurnStartedEvent = { backend_session_id: string; harness: L
  * An application or editor command that can open local source/text files.
  */
 export type LocalFileEditor = { id: string; name: string; path: string }
+export type MappedReviewThread = { threadId: string; startLine: number | null; line: number | null; status: ReviewMappingStatus }
 /**
  * Why a changed file is listed without hunks.
  */
@@ -2338,6 +2372,14 @@ export type ProviderSettings = { id: string; harness: string; endpoint: string; 
 export type ResolvePermissionRequestError = { kind: ResolvePermissionRequestErrorKind; message: string }
 export type ResolvePermissionRequestErrorKind = "unavailable" | "not_found" | "invalid" | "internal"
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
+export type ReviewAnchorError = "not_repository" | "unborn_head" | "invalid_path" | "invalid_range" | "content_unavailable" | "catalog_unavailable" | "parent_unavailable" | "git"
+export type ReviewAnchorLocation = { path: string; side: ReviewThreadSide; source: ReviewAnchorSource }
+export type ReviewAnchorParent = { chatId: string; projectPath: string | null }
+export type ReviewAnchorRequest = { worktree: string; threadId: string; location: ReviewAnchorLocation; range: ReviewLineRange; selectedText: string; parent: ReviewAnchorParent | null }
+export type ReviewAnchorSource = { kind: "worktree"; commit: string | null } | { kind: "tool_call"; chatId: string; toolUseId: string }
+export type ReviewLineRange = { startLine: number; line: number }
+export type ReviewMappingRequest = { threadId: string; originalBlobId: string; range: ReviewLineRange; location: ReviewAnchorLocation }
+export type ReviewMappingStatus = "open" | "outdated" | "unavailable"
 export type ReviewThread = { threadId: string; revision: number; payload: ReviewThreadInput }
 export type ReviewThreadCatalogRecovered = { projectId: string }
 export type ReviewThreadCatalogRecoveryNeeded = { projectId: string }

@@ -93,7 +93,7 @@ impl LocalChatAnnotationStore {
         let bytes = serde_json::to_vec(&annotation.payload)
             .map_err(|e| AnnotationStoreError::InvalidAnnotation(e.to_string()))?;
         let staged_body = self.staged(directory, &bytes)?;
-        let projected = annotation.frontend();
+        let projected = annotation.clone().frontend();
         if serde_json::to_vec(&projected)
             .map_err(|e| AnnotationStoreError::InvalidAnnotation(e.to_string()))?
             .len()

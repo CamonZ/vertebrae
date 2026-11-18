@@ -1161,3 +1161,9 @@ queued descendants use the same event. Use `reviewThreadCatalogRecovered` to
 reload the complete project projection after startup or reconnect, including
 an empty snapshot. A failed CDC merge emits `reviewThreadCatalogRecoveryNeeded`;
 the global catalog listener requests recovery for the current account.
+
+Git capture stages the anchor ref before acquiring the catalog lock so file
+reads and hashing cannot delay catalog writes. If the process stops after
+creating the ref but before saving its repository entry, the ref can remain
+in Git without a catalog record. Catalog recovery releases only tracked
+refs. An orphan in this window retains its blob until the ref is removed.
