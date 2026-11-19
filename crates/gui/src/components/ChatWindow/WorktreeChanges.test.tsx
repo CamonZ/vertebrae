@@ -17,6 +17,16 @@ import {
 } from "../../bindings";
 import { useDocumentStore } from "./workspace/documentStore";
 import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
+import {
+  SelectionDiscussionContext,
+  type DiscussionValue,
+} from "./selectionDiscussionState";
+import {
+  DISCUSSION_ASK_SHORTCUT,
+  DISCUSSION_COLLAPSE_SHORTCUT,
+  DISCUSSION_SEND_SHORTCUT,
+  shortcutText,
+} from "./chatShortcuts";
 import type { AllChangesViewProps } from "./workspace/AllChangesView";
 import type { DocumentEditorProps } from "./workspace/DocumentEditor";
 
@@ -1201,11 +1211,8 @@ describe("WorktreeChanges source references", () => {
   });
 });
 
-describe("contextual Changes key hints", () => {
-  const footer = () =>
-    screen.getByRole("contentinfo", { name: "Changes keyboard shortcuts" });
-
-  it("resumes the line cursor when Changes is entered and hints for it", async () => {
+describe("Changes keyboard focus", () => {
+  it("resumes the line cursor when Changes is entered", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     const onExit = vi.fn();
     render(<WorktreeChanges worktreePath="/worktree" onExit={onExit} />);
@@ -1214,33 +1221,25 @@ describe("contextual Changes key hints", () => {
 
     act(() => screen.getByRole("region", { name: "Worktree changes" }).focus());
     expect(cursor).toHaveFocus();
-    expect(footer()).toHaveAttribute("data-situation", "diff");
-    expect(footer()).toHaveTextContent("Move line cursor");
-    expect(footer()).toHaveTextContent("All shortcuts");
-    expect(footer()).not.toHaveTextContent("Browse file list");
-    // Split-only bindings are hidden in a unified diff.
-    expect(footer()).not.toHaveTextContent("Switch side");
+    expect(
+      screen.queryByRole("contentinfo", { name: "Changes keyboard shortcuts" })
+    ).toBeNull();
 
     fireEvent.keyDown(cursor, { key: "Escape" });
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
-  it("lists the expand bindings while the cursor is on collapsed lines", async () => {
+  it("puts the cursor on collapsed lines and back on code", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     render(<WorktreeChanges worktreePath="/worktree" />);
     const cursor = await screen.findByRole("group", { name: "Code diff selection" });
     act(() => cursor.focus());
 
     fireEvent.keyDown(cursor, { key: "ArrowDown" });
-    fireEvent.keyUp(cursor, { key: "ArrowDown" });
-    expect(footer()).toHaveAttribute("data-situation", "gap");
-    expect(footer()).toHaveTextContent("Expand toward where you came from");
-    expect(footer()).toHaveTextContent("Expand the other way");
-    expect(footer()).not.toHaveTextContent("Expand all");
+    expect(cursor).toHaveAttribute("data-line-cursor", "gap");
 
     fireEvent.keyDown(cursor, { key: "ArrowDown" });
-    fireEvent.keyUp(cursor, { key: "ArrowDown" });
-    expect(footer()).toHaveAttribute("data-situation", "diff");
+    expect(cursor).toHaveAttribute("data-line-cursor", "");
   });
 
   it("reads both sides of a change for revealing unchanged lines", async () => {
@@ -1263,26 +1262,6 @@ describe("contextual Changes key hints", () => {
     );
     expect(read).toHaveBeenCalledWith("/worktree", "src/app.ts");
   });
-
-  it("switches hints with focus and falls back when focus leaves", async () => {
-    load.mockResolvedValue({ status: "ok", data: modified });
-    render(
-      <>
-        <WorktreeChanges worktreePath="/worktree" />
-        <textarea aria-label="Main chat" />
-      </>
-    );
-    const row = await screen.findByRole("button", { name: "Jump to src/app.ts" });
-    act(() => row.focus());
-    expect(footer()).toHaveAttribute("data-situation", "files");
-    expect(footer()).toHaveTextContent("Browse file list");
-    expect(footer()).not.toHaveTextContent("Move line cursor");
-
-    act(() => screen.getByRole("textbox", { name: "Main chat" }).focus());
-    expect(footer()).toHaveAttribute("data-situation", "outside");
-    expect(footer()).toHaveTextContent("Move between chats and Changes");
-    expect(footer()).not.toHaveTextContent("Browse file list");
-  });
 });
 
 describe("Changes palette and viewed files", () => {
@@ -1303,6 +1282,76 @@ describe("Changes palette and viewed files", () => {
     palette = useCommandPaletteStore.getState();
     expect(palette.contextItems[0].label).toBe("Choose base");
     expect(palette.contextItems.map((item) => item.label)).toContain("gone.txt");
+  });
+
+  it("lists every discussion action with its keys", async () => {
+    load.mockResolvedValue({ status: "ok", data: modified });
+    const thread = (id: string, startLine: number, kind = "inline") => ({
+      id,
+      status: { kind },
+      anchor: { path: "src/app.ts", startLine, endLine: startLine, side: "new" },
+    });
+    const discussion = {
+      threads: [
+        thread("open", 1),
+        thread("closed", 2),
+        thread("detached", 3, "detached"),
+      ],
+      activeId: "open",
+      collapsed: new Set<string>(),
+      reopen: vi.fn(),
+      toggleCollapsed: vi.fn(),
+      attach: vi.fn(),
+      select: vi.fn(),
+    } as unknown as DiscussionValue;
+    render(
+      <SelectionDiscussionContext.Provider value={discussion}>
+        <WorktreeChanges worktreePath="/worktree" />
+      </SelectionDiscussionContext.Provider>
+    );
+    const row = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+
+    fireEvent.keyDown(row, { key: "k", metaKey: true });
+    const items = useCommandPaletteStore.getState().contextItems;
+    const listed = (label: string) =>
+      items
+        .filter((item) => item.label === label)
+        .map(({ hint, detail }) => [hint, detail]);
+    const collapse = shortcutText(DISCUSSION_COLLAPSE_SHORTCUT);
+    expect(listed("Show only the latest response")).toEqual([
+      ["src/app.ts:1 (new)", collapse],
+    ]);
+    expect(listed("Ask follow-up")).toEqual([
+      ["src/app.ts:1 (new)", shortcutText(DISCUSSION_ASK_SHORTCUT)],
+    ]);
+    expect(listed("Send selection to main chat")).toEqual([
+      ["src/app.ts:1 (new)", shortcutText(DISCUSSION_SEND_SHORTCUT)],
+    ]);
+    expect(listed("Highlight selected code")).toEqual([
+      ["src/app.ts:1 (new)", undefined],
+    ]);
+    expect(listed("Stop response")).toEqual([]);
+    expect(listed("Close discussion")).toEqual([["src/app.ts:1 (new)", "Esc"]]);
+    expect(listed("Open discussion")).toEqual([
+      ["src/app.ts:2 (new)", "o"],
+      ["src/app.ts:3 (new)", undefined],
+    ]);
+
+    const run = (label: string) =>
+      items.find((item) => item.label === label)!.run();
+    run("Open discussion");
+    expect(discussion.reopen).toHaveBeenCalledWith("closed", { focus: true });
+    run("Ask follow-up");
+    expect(discussion.reopen).toHaveBeenCalledWith("open", { focus: true });
+    run("Send selection to main chat");
+    expect(discussion.attach).toHaveBeenCalledWith(
+      discussion.threads[0].anchor,
+      false
+    );
+    run("Highlight selected code");
+    expect(discussion.select).toHaveBeenCalledWith(discussion.threads[0].anchor);
+    run("Show only the latest response");
+    expect(discussion.toggleCollapsed).toHaveBeenCalledWith("open");
   });
 
   it("marks the active file viewed with v and counts viewed files", async () => {

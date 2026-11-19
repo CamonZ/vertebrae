@@ -1,3 +1,4 @@
+import { CHANGES_HINT_GROUPS } from "./chatShortcuts";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ChatShortcutHints, CHAT_SHORTCUT_SECTIONS } from "./ChatShortcutHints";
@@ -47,6 +48,20 @@ describe("ChatShortcutHints", () => {
     const { container } = render(<ChatShortcutHints onClose={vi.fn()} />);
     const kbds = container.querySelectorAll("kbd");
     expect(kbds.length).toBeGreaterThan(0);
+  });
+
+  it("lists every inline discussion binding in its own section", () => {
+    render(<ChatShortcutHints onClose={vi.fn()} />);
+    expect(screen.getByText("Open discussion at line")).toBeInTheDocument();
+    const section = screen
+      .getByRole("heading", { name: "Changes · inline discussion" })
+      .closest("section")!;
+    const labels = [...section.querySelectorAll("dd")].map((dd) => dd.textContent);
+    expect(labels).toEqual(
+      CHANGES_HINT_GROUPS.find(
+        ({ title }) => title === "Changes · inline discussion"
+      )!.hints.map(({ label }) => label)
+    );
   });
 
   it("renders known shortcut labels", () => {

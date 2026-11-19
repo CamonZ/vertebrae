@@ -234,3 +234,26 @@ button:has(> .selection-chip-label) {
   background: var(--color-bg-hover);
   color: var(--color-fg);
 }
+
+/* Collapsed discussion: the earlier turns fold into one row (SYNTHESIS §1.4). */
+.selection-mini-earlier {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--color-bg-2);
+  color: var(--color-fg-soft);
+  font: 500 12px/1.4 var(--font-sans);
+  cursor: pointer;
+}
+
+.selection-mini-earlier:hover {
+  color: var(--color-fg);
+}
+
+.selection-mini-close[aria-pressed="true"] {
+  color: var(--color-fg);
+}

@@ -5,6 +5,7 @@ import {
   type PendingDiffComment,
 } from "../../ChatWindow/assistantTextComments";
 import { SelectionDiscussionModelContext } from "../../ChatWindow/selectionDiscussionState";
+import type { CodeSelection } from "../../ChatWindow/selectionDiscussions";
 import {
   DiscussionModelNotice,
   InlineSelectionDiscussion,
@@ -194,12 +195,15 @@ export function DiffCommentThread({
   onCancelDraft,
   onDiscussDraft,
   onAttachDraft,
+  onDiscussionClosed,
 }: {
   annotation: ReviewAnnotation;
   onSaveDraft(body: string): void;
   onCancelDraft(): void;
   onDiscussDraft?(body: string): void;
   onAttachDraft?(body: string): void;
+  /** A discussion here closed; return the cursor to its anchor line. */
+  onDiscussionClosed?(anchor: CodeSelection): void;
 }): ReactNode {
   const review = useContext(DiffReviewContext);
   const choice = useContext(SelectionDiscussionModelContext);
@@ -218,7 +222,11 @@ export function DiffCommentThread({
   return (
     <div className="diff-comment-thread" data-owns-escape="">
       {annotation.threadIds?.map((id) => (
-        <InlineSelectionDiscussion key={id} threadId={id} />
+        <InlineSelectionDiscussion
+          key={id}
+          threadId={id}
+          onClosed={onDiscussionClosed}
+        />
       ))}
       {comments.map((comment) => (
         <CommentCard

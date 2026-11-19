@@ -585,6 +585,8 @@ describe("Changes keyboard line cursor", () => {
     send: vi.fn(),
     cancel: vi.fn(),
     reconcile: vi.fn(),
+    toggleCollapsed: vi.fn(),
+    focusTaken: vi.fn(),
   } satisfies DiscussionActions;
   const writeText = vi.fn(() => Promise.resolve());
 

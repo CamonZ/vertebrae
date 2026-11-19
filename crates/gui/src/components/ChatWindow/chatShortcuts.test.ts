@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   CHAT_HELP_SHORTCUT,
-  changesHintsFor,
+  CHANGES_HINT_GROUPS,
   matchesChatShortcut,
+  DISCUSSION_ASK_SHORTCUT,
+  DISCUSSION_COLLAPSE_SHORTCUT,
+  DISCUSSION_SEND_SHORTCUT,
   presentChatShortcut,
+  shortcutText,
 } from "./chatShortcuts";
 
 describe("chat-help shortcut metadata", () => {
@@ -43,37 +47,36 @@ describe("chat-help shortcut metadata", () => {
   });
 });
 
-describe("changesHintsFor", () => {
-  const labels = (situation: Parameters<typeof changesHintsFor>[0], split = false) =>
-    changesHintsFor(situation, { split }).map((hint) => hint.label);
+describe("CHANGES_HINT_GROUPS", () => {
+  const pairs = (title: string) =>
+    CHANGES_HINT_GROUPS.find((group) => group.title === title)!.hints.map(
+      (hint) => [hint.keys.join(""), hint.label]
+    );
 
-  it("lists only the bindings for the focused situation", () => {
-    expect(labels("composer")).toEqual([
-      "Create inline discussion",
-      "Send to main chat",
-      "Cancel and return to line",
-      "All shortcuts",
+  it("lists the discussion bindings on the line cursor and in a discussion", () => {
+    const collapse = shortcutText(DISCUSSION_COLLAPSE_SHORTCUT);
+    expect(pairs("Changes · line cursor")).toEqual(
+      expect.arrayContaining([
+        ["o", "Open discussion at line"],
+        [collapse, "Collapse or expand the discussion at line"],
+      ])
+    );
+    expect(pairs("Changes · inline discussion")).toEqual([
+      ["↵", "Open discussion (on its marker)"],
+      [shortcutText(DISCUSSION_ASK_SHORTCUT), "Ask follow-up"],
+      [shortcutText(DISCUSSION_SEND_SHORTCUT), "Send follow-up to main chat"],
+      [collapse, "Collapse or expand earlier turns"],
+      ["↵", "Show all turns (on “▸ N earlier turns”)"],
+      ["Esc", "Close and return to line"],
     ]);
-    expect(labels("outside")).toEqual([
-      "Move between chats and Changes",
-      "All shortcuts",
-    ]);
-    expect(labels("diff")).not.toContain("Base");
   });
 
-  it("lists the expand bindings on collapsed lines", () => {
-    const hints = changesHintsFor("gap", { split: false });
-    expect(hints.map((hint) => [hint.keys.join(""), hint.label])).toEqual(
+  it("lists the expand bindings for collapsed lines", () => {
+    expect(pairs("Changes · unchanged lines")).toEqual(
       expect.arrayContaining([
         ["↵", "Expand toward where you came from"],
         ["⌥↵", "Expand the other way"],
       ])
     );
-    expect(labels("gap")).not.toContain("Discuss selection");
-  });
-
-  it("offers side switching only in a split diff", () => {
-    expect(labels("diff")).not.toContain("Switch side");
-    expect(labels("diff", true)).toContain("Switch side");
   });
 });
