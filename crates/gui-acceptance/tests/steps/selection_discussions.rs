@@ -1777,10 +1777,9 @@ async fn themed_layout(world: &mut GuiWorld) {
                 println!("Inline pending layout turn {index}, {theme}/{width}: {metrics}");
 
                 if index == 1 {
-                    assert_eq!(
-                        metrics["historyScrollable"],
-                        json!(true),
-                        "follow-up must exercise scrollable history"
+                    assert!(
+                        metrics["historyHeight"].as_u64().unwrap() > 420,
+                        "follow-up must grow beyond the former height cap: {metrics}"
                     );
                 }
 
