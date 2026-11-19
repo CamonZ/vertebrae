@@ -40,7 +40,6 @@ import {
   type PendingTextComment,
   type TextSelectionAnchor,
 } from "./assistantTextComments";
-import type { DiffReviewFocus } from "../thread/toolChange/DiffReviewContext";
 import { useCommentHighlights } from "./commentHighlight";
 import { CommentShortcutHint } from "./CommentShortcutHint";
 import { useScrollFollow } from "./useScrollFollow";
@@ -507,8 +506,6 @@ interface ChatMessagesProps {
   textComments?: readonly PendingTextComment[];
   /** The comment whose composer chip is hovered or pinned. */
   activeCommentId?: string | null;
-  /** A request to scroll a comment's quote into view. */
-  commentFocus?: DiffReviewFocus | null;
   /** Rendered inline after the last message, such as gate steering. */
   footer?: ReactNode;
 }
@@ -535,7 +532,6 @@ export function ChatMessages({
   onAddComment = () => undefined,
   textComments = NO_TEXT_COMMENTS,
   activeCommentId = null,
-  commentFocus = null,
   footer = null,
 }: ChatMessagesProps) {
   const retryHistory = useChatStore(
@@ -561,8 +557,10 @@ export function ChatMessages({
   const messageRefs = useRef(new Map<string, HTMLElement>());
   const blockBottomFollow = useCallback(
     (viewport: HTMLElement) =>
-      !!prependAnchorRef.current || hasInlineScrollFollow(viewport),
-    []
+      activeCommentId !== null ||
+      !!prependAnchorRef.current ||
+      hasInlineScrollFollow(viewport),
+    [activeCommentId]
   );
   const {
     schedule: scheduleBottomFollow,
@@ -655,13 +653,10 @@ export function ChatMessages({
       window.removeEventListener("resize", follow);
     };
   }, [selectionAction]);
-  useCommentHighlights(
-    messagesContainerRef,
-    textComments,
-    activeCommentId,
-    commentFocus,
-    [messages, streamingAssistant]
-  );
+  useCommentHighlights(messagesContainerRef, textComments, activeCommentId, [
+    messages,
+    streamingAssistant,
+  ]);
   // Tool calls with file changes render as diffs; warm Pierre ahead of them.
   useEffect(preloadDiffRenderer, []);
   useEffect(() => {

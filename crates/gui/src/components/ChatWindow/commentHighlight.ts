@@ -3,7 +3,6 @@ import {
   ASSISTANT_RESPONSE_SELECTOR,
   type PendingTextComment,
 } from "./assistantTextComments";
-import type { DiffReviewFocus } from "../thread/toolChange/DiffReviewContext";
 
 /** CSS Custom Highlight names; styled in chatComments.css. */
 export const PENDING_HIGHLIGHT = "vtb-comment";
@@ -124,14 +123,13 @@ function publish() {
 
 /**
  * Mark every pending text comment's quote in the transcript, the hovered or
- * pinned one more strongly, and scroll a navigated-to quote into view.
+ * pinned one more strongly.
  * Degrades to nothing where the CSS Custom Highlight API is missing.
  */
 export function useCommentHighlights(
   transcriptRef: RefObject<HTMLElement | null>,
   comments: readonly PendingTextComment[],
   activeId: string | null,
-  focus: DiffReviewFocus | null,
   /** Re-resolve when the rendered transcript changes. */
   revision: unknown
 ) {
@@ -154,17 +152,4 @@ export function useCommentHighlights(
       publish();
     };
   }, [transcriptRef, comments, activeId, revision]);
-
-  useEffect(() => {
-    const transcript = transcriptRef.current;
-    if (!transcript || !focus) return;
-    const comment = comments.find(
-      (candidate) => candidate.id === focus.commentId
-    );
-    const range = comment && findQuoteRange(transcript, comment);
-    const target = range?.startContainer.parentElement;
-    target?.scrollIntoView?.({ block: "center", behavior: "smooth" });
-    // Only a new navigation request scrolls; later edits must not.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transcriptRef, focus]);
 }

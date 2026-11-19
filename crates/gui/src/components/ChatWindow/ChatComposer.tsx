@@ -17,6 +17,7 @@ import {
   type PendingDiffComment,
 } from "./assistantTextComments";
 import { CommentShortcutHint } from "./CommentShortcutHint";
+import { useCommentCardAnchor } from "./useCommentCardAnchor";
 import "./chatComments.css";
 
 /** A code selection sent to the main chat; its own text is optional. */
@@ -373,6 +374,11 @@ export function ChatComposer({
     else onStartSession(message);
   };
   const shownCommentId = pinnedCommentId ?? activeCommentId;
+  const commentCardRef = useRef<HTMLDivElement>(null);
+  useCommentCardAnchor(
+    commentCardRef,
+    pendingComments.find((comment) => comment.id === shownCommentId)
+  );
   useEffect(() => {
     onActiveCommentChange?.(shownCommentId);
   }, [shownCommentId, onActiveCommentChange]);
@@ -461,7 +467,7 @@ export function ChatComposer({
         removeFromKeyboard(index);
         break;
       case "Escape":
-        leaveChips();
+        closeCommentPopover();
         break;
       case "ArrowDown":
         if (!(event.metaKey && event.altKey)) return;
@@ -587,8 +593,9 @@ export function ChatComposer({
             </button>
             {isActive ? (
               <div
+                ref={commentCardRef}
                 id={popoverId}
-                className="chat-comment-card absolute bottom-full left-0 z-[90] mb-2"
+                className="chat-comment-card chat-comment-card-chip"
                 role="group"
                 aria-label={`Comment ${commentNumber} details`}
                 data-testid="local-chat-comment-popover"
@@ -761,7 +768,7 @@ export function ChatComposer({
                       <kbd className="chat-comment-kbd">←→</kbd> move ·
                       <kbd className="chat-comment-kbd">↵</kbd> edit ·
                       <kbd className="chat-comment-kbd">⌫</kbd> remove ·
-                      <kbd className="chat-comment-kbd">esc</kbd> back
+                      <kbd className="chat-comment-kbd">esc</kbd> close
                     </span>
                   </div>
                 ) : null}

@@ -1252,16 +1252,13 @@ describe("ChatComposer", () => {
         expect(chip(3)).toHaveFocus();
 
         fireEvent.keyDown(chip(3), { key: "Escape" });
-        expect(input()).toHaveFocus();
+        expect(chip(3)).toHaveFocus();
         expect(screen.queryByTestId("local-chat-comment-popover")).toBeNull();
 
-        fireEvent.keyDown(input(), {
-          key: "ArrowUp",
-          metaKey: true,
-          altKey: true,
-        });
-        expect(chip(3)).toHaveFocus();
-        fireEvent.keyDown(chip(3), {
+        fireEvent.keyDown(chip(3), { key: "ArrowLeft" });
+        expect(chip(2)).toHaveFocus();
+        expect(screen.getByTestId("local-chat-comment-popover")).toBeVisible();
+        fireEvent.keyDown(chip(2), {
           key: "ArrowDown",
           metaKey: true,
           altKey: true,
@@ -1473,7 +1470,13 @@ describe("ChatComposer", () => {
                 ? { key: "Escape" }
                 : { key: "ArrowDown", metaKey: true, altKey: true }
             );
-            model.focus = "input";
+            if (how) {
+              expect(
+                screen.queryByTestId("local-chat-comment-popover")
+              ).toBeNull();
+            } else {
+              model.focus = "input";
+            }
           },
           remove: (tc, model) => {
             const at = onChip(tc, model);
@@ -1548,7 +1551,10 @@ describe("ChatComposer", () => {
               expect(stops).toEqual(chips.length ? [chips[roving(model)]] : []);
               expect(
                 screen.queryByTestId("local-chat-comment-keys") !== null
-              ).toBe(model.focus !== "input");
+              ).toBe(
+                model.focus !== "input" &&
+                  focused(model).getAttribute("aria-expanded") === "true"
+              );
             },
           },
           sendReadiness: {

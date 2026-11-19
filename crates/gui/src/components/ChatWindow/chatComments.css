@@ -59,6 +59,19 @@
   position: fixed;
   z-index: 80;
 }
+.chat-comment-card-chip:not(.chat-comment-card-fixed) {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  z-index: 90;
+  margin-bottom: 8px;
+  max-width: 100%;
+}
+.chat-comment-card-chip.chat-comment-card-fixed {
+  z-index: 90;
+  overflow: auto;
+  animation: none;
+}
 .chat-comment-card-header {
   display: flex;
   align-items: center;
@@ -215,10 +228,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  max-width: 100%;
-}
-/* All chips share the composer's bounds, including chips near its right edge. */
-.chat-comment-chips .chat-comment-card {
   max-width: 100%;
 }
 .chat-comment-chip {
