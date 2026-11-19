@@ -1,12 +1,6 @@
 import type { LocalChatDiscussionBinding } from "../bindings";
 import type { ChatSession } from "../stores/chatStore";
 
-export type LocalChatDiscussion = LocalChatDiscussionBinding | "unbound";
-
-export function discussionBinding(discussion: LocalChatDiscussion | undefined) {
-  return discussion === "unbound" ? undefined : discussion;
-}
-
 export function isOpenLocalChatConversation(
   session: ChatSession | undefined
 ): session is ChatSession & { status: "open"; discussion?: undefined } {

@@ -1,4 +1,4 @@
-import type { LocalChatDiscussion } from "../../utils/localChatDiscussion";
+import type { LocalChatDiscussionBinding } from "../../bindings";
 export type PaletteScope =
   | "all"
   | "navigate"
@@ -68,7 +68,7 @@ export interface PaletteChatSource {
   updatedAt?: string;
   status?: "open" | "closed";
   hasUserMessage?: boolean;
-  discussion?: LocalChatDiscussion;
+  discussion?: LocalChatDiscussionBinding;
   messageCount?: number;
 }
 

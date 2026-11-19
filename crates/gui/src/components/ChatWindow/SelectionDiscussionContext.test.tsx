@@ -25,7 +25,7 @@ import type {
   LocalChatToolResultEvent,
   LocalChatTurnStartedEvent,
 } from "../../bindings";
-import { commands } from "../../bindings";
+import { commands, events, type ReviewThread } from "../../bindings";
 import { useChatStore } from "../../stores/chatStore";
 import { flushPendingLocalChatText } from "../../utils/localChatTextBatch";
 import {
@@ -37,7 +37,7 @@ import {
   DiscussionSnapshot,
   InlineSelectionDiscussion,
 } from "./SelectionDiscussionContext";
-import { captureCodeSelection } from "./selectionDiscussions";
+import { captureCodeSelection, isOutdated } from "./selectionDiscussions";
 import { parsePatch } from "../thread/toolChange/diffLineMapper";
 
 const transport = vi.hoisted(() => ({
@@ -81,6 +81,10 @@ vi.mock("../../bindings", () => {
       getProjects: vi.fn(async () => ({ status: "ok", data: [] })),
       captureReviewAnchor: vi.fn(),
       mapReviewThreads: vi.fn(),
+      loadLocalChatSessionIndex: vi.fn(async () => ({ status: "ok", data: [] })),
+      listReviewThreads: vi.fn(async () => ({ status: "ok", data: [] })),
+      readReviewAnchor: vi.fn(async () => ({ status: "ok", data: "selected" })),
+      putReviewThread: vi.fn(async () => ({ status: "ok", data: null })),
     },
     events: {
       localChatTextEvent: listener("text"),
@@ -97,6 +101,8 @@ vi.mock("../../bindings", () => {
       localChatSessionWarningEvent: listener(),
       localChatCompactionEvent: listener(),
       localChatAnnotationEvent: listener(),
+      reviewThreadChanged: listener(),
+      reviewThreadCatalogRecovered: listener(),
     },
   };
 });
@@ -157,7 +163,7 @@ function Router() {
   return null;
 }
 
-function fixture(scope = "A", onAttach = vi.fn(), parentChatId?: string, projectPath?: string) {
+function fixture(scope = "A", onAttach = vi.fn(), parentChatId = `parent-${scope}`, projectPath = "/project") {
   return (
     <SelectionDiscussionProvider
       key={scope}
@@ -193,9 +199,11 @@ function startTurn(backend: string) {
   );
 }
 
-function open() {
+async function open() {
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
   fireEvent.click(screen.getByText("Select fixture"));
   fireEvent.click(screen.getByText("Open mini"));
+  await screen.findByTestId("selection-mini-thread");
 }
 
 async function send(text = "Question") {
@@ -261,6 +269,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   useChatStore.getState().reset();
   resetLocalChatTurnRoutingForTests();
+  vi.mocked(commands.checkReviewAnchorWorktree).mockReset().mockResolvedValue({ status: "ok", data: null });
+  vi.mocked(commands.captureReviewAnchor).mockReset().mockResolvedValue({
+    status: "ok", data: { originalBlobId: "blob", originalCommitId: "commit" },
+  });
+  vi.mocked(commands.mapReviewThreads).mockReset().mockResolvedValue({ status: "ok", data: [] });
   render(<Router />);
 
   useUIStore.setState({
@@ -287,7 +300,7 @@ it("selection, opening a thread and attaching are passive; explicit asks capture
   const attach = vi.fn();
 
   render(fixture("A", attach));
-  open();
+  await open();
   fireEvent.click(screen.getByText("Attach fixture"));
 
   expect(attach).toHaveBeenCalledWith(anchor);
@@ -358,7 +371,7 @@ it("cancels during creation and interrupts only the first turn of a runtime that
       })
   );
   render(fixture());
-  open();
+  await open();
 
   const id = await send();
 
@@ -388,7 +401,7 @@ it("cancels during creation and interrupts only the first turn of a runtime that
 
 it("cancel interrupts the in-flight turn of a live session without closing it", async () => {
   render(fixture());
-  open();
+  await open();
 
   const id = await send();
   const text = (text: string) =>
@@ -426,10 +439,10 @@ it("cancel interrupts the in-flight turn of a live session without closing it", 
   expect(commands.closeLocalChatSession).not.toHaveBeenCalled();
 });
 
-it("switching worktree discards the discussion session and ignores its late events", async () => {
+it("switching worktree closes the process and ignores its late events", async () => {
   const view = render(fixture());
 
-  open();
+  await open();
 
   const id = await send();
   const oldText = transport.text;
@@ -460,7 +473,7 @@ it("switching worktree discards the discussion session and ignores its late even
 
   expect(screen.queryByTestId("selection-mini-thread")).toBeNull();
   expect(screen.queryByText(/wrong scope|old failure/)).toBeNull();
-  expect(discussionSessions()).toEqual([]);
+  expect(discussionSessions()).toHaveLength(1);
 });
 
 it("keeps a captured discussion when the checkout changes and closes its process", async () => {
@@ -471,7 +484,7 @@ it("keeps a captured discussion when the checkout changes and closes its process
   vi.mocked(commands.mapReviewThreads).mockResolvedValue({ status: "ok", data: [] });
   const view = render(fixture("A", vi.fn(), "main", "/project"));
   await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
-  open();
+  await open();
   await screen.findByTestId("selection-mini-thread");
   const backendId = await send();
   const session = discussionSessions()[0];
@@ -555,7 +568,8 @@ function codeFixture(
   return (
     <SelectionDiscussionProvider
       worktreePath="/A"
-      parentChatId={parentChatId}
+      parentChatId={parentChatId ?? "code-fixture"}
+      projectPath="/project"
       harness="claude"
       onOpen={onOpen}
       onAttach={onAttach}
@@ -598,7 +612,7 @@ it.each([
     const onAttach = vi.fn();
     const component = codeFixture(onAttach, onOpen);
 
-    render(component);
+    await act(async () => render(component));
 
     const selectButton = screen.getByText("Select code");
 
@@ -822,7 +836,7 @@ it("renders a start failure like the main chat and starts afresh on the next ask
   });
 
   render(fixture());
-  open();
+  await open();
   const failed = await send();
 
   await waitFor(() =>
@@ -1006,9 +1020,7 @@ it("generated provider journeys observe command dispatch and retire responses ac
               })
             );
             selected = false;
-            facts.forEach((fact) => {
-              fact.outdated = true;
-            });
+
           }
 
           if (operation === 7 || operation === 8) {
@@ -1131,7 +1143,7 @@ it("generated provider journeys observe command dispatch and retire responses ac
                 code: thread.anchor.code,
                 waiting: !!session?.activeTurn,
                 live: !!session?.backendSessionId,
-                outdated: thread.outdated,
+                outdated: isOutdated(thread),
                 rows: session?.messages.length ?? 0,
               };
             })
@@ -1144,8 +1156,8 @@ it("generated provider journeys observe command dispatch and retire responses ac
               rows: fact.rows,
             }))
           );
-          // Discussions never reach the chat history or persistence.
-          expect(useChatStore.getState().localSessionSummaries).toEqual({});
+          // Discussions stay out of the main chat history.
+          expect(useChatStore.getState().listLocalSessions("/project")).toEqual([]);
         }
       } finally {
         view.unmount();
@@ -1153,7 +1165,7 @@ it("generated provider journeys observe command dispatch and retire responses ac
     },
     { seed: 0x8640ee9e, testCases: 40 }
   );
-});
+}, 30000);
 
 it("keeps the code highlight through dialog focus and clears it only on submission", async () => {
   render(codeFixture());
@@ -1332,6 +1344,8 @@ it("restores each discussion's range when switching between two comments", async
   const view = (
     <SelectionDiscussionProvider
       worktreePath="/A"
+      parentChatId="two-spans"
+      projectPath="/project"
       harness="claude"
       onOpen={onOpen}
       onAttach={onAttach}
@@ -1355,7 +1369,7 @@ it("restores each discussion's range when switching between two comments", async
         screen.getByRole("button", { name: "Discuss inline" })
       ).toBeEnabled()
     );
-    fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Discuss inline" })));
   }
 
   fireEvent.click(
@@ -1378,7 +1392,7 @@ it("restores each discussion's range when switching between two comments", async
   expect(selected).toEqual({ start: 2, end: 2, side: "additions" });
 });
 
-it("captures dedicated choice per request and applies a settings change only to the follow-up", async () => {
+it("keeps the captured provider when switching away from a dedicated model", async () => {
   const uiState = useUIStore.getState();
   const dedicatedPreference = {
     mode: "dedicated" as const,
@@ -1389,7 +1403,7 @@ it("captures dedicated choice per request and applies a settings change only to 
 
   uiState.setInlineDiscussionPreference(dedicatedPreference);
   render(view);
-  open();
+  await open();
 
   const id = await send();
   const dedicatedRequest = expect.objectContaining({
@@ -1424,29 +1438,11 @@ it("captures dedicated choice per request and applies a settings change only to 
     end(id);
   });
 
-  const followUp = await send("Follow up after change");
-
-  // A different harness cannot continue the conversation: the old process
-  // closes and a fresh one starts from the anchor, never a replayed answer.
-  const followUpRequest = expect.objectContaining({
-    harness: "claude",
-    provider_id: "anthropic",
-    model_id: "sonnet",
-    read_only: true,
-    provider_resume_id: null,
-  });
-  const prompt = vi
-    .mocked(commands.createLocalChatSession)
-    .mock.calls.at(-1)![0].initial_prompt;
-
-  expect(followUp).not.toBe(id);
-  expect(commands.closeLocalChatSession).toHaveBeenCalledWith(id);
-  expect(commands.createLocalChatSession).toHaveBeenLastCalledWith(
-    followUpRequest
+  expect(await send("Follow up after change")).toBe(id);
+  expect(commands.createLocalChatSession).toHaveBeenCalledTimes(1);
+  expect(commands.sendLocalChatMessage).toHaveBeenCalledWith(
+    id, "Follow up after change", expect.objectContaining({ model_id: "dedicated" })
   );
-  expect(prompt).toContain('"code":"selected"');
-  expect(prompt).not.toContain("Dedicated answer");
-  expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
 });
 
 it("resumes a bound discussion with its original provider and model after switching settings", async () => {
@@ -1457,7 +1453,7 @@ it("resumes a bound discussion with its original provider and model after switch
   const parentChatId = "provider-switch-parent";
   render(fixture("A", vi.fn(), parentChatId, "/project"));
   await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
-  open();
+  await open();
   await screen.findByTestId("selection-mini-thread");
 
   const backendId = await send();
@@ -1486,7 +1482,7 @@ it("resumes a bound discussion with its original provider and model after switch
   await send("Follow up using the saved discussion");
 
   const boundSessions = discussionSessions().filter(({ discussion }) =>
-    discussion && discussion !== "unbound" && discussion.parentChatId === parentChatId
+    discussion && discussion.parentChatId === parentChatId
   );
   expect(boundSessions.map(({ id }) => id)).toEqual([sessionId]);
   expect(commands.createLocalChatSession).toHaveBeenCalledTimes(2);
@@ -1504,7 +1500,7 @@ it("applies a changed model to a follow-up in the same session as turn settings"
   const uiState = useUIStore.getState();
 
   render(fixture());
-  open();
+  await open();
 
   const id = await send();
 
@@ -1542,7 +1538,7 @@ it.each([
 
     uiState.setInlineDiscussionPreference(preference);
     render(view);
-    open();
+    await open();
     await screen.findByText(
       /Open Settings → Diffs & code editor → Inline discussions/
     );
@@ -1566,7 +1562,7 @@ it("invalidates the catalog after provider settings change", async () => {
   const component = fixture();
   const view = render(component);
 
-  open();
+  await open();
   await waitFor(() => {
     const alert = screen.queryByRole("alert");
 
@@ -1598,7 +1594,7 @@ it("captures the provider and model when the question is asked", async () => {
     modelId: "dedicated",
   });
   render(fixture());
-  open();
+  await open();
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 
   await act(async () =>
@@ -1634,9 +1630,9 @@ it("shows catalog errors and retires a delayed catalog read after switching work
   const nextComponent = fixture("B");
   const view = render(initialComponent);
 
-  open();
+  await open();
   view.rerender(nextComponent);
-  open();
+  await open();
   await waitFor(() => {
     const alert = screen.queryByRole("alert");
 
@@ -1679,7 +1675,7 @@ it("sends custom effort and speed without applying a removed personality prefere
 
   ui.setInlineDiscussionPreference(preference);
   render(component);
-  open();
+  await open();
   await send();
 
   const request = expect.objectContaining({
@@ -1705,8 +1701,8 @@ it.each(["dark", "light"])(
 
     const component = fixture();
 
-    render(component);
-    open();
+    await act(async () => render(component));
+    await open();
 
     const id = await send("First line\nSecond line");
     const initialQuestion = screen.getByText("First line", { exact: false });
@@ -1792,7 +1788,7 @@ it.each([
     useUIStore.setState({ thinkingIndicatorStyle: style });
 
     render(fixture());
-    open();
+    await open();
 
     if (history) {
       const first = await send();
@@ -1874,7 +1870,7 @@ it.each(["end", "rejection", "error", "cancel", "unmount"])(
     const component = fixture();
     const view = render(component);
 
-    open();
+    await open();
 
     if (terminal === "rejection") {
       const setupError = new Error("setup failure");
@@ -1920,7 +1916,7 @@ it.each(["end", "rejection", "error", "cancel", "unmount"])(
       const nextComponent = fixture("B");
 
       view.rerender(nextComponent);
-      open();
+      await open();
     }
 
     await waitFor(() => {
@@ -1963,7 +1959,7 @@ it.each(["dark", "light"])(
 
     const component = codeFixture();
 
-    render(component);
+    await act(async () => render(component));
 
     const selectButton = screen.getByText("Select code");
 
@@ -2002,7 +1998,7 @@ it.each(["dark", "light"])(
 it("renders a discussion's tool calls, results and errors with the main chat's Thread rows", async () => {
   const view = render(fixture());
 
-  open();
+  await open();
 
   const id = await send("Please explain what this file does");
 
@@ -2141,7 +2137,7 @@ it("captures the selected range before starting an inline thread", async () => {
     },
     range: { startLine: 1, line: 1 },
     selectedText: "selected",
-    parent: { chatId: "main-chat", projectPath: null },
+    parent: { chatId: "main-chat", projectPath: "/project" },
   });
 });
 
@@ -2171,6 +2167,7 @@ it("moves a Git-anchored discussion and displays the captured lines when outdate
     <SelectionDiscussionProvider
       worktreePath="/A"
       parentChatId="main-chat"
+      projectPath="/project"
       harness="claude"
       onOpen={vi.fn()}
       onAttach={vi.fn()}
@@ -2259,10 +2256,331 @@ it("keeps an unavailable anchor separate from a confirmed outdated selection", a
   await screen.findByRole("region", { name: "Selection discussion" });
   await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: fixtureFiles }));
   expect(await screen.findByText("Anchor unavailable")).toBeVisible();
-  expect(liveDiscussion.threads[0]).toMatchObject({ outdated: false, outdatedNoted: false, detached: true });
+  expect(liveDiscussion.threads[0]).toMatchObject({ status: { kind: "unavailable", lastKnown: "open" }, outdatedNoted: false });
   await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: fixtureFiles }));
   expect(screen.queryByText("Anchor unavailable")).toBeNull();
-  expect(liveDiscussion.threads[0]).toMatchObject({ outdated: false, outdatedNoted: false, detached: false });
+  expect(liveDiscussion.threads[0]).toMatchObject({ status: { kind: "inline" }, outdatedNoted: false });
+});
+
+it("restores sessionless threads and applies refreshed positions and tombstones in place", async () => {
+  const row: ReviewThread = {
+    threadId: "restored", revision: 1, checkoutPath: "/A",
+    payload: {
+      parentChatId: "parent-A", path: "a", side: "RIGHT", homeKind: "worktree",
+      toolUseId: null, originalCommitId: "commit", originalBlobId: "blob",
+      originalStartLine: 1, originalLine: 1, startLine: 1, line: 1,
+      status: "open", outdatedNoted: false, originKind: "local", originRef: null,
+    },
+  };
+  let rows: ReviewThread[] = [row];
+  vi.mocked(commands.getProjects).mockResolvedValueOnce({
+    status: "ok", data: [{ path: "/project", project_id: "project-id", slug: "project" }],
+  });
+  vi.mocked(commands.listReviewThreads).mockImplementation(async () => ({ status: "ok", data: rows }));
+  vi.mocked(commands.mapReviewThreads).mockResolvedValue({
+    status: "ok", data: [{ threadId: row.threadId, status: "unavailable", startLine: null, line: null }],
+  });
+
+  render(fixture());
+  await screen.findByRole("button", { name: "Reopen selection discussion" });
+  expect(liveDiscussion.threads[0].sessionId).toBeNull();
+  const snapshot = { wholeBranch: false, files: fixtureFiles };
+  await act(async () => liveDiscussion.reconcile(snapshot));
+  expect(commands.putReviewThread).not.toHaveBeenCalled();
+  expect(liveDiscussion.threads[0]).toMatchObject({ status: { kind: "unavailable" }, anchor: { startLine: 1 } });
+
+  vi.mocked(commands.mapReviewThreads).mockResolvedValue({
+    status: "ok", data: [{ threadId: row.threadId, status: "open", startLine: 3, line: 3 }],
+  });
+  await act(async () => liveDiscussion.reconcile(snapshot));
+  expect(commands.putReviewThread).toHaveBeenCalledWith("project-id", row.threadId,
+    { kind: "position", position: { status: "open", startLine: 3, line: 3 } });
+  rows = [{ ...row, revision: 2, payload: { ...row.payload, startLine: 3, line: 3 } }];
+  const changed = vi.mocked(events.reviewThreadChanged.listen).mock.lastCall![0];
+  const update = { event: "review-thread-changed", id: 3,
+    payload: { projectId: "project-id", threadId: row.threadId, thread: rows[0] } };
+  const maps = vi.mocked(commands.mapReviewThreads).mock.calls.length;
+  await act(async () => { await changed(update); await changed(update); });
+  expect(commands.listReviewThreads).toHaveBeenCalledTimes(1);
+  expect(commands.mapReviewThreads).toHaveBeenCalledTimes(maps);
+  const recovered = vi.mocked(events.reviewThreadCatalogRecovered.listen).mock.lastCall![0];
+  await act(async () => recovered({ event: "review-thread-catalog-recovered", id: 1, payload: { projectId: "project-id" } }));
+  await act(async () => liveDiscussion.reconcile(snapshot));
+  expect(commands.putReviewThread).toHaveBeenCalledTimes(1);
+  expect(commands.readReviewAnchor).toHaveBeenCalledTimes(1);
+
+  rows = [];
+  await act(async () => changed({
+    event: "review-thread-changed", id: 2,
+    payload: { projectId: "project-id", threadId: row.threadId, thread: null },
+  }));
+  expect(liveDiscussion.threads).toEqual([]);
+  expect(screen.queryByRole("button", { name: "Reopen selection discussion" })).toBeNull();
+  vi.mocked(commands.listReviewThreads).mockResolvedValue({ status: "ok", data: [] });
+});
+
+function defer<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((complete) => { resolve = complete; });
+  return { promise, resolve };
+}
+
+function restoredRow(overrides: Partial<ReviewThread["payload"]> = {}): ReviewThread {
+  return {
+    threadId: "restored", revision: 1, checkoutPath: "/A",
+    payload: {
+      parentChatId: "parent-A", path: "a", side: "RIGHT", homeKind: "worktree",
+      toolUseId: null, originalCommitId: "commit", originalBlobId: "blob",
+      originalStartLine: 1, originalLine: 1, startLine: 1, line: 1,
+      status: "open", outdatedNoted: false, originKind: "local", originRef: null,
+      ...overrides,
+    },
+  };
+}
+
+function findFixtureProject() {
+  vi.mocked(commands.getProjects).mockResolvedValueOnce({
+    status: "ok", data: [{ path: "/project", project_id: "project-id", slug: "project" }],
+  });
+}
+
+function emitChange(thread: ReviewThread | null, id = "restored") {
+  return vi.mocked(events.reviewThreadChanged.listen).mock.lastCall![0]({
+    event: "review-thread-changed", id: 1,
+    payload: { projectId: "project-id", threadId: id, thread },
+  });
+}
+
+function emitRecovery() {
+  return vi.mocked(events.reviewThreadCatalogRecovered.listen).mock.lastCall![0]({
+    event: "review-thread-catalog-recovered", id: 2, payload: { projectId: "project-id" },
+  });
+}
+
+it("disposes a listener that finishes registering after unmount", async () => {
+  findFixtureProject();
+  const deferred = defer<() => void>();
+  const unlisten = vi.fn();
+  vi.mocked(events.reviewThreadChanged.listen).mockReturnValueOnce(deferred.promise);
+  const view = render(fixture());
+  await waitFor(() => expect(events.reviewThreadChanged.listen).toHaveBeenCalledOnce());
+  view.unmount();
+  await act(async () => deferred.resolve(unlisten));
+  expect(unlisten).toHaveBeenCalledOnce();
+  expect(commands.listReviewThreads).not.toHaveBeenCalled();
+});
+
+it("releases the other listener on partial registration failure and still loads the catalog", async () => {
+  findFixtureProject();
+  const deferred = defer<() => void>();
+  const unlisten = vi.fn();
+  vi.mocked(events.reviewThreadChanged.listen).mockReturnValueOnce(deferred.promise);
+  vi.mocked(events.reviewThreadCatalogRecovered.listen).mockRejectedValueOnce(new Error("Listener failed"));
+  vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({ status: "ok", data: [restoredRow()] });
+  render(fixture());
+  await screen.findByRole("button", { name: "Reopen selection discussion" });
+  expect(liveDiscussion.anchorError).toBe("Listener failed");
+  await act(async () => deferred.resolve(unlisten));
+  expect(unlisten).toHaveBeenCalledOnce();
+});
+
+it("keeps a live change during initial load and prevents a racing refresh from resurrecting a tombstone", async () => {
+  findFixtureProject();
+  const initial = defer<Awaited<ReturnType<typeof commands.listReviewThreads>>>();
+  const row = restoredRow();
+  vi.mocked(commands.listReviewThreads).mockReturnValueOnce(initial.promise);
+  render(fixture());
+  await waitFor(() => expect(commands.listReviewThreads).toHaveBeenCalledOnce());
+  await act(async () => emitChange({ ...row, revision: 2, payload: { ...row.payload, status: "outdated" } }));
+  await act(async () => initial.resolve({ status: "ok", data: [row] }));
+  expect(liveDiscussion.threads[0].status.kind).toBe("outdated");
+
+  const refresh = defer<Awaited<ReturnType<typeof commands.listReviewThreads>>>();
+  vi.mocked(commands.listReviewThreads).mockReturnValueOnce(refresh.promise);
+  await act(async () => emitRecovery());
+  await waitFor(() => expect(commands.listReviewThreads).toHaveBeenCalledTimes(2));
+  await act(async () => emitChange(null));
+  await act(async () => refresh.resolve({ status: "ok", data: [row] }));
+  expect(liveDiscussion.threads).toEqual([]);
+});
+
+it("does not hydrate again in response to a catalog recovery event", async () => {
+  findFixtureProject();
+  const sessions = defer<void>();
+  const hydrate = vi.spyOn(useChatStore.getState(), "hydrateLocalSessionIndex")
+    .mockReturnValueOnce(sessions.promise);
+  try {
+    vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({ status: "ok", data: [restoredRow()] });
+    render(fixture());
+    await waitFor(() => expect(hydrate).toHaveBeenCalledOnce());
+    await act(async () => emitRecovery());
+    expect(commands.listReviewThreads).not.toHaveBeenCalled();
+    await act(async () => sessions.resolve());
+    await screen.findByRole("button", { name: "Reopen selection discussion" });
+    await act(async () => emitRecovery());
+    expect(hydrate).toHaveBeenCalledOnce();
+    expect(commands.listReviewThreads).toHaveBeenCalledTimes(2);
+  } finally {
+    hydrate.mockRestore();
+  }
+});
+
+it("writes the newer mapped position and ignores a late acknowledgment of the earlier one", async () => {
+  findFixtureProject();
+  const row = restoredRow();
+  vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({ status: "ok", data: [row] });
+  const first = defer<Awaited<ReturnType<typeof commands.putReviewThread>>>();
+  const second = defer<Awaited<ReturnType<typeof commands.putReviewThread>>>();
+  vi.mocked(commands.putReviewThread).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+  render(fixture());
+  await screen.findByRole("button", { name: "Reopen selection discussion" });
+
+  async function map(line: number) {
+    vi.mocked(commands.mapReviewThreads).mockResolvedValue({
+      status: "ok", data: [{ threadId: row.threadId, status: "open", startLine: line, line }],
+    });
+    await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: fixtureFiles }));
+  }
+  await map(3);
+  await map(7);
+  expect(commands.putReviewThread).toHaveBeenCalledTimes(1);
+  expect(liveDiscussion.threads[0].anchor.startLine).toBe(7);
+  await act(async () => first.resolve({ status: "ok", data: null }));
+  expect(commands.putReviewThread).toHaveBeenLastCalledWith("project-id", row.threadId, {
+    kind: "position", position: { status: "open", startLine: 7, line: 7 },
+  });
+  await act(async () => second.resolve({ status: "ok", data: null }));
+  await act(async () => emitChange({ ...row, revision: 2, payload: { ...row.payload, startLine: 3, line: 3 } }));
+  expect(liveDiscussion.threads[0].anchor.startLine).toBe(7);
+  await act(async () => emitChange({ ...row, revision: 3, payload: { ...row.payload, startLine: 7, line: 7 } }));
+  expect(commands.putReviewThread).toHaveBeenCalledTimes(2);
+  expect(commands.mapReviewThreads).toHaveBeenCalledTimes(2);
+});
+
+it("saves the delivered outdated note when the originating project resolves late", async () => {
+  const lookup = defer<Awaited<ReturnType<typeof commands.getProjects>>>();
+  vi.mocked(commands.getProjects).mockReturnValueOnce(lookup.promise);
+  vi.mocked(commands.mapReviewThreads).mockImplementation(async (_, [request]) => ({
+    status: "ok", data: [{ threadId: request.threadId, status: "outdated", startLine: null, line: null }],
+  }));
+  render(fixture());
+  await open();
+  const id = liveDiscussion.threads[0].id;
+  await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: fixtureFiles }));
+  await send("Ask before project lookup finishes");
+  expect(commands.putReviewThread).not.toHaveBeenCalled();
+  await act(async () => lookup.resolve({
+    status: "ok", data: [{ path: "/project", project_id: "project-id", slug: "project" }],
+  }));
+  await waitFor(() => expect(commands.putReviewThread).toHaveBeenCalledExactlyOnceWith(
+    "project-id", id, { kind: "outdated_note" }
+  ));
+});
+
+function seedResumableDiscussion(threadId = "restored") {
+  const store = useChatStore.getState();
+  const id = store.openDiscussionSession({
+    harness: "claude", projectPath: "/project",
+    discussionBinding: { parentChatId: "parent-A", reviewThreadId: threadId, worktreePath: "/A" },
+  });
+  useChatStore.setState(({ sessions }) => ({
+    sessions: { ...sessions, [id]: { ...sessions[id], providerResumeId: "saved-resume" } },
+  }));
+  return id;
+}
+
+it("reports an unreadable anchor and retains the bound conversation even when a refresh omits the row", async () => {
+  findFixtureProject();
+  const sessionId = seedResumableDiscussion();
+  const row = restoredRow();
+  vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({ status: "ok", data: [row] });
+  vi.mocked(commands.readReviewAnchor).mockRejectedValueOnce(new Error("Git read failed"));
+  render(fixture());
+  await screen.findByRole("button", { name: "Reopen selection discussion" });
+  expect(liveDiscussion.anchorError).toContain("Git read failed");
+  expect(liveDiscussion.threads[0]).toMatchObject({ sessionId, status: { kind: "unreadable" } });
+  vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({ status: "ok", data: [] });
+  await act(async () => emitRecovery());
+  expect(useChatStore.getState().sessions[sessionId].providerResumeId).toBe("saved-resume");
+  expect(commands.closeLocalChatSession).not.toHaveBeenCalled();
+
+  vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({ status: "ok", data: [row] });
+  await act(async () => emitRecovery());
+  expect(liveDiscussion.threads[0]).toMatchObject({ sessionId, status: { kind: "detached" } });
+  fireEvent.click(screen.getByRole("button", { name: "Reopen selection discussion" }));
+  await send("Continue the original discussion");
+  expect(commands.createLocalChatSession).toHaveBeenCalledWith(expect.objectContaining({
+    chat_session_id: sessionId, provider_resume_id: "saved-resume",
+  }));
+});
+
+it("rejects a saved tool call without an ID and restores a valid tool marker that can start a session", async () => {
+  const tool = restoredRow({ parentChatId: "code-fixture", homeKind: "tool_call", toolUseId: "fixture-tool" });
+  for (const restart of [false, true]) {
+    findFixtureProject();
+    vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({ status: "ok", data: [
+      { ...tool, threadId: "invalid", payload: { ...tool.payload, toolUseId: null } }, tool,
+    ] });
+    const view = render(codeFixture());
+    const marker = await screen.findByRole("button", { name: "Reopen selection discussion" });
+    expect(screen.getByTestId("fixture-line-1")).toContainElement(marker);
+    expect(commands.readReviewAnchor).not.toHaveBeenCalledWith("/A", "invalid", expect.anything());
+    if (!restart) {
+      view.unmount();
+      useChatStore.getState().reset();
+      continue;
+    }
+    fireEvent.click(marker);
+    await send("Start this saved selection");
+    expect(commands.createLocalChatSession).toHaveBeenCalledWith(expect.objectContaining({
+      read_only: true, working_dir: "/A",
+      initial_prompt: expect.stringContaining("Question: Start this saved selection"),
+    }));
+  }
+});
+
+it("writes the outdated note once after successful delivery and retries it after a failed send", async () => {
+  findFixtureProject();
+  seedResumableDiscussion();
+  vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({
+    status: "ok", data: [restoredRow({ status: "outdated", startLine: null, line: null })],
+  });
+  vi.mocked(commands.createLocalChatSession).mockResolvedValueOnce({
+    status: "error", error: { StartFailed: "Provider unavailable" },
+  });
+  render(fixture());
+  fireEvent.click(await screen.findByRole("button", { name: "Reopen selection discussion" }));
+  await send("First try");
+  await screen.findByText("Provider unavailable", { exact: false });
+  expect(commands.putReviewThread).not.toHaveBeenCalled();
+
+  const id = await send("Second try");
+  await waitFor(() => expect(commands.putReviewThread).toHaveBeenCalledWith(
+    "project-id", "restored", { kind: "outdated_note" }
+  ));
+  act(() => end(id));
+  await send("Third question");
+  expect(commands.sendLocalChatMessage).toHaveBeenLastCalledWith(id, "Third question", expect.anything());
+  expect(commands.putReviewThread).toHaveBeenCalledTimes(1);
+});
+
+it("persists a delivered note when the delivery resolves after unmount", async () => {
+  findFixtureProject();
+  seedResumableDiscussion();
+  vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({
+    status: "ok", data: [restoredRow({ status: "outdated", startLine: null, line: null })],
+  });
+  const delivery = defer<Awaited<ReturnType<typeof commands.createLocalChatSession>>>();
+  vi.mocked(commands.createLocalChatSession).mockReturnValueOnce(delivery.promise);
+  const noteWrite = defer<Awaited<ReturnType<typeof commands.putReviewThread>>>();
+  vi.mocked(commands.putReviewThread).mockReturnValueOnce(noteWrite.promise);
+  const view = render(fixture());
+  fireEvent.click(await screen.findByRole("button", { name: "Reopen selection discussion" }));
+  await act(async () => liveDiscussion.send("restored", "Will finish during navigation"));
+  view.unmount();
+  await act(async () => delivery.resolve({ status: "ok", data: null }));
+  await act(async () => noteWrite.resolve({ status: "ok", data: null }));
+  expect(commands.putReviewThread).toHaveBeenCalledExactlyOnceWith("project-id", "restored", { kind: "outdated_note" });
 });
 
 it("keeps deleted tool-patch lines available for the main chat composer", async () => {

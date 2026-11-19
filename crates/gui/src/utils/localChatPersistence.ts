@@ -1,4 +1,4 @@
-import { discussionBinding, isOpenLocalChatConversation, normalizeDiscussionBinding } from "./localChatDiscussion";
+import { isOpenLocalChatConversation, normalizeDiscussionBinding } from "./localChatDiscussion";
 import { localChatActivityStatus } from "./localChatActivity";
 import type {
   ChatMessage,
@@ -471,7 +471,7 @@ function readSessions(): Record<string, ChatSession> {
 }
 
 function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
-  const binding = discussionBinding(session.discussion);
+  const binding = session.discussion;
   return {
     activityStatus: session.activityStatus ?? localChatActivityStatus(session),
     association: session.association ?? null,
@@ -890,8 +890,6 @@ export function findPersistedDefaultEmptyLocalChatSession(
 export function persistLocalChatSession(
   session: ChatSession
 ): Promise<boolean> {
-  if (session.discussion === "unbound") return Promise.resolve(true);
-
   const sessions = readSessions();
   const serialized = serializeSession(session, sessions[session.id]);
   if (isDisposableClosedLocalChatSession(session)) {

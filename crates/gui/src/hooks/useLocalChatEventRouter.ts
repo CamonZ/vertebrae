@@ -696,7 +696,7 @@ export async function deliverLocalChatTurn(
   if (!latestSession) return false;
 
   if (latestSession.backendSessionId) {
-    await doSendMessage(
+    return doSendMessage(
       latestSession.backendSessionId,
       sessionId,
       content,
@@ -713,10 +713,9 @@ export async function deliverLocalChatTurn(
       { addUserMessage: false }
     );
 
-    return true;
   }
 
-  await doStartSession(
+  return doStartSession(
     latestSession,
     sessionId,
     {
@@ -733,7 +732,6 @@ export async function deliverLocalChatTurn(
     { addUserMessage: false }
   );
 
-  return true;
 }
 
 function releaseRouterSubscription(subscription: RouterSubscription) {

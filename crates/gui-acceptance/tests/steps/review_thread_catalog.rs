@@ -1,5 +1,5 @@
 use crate::GuiWorld;
-use cucumber::when;
+use cucumber::{then, when};
 use fantoccini::{Client, ClientBuilder, Locator};
 use serde_json::{Value, json};
 use std::{
@@ -89,7 +89,7 @@ async fn put_thread(client: &Client, project: &str, id: Uuid, payload: Value) {
     ipc(
         client,
         "put_review_thread",
-        json!({"projectId": project, "threadId": id, "payload": payload}),
+        json!({"projectId": project, "threadId": id, "payload": {"kind": "anchor", "anchor": payload}}),
     )
     .await;
 }
@@ -225,6 +225,92 @@ async fn expect_thread_event(client: &Client, project: &str, id: Uuid, live: boo
     .await;
 }
 
+#[then("deleting the main chat removes the discussion in both GUI processes")]
+async fn cascade_updates_open_changes(world: &mut GuiWorld) {
+    let primary = world.webdriver.as_ref().unwrap().lock().await;
+    let project = world.project_id.as_deref().unwrap();
+    let slug = world.project_slug.as_deref().unwrap();
+    let rows = threads(&primary, project).await;
+    let row = &rows.as_array().unwrap()[0];
+    let parent = row["payload"]["parentChatId"].as_str().unwrap();
+    let thread = Uuid::parse_str(row["threadId"].as_str().unwrap()).unwrap();
+
+    // Give the peer the same machine-local checkout and conversation bindings,
+    // while keeping its catalog and runtime separate from the primary process.
+    let home = peer_home();
+    let source = std::path::PathBuf::from(std::env::var_os("HOME").unwrap());
+    for entry in fs::read_dir(data_dir(&source)).unwrap() {
+        let entry = entry.unwrap();
+        if is_catalog(&entry.file_name().to_string_lossy()) {
+            fs::copy(entry.path(), data_dir(home.path()).join(entry.file_name())).unwrap();
+        }
+    }
+    let (_driver, address) = peer_driver(home.path(), &world.env["VTB_URL"]).await;
+    let peer = peer_client(&address, home.path(), slug).await;
+    listen_to_threads(&peer).await;
+    ipc(&peer, "load_local_chat_session_index", json!({})).await;
+    let peer_rows = threads(&peer, project).await;
+    assert_eq!(
+        peer_rows, rows,
+        "the peer has the captured anchor and checkout"
+    );
+    gui_acceptance::click_when_ready(
+        &peer,
+        Locator::Css("[data-testid='local-chat-launcher']"),
+        "open the peer conversation pane",
+    )
+    .await;
+    if peer
+        .find(Locator::Css("[data-testid='local-chat-history-drawer']"))
+        .await
+        .is_err()
+    {
+        gui_acceptance::click_pane_action(
+            &peer,
+            "[title='Toggle chat history']",
+            "open the peer chat history",
+        )
+        .await;
+    }
+    gui_acceptance::click_when_ready(
+        &peer,
+        Locator::Css("[data-testid='local-chat-history-drawer'] .hc-mini-history-open"),
+        "open the saved parent conversation in the peer",
+    )
+    .await;
+    gui_acceptance::click_pane_action(
+        &peer,
+        "[data-testid=local-chat-view-changes]",
+        "open Changes in the second GUI",
+    )
+    .await;
+    gui_acceptance::wait_until("the peer Changes view displays the saved discussion", TIMEOUT, || async {
+        let panel = peer.execute(
+            r#"const panel = document.querySelector('[aria-label="Changes panel"]');
+               const marker = document.querySelector('[aria-label="Reopen selection discussion"]');
+               return { visible: !!panel && !!marker,
+                        contents: document.querySelector('[data-testid="local-chat-window"]')?.innerText.slice(0, 600) };"#,
+            vec![],
+        ).await.map_err(|error| error.to_string())?;
+        if panel["visible"] == true {
+            Ok(true)
+        } else {
+            Err(panel.to_string())
+        }
+    }).await.unwrap();
+
+    delete_chat(&primary, parent).await;
+    expect_thread_event(&peer, project, thread, false).await;
+    for client in [&*primary, &peer] {
+        gui_acceptance::wait_for_js(
+            client, "the cascade removed the open discussion",
+            r#"return !document.querySelector('[data-testid="selection-mini-thread"], [aria-label="Reopen selection discussion"]');"#,
+            vec![], TIMEOUT,
+        ).await;
+    }
+    peer.close().await.unwrap();
+}
+
 #[when("two GUI processes create, cascade-delete and recover review threads")]
 async fn review_thread_cdc_and_recovery(world: &mut GuiWorld) {
     let primary = world.webdriver.as_ref().unwrap().lock().await;
@@ -302,7 +388,7 @@ async fn review_thread_cdc_and_recovery(world: &mut GuiWorld) {
     let rejected = ipc_reply(
         &peer,
         "put_review_thread",
-        json!({"projectId": project, "threadId": removed, "payload": thread_payload(&keep_parent)}),
+        json!({"projectId": project, "threadId": removed, "payload": {"kind": "outdated_note"}}),
     )
     .await;
     assert_eq!(

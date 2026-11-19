@@ -1170,7 +1170,7 @@ async listReviewThreads(projectId: string) : Promise<Result<ReviewThread[], Comm
     else return { status: "error", error: e  as any };
 }
 },
-async putReviewThread(projectId: string, threadId: string, payload: ReviewThreadInput) : Promise<Result<null, CommandError>> {
+async putReviewThread(projectId: string, threadId: string, payload: ReviewThreadUpdate) : Promise<Result<null, CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("put_review_thread", { projectId, threadId, payload }) };
 } catch (e) {
@@ -2381,7 +2381,7 @@ export type ReviewAnchorSource = { kind: "worktree"; commit: string | null } | {
 export type ReviewLineRange = { startLine: number; line: number }
 export type ReviewMappingRequest = { threadId: string; originalBlobId: string; range: ReviewLineRange; location: ReviewAnchorLocation }
 export type ReviewMappingStatus = "open" | "outdated" | "unavailable"
-export type ReviewThread = { threadId: string; revision: number; payload: ReviewThreadInput }
+export type ReviewThread = { threadId: string; revision: number; checkoutPath: string | null; payload: ReviewThreadInput }
 export type ReviewThreadCatalogRecovered = { projectId: string }
 export type ReviewThreadCatalogRecoveryNeeded = { projectId: string }
 export type ReviewThreadChanged = { projectId: string; threadId: string; thread: ReviewThread | null }
@@ -2392,8 +2392,10 @@ export type ReviewThreadHome = "worktree" | "tool_call"
  */
 export type ReviewThreadInput = { parentChatId: string; path: string; side: ReviewThreadSide; homeKind: ReviewThreadHome; toolUseId: string | null; originalCommitId: string; originalBlobId: string; originalStartLine: number; originalLine: number; startLine: number | null; line: number | null; status: ReviewThreadStatus; outdatedNoted: boolean; originKind: ReviewThreadOrigin; originRef: string | null }
 export type ReviewThreadOrigin = "local"
+export type ReviewThreadPosition = { status: ReviewThreadStatus; startLine: number | null; line: number | null }
 export type ReviewThreadSide = "LEFT" | "RIGHT"
 export type ReviewThreadStatus = "open" | "outdated"
+export type ReviewThreadUpdate = { kind: "position"; position: ReviewThreadPosition } | { kind: "outdated_note" } | { kind: "anchor"; anchor: ReviewThreadInput }
 /**
  * Config of a `route` step.
  */

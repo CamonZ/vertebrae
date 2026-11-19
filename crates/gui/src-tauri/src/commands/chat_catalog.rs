@@ -45,6 +45,9 @@ struct Catalog {
     // Local-only Git common directories, keyed by project and thread.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     anchor_repositories: BTreeMap<String, BTreeMap<Uuid, std::path::PathBuf>>,
+    // Checkout identity is local and distinct from the shared ref namespace.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    anchor_checkouts: BTreeMap<String, BTreeMap<Uuid, String>>,
 }
 
 impl Catalog {

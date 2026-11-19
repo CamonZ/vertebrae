@@ -1,4 +1,3 @@
-import { discussionBinding } from "../utils/localChatDiscussion";
 import { loadMainChatWorktree } from "../utils/chatAssociation/defaultWorktree";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { flushPendingLocalChatText } from "../utils/localChatTextBatch";
@@ -790,7 +789,7 @@ export async function doStartSession(
       });
     }
 
-    let workingDir = discussionBinding(session.discussion)?.worktreePath ?? session.projectPath ?? null;
+    let workingDir = session.discussion?.worktreePath ?? session.projectPath ?? null;
     if (workingDir === null) {
       const pathResult = await commands.getCurrentProjectPath();
       if (pathResult.status === "ok" && pathResult.data) {
@@ -851,10 +850,11 @@ export async function doStartSession(
     // A Stop (or a replacement start) that landed while this create was in
     // flight already nulled the backend session. Writing "streaming" back here
     // strands the session busy with nothing running and no way to recover.
-    if (completionIsStale()) return;
+    if (completionIsStale()) return true;
     deps.setSessionLifecycle(sessionId, userMessage ? "streaming" : "idle");
+    return true;
   } catch (error) {
-    if (completionIsStale()) return;
+    if (completionIsStale()) return false;
     forgetRecordingTarget(backendSessionId);
     const message = commandErrorMessage(error);
     deps.setBackendSessionId(sessionId, null);
@@ -866,6 +866,7 @@ export async function doStartSession(
     });
     if (userMessage) deps.settleActiveTurn?.(sessionId);
     deps.setSessionLifecycle(sessionId, "error", message);
+    return false;
   }
 }
 
@@ -940,7 +941,7 @@ export async function doSendMessage(
     // Gate before any write: settling or erroring unconditionally here would
     // clear whichever turn is current, including a replacement started after
     // this send was abandoned by a Stop.
-    if (completionIsStale()) return;
+    if (completionIsStale()) return result.status === "ok" && result.data !== false;
     if (result.status === "error") {
       if (isSessionNotFoundError(result.error)) {
         deps.setBackendSessionId?.(sessionId, null);
@@ -952,18 +953,20 @@ export async function doSendMessage(
         "error",
         commandErrorMessage(result.error)
       );
-      return;
+      return false;
     }
     if (result.data === false) {
       deps.settleActiveTurn?.(sessionId);
       deps.setSessionLifecycle(sessionId, "idle");
-      return;
+      return false;
     }
     deps.markStreamingIfSending(sessionId);
+    return true;
   } catch (error) {
-    if (completionIsStale()) return;
+    if (completionIsStale()) return false;
     deps.settleActiveTurn?.(sessionId);
     deps.setSessionLifecycle(sessionId, "error", commandErrorMessage(error));
+    return false;
   }
 }
 

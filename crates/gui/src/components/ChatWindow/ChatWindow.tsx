@@ -835,7 +835,7 @@ export function ChatWindow({
     >
       <DiffReviewContext.Provider value={diffReview}>
         <SelectionDiscussionProvider
-          key={`${sessionId}:${worktreePath ?? ""}`}
+          key={JSON.stringify([chat.session.projectPath, sessionId, worktreePath])}
           worktreePath={worktreePath ?? ""}
           parentChatId={sessionId}
           projectPath={chat.session.projectPath}

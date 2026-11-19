@@ -1,4 +1,4 @@
-import { discussionBinding, isOpenLocalChatConversation, type LocalChatDiscussion } from "../utils/localChatDiscussion";
+import { isOpenLocalChatConversation } from "../utils/localChatDiscussion";
 import { replaySpeedTier } from "../utils/localChatSpeedTier";
 import { localChatActivityStatus } from "../utils/localChatActivity";
 import {
@@ -505,7 +505,7 @@ export interface ChatSession {
    * Read-only selection discussion. It runs through the local
    * chat lifecycle, and only the inline review thread can open it.
    */
-  discussion?: LocalChatDiscussion;
+  discussion?: LocalChatDiscussionBinding;
   /** Runtime-only Vertebrae annotations keyed by provider tool id, then kind. */
   toolAnnotations?: ToolAnnotations;
   /** Runtime-only token of the annotation load allowed to write this session. */
@@ -660,7 +660,7 @@ interface ChatStoreActions {
   ) => string;
   /** Add a hidden read-only discussion session. */
   openDiscussionSession: (input: {
-    discussionBinding?: LocalChatDiscussionBinding;
+    discussionBinding: LocalChatDiscussionBinding;
     harness: LocalChatHarnessKind;
     providerId?: string | null;
     projectPath: string;
@@ -722,7 +722,10 @@ interface ChatStoreActions {
   /** List persisted local chat sessions, newest first */
   listLocalSessions: (projectPath?: string | null) => LocalChatSessionSummary[];
   /** Hydrate local chat metadata from the app-managed index file. */
-  hydrateLocalSessionIndex: () => Promise<void>;
+  hydrateLocalSessionIndex: (options?: {
+    isCurrent?: () => boolean;
+    include?: (session: ChatSession) => boolean;
+  }) => Promise<void>;
   refreshLocalSessionIndex: (isCurrent: () => boolean) => Promise<void>;
   /** Apply one durably merged catalog CDC entry without a full recovery. */
   applyCatalogEntry: (sessionId: string, session: unknown | null) => void;
@@ -1724,7 +1727,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         session_id: session.id,
         harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
         provider_resume_id: session.providerResumeId,
-        project_path: discussionBinding(session.discussion)?.worktreePath ?? session.projectPath ?? null,
+        project_path: session.discussion?.worktreePath ?? session.projectPath ?? null,
         created_at: session.createdAt ?? null,
         cursor,
         limit: 200,
@@ -2338,7 +2341,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         ...createLocalSession("Selection discussion", projectPath),
         harness,
         providerId: providerId ?? null,
-        discussion: discussionBinding ?? "unbound",
+        discussion: discussionBinding,
       };
 
       set((state) => ({
@@ -2597,11 +2600,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
         .filter(hasLocalChatUserMessageSummary)
         .sort(compareLocalChatSessionRecency),
 
-    hydrateLocalSessionIndex: async () => {
+    hydrateLocalSessionIndex: async ({ isCurrent, include } = {}) => {
       const { sessions } = await hydrateLocalChatSessionIndex();
+      if (isCurrent && !isCurrent()) return;
       set((state) => {
+        const restored = include
+          ? Object.fromEntries(Object.entries(sessions).filter(([, session]) => include(session)))
+          : sessions;
         const nextSessions = {
-          ...sessions,
+          ...restored,
           ...state.sessions,
         };
         const spawnOutlineSignatures = {

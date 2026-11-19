@@ -1,6 +1,7 @@
 import { useInlineScrollFollow } from "./useInlineScrollFollow";
-import { loadWorktreeDiscussions, placeWorktreeDiscussions } from "./restoreSelectionDiscussions";
-import { discussionBinding } from "../../utils/localChatDiscussion";
+import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
+import { findDiscussionSession } from "./restoreSelectionDiscussions";
+import { useSelectionDiscussionCatalog } from "./useSelectionDiscussionCatalog";
 import { useUIStore } from "../../stores/uiStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { useDiscussionModel } from "../../hooks/useDiscussionModel";
@@ -30,10 +31,12 @@ import {
 import { deliverLocalChatTurn } from "../../hooks/useLocalChatEventRouter";
 import {
   SelectionDiscussions,
+  isOutdated,
   discussionTurn,
   selectionLabel,
   type CodeSelection,
   type DiscussionState,
+  type ThreadStatus,
 } from "./selectionDiscussions";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 import { ChatTranscript } from "./ChatMessages";
@@ -84,7 +87,6 @@ export function SelectionDiscussionProvider({
   const [anchorError, setAnchorError] = useState<string | null>(null);
   const [mappingError, setMappingError] = useState<string | null>(null);
   const capabilityVersion = useRef(0);
-  const mappingVersion = useRef(0);
   const snapshotRef = useRef<WorktreeSnapshot | null>(null);
   const capturing = useRef(false);
   const mounted = useRef(false);
@@ -114,7 +116,7 @@ export function SelectionDiscussionProvider({
     return () => window.removeEventListener("focus", onFocus);
   }, [checkAvailability]);
 
-  const canAsk = !parentChatId || readyWorktree === worktreePath;
+  const canAsk = !!parentChatId && !!projectPath && readyWorktree === worktreePath;
 
   const mainSelection = {
     harness,
@@ -177,28 +179,40 @@ export function SelectionDiscussionProvider({
         const session = thread.sessionId && store.sessions[thread.sessionId];
         if (!session) continue;
 
-        if (discussionBinding(session.discussion)) {
-          if (session.backendSessionId)
-            void closeProcess(session.id, session.backendSessionId);
-        } else {
-          if (session.backendSessionId)
-            void commands.closeLocalChatSession(session.backendSessionId).catch(() => {});
-          store.closeSession(session.id);
-        }
+        if (session.backendSessionId)
+          void closeProcess(session.id, session.backendSessionId);
       }
     },
     [controller]
   );
+
+  const reportCatalogError = useCallback((error: unknown) => {
+    if (mounted.current) setAnchorError(errorMessage(error));
+  }, []);
+  const reportMapping = useCallback((error: unknown | null) => {
+    setMappingError(error === null ? null : errorMessage(error));
+  }, []);
+  const { mapSnapshot, noteWriter, comparison } = useSelectionDiscussionCatalog({
+    controller, projectPath, parentChatId, worktreePath, report: reportCatalogError, reportMapping,
+  });
+  const reconcile = useCallback((snapshot: WorktreeSnapshot) => {
+    const changed = snapshotRef.current !== snapshot;
+    snapshotRef.current = snapshot;
+    controller.reconcile(snapshot);
+    if (changed) void checkAvailability();
+    mapSnapshot(snapshot);
+  }, [checkAvailability, controller, mapSnapshot]);
 
   const send = useCallback(
     async (id: string, text: string) => {
       // Snapshot the selected provider/model before any asynchronous setup.
       const thread = controller.thread(id);
       const question = text.trim();
-      if (choice.error !== null || !thread || !question) return;
+      if (choice.error !== null || !thread || thread.status.kind === "unreadable" || !question || !parentChatId || !projectPath) return;
 
       const store = useChatStore.getState();
-      let session = thread.sessionId ? store.sessions[thread.sessionId] : undefined;
+      const session = (thread.sessionId ? store.sessions[thread.sessionId] : undefined) ??
+        findDiscussionSession(Object.values(store.sessions), { projectPath, parentChatId, worktreePath }, id);
       // One turn at a time, and never into a process that is closing.
       if (
         session &&
@@ -210,26 +224,14 @@ export function SelectionDiscussionProvider({
       const sameProvider =
         session?.harness === choice.harness &&
         (session.providerId ?? null) === (choice.providerId ?? null);
-      // A captured thread keeps its original provider and resume ID.
-      if (session && !sameProvider && session.discussion === "unbound") {
-        if (session.backendSessionId)
-          void commands
-            .closeLocalChatSession(session.backendSessionId)
-            .catch(() => {});
-        store.closeSession(session.id);
-        session = undefined;
-      }
-
       const applyChoice = !session || sameProvider;
-      const sessionLocation = parentChatId && projectPath && thread.git
-        ? { projectPath, discussionBinding: { parentChatId, reviewThreadId: thread.id, worktreePath } }
-        : { projectPath: worktreePath };
       const sessionId =
         session?.id ??
         store.openDiscussionSession({
           harness: choice.harness,
           providerId: choice.providerId,
-          ...sessionLocation,
+          projectPath,
+          discussionBinding: { parentChatId, reviewThreadId: id, worktreePath },
         });
       if (applyChoice) {
         store.setSessionSelectedModel(sessionId, choice.modelId);
@@ -242,20 +244,25 @@ export function SelectionDiscussionProvider({
         !!session && (!!session.backendSessionId || !!session.providerResumeId);
       const turn = discussionTurn(thread, continues, question);
 
-      controller.sent(id, sessionId, turn.notesOutdated);
+      controller.sent(id, sessionId, false);
+      const writer = noteWriter();
       store.addMessage(sessionId, {
         kind: "user",
         text: question,
         timestamp: new Date().toISOString(),
       });
-      await deliverLocalChatTurn(sessionId, turn.payload);
+      const delivered = await deliverLocalChatTurn(sessionId, turn.payload);
+      if (delivered && turn.notesOutdated) {
+        if (mounted.current && controller.thread(id)) controller.sent(id, sessionId, true);
+        void writer?.(id);
+      }
 
       // Cancelled while the process started: stop its turn now it exists.
       const started = useChatStore.getState().sessions[sessionId];
       if (started?.activeTurn?.phase === "stopping" && started.backendSessionId)
         void interrupt(sessionId, started.backendSessionId);
     },
-    [controller, choice, parentChatId, projectPath, worktreePath]
+    [controller, choice, noteWriter, parentChatId, projectPath, worktreePath]
   );
 
   const cancel = useCallback(
@@ -274,105 +281,37 @@ export function SelectionDiscussionProvider({
     [controller]
   );
 
-  const savedDiscussions = useRef<Awaited<ReturnType<typeof loadWorktreeDiscussions>>>([]);
-  const placeSavedDiscussions = useCallback(
-    (snapshot: WorktreeSnapshot) =>
-      controller.restore(placeWorktreeDiscussions(savedDiscussions.current, snapshot)),
-    [controller]
-  );
-  const reconcile = useCallback((snapshot: WorktreeSnapshot) => {
-    const version = ++mappingVersion.current;
-    const changed = snapshotRef.current !== snapshot;
-    snapshotRef.current = snapshot;
-    placeSavedDiscussions(snapshot);
-    controller.reconcile(snapshot);
-    if (changed) void checkAvailability();
-    if (!parentChatId) return;
-    const requests = controller.getSnapshot().threads.flatMap(({ id, git }) =>
-      git?.original.home.kind === "worktree"
-        ? [{
-            threadId: id,
-            ...git.capture,
-            range: reviewRange(git.original),
-            location: reviewLocation(git.original, parentChatId, snapshot.comparison),
-          }]
-        : []
-    );
-    if (requests.length) {
-      void unwrapAnchor(commands.mapReviewThreads(worktreePath, requests))
-        .then((positions) => {
-          if (mounted.current && mappingVersion.current === version) {
-            controller.applyMappings(snapshot, positions);
-            setMappingError(null);
-          }
-        })
-        .catch((error: unknown) => {
-          if (mounted.current && mappingVersion.current === version) setMappingError(errorMessage(error));
-        });
-    }
-  }, [checkAvailability, controller, parentChatId, placeSavedDiscussions, worktreePath]);
-
-  useEffect(() => {
-    if (!parentChatId || !projectPath || !worktreePath) return;
-    let current = true;
-    void useChatStore.getState().hydrateLocalSessionIndex()
-      .then(() => current ? loadWorktreeDiscussions(
-        worktreePath, projectPath, parentChatId,
-        Object.values(useChatStore.getState().sessions)
-      ) : [])
-      .then((records) => {
-        if (!current) return;
-        savedDiscussions.current = records;
-        const snapshot = snapshotRef.current;
-        if (snapshot && placeSavedDiscussions(snapshot)) reconcile(snapshot);
-      })
-      .catch((error: unknown) => {
-        if (current) setAnchorError(errorMessage(error));
-      });
-    return () => {
-      current = false;
-      savedDiscussions.current = [];
-    };
-  }, [parentChatId, placeSavedDiscussions, projectPath, reconcile, worktreePath]);
-
   const begin = useCallback(async (anchor: CodeSelection, question?: string) => {
-    if (!canAsk || capturing.current || !supportsInlineDiscussion(anchor)) return false;
-    let id: string | null;
-    if (parentChatId) {
-      capturing.current = true;
-      setAnchorError(null);
-      try {
-        const comparison = snapshotRef.current?.comparison;
-        const threadId = crypto.randomUUID();
-        const range = reviewRange(anchor);
-        const capture = await unwrapAnchor(commands.captureReviewAnchor({
-          worktree: worktreePath,
-          threadId,
-          location: reviewLocation(anchor, parentChatId, comparison),
-          range,
-          selectedText: anchor.code,
-          parent: { chatId: parentChatId, projectPath: projectPath ?? null },
-        }));
-        if (!mounted.current) return false;
-        id = controller.ask(anchor, threadId, capture);
-        if (snapshotRef.current) reconcile(snapshotRef.current);
-      } catch (error) {
-        if (mounted.current) setAnchorError(errorMessage(error));
-        return false;
-      } finally {
-        capturing.current = false;
-      }
-    } else {
-      id = controller.ask(anchor);
+    if (!canAsk || !parentChatId || !projectPath || capturing.current ||
+        !supportsInlineDiscussion(anchor)) return false;
+    capturing.current = true;
+    setAnchorError(null);
+    const id = crypto.randomUUID();
+    const generation = getProjectScopeGeneration();
+    try {
+      const capture = await unwrapAnchor(commands.captureReviewAnchor({
+        worktree: worktreePath,
+        threadId: id,
+        location: reviewLocation(anchor, parentChatId, comparison()),
+        range: reviewRange(anchor),
+        selectedText: anchor.code,
+        parent: { chatId: parentChatId, projectPath },
+      }));
+      if (!mounted.current || generation !== getProjectScopeGeneration()) return false;
+      controller.ask(anchor, id, capture);
+    } catch (error) {
+      if (generation === getProjectScopeGeneration()) reportCatalogError(error);
+      return false;
+    } finally {
+      capturing.current = false;
     }
-    if (!id) return false;
     if (question) {
       void send(id, question).catch((error: unknown) => {
         if (mounted.current) setAnchorError(errorMessage(error));
       });
     }
     return true;
-  }, [canAsk, controller, parentChatId, projectPath, reconcile, send, worktreePath]);
+  }, [canAsk, comparison, controller, parentChatId, projectPath, reportCatalogError, send, worktreePath]);
 
   const actions = useMemo<DiscussionActions>(
     () => ({
@@ -404,9 +343,11 @@ export function SelectionDiscussionProvider({
     [controller, send, cancel, canAsk, begin, reconcile, checkAvailability]
   );
 
+  const unreadable = state.threads.find(({ status }) => status.kind === "unreadable")?.status;
+  const readError = unreadable?.kind === "unreadable" ? unreadable.message : null;
   const value = useMemo<DiscussionValue>(
-    () => ({ ...state, ...actions, projectPath: worktreePath, anchorError: anchorError ?? mappingError }),
-    [state, actions, worktreePath, anchorError, mappingError]
+    () => ({ ...state, ...actions, projectPath: worktreePath, anchorError: anchorError ?? readError ?? mappingError }),
+    [state, actions, worktreePath, anchorError, readError, mappingError]
   );
 
   return (
@@ -452,11 +393,25 @@ function closeProcess(sessionId: string, backendSessionId: string) {
   });
 }
 
+function anchorNotice(status: ThreadStatus) {
+  switch (status.kind) {
+    case "inline":
+    case "detached":
+      return null;
+    case "outdated":
+      return { marker: "outdated", label: "Outdated context" };
+    case "unavailable":
+    case "unreadable":
+      return { marker: "anchor unavailable", label: "Anchor unavailable" };
+  }
+}
+
 /** Rendered in the diff annotation at the thread's anchor, never in a footer. */
 export function InlineSelectionDiscussion({ threadId }: { threadId: string }) {
   const discussion = useContext(SelectionDiscussionContext);
   const thread = discussion?.threads.find((thread) => thread.id === threadId);
   if (!thread || !discussion) return null;
+  const notice = anchorNotice(thread.status);
 
   return discussion.activeId === thread.id ? (
     <MiniThread key={thread.id} thread={thread} discussion={discussion} />
@@ -468,7 +423,7 @@ export function InlineSelectionDiscussion({ threadId }: { threadId: string }) {
       onClick={() => discussion.reopen(thread.id)}
     >
       Discussion · {selectionLabel(thread.anchor)}
-      {thread.outdated ? " · outdated" : thread.unavailable ? " · anchor unavailable" : ""}
+      {notice && ` · ${notice.marker}`}
     </button>
   );
 }
@@ -491,6 +446,7 @@ function MiniThread({
   const cardRef = useInlineScrollFollow(activeTurn?.localId);
   const failed = getLocalChatLifecycle(session) === "error";
   const announcement = useTurnAnnouncement(activeTurn, failed);
+  const notice = anchorNotice(thread.status);
 
   return (
     <section
@@ -499,7 +455,7 @@ function MiniThread({
       aria-label="Selection discussion"
       data-testid="selection-mini-thread"
       onClick={(event) => {
-        if (thread.detached ||
+        if (thread.status.kind !== "inline" ||
           (event.target instanceof Element &&
             event.target.closest("button, a, input, textarea, select, pre"))
         ) return;
@@ -510,7 +466,7 @@ function MiniThread({
         <button
           type="button"
           className="selection-mini-anchor"
-          disabled={thread.detached}
+          disabled={thread.status.kind !== "inline"}
           aria-label={`Highlight selected code: ${selectionLabel(thread.anchor)}`}
           title="Highlight selected code"
           onClick={() => discussion.select(thread.anchor)}
@@ -529,9 +485,9 @@ function MiniThread({
           <span>{selectionLabel(thread.anchor)}</span>
         </button>
         <span className="selection-mini-badge">Read only</span>
-        {(thread.outdated || thread.unavailable) && (
+        {notice && (
           <span className="selection-mini-outdated" role="status">
-            {thread.outdated ? "Outdated context" : "Anchor unavailable"}
+            {notice.label}
           </span>
         )}
         <button
@@ -555,7 +511,7 @@ function MiniThread({
           </svg>
         </button>
       </header>
-      {thread.outdated && thread.git && (
+      {thread.status.kind !== "inline" && thread.status.kind !== "unreadable" && (
         <pre aria-label="Original selected code">{thread.git.original.code}</pre>
       )}
       <DiscussionModelNotice />
@@ -592,7 +548,7 @@ function MiniThread({
         className="diff-comment-editor selection-mini-composer"
         onSubmit={(event) => {
           event.preventDefault();
-          if (choice?.error) return;
+          if (choice?.error || thread.status.kind === "unreadable") return;
           discussion.send(thread.id, question);
           setQuestion("");
         }}
@@ -616,8 +572,9 @@ function MiniThread({
           )}
           <button
             type="button"
+            disabled={thread.status.kind === "unreadable"}
             onClick={() => {
-              discussion.attach(thread.anchor, thread.outdated, question);
+              discussion.attach(thread.anchor, isOutdated(thread), question);
               setQuestion("");
             }}
           >
@@ -626,7 +583,7 @@ function MiniThread({
           <button
             type="submit"
             data-primary
-            disabled={!!activeTurn || !question.trim() || !!choice?.error}
+            disabled={thread.status.kind === "unreadable" || !!activeTurn || !question.trim() || !!choice?.error}
           >
             Ask
           </button>
@@ -677,7 +634,7 @@ export function DiscussionSnapshot({
   }, [snapshot]);
 
   if (!discussion) return null;
-  const detached = discussion.threads.filter((thread) => thread.detached);
+  const detached = discussion.threads.filter((thread) => thread.status.kind !== "inline");
   if (!discussion.anchorError && !detached.length) return null;
   return (
     <div className="selection-discussion-notices">

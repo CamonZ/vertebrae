@@ -20,17 +20,34 @@ export interface CodeSelection extends LineSpan {
 export interface SelectionThread {
   id: string;
   anchor: CodeSelection;
-  outdated: boolean;
-  detached?: boolean;
-  unavailable?: boolean;
-  git?: { original: CodeSelection; capture: CapturedReviewAnchor };
+  status: ThreadStatus;
+  git: { original: CodeSelection; capture: CapturedReviewAnchor };
   /** Whether the agent has been told the context is outdated. */
   outdatedNoted: boolean;
+
   /** The read-only chat session the conversation runs in, once asked. */
   sessionId: string | null;
 }
 
-export type ThreadAnchor = Pick<SelectionThread, "id" | "anchor" | "detached">;
+export type ThreadStatus =
+  | { kind: "inline" | "detached" | "outdated" }
+  | { kind: "unreadable"; message: string }
+  | { kind: "unavailable"; lastKnown: "open" | "outdated" };
+
+export function isOutdated({ status }: SelectionThread): boolean {
+  return status.kind === "outdated" ||
+    (status.kind === "unavailable" && status.lastKnown === "outdated");
+}
+
+export type ThreadAnchor = Pick<SelectionThread, "id" | "anchor"> & { detached: boolean };
+
+export function mergeDiscussion(previous: SelectionThread | undefined, restored: SelectionThread): SelectionThread {
+  return {
+    ...restored,
+    sessionId: restored.sessionId ?? previous?.sessionId ?? null,
+    outdatedNoted: restored.outdatedNoted || previous?.outdatedNoted === true,
+  };
+}
 
 export interface DiscussionState {
   selection: CodeSelection | null;
@@ -56,6 +73,18 @@ export function captureCodeSelection(
   const code = lines.join("\n");
 
   return { ...span, path, code, file, home };
+}
+
+function sameSelection(left: CodeSelection | null, right: CodeSelection | null) {
+  if (left === right) return true;
+  if (!left || !right || left.file !== right.file || left.path !== right.path ||
+      left.side !== right.side || left.startLine !== right.startLine ||
+      left.endLine !== right.endLine || left.code !== right.code) return false;
+  const a = left.home;
+  const b = right.home;
+  return a.kind === "worktree"
+    ? b.kind === "worktree" && a.wholeBranch === b.wholeBranch && a.comparisonIdentity === b.comparisonIdentity
+    : b.kind === "tool_call" && a.toolUseId === b.toolUseId && a.toolName === b.toolName;
 }
 
 export function selectionLabel(anchor: CodeSelection): string {
@@ -107,11 +136,11 @@ export function discussionTurn(
 ): { payload: string; notesOutdated: boolean } {
   if (!continues)
     return {
-      payload: discussionFirstTurn(thread.anchor, thread.outdated, question),
-      notesOutdated: thread.outdated,
+      payload: discussionFirstTurn(thread.anchor, isOutdated(thread), question),
+      notesOutdated: isOutdated(thread),
     };
 
-  const noteOutdated = thread.outdated && !thread.outdatedNoted;
+  const noteOutdated = isOutdated(thread) && !thread.outdatedNoted;
 
   return {
     payload: discussionFollowUp(question, noteOutdated),
@@ -152,47 +181,64 @@ export class SelectionDiscussions {
   }
 
   select(selection: CodeSelection | null) {
-    const nextSelection = JSON.stringify(selection);
-    const currentSelection = JSON.stringify(this.state.selection);
-    if (nextSelection === currentSelection) return;
+    if (sameSelection(selection, this.state.selection)) return;
 
     this.publish({ ...this.state, selection });
   }
 
   ask(
-    anchor = this.state.selection,
-    id = crypto.randomUUID(),
-    capture?: CapturedReviewAnchor
-  ): string | null {
-    if (!anchor) return null;
+    anchor: CodeSelection,
+    id: string,
+    capture: CapturedReviewAnchor
+  ): string {
+    // Capture can publish a catalog event before its command returns.
+    if (this.thread(id)) {
+      this.publish({ ...this.state, activeId: id });
+      return id;
+    }
+
     const thread: SelectionThread = {
       id,
       anchor,
-      ...(capture && { git: { original: anchor, capture } }),
-      outdated: false,
+      git: { original: anchor, capture },
+      status: { kind: "inline" },
       outdatedNoted: false,
       sessionId: null,
     };
     const threads = [...this.state.threads, thread];
     const nextState = { ...this.state, activeId: id, threads };
 
-    this.anchors = [...this.anchors, { id, anchor }];
+    this.anchors = [...this.anchors, { id, anchor, detached: false }];
     this.publish(nextState);
 
     return id;
   }
 
   restore(restored: readonly SelectionThread[]) {
-    const ids = new Set(this.state.threads.map(({ id }) => id));
-    const newThreads = restored.filter(({ id }) => {
-      if (ids.has(id)) return false;
-      ids.add(id);
-      return true;
-    });
-    if (!newThreads.length) return false;
-    this.anchors = [...this.anchors, ...newThreads.map(({ id, anchor }) => ({ id, anchor }))];
-    this.publish({ ...this.state, threads: [...this.state.threads, ...newThreads] });
-    return true;
+    const byId = new Map(this.state.threads.map((thread) => [thread.id, thread]));
+    for (const thread of restored) byId.set(thread.id, mergeDiscussion(byId.get(thread.id), thread));
+    if (restored.length) this.publishThreads([...byId.values()]);
+  }
+
+  private publishThreads(threads: SelectionThread[]) {
+    this.anchors = threads.map(({ id, anchor, status }) => ({
+      id, anchor, detached: status.kind !== "inline",
+    }));
+    this.publish({ ...this.state, threads });
+  }
+
+  remove(id: string) {
+    const thread = this.thread(id);
+    if (!thread) return undefined;
+    if (this.state.activeId === id) {
+      this.state = {
+        ...this.state,
+        activeId: null,
+        selection: this.state.selection === thread.anchor ? null : this.state.selection,
+      };
+    }
+    this.publishThreads(this.state.threads.filter((item) => item.id !== id));
+    return thread;
   }
 
   reopen(id: string | null) {
@@ -202,7 +248,7 @@ export class SelectionDiscussions {
       this.publish({
         ...this.state,
         activeId: id,
-        selection: thread && !thread.detached ? thread.anchor : this.state.selection,
+        selection: thread?.status.kind === "inline" ? thread.anchor : this.state.selection,
       });
   }
 
@@ -238,80 +284,44 @@ export class SelectionDiscussions {
     const positions = new Map(mappings.map((row) => [row.threadId, row]));
     const threads = this.state.threads.map((thread) => {
       const position = positions.get(thread.id);
-      if (!position || thread.git?.original.home.kind !== "worktree") return thread;
+      if (!position || thread.status.kind === "unreadable" || thread.git.original.home.kind !== "worktree") return thread;
       const original = thread.git.original;
-      const file = snapshot.files.find((file) => canonicalPath(file) === original.path);
-      // A LEFT-side path can still exist in the base after a rename.
-      const renamed = !file && snapshot.files.some(({ oldPath, newPath }) =>
-        oldPath !== null && newPath !== null &&
-        (oldPath === original.path || oldPath === original.file.oldPath)
+      const file = snapshot.files.find((file) =>
+        original.side === "old"
+          ? file.oldPath === original.file.oldPath
+          : file.newPath === original.path
       );
-      const outdated = position.status === "outdated" || renamed;
-      const unavailable = !outdated && position.status === "unavailable";
+      if (position.status === "unavailable")
+        return { ...thread, status: { kind: "unavailable", lastKnown: isOutdated(thread) ? "outdated" : "open" } } satisfies SelectionThread;
+      const outdated = position.status === "outdated";
       const anchor =
         outdated || position.startLine === null || position.line === null
           ? original
           : {
               ...original,
               file: file ?? original.file,
+              path: file ? canonicalPath(file) : original.path,
               startLine: position.startLine,
               endLine: position.line,
             };
       return {
         ...thread,
         anchor,
-        outdated,
-        unavailable,
-        detached: outdated || unavailable || !file || !spanRows(file, anchor),
-      };
+        status: { kind: outdated ? "outdated" : file && spanRows(file, anchor) ? "inline" : "detached" },
+      } satisfies SelectionThread;
     });
 
-    this.anchors = threads.map(({ id, anchor, detached }) => ({ id, anchor, detached }));
-    this.publish({ ...this.state, threads });
+    this.publishThreads(threads);
   }
 
   reconcile(snapshot: WorktreeSnapshot) {
-    const previous = this.snapshot;
     this.snapshot = snapshot;
 
-    const patchFor = (snapshot: WorktreeSnapshot | null, path: string) =>
-      snapshot?.files.find((file) => canonicalPath(file) === path);
-    let selection = this.state.selection;
+    const selection = this.state.selection;
+    if (selection?.home.kind !== "worktree") return;
 
-    if (selection?.home.kind === "worktree") {
-      const currentFile = patchFor(snapshot, selection.path);
-      const currentPatch = JSON.stringify(currentFile);
-      const selectedPatch = JSON.stringify(selection.file);
-
-      if (currentPatch !== selectedPatch) selection = null;
-    }
-
-    const threads = this.state.threads.map((thread) => {
-      if (thread.git) return thread;
-      const anchor = thread.anchor;
-      const currentFile = patchFor(snapshot, anchor.path);
-      const currentPatch = JSON.stringify(currentFile);
-      let outdated: boolean;
-
-      if (anchor.home.kind === "worktree") {
-        const selectedPatch = JSON.stringify(anchor.file);
-        const comparisonChanged =
-          anchor.home.comparisonIdentity !== snapshot.comparisonIdentity;
-
-        outdated = currentPatch !== selectedPatch || comparisonChanged;
-      } else {
-        const previousFile = patchFor(previous, anchor.path);
-        const previousPatch = JSON.stringify(previousFile);
-
-        outdated = previous !== null && previousPatch !== currentPatch;
-      }
-
-      return outdated && !thread.outdated
-        ? { ...thread, outdated: true }
-        : thread;
-    });
-    const nextState = { ...this.state, selection, threads };
-
-    this.publish(nextState);
+    const file = snapshot.files.find((file) => canonicalPath(file) === selection.path);
+    if (!file || spanRows(file, selection)?.map((row) => row.text).join("\n") !== selection.code)
+      this.publish({ ...this.state, selection: null });
   }
 }
