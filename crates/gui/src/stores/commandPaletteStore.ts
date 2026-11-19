@@ -1,14 +1,27 @@
 import { create } from "zustand";
-import type { PaletteScope } from "../components/CommandPalette/paletteModel";
+import type {
+  PaletteItem,
+  PaletteScope,
+} from "../components/CommandPalette/paletteModel";
 
 interface CommandPaletteState {
   open: boolean;
   /** Scope the palette opens with; the user can still switch tabs. */
   scope: PaletteScope;
-  openPalette: (scope?: PaletteScope) => void;
+  /**
+   * Items from the focused surface (Changes), offered under their own scope
+   * for this opening only; cleared when the palette closes.
+   */
+  contextItems: readonly PaletteItem[];
+  openPalette: (
+    scope?: PaletteScope,
+    contextItems?: readonly PaletteItem[]
+  ) => void;
   closePalette: () => void;
   togglePalette: (scope?: PaletteScope) => void;
 }
+
+const NO_ITEMS: readonly PaletteItem[] = [];
 
 /**
  * Open state for the ⌘K palette, so page-level search affordances (the
@@ -18,8 +31,14 @@ interface CommandPaletteState {
 export const useCommandPaletteStore = create<CommandPaletteState>((set) => ({
   open: false,
   scope: "all",
-  openPalette: (scope = "all") => set({ open: true, scope }),
-  closePalette: () => set({ open: false }),
+  contextItems: NO_ITEMS,
+  openPalette: (scope = "all", contextItems = NO_ITEMS) =>
+    set({ open: true, scope, contextItems }),
+  closePalette: () => set({ open: false, contextItems: NO_ITEMS }),
   togglePalette: (scope = "all") =>
-    set((state) => (state.open ? { open: false } : { open: true, scope })),
+    set((state) =>
+      state.open
+        ? { open: false, contextItems: NO_ITEMS }
+        : { open: true, scope, contextItems: NO_ITEMS }
+    ),
 }));

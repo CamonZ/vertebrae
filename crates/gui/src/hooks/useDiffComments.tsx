@@ -6,6 +6,8 @@ import {
   useState,
   type ReactNode,
   type HTMLAttributes,
+  type KeyboardEvent,
+  type RefObject,
 } from "react";
 import {
   SelectionDiscussionActionsContext,
@@ -17,7 +19,21 @@ import {
   type CodeSelection,
 } from "../components/ChatWindow/selectionDiscussions";
 import { supportsInlineDiscussion } from "../components/ChatWindow/reviewAnchors";
-import type { DiffLineAnnotation, SelectedLineRange } from "@pierre/diffs";
+import type {
+  DiffLineAnnotation,
+  SelectedLineRange,
+  SelectionSide,
+} from "@pierre/diffs";
+import {
+  DIFF_CURSOR_ENTRY_ATTRIBUTE,
+  DIFF_CURSOR_HOST_ATTRIBUTE,
+  moveCursor,
+  moveToLandmark,
+  selectedCode,
+  switchCursorSide,
+  type DiffLayout,
+} from "../components/thread/toolChange/diffCursor";
+import { DIFF_COMMENT_KEYS } from "../components/ChatWindow/chatShortcuts";
 import {
   DiffCommentThread,
   type ReviewAnnotation,
@@ -58,11 +74,45 @@ export interface DiffCommentsApi {
   onSelectionChange(path: string, range: SelectedLineRange | null): void;
   /** Retire a file's transient selection/composer when its body is hidden. */
   clearInteraction(path: string): void;
-  keyboardProps: HTMLAttributes<HTMLDivElement>;
+  /**
+   * Props for the element that owns the keyboard line cursor. Spread them on
+   * the diff group; its `ref` is where Esc from the composer returns focus.
+   */
+  keyboardProps: HTMLAttributes<HTMLDivElement> & {
+    ref: RefObject<HTMLDivElement | null>;
+  };
   renderAnnotation(annotation: { metadata: ReviewAnnotation }): ReactNode;
 }
 
 const NONE: ReviewDiffAnnotation[] = [];
+
+export interface DiffCursorOptions {
+  /** How the surface lays out rows; split diffs have a column per side. */
+  layout?: DiffLayout;
+  /** The keyboard cursor moved to this line; scroll it into view. */
+  onCursorMove?(path: string, line: number, side: SelectionSide): void;
+  /**
+   * Leave the surface for the main chat input: Esc on a single-line cursor,
+   * and after sending a selection to the main chat.
+   */
+  onExit?(): void;
+  /** ← or → past the diff's outer column: move focus to the neighbouring area. */
+  onEdge?(direction: -1 | 1): void;
+  /** `v`: mark a file as viewed (or unviewed, from its heading). */
+  onToggleViewed?(path: string): void;
+}
+
+
+function writeClipboard(text: string) {
+  navigator.clipboard.writeText(text).catch((error: unknown) => {
+    console.error("Failed to copy selected code", error);
+  });
+}
+
+function hasTextSelection(): boolean {
+  const selection = document.getSelection();
+  return !!selection && !selection.isCollapsed;
+}
 
 /**
  * Review props for one diff surface: annotations for the comments placed on
@@ -75,8 +125,17 @@ const NONE: ReviewDiffAnnotation[] = [];
 export function useDiffComments(
   surface: ReviewSurface,
   files: readonly FilePatch[],
-  toolName?: string
+  toolName?: string,
+  cursor: DiffCursorOptions = {}
 ): DiffCommentsApi {
+  const {
+    layout = "unified",
+    onCursorMove,
+    onExit,
+    onEdge,
+    onToggleViewed,
+  } = cursor;
+  const groupRef = useRef<HTMLDivElement | null>(null);
   const review = useContext(DiffReviewContext);
   const discussion = useContext(SelectionDiscussionActionsContext);
   const threadAnchors = useContext(SelectionDiscussionAnchorsContext);
@@ -227,7 +286,11 @@ export function useDiffComments(
       return (
         <DiffCommentThread
           annotation={annotation.metadata}
-          onCancelDraft={() => setDraft(null)}
+          onCancelDraft={() => {
+            // The selection stays; the cursor resumes from its line.
+            setDraft(null);
+            groupRef.current?.focus({ preventScroll: true });
+          }}
           onDiscussDraft={
             discussion?.canAsk && draft &&
             supportsInlineDiscussion(draft.anchor)
@@ -243,6 +306,8 @@ export function useDiffComments(
               ? (body) => {
                   discussion.attach(draft.anchor, false, body);
                   clearDraft();
+                  // The selection is now in the main chat; continue there.
+                  onExit?.();
                 }
               : undefined
           }
@@ -259,7 +324,7 @@ export function useDiffComments(
         />
       );
     },
-    [addComment, draft, discussion]
+    [addComment, draft, discussion, onExit]
   );
 
   const selectedFile =
@@ -314,43 +379,177 @@ export function useDiffComments(
     ]
   );
 
-  const keyboardProps: HTMLAttributes<HTMLDivElement> = {
+  const moveTo = (path: string, range: SelectedLineRange) => {
+    onSelectionChange(path, range);
+    onCursorMove?.(path, range.end, range.endSide ?? range.side ?? "additions");
+  };
+
+  const landmarkMarks = (path: string) =>
+    (annotationsByPath.get(path) ?? NONE).map((annotation) => ({
+      side: annotation.side,
+      line: annotation.lineNumber,
+    }));
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+    const group = event.currentTarget;
+    const entry =
+      event.target instanceof HTMLElement && event.target !== group
+        ? event.target.closest<HTMLElement>(`[${DIFF_CURSOR_ENTRY_ATTRIBUTE}]`)
+        : null;
+    if (event.target !== group && !(entry && group.contains(entry))) return;
+
+    const command = event.metaKey || event.ctrlKey;
+    const plain = !command && !event.shiftKey && !event.altKey;
+    const current = selection;
+    const vertical = event.key === "ArrowDown" || event.key === "ArrowUp";
+    const direction = event.key === "ArrowDown" ? 1 : -1;
+
+    // ⌥↑/⌥↓: hunks, comments and discussions; ⌥⇧↑/⌥⇧↓: files only.
+    if (vertical && event.altKey && !command) {
+      const next = moveToLandmark(files, layout, current, direction, {
+        filesOnly: event.shiftKey,
+        marks: landmarkMarks,
+      });
+      if (!next) return;
+      event.preventDefault();
+      if (entry) group.focus({ preventScroll: true });
+      moveTo(next.path, next.range);
+      return;
+    }
+    if (event.altKey) return;
+
+    if (entry) {
+      const path = entry.getAttribute(DIFF_CURSOR_ENTRY_ATTRIBUTE) ?? "";
+      if (event.key === "Escape" && plain && onExit) {
+        event.preventDefault();
+        onExit();
+        return;
+      }
+      if (event.key === "v" && plain && onToggleViewed) {
+        event.preventDefault();
+        if (!event.repeat) onToggleViewed(path);
+        return;
+      }
+      // A file heading: ↓ starts the cursor on that file's first line.
+      if (!plain || event.key !== "ArrowDown") return;
+      const file = files.find((candidate) => canonicalPath(candidate) === path);
+      const start = file && moveCursor([file], layout, null, 1, false);
+      if (!start) return;
+      event.preventDefault();
+      group.focus({ preventScroll: true });
+      moveTo(start.path, start.range);
+      return;
+    }
+
+    if (vertical) {
+      if (command) return;
+      const next = moveCursor(files, layout, current, direction, event.shiftKey);
+      if (!next) return;
+      event.preventDefault();
+      if (next !== current) moveTo(next.path, next.range);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      if (!plain) return;
+      const end = current && {
+        side: current.range.endSide ?? current.range.side ?? "additions",
+        line: current.range.end,
+      };
+      const multiLine =
+        current &&
+        end &&
+        (current.range.start !== end.line ||
+          (current.range.side ?? "additions") !== end.side);
+      if (current && end && multiLine) {
+        event.preventDefault();
+        moveTo(current.path, { start: end.line, end: end.line, side: end.side });
+      } else if (onExit) {
+        event.preventDefault();
+        onExit();
+      }
+      return;
+    }
+
+    if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && plain) {
+      const toward = event.key === "ArrowLeft" ? -1 : 1;
+      const side = current
+        ? (current.range.endSide ?? current.range.side ?? "additions")
+        : null;
+      // Past the outer column (or in a one-column diff) focus leaves the diff.
+      const atEdge =
+        layout === "unified" ||
+        !current ||
+        (toward === -1 ? side === "deletions" : side === "additions");
+      if (atEdge) {
+        if (!onEdge) return;
+        event.preventDefault();
+        onEdge(toward);
+        return;
+      }
+      event.preventDefault();
+      const next = switchCursorSide(
+        files,
+        layout,
+        current,
+        toward === -1 ? "deletions" : "additions"
+      );
+      if (next !== current) moveTo(next.path, next.range);
+      return;
+    }
+
+    if (!current) return;
+
+    if (event.key === "v" && plain && onToggleViewed) {
+      event.preventDefault();
+      if (event.repeat) return;
+      // Mark the file reviewed and carry on with the next one.
+      const at = files.findIndex((file) => canonicalPath(file) === current.path);
+      const next = moveCursor(files.slice(at + 1), layout, null, 1, false);
+      onToggleViewed(current.path);
+      if (next) moveTo(next.path, next.range);
+      return;
+    }
+
+    if (
+      command &&
+      !event.shiftKey &&
+      event.key.toLowerCase() === "c" &&
+      !hasTextSelection()
+    ) {
+      const code =
+        selectedFile &&
+        (selectedCode(selectedFile, layout, current.range) ?? anchor?.code);
+      if (code == null) return;
+      event.preventDefault();
+      writeClipboard(code);
+      return;
+    }
+
+    if (
+      review &&
+      !command &&
+      !event.shiftKey &&
+      (DIFF_COMMENT_KEYS as readonly string[]).includes(event.key)
+    ) {
+      event.preventDefault();
+      if (!event.repeat) openComposer(current.path, current.range);
+    }
+  };
+
+  const keyboardProps = {
+    ref: groupRef,
     tabIndex: review ? 0 : undefined,
     role: "group",
     "aria-label": "Code diff selection",
-    onKeyDown: (event) => {
-      if (
-        event.target !== event.currentTarget ||
-        !["ArrowDown", "ArrowUp"].includes(event.key)
-      )
-        return;
-      const file = selectedFile || files[0];
-      if (!file) return;
-      const side = selection?.range.side ?? "additions";
-      const lines = file.hunks
-        .flatMap((hunk) => hunk.rows)
-        .flatMap((row) => {
-          const line = side === "deletions" ? row.oldLine : row.newLine;
-          return line === null ? [] : [line];
-        });
-      if (!lines.length) return;
-      event.preventDefault();
-      const current = selection?.range.end;
-      const line =
-        current == null
-          ? lines[0]
-          : event.key === "ArrowDown"
-            ? (lines.find((line) => line > current) ?? current)
-            : ([...lines].reverse().find((line) => line < current) ?? current);
-      const path = canonicalPath(file);
-      const range = {
-        side,
-        start: event.shiftKey ? (selection?.range.start ?? line) : line,
-        end: line,
-      };
-
-      onSelectionChange(path, range);
-    },
+    "data-line-cursor": selection ? "" : undefined,
+    // The cursor line's accent bar is the focus indicator once there is one.
+    "data-focus-halo": selection ? "none" : undefined,
+    [DIFF_CURSOR_HOST_ATTRIBUTE]: "",
+    // Esc steps out of the cursor here instead of closing the chat panel.
+    "data-owns-escape": onExit ? "" : undefined,
+    onKeyDown,
   };
   return {
     keyboardProps,

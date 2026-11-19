@@ -1,4 +1,5 @@
 import { loadMainChatWorktree } from "../../utils/chatAssociation/defaultWorktree";
+import { moveChatArea } from "./chatAreas";
 import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 import { commands } from "../../bindings";
 import {
@@ -756,6 +757,9 @@ export function ChatWindowManager({
       hasActiveSession: !!activeSessionId,
       focusPaneByIndex,
       focusPaneByOffset,
+      focusAreaByOffset: (offset) =>
+        moveChatArea(document.activeElement, offset) ||
+        focusPaneByOffset(offset),
       historyNavigationEnabled: isMaximized,
       focusHistorySearch,
       openPaneFind: () => {

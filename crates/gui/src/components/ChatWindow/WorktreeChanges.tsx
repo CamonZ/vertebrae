@@ -2,7 +2,22 @@ import { flushSync } from "react-dom";
 import { useOpenLocalFile } from "../../hooks/useOpenLocalFile";
 import { ChangesKeyHints } from "./ChangesKeyHints";
 import { isEditableShortcutTarget } from "../../utils/keyboard";
-import { CHANGED_FILE_LIST_KEYS, CHANGES_KEYS } from "./chatShortcuts";
+import {
+  CHANGED_FILE_LIST_KEYS,
+  CHANGES_COMMANDS,
+  CHANGES_VIEWED_KEY,
+  type ChangesSituation,
+} from "./chatShortcuts";
+import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
+import { CHAT_AREA_ATTRIBUTE } from "./chatAreas";
+import {
+  isPaletteShortcut,
+  type PaletteItem,
+} from "../CommandPalette/paletteModel";
+import {
+  DIFF_CURSOR_ENTRY_ATTRIBUTE,
+  DIFF_CURSOR_HOST_ATTRIBUTE,
+} from "../thread/toolChange/diffCursor";
 import { OpenInExternalEditor } from "./workspace/OpenInExternalEditor";
 import { backgroundClient } from "../../background/client";
 import type { BackgroundTask, BackgroundOutputs } from "../../background/types";
@@ -77,6 +92,28 @@ type LoadState =
 
 type SidebarMode = "changes" | "files";
 
+const NO_VIEWED: ReadonlySet<string> = new Set();
+
+/** Which bindings apply for the focused element inside a Changes panel. */
+function changesSituation(
+  section: HTMLElement,
+  focused: EventTarget | null,
+  fileList: HTMLElement | null
+): ChangesSituation {
+  if (!(focused instanceof HTMLElement) || !section.contains(focused))
+    return "outside";
+  if (focused.closest(".diff-comment-editor")) return "composer";
+  if (focused.getAttribute("role") === "combobox") return "picker";
+  if (fileList?.contains(focused)) return "files";
+  if (isEditableShortcutTarget(focused)) return "outside";
+  if (
+    focused.closest(`[${DIFF_CURSOR_HOST_ATTRIBUTE}]`) &&
+    !focused.closest(`[${DIFF_CURSOR_ENTRY_ATTRIBUTE}]`)
+  )
+    return "diff";
+  return "panel";
+}
+
 /**
  * The worktree workspace: Git changes and a file browser in the sidebar,
  * every change in one virtualized viewport, and open documents edited as
@@ -89,8 +126,14 @@ export function WorktreeChanges({
   worktreePath,
   onChangesLoaded,
   sourceJump,
+  onExit,
+  onEdge,
 }: {
   ref?: Ref<HTMLElement>;
+  /** Hand focus back to the chat input (Esc from the line cursor). */
+  onExit?(): void;
+  /** ← / → past the diff's outer column: the chat, or the next area. */
+  onEdge?(direction: -1 | 1): void;
   worktreePath: string;
   sourceJump?: JumpTarget | null;
   /** Called with the parsed All Changes patch after every successful load. */
@@ -99,6 +142,9 @@ export function WorktreeChanges({
   const baseButton = useRef<HTMLButtonElement>(null);
   const targetButton = useRef<HTMLButtonElement>(null);
   const fileList = useRef<HTMLElement>(null);
+  const sectionRef = useRef<HTMLElement | null>(null);
+  const openPalette = useCommandPaletteStore((state) => state.openPalette);
+  const [situation, setSituation] = useState<ChangesSituation>("outside");
   const [base, setBase] = useState<ComparisonEndpoint | null>(null);
   const [target, setTarget] = useState<ComparisonEndpoint>({
     kind: "working_tree",
@@ -368,6 +414,35 @@ export function WorktreeChanges({
     [files]
   );
 
+  // Viewed marks belong to one comparison; another base or target starts fresh.
+  const comparisonKey = JSON.stringify([worktreePath, comparisonRequest]);
+  const [viewedState, setViewedState] = useState<{
+    key: string;
+    paths: ReadonlySet<string>;
+  }>({ key: comparisonKey, paths: NO_VIEWED });
+  const viewedPaths = useMemo<ReadonlySet<string>>(() => {
+    if (viewedState.key !== comparisonKey) return NO_VIEWED;
+    const present = [...viewedState.paths].filter((path) => statuses.has(path));
+    return present.length === viewedState.paths.size
+      ? viewedState.paths
+      : new Set(present);
+  }, [viewedState, comparisonKey, statuses]);
+  const setViewed = useCallback(
+    (path: string, viewed: boolean) =>
+      setViewedState((current) => {
+        const paths = current.key === comparisonKey ? current.paths : NO_VIEWED;
+        if (paths.has(path) === viewed)
+          return current.key === comparisonKey
+            ? current
+            : { key: comparisonKey, paths };
+        const next = new Set(paths);
+        if (viewed) next.add(path);
+        else next.delete(path);
+        return { key: comparisonKey, paths: next };
+      }),
+    [comparisonKey]
+  );
+
   const selectedFile =
     files.find((file) => file.path === activePath) ?? files[0];
   const external = useOpenLocalFile(
@@ -429,6 +504,86 @@ export function WorktreeChanges({
     )?.focus();
   };
 
+  /** Return focus to Changes; entering resumes the line cursor. */
+  const refocus = () => {
+    requestAnimationFrame(() => sectionRef.current?.focus({ preventScroll: true }));
+  };
+
+  const openSelected = (view: "file" | "diff") => {
+    if (!selectedFile) return;
+    // Opening the document removes the focused diff heading.
+    sectionRef.current?.focus({ preventScroll: true });
+    open(selectedFile.path, view);
+  };
+
+  /** Changes commands and files, in the ⌘K palette's Changes scope. */
+  const openChangesPalette = (filesFirst: boolean) => {
+    const pick = (button: HTMLButtonElement | null) => () => {
+      requestAnimationFrame(() => {
+        button?.focus();
+        button?.click();
+      });
+    };
+    const fileItems: PaletteItem[] = files.map((file) => ({
+      id: `changes-file-${file.path}`,
+      scope: "changes",
+      label: file.path,
+      hint: viewedPaths.has(file.path) ? "Viewed" : undefined,
+      detail: STATUS_LETTER[file.status],
+      keywords: "file go to jump",
+      run: () => jumpToFile(file.path, true),
+    }));
+    const viewed = selectedFile && viewedPaths.has(selectedFile.path);
+    const commands: PaletteItem[] = [
+      { id: "changes-base", scope: "changes", label: CHANGES_COMMANDS.base, keywords: "comparison branch", run: pick(baseButton.current) },
+      { id: "changes-target", scope: "changes", label: CHANGES_COMMANDS.target, keywords: "comparison head branch worktree", run: pick(targetButton.current) },
+      { id: "changes-files", scope: "changes", label: CHANGES_COMMANDS.files, keywords: "sidebar list", run: () => void requestAnimationFrame(focusFileList) },
+      ...(selectedFile
+        ? ([
+            { id: "changes-diff", scope: "changes", label: CHANGES_COMMANDS.diff, hint: selectedFile.path, run: () => openSelected("diff") },
+            { id: "changes-file", scope: "changes", label: CHANGES_COMMANDS.file, hint: selectedFile.path, run: () => openSelected("file") },
+            { id: "changes-external", scope: "changes", label: CHANGES_COMMANDS.external, hint: selectedFile.path, run: () => void external.open() },
+            {
+              id: "changes-viewed",
+              scope: "changes",
+              label: viewed ? "Unmark file viewed" : "Mark file viewed",
+              hint: selectedFile.path,
+              detail: CHANGES_VIEWED_KEY,
+              keywords: "reviewed done",
+              run: () => {
+                setViewed(selectedFile.path, !viewed);
+                refocus();
+              },
+            },
+          ] satisfies PaletteItem[])
+        : []),
+      {
+        id: "changes-layout",
+        scope: "changes",
+        label: diffStyle === "split" ? CHANGES_COMMANDS.unified : CHANGES_COMMANDS.split,
+        keywords: "diff layout view",
+        run: () => {
+          setDiffStyle(diffStyle === "split" ? "unified" : "split");
+          refocus();
+        },
+      },
+      {
+        id: "changes-refresh",
+        scope: "changes",
+        label: CHANGES_COMMANDS.refresh,
+        keywords: "reload",
+        run: () => {
+          refreshAll();
+          refocus();
+        },
+      },
+    ];
+    openPalette(
+      "changes",
+      filesFirst ? [...fileItems, ...commands] : [...commands, ...fileItems]
+    );
+  };
+
   const onKeyDownCapture = (event: KeyboardEvent<HTMLElement>) => {
     if (
       closing == null &&
@@ -445,53 +600,66 @@ export function WorktreeChanges({
       closing != null ||
       event.defaultPrevented ||
       event.nativeEvent.isComposing ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.altKey ||
-      event.shiftKey ||
       !(origin instanceof HTMLElement) ||
       !event.currentTarget.contains(origin) ||
-      isEditableShortcutTarget(origin) ||
       origin.closest('[role="combobox"][aria-expanded="true"]') ||
       document.querySelector('[role="dialog"][aria-modal="true"]')
     )
       return;
+    const typing = isEditableShortcutTarget(origin);
+
+    // ⌘K, or / outside text fields: the palette with Changes commands and files.
+    const slash =
+      event.key === "/" &&
+      !typing &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey;
+    if (isPaletteShortcut(event) || slash) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) openChangesPalette(slash);
+      return;
+    }
+    if (typing) return;
+
+    const inCursor = !!origin.closest(`[${DIFF_CURSOR_HOST_ATTRIBUTE}]`);
+    const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
+    // ⌥⇧↑/↓ outside the diff: previous/next file heading. The diff's own
+    // headings and lines move the line cursor instead.
+    if (
+      vertical &&
+      event.altKey &&
+      event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !inCursor
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      moveFile(event.key === "ArrowDown" ? 1 : -1);
+      return;
+    }
+    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)
+      return;
 
     const list = fileList.current;
-    if (
-      list?.contains(origin) &&
-      (event.key === "ArrowUp" || event.key === "ArrowDown")
-    ) {
+    if (list?.contains(origin) && vertical) {
       event.preventDefault();
       event.stopPropagation();
       const rows = Array.from(list.querySelectorAll("button"));
       const index = rows.findIndex((row) => row.contains(origin));
-      rows[index + CHANGED_FILE_LIST_KEYS.directions[event.key]]?.focus();
+      rows[index + CHANGED_FILE_LIST_KEYS.directions[event.key as "ArrowUp" | "ArrowDown"]]?.focus();
       return;
     }
 
-    const openSelected = (view: "file" | "diff") => {
-      if (!selectedFile) return;
-      // Opening the document removes the focused diff heading.
-      event.currentTarget.focus();
-      open(selectedFile.path, view);
-    };
-    const actions: Record<string, () => void> = {
-      [CHANGES_KEYS.base.key]: () => baseButton.current?.click(),
-      [CHANGES_KEYS.target.key]: () => targetButton.current?.click(),
-      [CHANGES_KEYS.files.key]: focusFileList,
-      [CHANGES_KEYS.previous.key]: () => moveFile(-1),
-      [CHANGES_KEYS.next.key]: () => moveFile(1),
-      [CHANGES_KEYS.diff.key]: () => openSelected("diff"),
-      [CHANGES_KEYS.file.key]: () => openSelected("file"),
-      [CHANGES_KEYS.external.key]: () => {
-        if (selectedFile) void external.open();
-      },
-    };
-    if (!Object.prototype.hasOwnProperty.call(actions, event.key)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (!event.repeat) actions[event.key]();
+    // v outside the diff marks the active file; the diff handles its own.
+    if (event.key === CHANGES_VIEWED_KEY && !inCursor && selectedFile) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat)
+        setViewed(selectedFile.path, !viewedPaths.has(selectedFile.path));
+    }
   };
 
   const changesBody =
@@ -520,7 +688,6 @@ export function WorktreeChanges({
               <OpenInExternalEditor
                 root={worktreePath}
                 path={path}
-                shortcut={CHANGES_KEYS.external.key}
                 line={
                   effectiveJumpTarget?.path === path
                     ? effectiveJumpTarget.line
@@ -534,6 +701,11 @@ export function WorktreeChanges({
               />
             )}
             diffStyle={diffStyle}
+            onCursorFile={setActivePath}
+            onExit={onExit}
+            onEdge={onEdge}
+            viewedPaths={viewedPaths}
+            onViewedChange={setViewed}
           />
         </Suspense>
       </div>
@@ -541,17 +713,59 @@ export function WorktreeChanges({
 
   return (
     <section
-      ref={ref}
+      ref={(node) => {
+        sectionRef.current = node;
+        if (typeof ref === "function") return ref(node);
+        if (ref) ref.current = node;
+      }}
       tabIndex={-1}
       aria-label="Worktree changes"
+      {...{ [CHAT_AREA_ATTRIBUTE]: "changes" }}
       className="changes-keyboard-region flex min-h-0 flex-1 flex-col gap-2 p-3 text-sm"
       onKeyDownCapture={onKeyDownCapture}
       onFocusCapture={(event) => {
+        const section = event.currentTarget;
+        if (
+          event.target === section &&
+          !(
+            event.relatedTarget instanceof Node &&
+            section.contains(event.relatedTarget)
+          )
+        ) {
+          // Entering Changes resumes the line cursor where it was left.
+          const cursor = section.querySelector<HTMLElement>(
+            `[${DIFF_CURSOR_HOST_ATTRIBUTE}]`
+          );
+          if (cursor) {
+            cursor.focus({ preventScroll: true });
+            return;
+          }
+        }
+        setSituation(changesSituation(section, event.target, fileList.current));
         if (!(event.target instanceof HTMLElement)) return;
         const path = event.target.closest<HTMLElement>("[data-changes-path]")
           ?.dataset.changesPath;
         if (path) setActivePath(path);
       }}
+      onBlurCapture={(event) =>
+        setSituation(
+          changesSituation(
+            event.currentTarget,
+            event.relatedTarget,
+            fileList.current
+          )
+        )
+      }
+      onKeyUpCapture={(event) =>
+        // Focus can move without a blur here (an editor unmounting).
+        setSituation(
+          changesSituation(
+            event.currentTarget,
+            document.activeElement,
+            fileList.current
+          )
+        )
+      }
     >
       <div className="flex flex-wrap items-center gap-3">
         <div className="changes-comparison-controls">
@@ -560,7 +774,6 @@ export function WorktreeChanges({
             <ComparisonSelect
               label="Comparison base"
               buttonRef={baseButton}
-              shortcut={CHANGES_KEYS.base.key}
               value={base ? endpointKey(base) : "auto"}
               onChange={(value) => {
                 const endpoint = value === "auto" ? null : endpointFor(value);
@@ -593,7 +806,6 @@ export function WorktreeChanges({
             <ComparisonSelect
               label="Comparison target"
               buttonRef={targetButton}
-              shortcut={CHANGES_KEYS.target.key}
               value={endpointKey(target)}
               onChange={(value) => {
                 const endpoint = endpointFor(value);
@@ -687,6 +899,11 @@ export function WorktreeChanges({
             <span className="changes-total-deleted">
               −{state.data.totals.deletions}
             </span>
+            {viewedPaths.size > 0 && (
+              <span className="changes-total-viewed">
+                {viewedPaths.size}/{files.length} viewed
+              </span>
+            )}
             {state.data.totals.binary_files > 0 && (
               <span className="changes-total-binary">
                 {state.data.totals.binary_files} binary
@@ -745,7 +962,7 @@ export function WorktreeChanges({
               type="button"
               className="changes-files-toggle"
               aria-label={filesOpen ? "Hide files" : "Show files"}
-              title={`${filesOpen ? "Collapse" : "Expand"} file list · Focus file list (${CHANGES_KEYS.files.key})`}
+              title={`${filesOpen ? "Collapse" : "Expand"} file list`}
               aria-expanded={filesOpen}
               aria-controls={filesOpen ? fileListId : undefined}
               onClick={() => setFilesOpen((value) => !value)}
@@ -952,7 +1169,12 @@ export function WorktreeChanges({
         </div>
       </div>
       {external.error && <p role="alert">{external.error}</p>}
-      <ChangesKeyHints hasFiles={files.length > 0} moveFile={moveFile} />
+      <ChangesKeyHints
+        situation={situation}
+        split={diffStyle === "split"}
+        hasFiles={files.length > 0}
+        moveFile={moveFile}
+      />
       <UnsavedChangesDialog
         paths={closing ? [closing] : null}
         busy={closeBusy}

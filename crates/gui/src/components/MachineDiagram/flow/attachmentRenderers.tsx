@@ -68,7 +68,7 @@ const source: AttachmentRenderer = (a, { openSource }) => {
           aria-label={location}
           title={location}
           disabled={!openSource}
-          className="break-all text-left font-mono underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:no-underline"
+          className="break-all text-left font-mono underline disabled:no-underline"
           onClick={() =>
             openSource?.({
               path,
@@ -182,7 +182,7 @@ function ArtifactCrop({
       {error && (
         <button
           type="button"
-          className="underline focus-visible:ring-2"
+          className="underline"
           onClick={refetch}
         >
           Retry image

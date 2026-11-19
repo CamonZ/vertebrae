@@ -32,6 +32,7 @@ const SCOPES: { id: PaletteScope; label: string }[] = [
 ];
 
 const SCOPE_HEADINGS: Record<Exclude<PaletteScope, "all">, string> = {
+  changes: "Changes",
   navigate: "Go to",
   tasks: "Tasks",
   chats: "Chats",
@@ -89,6 +90,7 @@ function defaultScopeForPath(pathname: string): PaletteScope {
 export function CommandPalette() {
   const open = useCommandPaletteStore((state) => state.open);
   const scope = useCommandPaletteStore((state) => state.scope);
+  const contextItems = useCommandPaletteStore((state) => state.contextItems);
   const togglePalette = useCommandPaletteStore((state) => state.togglePalette);
   const openPalette = useCommandPaletteStore((state) => state.openPalette);
   const closePalette = useCommandPaletteStore((state) => state.closePalette);
@@ -118,16 +120,36 @@ export function CommandPalette() {
   }, [openPalette, pathname, togglePalette]);
 
   if (!open) return null;
-  return <PaletteDialog initialScope={scope} onClose={closePalette} />;
+  return (
+    <PaletteDialog
+      initialScope={scope}
+      contextItems={contextItems}
+      onClose={closePalette}
+    />
+  );
 }
 
 function PaletteDialog({
   initialScope,
+  contextItems,
   onClose,
 }: {
   initialScope: PaletteScope;
+  /** Surface-specific items (Changes) shown under their own scope tab. */
+  contextItems: readonly PaletteItem[];
   onClose: () => void;
 }) {
+  const scopes = useMemo(
+    () =>
+      contextItems.length
+        ? [
+            SCOPES[0],
+            { id: "changes" as const, label: SCOPE_HEADINGS.changes },
+            ...SCOPES.slice(1),
+          ]
+        : SCOPES,
+    [contextItems.length]
+  );
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<PaletteScope>(initialScope);
@@ -306,6 +328,7 @@ function PaletteDialog({
         },
       }));
     return [
+      ...contextItems,
       ...nav,
       ...taskItems,
       ...chatItems,
@@ -314,6 +337,7 @@ function PaletteDialog({
       ...actions,
     ];
   }, [
+    contextItems,
     localSessionSummaries,
     navigate,
     openTask,
@@ -332,6 +356,7 @@ function PaletteDialog({
     // Short, fixed lists first so pages and actions are never buried under
     // the (much longer) task list.
     const order: Exclude<PaletteScope, "all">[] = [
+      "changes",
       "navigate",
       "actions",
       "chats",
@@ -402,9 +427,9 @@ function PaletteDialog({
       runItem(flat[activeIndex]);
     } else if (event.key === "Tab") {
       event.preventDefault();
-      const current = SCOPES.findIndex((entry) => entry.id === scope);
+      const current = scopes.findIndex((entry) => entry.id === scope);
       const delta = event.shiftKey ? -1 : 1;
-      setScope(SCOPES[(current + delta + SCOPES.length) % SCOPES.length].id);
+      setScope(scopes[(current + delta + scopes.length) % scopes.length].id);
     }
   };
 
@@ -453,7 +478,7 @@ function PaletteDialog({
           <kbd className="cmdk-kbd">esc</kbd>
         </div>
         <div className="cmdk-scopes" role="tablist" aria-label="Palette scope">
-          {SCOPES.map((entry) => (
+          {scopes.map((entry) => (
             <button
               key={entry.id}
               type="button"

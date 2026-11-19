@@ -247,3 +247,35 @@ it("tracks replacement containers, ignores retired observations, and restores re
     expect(observation.disconnect).toHaveBeenCalledOnce();
   }
 });
+
+it("resizes the Changes panel by tenths and cycles preset widths", () => {
+  function Fixture() {
+    const { containerRef, handleProps, resizeBy, cycleWidth } =
+      useSidebarResize({ initial: 400, side: "right" });
+    return (
+      <div ref={containerRef}>
+        <div {...handleProps} />
+        <button onClick={() => resizeBy(1)}>grow</button>
+        <button onClick={() => resizeBy(-1)}>shrink</button>
+        <button onClick={cycleWidth}>cycle</button>
+      </div>
+    );
+  }
+  render(<Fixture />);
+  const handle = screen.getByRole("separator");
+  const press = (name: string) =>
+    fireEvent.click(screen.getByRole("button", { name }));
+
+  press("grow");
+  expect(handle).toHaveAttribute("aria-valuenow", "480");
+  press("shrink");
+  press("shrink");
+  expect(handle).toHaveAttribute("aria-valuenow", "320");
+  // ⅓, ½, ⅔ of 800px, then back to ⅓.
+  press("cycle");
+  expect(handle).toHaveAttribute("aria-valuenow", "400");
+  press("cycle");
+  expect(handle).toHaveAttribute("aria-valuenow", "533");
+  press("cycle");
+  expect(handle).toHaveAttribute("aria-valuenow", "267");
+});

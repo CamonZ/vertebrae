@@ -1,4 +1,4 @@
-import { CHANGES_KEYS } from "../chatShortcuts";
+import { CHANGES_COMMANDS } from "../chatShortcuts";
 import { OpenInExternalEditor } from "./OpenInExternalEditor";
 import type { DiffPreferences } from "../../../utils/codeAppearance";
 import { lazy, Suspense, useEffect } from "react";
@@ -154,7 +154,6 @@ export function DocumentPane({
         <OpenInExternalEditor
           root={worktreePath}
           path={path}
-          shortcut={CHANGES_KEYS.external.key}
           line={reveal?.line}
           available={
             document.disk.kind === "text" ||
@@ -179,7 +178,7 @@ export function DocumentPane({
             <button
               type="button"
               aria-pressed={view === "diff"}
-              title={`Full diff (${CHANGES_KEYS.diff.key})`}
+              title={CHANGES_COMMANDS.diff}
               onClick={() => setView(worktreePath, path, "diff")}
             >
               Diff
@@ -187,7 +186,7 @@ export function DocumentPane({
             <button
               type="button"
               aria-pressed={view === "file"}
-              title={`Full file (${CHANGES_KEYS.file.key})`}
+              title={CHANGES_COMMANDS.file}
               onClick={() => setView(worktreePath, path, "file")}
             >
               File

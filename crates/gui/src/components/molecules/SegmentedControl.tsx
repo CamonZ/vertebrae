@@ -95,7 +95,7 @@ export function SegmentedControl<T extends string>({
             tabIndex={tabbable ? 0 : -1}
             disabled={disabled}
             onClick={() => !disabled && onChange(option.value)}
-            className={`px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${
+            className={`px-3 py-1 text-xs font-medium transition-colors ${
               index > 0 ? "border-l border-[var(--color-line-strong)]" : ""
             } ${
               selected

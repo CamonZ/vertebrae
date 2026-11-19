@@ -174,7 +174,7 @@ export const TextareaField = forwardRef<HTMLTextAreaElement, TextareaFieldProps>
 
     // Error state classes
     const errorClasses = displayError
-      ? "border-err focus:border-err focus:ring-err/20"
+      ? "border-err"
       : "";
 
     // Disabled state classes

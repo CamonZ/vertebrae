@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { CommandPalette } from "./CommandPalette";
 import {
@@ -73,6 +73,28 @@ describe("CommandPalette", () => {
     useEntityPanelStore.getState().reset();
     useCommandPaletteStore.setState({ open: false, scope: "all" });
     useChatStore.setState({ sessions: {}, localSessionSummaries: {} });
+  });
+
+  it("offers a surface's own items under a Changes tab for one opening", () => {
+    const run = vi.fn();
+    renderPalette("/tasks");
+    act(() =>
+      useCommandPaletteStore.getState().openPalette("changes", [
+        { id: "changes-base", scope: "changes", label: "Choose base", run },
+      ])
+    );
+    expect(screen.getByRole("tab", { name: "Changes" })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    fireEvent.keyDown(screen.getByTestId("command-palette-input"), {
+      key: "Enter",
+    });
+    expect(run).toHaveBeenCalled();
+    expect(useCommandPaletteStore.getState().contextItems).toEqual([]);
+
+    openPalette();
+    expect(screen.queryByRole("tab", { name: "Changes" })).toBeNull();
   });
 
   it("opens on '/' scoped to tasks on task pages, but not while typing", () => {

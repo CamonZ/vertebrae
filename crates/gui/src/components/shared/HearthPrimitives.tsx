@@ -514,7 +514,7 @@ export function DetailHeader({
                 type="button"
                 onClick={crumb.onClick}
                 className={classNames(
-                  "rounded-sm text-left hover:text-[var(--color-fg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
+                  "rounded-sm text-left hover:text-[var(--color-fg)]",
                   crumb.em && "font-serif italic"
                 )}
               >

@@ -31,7 +31,8 @@ describe("chat entity references", () => {
       const link = screen.getByRole("link");
       const copy = screen.getByRole("button", { name: `Copy full ${type} ID` });
       expect(copy.closest("a")).toBeNull();
-      expect(copy).toHaveClass("focus-visible:ring-2");
+      // Focus is drawn by the shared halo (index.css), not a per-button ring.
+      expect(copy).not.toHaveAttribute("data-focus-halo", "none");
       await user.tab();
       expect(link).toHaveFocus();
       await user.tab();

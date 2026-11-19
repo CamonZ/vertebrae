@@ -24,12 +24,13 @@
   gap: 6px;
   height: 28px;
   padding: 0 10px 0 8px;
-  border: 1px solid var(--color-primary);
+  /* Border and ring come from the focus halo (data-focus-halo="surface"). */
+  border: 1px solid;
   border-radius: 8px;
   background: color-mix(in oklch, var(--color-primary) 12%, var(--color-bg-2));
   color: var(--color-fg);
   font: 600 12px/1 var(--font-sans);
-  box-shadow: var(--shadow-1);
+  --surface-shadow: var(--shadow-1);
   cursor: pointer;
   animation: chat-comment-in 120ms ease-out;
 }
@@ -46,11 +47,12 @@
 .chat-comment-card {
   width: 384px;
   max-width: calc(100vw - 1rem);
-  border: 1px solid var(--color-line);
+  /* Border and ring come from the focus halo (data-focus-halo="surface"). */
+  border: 1px solid;
   border-radius: 12px;
   background: var(--color-bg-2);
   color: var(--color-fg);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.32);
+  --surface-shadow: 0 12px 32px rgb(0 0 0 / 0.32);
   font: 400 13px/1.5 var(--font-sans);
   text-align: left;
   animation: chat-comment-in 120ms ease-out;

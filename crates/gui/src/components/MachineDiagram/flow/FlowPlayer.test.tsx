@@ -122,12 +122,9 @@ describe("keyboard control", () => {
     for (const b of buttons) {
       expect(b.tabIndex).toBe(0);
     }
-    // Player controls draw an accent ring; the shared zoom widget gets one
-    // from MachineDiagram.css (.md-viewport .uv-zoom button:focus-visible).
-    for (const b of buttons.filter(
-      (b) => b.tagName === "BUTTON" && !b.closest(".uv-zoom")
-    ))
-      expect(b.className).toMatch(/focus-visible:ring/);
+    // Buttons take the app-wide focus halo (index.css); none opt out.
+    for (const b of buttons)
+      expect(b).not.toHaveAttribute("data-focus-halo", "none");
     const parts = after.parts.filter((p) => p.presence !== "absent");
     for (const p of parts) {
       expect(part(p.id)).toHaveAttribute("tabindex", "0");
@@ -141,7 +138,7 @@ describe("keyboard control", () => {
           .getAllByRole("radio")
           .some((r) => r.tabIndex === 0)
       ).toBe(true);
-    expect(player().className).toMatch(/focus-visible:ring/);
+    expect(player()).not.toHaveAttribute("data-focus-halo", "none");
   });
 
   it("buttons keep Space and Enter; radio groups keep their arrows", () => {

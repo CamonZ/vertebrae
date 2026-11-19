@@ -133,13 +133,14 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     );
 
     const textareaClassName = hasFooter
-      ? "block w-full resize-none rounded-t-lg bg-transparent px-3 py-2 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-      : "block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
+      ? "block w-full resize-none rounded-t-lg bg-transparent px-3 py-2 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] disabled:cursor-not-allowed disabled:opacity-50"
+      : "block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] disabled:cursor-not-allowed disabled:opacity-50";
 
     return (
       <div
         className="chat-input-shell relative rounded-[var(--radius-lg)] border border-[var(--color-line)] bg-[var(--color-bg)]"
         data-testid="chat-input-shell"
+        data-focus-halo="within"
       >
         {inputAccessory != null ? (
           <div className="flex items-center gap-1 px-2 pt-2">

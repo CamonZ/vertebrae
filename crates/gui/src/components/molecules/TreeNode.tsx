@@ -67,7 +67,6 @@ export function TreeNode({
         "group relative flex cursor-pointer gap-1.5 pr-2 text-sm",
         multiline ? "min-h-[3.25rem] items-start py-2" : "h-8 items-center",
         "transition-[background-color] duration-[var(--t-fast)]",
-        "focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]",
         // Selected rows: a solid accent bar pinned to the left edge plus the
         // shared neutral selection surface. The bar is an inset pseudo-
         // replacement so it never shifts content the way a left border would.

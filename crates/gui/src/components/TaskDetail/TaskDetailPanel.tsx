@@ -738,7 +738,7 @@ export function TaskDetailPanel({
           onBlur={() => handleFieldSave("title")}
           autoFocus
           disabled={isSubmitting}
-          className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 font-sans text-[length:calc(var(--text-base)*var(--reading-scale))] font-semibold leading-snug text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:opacity-50"
+          className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 font-sans text-[length:calc(var(--text-base)*var(--reading-scale))] font-semibold leading-snug text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] disabled:opacity-50"
           placeholder="Enter title"
         />
         {fieldError && (
@@ -1145,7 +1145,7 @@ export function TaskDetailPanel({
                       onBlur={() => handleFieldSave("priority")}
                       autoFocus
                       disabled={isSubmitting}
-                      className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 text-sm text-[var(--color-fg)] focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 text-sm text-[var(--color-fg)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <option value="">None</option>
                       <option value="low">Low</option>

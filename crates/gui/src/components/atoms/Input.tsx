@@ -10,11 +10,10 @@ const baseClasses =
   "font-sans text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] " +
   "rounded-[var(--ctl-radius)] transition-[border-color,box-shadow,background-color] duration-[var(--t-fast)] ease-[var(--ease-default)] " +
   "hover:border-[var(--ctl-line-hover)] " +
-  "focus:outline-none focus:border-[var(--focus-edge)] focus:shadow-[0_0_0_3px_color-mix(in_oklch,var(--color-accent)_22%,transparent)] " +
   "disabled:cursor-not-allowed disabled:opacity-50";
 
 const invalidClasses =
-  "border-[var(--color-err)] focus:border-[var(--color-err)] focus:shadow-[0_0_0_3px_var(--color-err-wash)]";
+  "border-[var(--color-err)]";
 
 const monoClasses = "font-mono text-sm";
 

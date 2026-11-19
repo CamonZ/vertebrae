@@ -139,7 +139,7 @@ export function FlowDrill({
           }}
           hidden={i + 1 < depth}
           tabIndex={-1}
-          className="focus-visible:outline-none"
+          className=""
           data-drill-level={i + 1}
           data-drill-part={level.partId}
         >
@@ -222,7 +222,7 @@ function Breadcrumb({
               ) : (
                 <button
                   type="button"
-                  className="truncate rounded text-fg-soft underline decoration-dotted underline-offset-2 hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+                  className="truncate rounded text-fg-soft underline decoration-dotted underline-offset-2 hover:text-fg"
                   onClick={() => onGoTo(i)}
                 >
                   {name}

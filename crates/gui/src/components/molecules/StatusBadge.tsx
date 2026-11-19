@@ -95,7 +95,7 @@ export function StatusBadge({ state, size = "sm", onClick }: StatusBadgeProps) {
       <button
         type="button"
         onClick={onClick}
-        className="inline-flex rounded-[var(--radius-sm)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        className="inline-flex rounded-[var(--radius-sm)]"
       >
         {badge}
       </button>

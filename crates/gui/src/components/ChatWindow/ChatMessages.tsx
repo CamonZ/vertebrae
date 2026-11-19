@@ -1044,6 +1044,7 @@ export function ChatMessages({
                   type="button"
                   ref={commentTriggerRef}
                   className="chat-comment-trigger"
+                  data-focus-halo="surface"
                   data-testid="local-chat-add-comment"
                   aria-label="Add comment"
                   title={`Comment on the selected text (${commentShortcut})`}
@@ -1083,6 +1084,7 @@ export function ChatMessages({
             ? createPortal(
                 <div
                   className="chat-comment-card chat-comment-card-fixed"
+                  data-focus-halo="surface"
                   data-owns-escape=""
                   role="group"
                   aria-label="Add a comment to selected text"

@@ -10,6 +10,8 @@ export type ShortcutDispatchState = {
   hasActiveSession: boolean;
   focusPaneByIndex: (index: number) => boolean;
   focusPaneByOffset: (offset: number) => boolean;
+  /** ⌘⌥←/→: chat 1 · its Changes · chat 2 … */
+  focusAreaByOffset: (offset: -1 | 1) => boolean;
   historyNavigationEnabled: boolean;
   focusHistorySearch: () => boolean;
   /** Open the focused pane's in-transcript find bar. */
@@ -184,14 +186,8 @@ export function useChatKeyboardShortcuts({
 
       if (!event.altKey) return;
 
-      if (key === "arrowright") {
-        if (current.focusPaneByOffset(1)) {
-          event.preventDefault();
-        }
-        return;
-      }
-      if (key === "arrowleft") {
-        if (current.focusPaneByOffset(-1)) {
+      if (key === "arrowright" || key === "arrowleft") {
+        if (current.focusAreaByOffset(key === "arrowright" ? 1 : -1)) {
           event.preventDefault();
         }
         return;

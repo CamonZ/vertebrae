@@ -51,7 +51,7 @@ function parseCodeRefString(input: string): { path: string; lineStart: number | 
 }
 
 const inputClasses =
-  'rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-2 py-1.5 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:border-[var(--focus-edge)] focus:outline-none disabled:opacity-50';
+  'rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-2 py-1.5 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] disabled:opacity-50';
 
 interface CodeRefFormProps {
   initialData?: CodeRef;
@@ -284,7 +284,7 @@ function CodeRefItem({ codeRef, onEdit }: CodeRefItemProps) {
       <button
         type="button"
         onClick={handleCopy}
-        className="flex-shrink-0 rounded-[var(--radius-sm)] p-1 text-[var(--color-fg-mute)] opacity-0 transition-opacity hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)] focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] group-hover:opacity-100 cursor-pointer"
+        className="flex-shrink-0 rounded-[var(--radius-sm)] p-1 text-[var(--color-fg-mute)] opacity-0 transition-opacity hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)] focus:opacity-100 group-hover:opacity-100 cursor-pointer"
         title="Copy path"
         aria-label={copied ? 'Copied!' : 'Copy path to clipboard'}
       >

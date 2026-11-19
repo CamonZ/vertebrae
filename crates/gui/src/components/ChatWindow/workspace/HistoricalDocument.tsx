@@ -1,4 +1,4 @@
-import { CHANGES_KEYS } from "../chatShortcuts";
+import { CHANGES_COMMANDS } from "../chatShortcuts";
 import { OpenInExternalEditor } from "./OpenInExternalEditor";
 import type { DiffPreferences } from "../../../utils/codeAppearance";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -82,7 +82,6 @@ export function HistoricalDocument({
         <OpenInExternalEditor
           root={worktreePath}
           path={path}
-          shortcut={CHANGES_KEYS.external.key}
         />
         <span className="document-path">{path} · Read-only</span>
         <div role="group" aria-label="Document view" className="document-views">
@@ -91,7 +90,7 @@ export function HistoricalDocument({
               key={value}
               type="button"
               aria-pressed={view === value}
-              title={`${CHANGES_KEYS[value].label} (${CHANGES_KEYS[value].key})`}
+              title={CHANGES_COMMANDS[value]}
               onClick={() => onViewChange(value)}
             >
               {value === "diff" ? "Diff" : "File"}

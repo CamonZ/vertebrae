@@ -92,6 +92,22 @@ describe("ChatHeader", () => {
     );
   });
 
+  it("owns Esc while renaming and returns focus where renaming began", () => {
+    renderHeader({ label: "Title", onTitleSave: vi.fn() });
+    const composer = document.createElement("textarea");
+    document.body.appendChild(composer);
+    composer.focus();
+
+    fireEvent.click(screen.getByRole("button", { name: "Rename chat: Title" }));
+    const input = screen.getByRole("textbox", { name: "Chat title" });
+    // The chat panel's Esc-to-close leaves elements inside this alone.
+    expect(input.closest("[data-owns-escape]")).not.toBeNull();
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(composer).toHaveFocus();
+    composer.remove();
+  });
+
   it("cancels a title edit without changing the displayed title", () => {
     const onTitleSave = vi.fn();
     renderHeader({ label: "Keep this title", onTitleSave });

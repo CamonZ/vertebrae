@@ -46,7 +46,6 @@ function NavItem({
             // 28px project avatar) — keeps the icon pitch tight per the v2 shell.
             "group relative flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
             "transition-[background-color,color] duration-[var(--t-fast)] ease-[var(--ease-default)]",
-            "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
             isActive
               ? "bg-[var(--color-accent-wash)] text-[var(--color-accent)]"
               : "text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)]",
@@ -645,7 +644,6 @@ export function Sidebar() {
               className={[
                 "group relative flex h-7 w-7 items-center justify-center rounded-[var(--radius-md)]",
                 "transition-[background-color,color] duration-[var(--t-fast)] ease-[var(--ease-default)]",
-                "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]",
                 chatPanelPresentation === "expanded"
                   ? "bg-[var(--color-accent-wash)] text-[var(--color-accent)]"
                   : "text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-1)] hover:text-[var(--color-fg)]",

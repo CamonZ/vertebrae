@@ -525,10 +525,7 @@ describe("ChatWindow", () => {
     composer.focus();
     expect(fireEvent.keyDown(composer, { key: "b" })).toBe(true);
     expect(screen.queryByRole("listbox")).toBeNull();
-    fireEvent.keyDown(composer, { key: "J", metaKey: true, shiftKey: true });
-    expect(changes).toHaveFocus();
-    fireEvent.keyDown(changes, { key: "J", metaKey: true, shiftKey: true });
-    expect(composer).toHaveFocus();
+    expect(changes).toHaveAttribute("data-chat-area", "changes");
 
     expect(composer).toBeVisible();
     expect(container.querySelector(".selection-discussions")).toBeNull();

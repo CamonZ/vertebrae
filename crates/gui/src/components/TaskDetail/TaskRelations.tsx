@@ -17,7 +17,7 @@ interface TaskRelationsProps {
 }
 
 const pickerInputClasses =
-  'w-full rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:border-[var(--focus-edge)] focus:outline-none';
+  'w-full rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)]';
 
 const cancelButtonClasses =
   'p-1.5 rounded-[var(--radius-sm)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] transition-colors cursor-pointer';
@@ -64,7 +64,7 @@ function TaskLink({
       tabIndex={0}
       onClick={() => onClick?.(taskId)}
       onKeyDown={handleKeyDown}
-      className="inline-flex items-center rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-2 py-1 font-mono text-xs text-[var(--color-fg-soft)] transition-colors hover:bg-[var(--color-accent-wash)] hover:text-[var(--color-accent)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] cursor-pointer"
+      className="inline-flex items-center rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-2 py-1 font-mono text-xs text-[var(--color-fg-soft)] transition-colors hover:bg-[var(--color-accent-wash)] hover:text-[var(--color-accent)] cursor-pointer"
       title={`View task ${taskId}`}
     >
       <NavigableReference id={taskId} kind="task" testId="task-relation-id" />

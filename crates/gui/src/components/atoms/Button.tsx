@@ -24,7 +24,6 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 const baseClasses =
   "inline-flex items-center justify-center gap-2 font-sans font-medium border whitespace-nowrap select-none rounded-[var(--radius-md)] " +
   "transition-[background-color,border-color,color,box-shadow] duration-[var(--t-fast)] ease-[var(--ease-default)] " +
-  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)] " +
   "disabled:cursor-not-allowed disabled:opacity-40";
 
 const sizeClasses: Record<ButtonSize, string> = {
