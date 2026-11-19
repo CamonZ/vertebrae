@@ -52,7 +52,7 @@ const HISTORY_LOAD_THRESHOLD_PX = 240;
 const BOTTOM_SCROLL_TARGET_PX = 1_000_000_000;
 const COMMENT_EDITOR_MAX_WIDTH_PX = 384;
 const COMMENT_EDITOR_HEIGHT_PX = 230;
-const COMMENT_TRIGGER_WIDTH_PX = 96;
+const COMMENT_TRIGGER_WIDTH_PX = 144;
 const COMMENT_TRIGGER_HEIGHT_PX = 28;
 const VIEWPORT_GUTTER_PX = 8;
 
@@ -91,11 +91,22 @@ function triggerPosition(action: SelectionAction) {
   const top = action.backward
     ? edge.top - COMMENT_TRIGGER_HEIGHT_PX - 6
     : edge.bottom + 6;
+  const bottomLimit =
+    window.innerHeight - COMMENT_TRIGGER_HEIGHT_PX - VIEWPORT_GUTTER_PX;
+  const bounds = action.range.getBoundingClientRect?.() ?? edge;
+  const oppositeTop = action.backward
+    ? bounds.bottom + 6
+    : bounds.top - COMMENT_TRIGGER_HEIGHT_PX - 6;
   const left = action.backward
     ? edge.left
     : edge.right - COMMENT_TRIGGER_WIDTH_PX / 2;
   return {
-    top: clamp(top, VIEWPORT_GUTTER_PX, window.innerHeight - 40),
+    top: clamp(
+      top < VIEWPORT_GUTTER_PX || top > bottomLimit ? oppositeTop : top,
+      VIEWPORT_GUTTER_PX,
+      bottomLimit
+    ),
+    width: COMMENT_TRIGGER_WIDTH_PX,
     left: clamp(
       left,
       VIEWPORT_GUTTER_PX,
@@ -536,6 +547,7 @@ export function ChatMessages({
   );
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const commentTriggerRef = useRef<HTMLButtonElement>(null);
 
   const visibleRef = useRef(isVisible);
   visibleRef.current = isVisible;
@@ -616,6 +628,8 @@ export function ChatMessages({
     const transcript = messagesContainerRef.current;
     const selection = window.getSelection();
     if (!transcript || !selection || selection.isCollapsed) {
+      // Moving keyboard focus to the trigger can collapse the webview selection.
+      if (document.activeElement === commentTriggerRef.current) return;
       setSelectionAction(null);
       return;
     }
@@ -694,6 +708,43 @@ export function ChatMessages({
     setCommentDraft("");
     window.getSelection()?.removeAllRanges();
   }, [sessionId]);
+  const openCommentEditor = useCallback(() => {
+    setCommentDraft("");
+    setCommentEditorOpen(true);
+  }, []);
+  const commentShortcut = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
+    ? "⌘↵"
+    : "Ctrl+Enter";
+  useEffect(() => {
+    if (!selectionAction || commentEditorOpen) return;
+    const handleSelectionKey = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat ||
+        event.altKey ||
+        event.shiftKey ||
+        (event.target instanceof HTMLElement &&
+          event.target.closest("input, textarea, [contenteditable=true]"))
+      )
+        return;
+      if (
+        event.key === "Tab" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        (event.target === document.body ||
+          event.target === messagesContainerRef.current)
+      ) {
+        event.preventDefault();
+        commentTriggerRef.current?.focus();
+      } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        openCommentEditor();
+      }
+    };
+    document.addEventListener("keydown", handleSelectionKey);
+    return () => document.removeEventListener("keydown", handleSelectionKey);
+  }, [selectionAction, commentEditorOpen, openCommentEditor]);
   const submitCommentDraft = useCallback(() => {
     const body = commentDraft.trim();
     if (!selectionAction || !body) return;
@@ -1125,21 +1176,25 @@ export function ChatMessages({
             ? createPortal(
                 <button
                   type="button"
+                  ref={commentTriggerRef}
                   className="chat-comment-trigger"
                   data-testid="local-chat-add-comment"
                   aria-label="Add comment"
-                  title="Comment on the selected text"
+                  title={`Comment on the selected text (${commentShortcut})`}
+                  aria-keyshortcuts="Meta+Enter Control+Enter"
                   style={triggerPosition(selectionAction)}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    setCommentDraft("");
-                    setCommentEditorOpen(true);
+                  onBlur={() => {
+                    if (window.getSelection()?.isCollapsed) {
+                      setSelectionAction(null);
+                    }
                   }}
+                  onClick={openCommentEditor}
                 >
                   <svg
                     aria-hidden="true"
-                    width="14"
-                    height="14"
+                    width="16"
+                    height="16"
                     fill="none"
                     stroke="currentColor"
                     strokeLinecap="round"
@@ -1151,6 +1206,9 @@ export function ChatMessages({
                     <path d="M12 8.5v6M9 11.5h6" />
                   </svg>
                   Comment
+                  <kbd className="chat-comment-kbd" aria-hidden="true">
+                    {commentShortcut}
+                  </kbd>
                 </button>,
                 document.body
               )

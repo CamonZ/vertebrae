@@ -1212,7 +1212,30 @@ describe("ChatWindow diff review comments", () => {
           ).toHaveFocus();
           selectParagraph();
         }
-        fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+        const trigger = screen.getByRole("button", { name: "Add comment" });
+        const shortcut = trigger.querySelector("kbd")!.textContent;
+        expect(trigger).toHaveAttribute(
+          "title",
+          `Comment on the selected text (${shortcut})`
+        );
+        if (intent === "focused control") {
+          fireEvent.keyDown(
+            screen.getByRole("textbox", { name: "Another control" }),
+            {
+              key: "Enter",
+              ctrlKey: true,
+            }
+          );
+          expect(screen.queryByTestId("local-chat-comment-draft")).toBeNull();
+          fireEvent.click(trigger);
+        } else {
+          fireEvent.keyDown(document.body, { key: "Tab" });
+          expect(trigger).toHaveFocus();
+          selection.removeAllRanges();
+          fireEvent(document, new Event("selectionchange"));
+          expect(trigger).toHaveFocus();
+          fireEvent.keyDown(trigger, { key: "Enter", metaKey: true });
+        }
         const draft = screen.getByTestId("local-chat-comment-draft");
         expect(draft).toHaveFocus();
         fireEvent.change(draft, {
