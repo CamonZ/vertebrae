@@ -51,7 +51,7 @@ function parseCodeRefString(input: string): { path: string; lineStart: number | 
 }
 
 const inputClasses =
-  'rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-2 py-1.5 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:border-[var(--color-accent)] focus:outline-none disabled:opacity-50';
+  'rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-2 py-1.5 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:border-[var(--focus-edge)] focus:outline-none disabled:opacity-50';
 
 interface CodeRefFormProps {
   initialData?: CodeRef;

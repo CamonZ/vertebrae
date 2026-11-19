@@ -521,6 +521,15 @@ describe("ChatWindow", () => {
     firePaneControl("Changes");
     await screen.findByText("No changes against this baseline.");
 
+    const changes = screen.getByRole("region", { name: "Worktree changes" });
+    composer.focus();
+    expect(fireEvent.keyDown(composer, { key: "b" })).toBe(true);
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.keyDown(composer, { key: "J", metaKey: true, shiftKey: true });
+    expect(changes).toHaveFocus();
+    fireEvent.keyDown(changes, { key: "J", metaKey: true, shiftKey: true });
+    expect(composer).toHaveFocus();
+
     expect(composer).toBeVisible();
     expect(container.querySelector(".selection-discussions")).toBeNull();
 

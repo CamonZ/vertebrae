@@ -66,7 +66,7 @@ describe("usePierreThemeOptions", () => {
     const { result } = renderHook(() => usePierreThemeOptions());
 
     await waitFor(() =>
-      expect(result.current.unsafeCSS).toBe(pierreSelectionCSS("#009fff4d"))
+      expect(result.current.unsafeCSS).toContain(pierreSelectionCSS("#009fff4d"))
     );
   });
 
@@ -78,7 +78,8 @@ describe("usePierreThemeOptions", () => {
     const { result } = renderHook(() => usePierreThemeOptions());
 
     await act(() => Promise.resolve());
-    expect(result.current.unsafeCSS).toBe(pierreSelectionCSS(null));
+    expect(result.current.unsafeCSS).toContain(pierreSelectionCSS(null));
     expect(result.current.unsafeCSS).toContain(FALLBACK_SELECTION_BG);
+    expect(result.current.unsafeCSS).toContain("box-shadow: var(--focus-shadow)");
   });
 });

@@ -17,7 +17,7 @@ interface TaskRelationsProps {
 }
 
 const pickerInputClasses =
-  'w-full rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:border-[var(--color-accent)] focus:outline-none';
+  'w-full rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] focus:border-[var(--focus-edge)] focus:outline-none';
 
 const cancelButtonClasses =
   'p-1.5 rounded-[var(--radius-sm)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] transition-colors cursor-pointer';

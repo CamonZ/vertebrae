@@ -1,4 +1,11 @@
-import { CHAT_HELP_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
+import {
+  CHAT_HELP_SHORTCUT,
+  CHANGED_FILE_LIST_KEYS,
+  CHANGES_FOCUS_SHORTCUT,
+  CHANGES_KEYS,
+  COMPARISON_KEYS,
+  presentChatShortcut,
+} from "./chatShortcuts";
 
 const chatHelpKeys = presentChatShortcut(CHAT_HELP_SHORTCUT)?.keys ?? [];
 
@@ -18,6 +25,21 @@ export const CHAT_SHORTCUT_SECTIONS = [
         label: "Show/hide Changes (worktree has changes)",
       },
       { keys: ["Esc"], label: "Close hints or focused panel" },
+    ],
+  },
+  {
+    title: "Changes",
+    shortcuts: [
+      {
+        keys: presentChatShortcut(CHANGES_FOCUS_SHORTCUT)?.keys ?? [],
+        label: CHANGES_FOCUS_SHORTCUT.label,
+      },
+      ...Object.values(CHANGES_KEYS).map(({ key, label }) => ({
+        keys: [key],
+        label,
+      })),
+      CHANGED_FILE_LIST_KEYS,
+      ...COMPARISON_KEYS,
     ],
   },
   {

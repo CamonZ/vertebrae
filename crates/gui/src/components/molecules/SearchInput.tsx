@@ -27,7 +27,7 @@ const inputClasses =
   "border border-[var(--color-line-strong)] rounded-[var(--radius-md)] " +
   "font-sans text-xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] " +
   "transition-[border-color,box-shadow] duration-[var(--t-fast)] ease-[var(--ease-default)] " +
-  "focus:outline-none focus:border-[var(--color-accent)] focus:shadow-[0_0_0_3px_var(--color-accent-wash)] " +
+  "focus:outline-none focus:border-[var(--focus-edge)] focus:shadow-[0_0_0_3px_var(--color-accent-wash)] " +
   // WebKit draws its own cancel button on type="search"; the component renders
   // a single, labelled clear button instead.
   "[&::-webkit-search-cancel-button]:appearance-none";

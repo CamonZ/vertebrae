@@ -10,12 +10,14 @@ export function OpenInExternalEditor({
   line = null,
   column = null,
   available,
+  shortcut,
 }: {
   root: string;
   path: string;
   line?: number | null;
   column?: number | null;
   available?: boolean;
+  shortcut?: string;
 }) {
   const {
     open,
@@ -55,7 +57,7 @@ export function OpenInExternalEditor({
         disabled={!localAvailable || opening}
         title={
           localAvailable
-            ? "Open the local working-tree file in the app's configured editor"
+            ? `Open the local working-tree file in the app's configured editor${shortcut ? ` (${shortcut})` : ""}`
             : "The corresponding local working-tree file is unavailable"
         }
         onClick={() => {

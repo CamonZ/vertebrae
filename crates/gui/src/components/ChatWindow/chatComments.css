@@ -35,10 +35,7 @@
   background: var(--color-bg-3);
   color: var(--color-fg);
 }
-.chat-comment-trigger:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
+
 .chat-comment-trigger kbd {
   margin-left: 2px;
 }
@@ -99,9 +96,6 @@
   background: var(--color-err-wash);
   color: var(--color-err);
 }
-.chat-comment-icon-button:focus-visible {
-  outline: 2px solid var(--color-accent);
-}
 
 /* The commented text: accent bar, muted context, the selection emphasised. */
 .chat-comment-quote {
@@ -150,10 +144,7 @@
   padding: 8px;
   color: var(--color-fg);
 }
-.chat-comment-textarea:focus {
-  outline: none;
-  border-color: var(--color-line-strong);
-}
+
 .chat-comment-textarea::placeholder {
   color: var(--color-fg-faint);
 }
@@ -187,9 +178,7 @@
   background: var(--color-bg-hover);
   color: var(--color-fg);
 }
-.chat-comment-button:focus-visible {
-  outline: 2px solid var(--color-accent);
-}
+
 .chat-comment-button[data-primary] {
   background: var(--color-primary);
   color: var(--color-on-primary);

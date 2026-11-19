@@ -38,12 +38,6 @@
   color: var(--color-fg);
 }
 
-.workspace-tabs > button:focus-visible,
-.workspace-tabs .changes-tab:focus-visible {
-  outline: 2px solid var(--color-fg-mute);
-  outline-offset: -2px;
-}
-
 .workspace-tabs > button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
@@ -64,7 +58,6 @@
   flex: 0 0 55%;
   min-width: 180px;
   overflow: auto;
-  border-left: 1px solid var(--color-line);
 }
 .changes-side-panel > section:first-child {
   flex: 1;
@@ -159,13 +152,6 @@
 .selection-mini-close:hover {
   background: var(--color-bg-2);
   color: var(--color-fg);
-}
-
-.selection-mini-anchor:focus-visible,
-.selection-mini-close:focus-visible,
-.selection-mini-marker:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 3px;
 }
 
 .selection-mini-messages {

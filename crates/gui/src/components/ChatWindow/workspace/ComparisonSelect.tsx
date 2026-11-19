@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import type { SelectOption } from "../../atoms/Select";
@@ -15,22 +16,37 @@ export function ComparisonSelect({
   value,
   options,
   onChange,
+  buttonRef,
+  shortcut,
 }: {
   label: string;
   value: string;
   options: readonly SelectOption[];
   onChange(value: string): void;
+  buttonRef?: RefObject<HTMLButtonElement | null>;
+  shortcut?: string;
 }) {
   const id = useId();
-  const trigger = useRef<HTMLButtonElement>(null);
+  const localTrigger = useRef<HTMLButtonElement>(null);
+  const trigger = buttonRef ?? localTrigger;
   const menu = useRef<HTMLDivElement>(null);
-  const search = useRef({ text: "", at: 0 });
+  const [query, setQuery] = useState("");
 
   const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(0);
+  const [activeValue, setActiveValue] = useState(value);
   const [position, setPosition] = useState<CSSProperties>({});
 
-  const selected = options.findIndex((option) => option.value === value);
+  const selected = options.find((option) => option.value === value);
+  const visible = options.filter((option) =>
+    option.label.toLocaleLowerCase().includes(query.toLocaleLowerCase())
+  );
+  const preferred = visible.findIndex(
+    (option) => option.value === activeValue && !option.disabled
+  );
+  const active =
+    preferred >= 0
+      ? preferred
+      : visible.findIndex((option) => !option.disabled);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -74,7 +90,7 @@ export function ComparisonSelect({
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [open]);
+  }, [open, trigger]);
 
   useEffect(() => {
     if (open)
@@ -83,19 +99,15 @@ export function ComparisonSelect({
         ?.scrollIntoView?.({ block: "nearest" });
   }, [open, active]);
 
-  useEffect(() => {
-    setActive((index) => Math.min(index, Math.max(0, options.length - 1)));
-  }, [options.length]);
-
   const show = () => {
     trigger.current?.focus();
-    setActive(Math.max(0, selected));
+    setActiveValue(value);
+    setQuery("");
     setOpen(true);
-    search.current = { text: "", at: 0 };
   };
 
   const choose = (index: number) => {
-    const option = options[index];
+    const option = visible[index];
     if (!option || option.disabled) return;
 
     onChange(option.value);
@@ -105,11 +117,11 @@ export function ComparisonSelect({
   const move = (from: number, direction: number) => {
     for (
       let i = from + direction;
-      i >= 0 && i < options.length;
+      i >= 0 && i < visible.length;
       i += direction
     ) {
-      if (!options[i].disabled) {
-        setActive(i);
+      if (!visible[i].disabled) {
+        setActiveValue(visible[i].value);
         break;
       }
     }
@@ -126,11 +138,23 @@ export function ComparisonSelect({
         aria-expanded={open}
         aria-haspopup="listbox"
         aria-controls={open ? id : undefined}
-        aria-activedescendant={open ? `${id}-${active}` : undefined}
+        aria-keyshortcuts={shortcut?.toUpperCase()}
+        title={shortcut ? `${label} (${shortcut})` : label}
+        data-owns-escape={open ? "" : undefined}
+        aria-activedescendant={
+          open && active >= 0 ? `${id}-${active}` : undefined
+        }
         className="comparison-select"
         onClick={() => (open ? setOpen(false) : show())}
         onBlur={() => setOpen(false)}
         onKeyDown={(event) => {
+          if (
+            event.nativeEvent.isComposing ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.altKey
+          )
+            return;
           if (event.key === "Escape") {
             if (open) {
               setOpen(false);
@@ -154,74 +178,71 @@ export function ComparisonSelect({
             }
 
             if (event.key === "Home") move(-1, 1);
-            else if (event.key === "End") move(options.length, -1);
+            else if (event.key === "End") move(visible.length, -1);
             else move(active, event.key === "ArrowDown" ? 1 : -1);
-          } else if (event.key === "Enter" || event.key === " ") {
+          } else if (
+            event.key === "Enter" ||
+            (event.key === " " && (!open || !query))
+          ) {
             event.preventDefault();
 
             if (open) choose(active);
             else show();
           } else if (
-            event.key.length === 1 &&
-            !event.ctrlKey &&
-            !event.metaKey &&
-            !event.altKey
+            event.key.length === 1 ||
+            (open && event.key === "Backspace")
           ) {
             event.preventDefault();
-
             if (!open) show();
-
-            const now = Date.now();
-            const text =
-              (now - search.current.at < 600 ? search.current.text : "") +
-              event.key.toLocaleLowerCase();
-            search.current = { text, at: now };
-
-            const index = options.findIndex(
-              (option) =>
-                !option.disabled &&
-                option.label.toLocaleLowerCase().startsWith(text)
+            setQuery(
+              event.key === "Backspace"
+                ? query.slice(0, -1)
+                : (open ? query : "") + event.key
             );
-
-            if (index >= 0) setActive(index);
+            setActiveValue("");
           }
         }}
       >
         <span className="comparison-select-label">
-          {options[selected]?.label ?? "Selection unavailable"}
+          {selected?.label ?? "Selection unavailable"}
         </span>
         <span className="comparison-select-caret" aria-hidden="true" />
       </button>
       {open &&
         createPortal(
-          <div
-            ref={menu}
-            id={id}
-            role="listbox"
-            aria-label={label}
-            className="comparison-options"
-            style={position}
-          >
-            {options.map((option, index) => (
-              <div
-                key={option.value}
-                id={`${id}-${index}`}
-                role="option"
-                aria-selected={option.value === value}
-                aria-disabled={option.disabled || undefined}
-                data-value={option.value}
-                data-focused={active === index}
-                className="comparison-option"
-                onPointerMove={() => !option.disabled && setActive(index)}
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => choose(index)}
-              >
-                <span className="comparison-option-check" aria-hidden="true">
-                  {option.value === value ? "✓" : ""}
-                </span>
-                <span>{option.label}</span>
-              </div>
-            ))}
+          <div ref={menu} className="comparison-options" style={position}>
+            <div className="comparison-filter" role="status">
+              {query ? `Filter: ${query}` : "Type to filter"}
+            </div>
+            {visible.length === 0 && (
+              <p className="comparison-filter" role="status">
+                No matching options
+              </p>
+            )}
+            <div id={id} role="listbox" aria-label={label}>
+              {visible.map((option, index) => (
+                <div
+                  key={option.value}
+                  id={`${id}-${index}`}
+                  role="option"
+                  aria-selected={option.value === value}
+                  aria-disabled={option.disabled || undefined}
+                  data-value={option.value}
+                  data-focused={active === index}
+                  className="comparison-option"
+                  onPointerMove={() =>
+                    !option.disabled && setActiveValue(option.value)
+                  }
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => choose(index)}
+                >
+                  <span className="comparison-option-check" aria-hidden="true">
+                    {option.value === value ? "✓" : ""}
+                  </span>
+                  <span>{option.label}</span>
+                </div>
+              ))}
+            </div>
           </div>,
           document.body
         )}

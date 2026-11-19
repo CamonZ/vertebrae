@@ -113,6 +113,28 @@ describe("AllChangesView", () => {
     expect(onOpen).toHaveBeenCalledExactlyOnceWith("a.ts");
   });
 
+  it("focuses diff and fallback headings for keyboard jumps without unfolding them", () => {
+    const props = { files, onOpen: vi.fn() };
+    const view = render(<AllChangesView {...props} jumpTarget={null} />);
+    const header = screen.getByRole("button", { name: "Toggle diff for a.ts" });
+    fireEvent.click(header);
+    view.rerender(
+      <AllChangesView
+        {...props}
+        jumpTarget={{ path: "a.ts", nonce: 1, focusHeader: true }}
+      />
+    );
+    expect(header).toHaveFocus();
+    expect(header).toHaveAttribute("aria-expanded", "false");
+    view.rerender(
+      <AllChangesView
+        {...props}
+        jumpTarget={{ path: "image.png", nonce: 2, focusHeader: true }}
+      />
+    );
+    expect(document.activeElement).toHaveTextContent("image.png");
+  });
+
   it("scrolls once per jump request to diffs and fallbacks", () => {
     const view = render(
       <AllChangesView
