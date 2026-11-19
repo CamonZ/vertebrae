@@ -997,6 +997,13 @@ describe("ChatComposer", () => {
       screen.getByTestId("local-chat-comment-popover")
     ).toBeInTheDocument();
 
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Edit comment 1" })
+    );
+    expect(
+      screen.getByTestId("local-chat-comment-popover")
+    ).toBeInTheDocument();
+
     fireEvent.pointerDown(document.body);
     expect(screen.queryByTestId("local-chat-comment-popover")).toBeNull();
   });

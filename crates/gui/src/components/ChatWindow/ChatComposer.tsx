@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ComponentPropsWithRef,
+} from "react";
+import { createPortal } from "react-dom";
 import { ChatInput } from "../ChatInput";
 import { formatTokenCount } from "../../utils/modelContextWindow";
 import type {
@@ -19,6 +25,18 @@ import {
 import { CommentShortcutHint } from "./CommentShortcutHint";
 import { useCommentCardAnchor } from "./useCommentCardAnchor";
 import "./chatComments.css";
+
+function CommentCard(props: ComponentPropsWithRef<"div">) {
+  // The mini panel's backdrop filter makes fixed children panel-relative.
+  return createPortal(
+    <div
+      {...props}
+      className="chat-comment-card chat-comment-card-fixed chat-comment-card-chip"
+      data-owns-escape=""
+    />,
+    document.body
+  );
+}
 
 /** A code selection sent to the main chat; its own text is optional. */
 function isAttachment(comment: PendingComment): boolean {
@@ -251,6 +269,7 @@ export function ChatComposer({
   const chipRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const pointerFocusRef = useRef(false);
   const commentsAccessoryRef = useRef<HTMLDivElement | null>(null);
+  const commentCardRef = useRef<HTMLDivElement>(null);
   const [modelSettingsOpen, setModelSettingsOpen] = useState(false);
   const modelSettingsRef = useRef<HTMLDivElement | null>(null);
   const modelSettingsTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -286,7 +305,8 @@ export function ChatComposer({
       const target = event.target;
       if (
         target instanceof Node &&
-        !commentsAccessoryRef.current?.contains(target)
+        !commentsAccessoryRef.current?.contains(target) &&
+        !commentCardRef.current?.contains(target)
       ) {
         setPinnedCommentId(null);
         setActiveCommentId(null);
@@ -374,9 +394,9 @@ export function ChatComposer({
     else onStartSession(message);
   };
   const shownCommentId = pinnedCommentId ?? activeCommentId;
-  const commentCardRef = useRef<HTMLDivElement>(null);
   useCommentCardAnchor(
     commentCardRef,
+    commentsAccessoryRef,
     pendingComments.find((comment) => comment.id === shownCommentId)
   );
   useEffect(() => {
@@ -592,10 +612,9 @@ export function ChatComposer({
               )}
             </button>
             {isActive ? (
-              <div
+              <CommentCard
                 ref={commentCardRef}
                 id={popoverId}
-                className="chat-comment-card chat-comment-card-chip"
                 role="group"
                 aria-label={`Comment ${commentNumber} details`}
                 data-testid="local-chat-comment-popover"
@@ -772,7 +791,7 @@ export function ChatComposer({
                     </span>
                   </div>
                 ) : null}
-              </div>
+              </CommentCard>
             ) : null}
           </div>
         );

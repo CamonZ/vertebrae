@@ -522,17 +522,19 @@ async fn local_chat_comment_popover_fits_viewport(world: &mut GuiWorld) {
     let client = wd.lock().await;
     gui_acceptance::wait_for_js(
         &client,
-        "comment popover within the viewport and composer",
+        "visible comment popover within the transcript viewport",
         r#"
           const popover = document.querySelector('[data-testid="local-chat-comment-popover"]');
-          const chips = document.querySelector('[data-testid="local-chat-pending-comments"]');
-          if (!popover || !chips) return false;
+          const transcript = document.querySelector('[data-transcript-viewport]');
+          if (!popover || !transcript) return false;
           const card = popover.getBoundingClientRect();
-          const row = chips.getBoundingClientRect();
-          return card.width > 0 && card.height > 0 &&
-            card.left >= Math.max(0, row.left) &&
-            card.right <= Math.min(window.innerWidth, row.right) &&
-            card.top >= 0 && card.bottom <= window.innerHeight;
+          const pane = transcript.getBoundingClientRect();
+          const hit = document.elementFromPoint(card.left + card.width / 2, card.top + card.height / 2);
+          return card.width > 0 && card.height > 0 && popover.contains(hit) &&
+            card.left >= Math.max(0, pane.left) &&
+            card.right <= Math.min(window.innerWidth, pane.right) &&
+            card.top >= Math.max(0, pane.top) &&
+            card.bottom <= Math.min(window.innerHeight, pane.bottom);
         "#,
         vec![],
         std::time::Duration::from_secs(5),

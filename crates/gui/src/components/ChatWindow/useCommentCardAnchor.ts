@@ -16,12 +16,14 @@ function diffQuoteLine(comment: HTMLElement): HTMLElement | null {
 
 export function useCommentCardAnchor(
   cardRef: RefObject<HTMLDivElement | null>,
+  chipsRef: RefObject<HTMLDivElement | null>,
   comment: PendingComment | undefined
 ) {
   useLayoutEffect(() => {
     const card = cardRef.current;
-    const workspace = card?.closest(".chat-with-changes");
-    if (!card || !workspace || !comment) return;
+    const chips = chipsRef.current;
+    if (!card || !chips || !comment) return;
+    const workspace = chips.closest(".chat-with-changes");
 
     let surface: HTMLElement | null = null;
     let pane: Element | null = null;
@@ -29,25 +31,26 @@ export function useCommentCardAnchor(
     let reveal = true;
     let frame = 0;
 
-    const reset = () => {
-      card.classList.remove("chat-comment-card-fixed");
-      for (const property of ["top", "left", "max-width", "max-height"]) {
-        card.style.removeProperty(property);
-      }
+    const placeAboveChips = () => {
+      const bounds = chips.getBoundingClientRect();
+      card.style.left = `${bounds.left}px`;
+      card.style.maxWidth = `${bounds.width}px`;
+      card.style.maxHeight = `${Math.max(0, bounds.top - GAP * 2)}px`;
+      card.style.top = `${bounds.top - GAP - card.offsetHeight}px`;
     };
     const position = () => {
-      if (!surface || !pane) return reset();
+      if (!surface || !pane) return placeAboveChips();
       const diffLine = comment.kind === "diff" ? diffQuoteLine(surface) : null;
       const quoteRects = quote?.getClientRects?.();
       const line = diffLine?.getBoundingClientRect() ?? quoteRects?.[0];
-      if (!line?.height) return reset();
+      if (!line?.height) return placeAboveChips();
 
       const bounds = pane.getBoundingClientRect();
       const left = Math.max(0, bounds.left) + GAP;
       const right = Math.min(window.innerWidth, bounds.right) - GAP;
       const top = Math.max(0, bounds.top) + GAP;
       const bottom = Math.min(window.innerHeight, bounds.bottom) - GAP;
-      if (right <= left || bottom <= top) return reset();
+      if (right <= left || bottom <= top) return placeAboveChips();
 
       if (reveal) {
         reveal = false;
@@ -63,9 +66,8 @@ export function useCommentCardAnchor(
         }
       }
       if (line.bottom <= bounds.top || line.top >= bounds.bottom)
-        return reset();
+        return placeAboveChips();
 
-      card.classList.add("chat-comment-card-fixed");
       card.style.maxWidth = `${right - left}px`;
       card.style.maxHeight = `${bottom - top}px`;
       const { width, height } = card.getBoundingClientRect();
@@ -85,6 +87,7 @@ export function useCommentCardAnchor(
         ? null
         : new ResizeObserver(schedule);
     const resolve = () => {
+      if (!workspace) return;
       const next =
         comment.kind === "text"
           ? workspace.querySelector<HTMLElement>("[data-transcript-viewport]")
@@ -110,15 +113,16 @@ export function useCommentCardAnchor(
           : null;
       schedule();
     };
-    const mutations = new MutationObserver((records) => {
-      if (records.some(({ target }) => !card.contains(target))) resolve();
-    });
-    mutations.observe(workspace, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-    resize?.observe(workspace);
+    const mutations = new MutationObserver(resolve);
+    if (workspace) {
+      mutations.observe(workspace, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      resize?.observe(workspace);
+    }
+    resize?.observe(chips);
     resize?.observe(card);
     resolve();
     cancelAnimationFrame(frame);
@@ -134,7 +138,6 @@ export function useCommentCardAnchor(
       mutations.disconnect();
       window.removeEventListener("scroll", schedule, true);
       window.removeEventListener("resize", schedule);
-      reset();
     };
-  }, [cardRef, comment]);
+  }, [cardRef, chipsRef, comment]);
 }
