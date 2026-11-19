@@ -244,7 +244,7 @@ function NotificationItem({
                   type="button"
                   onClick={onMarkRead}
                   aria-label="Mark notification read"
-                  className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:visible:outline-none focus:visible:ring-1 focus:visible:ring-[var(--color-accent)] group-hover:visible"
+                  className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] group-hover:visible"
                 >
                   Mark read
                 </button>
@@ -253,7 +253,7 @@ function NotificationItem({
                 type="button"
                 onClick={onDismiss}
                 aria-label={`Dismiss ${notification.message}`}
-                className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] focus:visible:outline-none focus:visible:ring-1 focus:visible:ring-[var(--color-accent)] group-hover:visible"
+                className="invisible rounded-[var(--radius-sm)] px-1.5 py-0.5 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-2)] hover:text-[var(--color-fg)] group-hover:visible"
               >
                 Dismiss
               </button>

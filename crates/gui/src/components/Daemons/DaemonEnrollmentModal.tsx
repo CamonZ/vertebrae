@@ -50,7 +50,7 @@ function CopyButton({
   return (
     <button
       type="button"
-      className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+      className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
       onClick={() => onCopy(target, value)}
     >
       {copied === target ? "Copied" : "Copy"}
@@ -290,7 +290,7 @@ export function DaemonEnrollmentModal({
                   </code>
                   <button
                     type="button"
-                    className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+                    className="shrink-0 rounded-[var(--radius-xs)] px-1.5 py-1 t-label text-[var(--color-fg-mute)] transition-colors hover:bg-[var(--color-bg-3)] hover:text-[var(--color-fg)]"
                     onClick={() => setTokenVisible((visible) => !visible)}
                   >
                     {tokenVisible ? "Hide" : "Reveal"}

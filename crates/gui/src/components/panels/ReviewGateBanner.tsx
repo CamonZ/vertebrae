@@ -104,7 +104,6 @@ export function ReviewGateBanner({
             "w-full resize-none rounded-[var(--radius-md)] border px-2 py-1.5",
             "border-[var(--color-line-strong)] bg-[var(--color-bg-1)]",
             "font-sans text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)]",
-            "focus:outline-none focus:border-[var(--focus-edge)]",
           ].join(" ")}
         />
       )}

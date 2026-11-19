@@ -29,6 +29,10 @@ import {
   numbered,
 } from "../../thread/toolChange/diffPatchBuilder.test.helpers";
 import type { PendingComment } from "../assistantTextComments";
+import {
+  SelectionDiscussionActionsContext,
+  type DiscussionActions,
+} from "../selectionDiscussionState";
 
 interface Props {
   fileDiff: { name: string };
@@ -560,6 +564,295 @@ describe("diff review across PatchFiles and AllChangesView", () => {
       addComment("gutter file diff", "Context to Y");
       expect(screen.getAllByText(/f\.ts:5-7 \(new\)/)).toHaveLength(2);
     });
+  });
+});
+
+describe("Changes keyboard line cursor", () => {
+  const G = filePatch({ path: "g.ts", before: ["g1"], after: ["g1", "g2"] });
+  const keyboardFiles: WorktreeChange[] = [
+    worktreeFiles[0],
+    { ...worktreeFiles[0], path: "g.ts", patch: G },
+  ];
+  const actions = {
+    canAsk: true,
+    select: vi.fn(),
+    discuss: vi.fn(() => Promise.resolve(true)),
+    attach: vi.fn(),
+    reopen: vi.fn(),
+    send: vi.fn(),
+    cancel: vi.fn(),
+    reconcile: vi.fn(),
+  } satisfies DiscussionActions;
+  const writeText = vi.fn(() => Promise.resolve());
+
+  beforeEach(() => {
+    seen.scrollTo.mockReset();
+    seen.codeView = null;
+    for (const action of Object.values(actions)) {
+      if (typeof action === "function") action.mockClear();
+    }
+    writeText.mockClear();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+  });
+
+  const onExit = vi.fn();
+  const onEdge = vi.fn();
+
+  function ViewedChanges({ diffStyle }: { diffStyle?: "unified" | "split" }) {
+    const [viewed, setViewed] = useState<ReadonlySet<string>>(new Set());
+    return (
+      <AllChangesView
+        files={keyboardFiles}
+        jumpTarget={null}
+        onOpen={vi.fn()}
+        onExit={onExit}
+        onEdge={onEdge}
+        diffStyle={diffStyle}
+        viewedPaths={viewed}
+        onViewedChange={(path, value) =>
+          setViewed((current) => {
+            const next = new Set(current);
+            if (value) next.add(path);
+            else next.delete(path);
+            return next;
+          })
+        }
+      />
+    );
+  }
+
+  function renderChanges(diffStyle?: "unified" | "split") {
+    onExit.mockClear();
+    onEdge.mockClear();
+    render(
+      <Harness>
+        <SelectionDiscussionActionsContext.Provider value={actions}>
+          <ViewedChanges diffStyle={diffStyle} />
+        </SelectionDiscussionActionsContext.Provider>
+      </Harness>
+    );
+    const group = screen.getByRole("group", { name: "Code diff selection" });
+    act(() => group.focus());
+    return group;
+  }
+  const selected = () =>
+    (seen.codeView as unknown as { selectedLines: unknown }).selectedLines;
+  const press = (key: string, init: Record<string, unknown> = {}) =>
+    fireEvent.keyDown(document.activeElement!, { key, ...init });
+
+  it("moves past the last line of a file to the first line of the next", () => {
+    renderChanges();
+    press("ArrowDown");
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 3, end: 3, side: "additions" },
+    });
+    // f.ts shows lines 3-15 of the working tree (X inserted, l12 removed).
+    for (let step = 0; step < 14; step++) press("ArrowDown");
+    expect(selected()).toEqual({
+      id: "g.ts",
+      range: { start: 1, end: 1, side: "additions" },
+    });
+    expect(seen.scrollTo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ type: "line", id: "g.ts", lineNumber: 1 })
+    );
+  });
+
+  it("copies an extended range as plain code", () => {
+    renderChanges();
+    press("ArrowDown");
+    press("ArrowDown", { shiftKey: true });
+    press("ArrowDown", { shiftKey: true });
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 3, end: 5, side: "additions" },
+    });
+    press("c", { metaKey: true });
+    expect(writeText).toHaveBeenCalledWith("l3\nl4\nl5");
+  });
+
+  it("starts the cursor from a focused file heading", () => {
+    renderChanges();
+    const heading = screen.getByRole("button", { name: "Toggle diff for g.ts" });
+    act(() => heading.focus());
+    press("ArrowDown");
+    expect(selected()).toEqual({
+      id: "g.ts",
+      range: { start: 1, end: 1, side: "additions" },
+    });
+    expect(document.activeElement).toBe(
+      screen.getByRole("group", { name: "Code diff selection" })
+    );
+  });
+
+  it("opens a focused composer that discusses inline on ⌘↵", () => {
+    renderChanges();
+    press("ArrowDown");
+    press("c");
+    const input = screen.getByRole("textbox", { name: "New diff comment" });
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: "Why?" } });
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+    expect(actions.discuss).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "f.ts", startLine: 3, endLine: 3 }),
+      "Why?"
+    );
+    expect(actions.attach).not.toHaveBeenCalled();
+  });
+
+  it("sends the selection to the main chat on ⌘⇧↵", () => {
+    renderChanges();
+    press("ArrowDown");
+    press("Enter");
+    const input = screen.getByRole("textbox", { name: "New diff comment" });
+    fireEvent.change(input, { target: { value: "Look here" } });
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true, shiftKey: true });
+    expect(actions.attach).toHaveBeenCalledWith(
+      expect.objectContaining({ path: "f.ts", startLine: 3 }),
+      false,
+      "Look here"
+    );
+    expect(actions.discuss).not.toHaveBeenCalled();
+  });
+
+  it("returns focus to the cursor line with the selection on Esc", async () => {
+    const group = renderChanges();
+    press("ArrowDown");
+    press("ArrowDown", { shiftKey: true });
+    press("c");
+    // The composer ignores Pierre's echo of the opening selection for a tick.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "New diff comment" }),
+      { key: "Escape" }
+    );
+    expect(
+      screen.queryByRole("textbox", { name: "New diff comment" })
+    ).toBeNull();
+    expect(document.activeElement).toBe(group);
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 3, end: 4, side: "additions" },
+    });
+    press("ArrowDown", { shiftKey: true });
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 3, end: 5, side: "additions" },
+    });
+  });
+
+  it("steps out with Esc: a range collapses, then focus leaves for the chat", () => {
+    const group = renderChanges();
+    expect(group).toHaveAttribute("data-owns-escape");
+    press("ArrowDown");
+    press("ArrowDown", { shiftKey: true });
+    press("Escape");
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 4, end: 4, side: "additions" },
+    });
+    expect(onExit).not.toHaveBeenCalled();
+    press("Escape");
+    expect(onExit).toHaveBeenCalledTimes(1);
+    // The cursor survives leaving, so returning resumes it.
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 4, end: 4, side: "additions" },
+    });
+  });
+
+  it("continues in the main chat after sending a selection there", () => {
+    renderChanges();
+    press("ArrowDown");
+    press("c");
+    fireEvent.keyDown(
+      screen.getByRole("textbox", { name: "New diff comment" }),
+      { key: "Enter", metaKey: true, shiftKey: true }
+    );
+    expect(actions.attach).toHaveBeenCalled();
+    expect(onExit).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a context margin around the cursor when scrolling", () => {
+    renderChanges();
+    press("ArrowDown");
+    expect(seen.scrollTo).toHaveBeenLastCalledWith(
+      expect.objectContaining({ align: "nearest", offset: expect.any(Number) })
+    );
+  });
+
+  it("jumps between files and hunks with ⌥↑/⌥↓ and ⌥⇧↑/⌥⇧↓", () => {
+    renderChanges();
+    press("ArrowDown", { altKey: true });
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 3, end: 3, side: "additions" },
+    });
+    press("ArrowDown", { altKey: true });
+    expect(selected()).toEqual({
+      id: "g.ts",
+      range: { start: 1, end: 1, side: "additions" },
+    });
+    press("ArrowUp", { altKey: true, shiftKey: true });
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 3, end: 3, side: "additions" },
+    });
+  });
+
+  it("leaves the diff with ←/→ past its outer column", () => {
+    renderChanges("split");
+    press("ArrowDown");
+    // Additions column: → is the edge, ← switches column.
+    press("ArrowRight");
+    expect(onEdge).toHaveBeenLastCalledWith(1);
+    press("ArrowLeft");
+    expect(onEdge).toHaveBeenCalledTimes(1);
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 3, end: 3, side: "deletions" },
+    });
+    press("ArrowLeft");
+    expect(onEdge).toHaveBeenLastCalledWith(-1);
+  });
+
+  it("marks a file viewed with v, folds it and moves on", () => {
+    renderChanges();
+    press("ArrowDown");
+    press("v");
+    expect(selected()).toEqual({
+      id: "g.ts",
+      range: { start: 1, end: 1, side: "additions" },
+    });
+    expect(
+      screen.getByRole("button", { name: "Toggle diff for f.ts" })
+    ).toHaveAttribute("aria-expanded", "false");
+    // The viewed file is skipped by the cursor.
+    press("ArrowUp", { altKey: true });
+    expect(selected()).toEqual({
+      id: "g.ts",
+      range: { start: 1, end: 1, side: "additions" },
+    });
+    // Unfolding a viewed file unmarks it.
+    fireEvent.click(screen.getByRole("button", { name: "Toggle diff for f.ts" }));
+    expect(
+      screen.getByRole("button", { name: "Toggle diff for f.ts" })
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("shows the composer bindings in its footer and tooltips", () => {
+    renderChanges();
+    press("ArrowDown");
+    press("c");
+    expect(
+      screen.getByRole("button", { name: "Send to main chat" })
+    ).toHaveAttribute("title", expect.stringMatching(/Send to main chat \(.+↵\)/));
+    expect(
+      screen.getByRole("button", { name: "Discuss inline" })
+    ).toHaveAttribute("title", expect.stringMatching(/Discuss inline \(.+↵\)/));
   });
 });
 

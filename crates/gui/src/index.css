@@ -572,7 +572,28 @@ body {
   }
 }
 
-/* The inset edge stays visible when a scroll container clips the halo. */
+/* ── Focus halo ────────────────────────────────────────────────────────────
+   The single focus indicator for everything that can take focus. Do not set
+   outline, box-shadow, ring or border on :focus / :focus-visible anywhere else
+   (CSS or Tailwind `focus:` utilities); focusHalo.test.ts enforces this.
+   Variants only adjust this block:
+   - [aria-invalid="true"]          error tint for the same halo
+   - [data-focus-halo="within"]     a composite field (e.g. the chat composer)
+                                    draws the halo while any descendant has
+                                    focus; its text field draws none, its
+                                    buttons keep their own
+   - [data-focus-halo="surface"]    a floating surface tied to the current
+                                    selection (the Comment trigger, the comment
+                                    card) always wears the halo as its border;
+                                    its text field draws none. Keep the
+                                    surface's own elevation in --surface-shadow
+   - [data-focus-halo="none"]       the element shows focus another way (resize
+                                    grips, the diff line cursor's accent bar)
+   SVG parts can't take box-shadow; they use --focus-edge / --focus-halo in
+   their own stroke rules.
+   The halo is !important on purpose: state styles (an active chip, a selected
+   card, a hover glow) set box-shadow too and must not hide keyboard focus.
+   The inset edge stays visible when a scroll container clips the halo. */
 :root {
   --focus-edge: color-mix(in oklch, var(--color-accent) 32%, var(--color-line-strong));
   --focus-halo-opacity: 9%;
@@ -584,16 +605,31 @@ body {
   --focus-halo-opacity: 10%;
   --focus-depth: 0 6px 18px -10px rgb(68 52 31 / 25%);
 }
-:root :where(button, a, input, textarea, select, summary, [tabindex], [contenteditable]):not(:where(.changes-resize-handle)):focus-visible {
-  outline: 1px solid transparent;
-  outline-offset: -1px;
-  box-shadow: var(--focus-shadow);
+:root [aria-invalid="true"] {
+  --focus-edge: color-mix(in oklch, var(--color-err) 55%, var(--color-line-strong));
+  --focus-halo: color-mix(in oklch, var(--color-err) 14%, transparent);
+}
+:root :where(button, a, input, textarea, select, summary, [tabindex], [contenteditable]):not(:where([data-focus-halo="none"])):focus-visible {
+  outline: 1px solid transparent !important;
+  outline-offset: -1px !important;
+  box-shadow: var(--focus-shadow) !important;
+}
+:root [data-focus-halo="within"]:focus-within {
+  border-color: var(--focus-edge) !important;
+  box-shadow: 0 0 0 3px var(--focus-halo), var(--focus-depth) !important;
+}
+:root [data-focus-halo="surface"] {
+  border-color: var(--focus-edge);
+  box-shadow: 0 0 0 3px var(--focus-halo), var(--surface-shadow, var(--focus-depth));
+}
+:root :is([data-focus-halo="within"], [data-focus-halo="surface"]) :where(textarea, input, [contenteditable]):focus-visible {
+  box-shadow: none !important;
 }
 
 @media (forced-colors: active) {
   :root :focus-visible {
-    outline: 1px solid Highlight;
-    box-shadow: none;
+    outline: 1px solid Highlight !important;
+    box-shadow: none !important;
   }
 }
 
@@ -2756,14 +2792,8 @@ html.light ::selection {
     background-color var(--t-fast, 120ms) var(--ease, ease),
     box-shadow var(--t-fast, 120ms) var(--ease, ease);
 }
-.chat-input-shell textarea:focus-visible {
-  box-shadow: none;
-}
-
 .chat-input-shell:focus-within {
-  border-color: var(--focus-edge);
   background-color: var(--color-bg);
-  box-shadow: 0 0 0 3px var(--focus-halo), var(--focus-depth);
 }
 
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
@@ -2909,13 +2939,12 @@ html.light ::selection {
   min-width: 0;
   width: 100%;
   padding: 2px var(--s-1);
-  border: 1px solid var(--accent);
+  border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--bg-1);
   color: var(--fg);
   font: inherit;
   line-height: 1.2;
-  outline: none;
 }
 .hc-panel .hc-title-edit-actions {
   display: inline-flex;

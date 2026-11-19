@@ -1,4 +1,4 @@
-import { CHANGES_FOCUS_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
+import { CHAT_AREA_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StopIcon } from "../panels";
 import { OverflowMenu } from "../molecules/OverflowMenu";
@@ -308,7 +308,8 @@ export function ChatHeader({
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const titleButtonRef = useRef<HTMLButtonElement>(null);
-  const restoreTitleFocus = useRef(false);
+  /** Where focus was when renaming began; finishing returns it there. */
+  const restoreTitleFocus = useRef<HTMLElement | "title" | null>(null);
 
   useEffect(() => {
     if (!isEditingTitle) setDraftTitle(label);
@@ -320,23 +321,28 @@ export function ChatHeader({
       titleInputRef.current?.select();
       return;
     }
-    if (restoreTitleFocus.current) {
-      titleButtonRef.current?.focus();
-      restoreTitleFocus.current = false;
-    }
+    const restore = restoreTitleFocus.current;
+    restoreTitleFocus.current = null;
+    if (restore instanceof HTMLElement && restore.isConnected) restore.focus();
+    else if (restore) titleButtonRef.current?.focus();
   }, [isEditingTitle]);
 
   const beginTitleEdit = useCallback(() => {
     if (!onTitleSave || isTitleRegenerating || isSavingTitle) return;
     setDraftTitle(label);
     setTitleEditError(null);
+    const previous = document.activeElement;
+    restoreTitleFocus.current =
+      previous instanceof HTMLElement && previous !== document.body
+        ? previous
+        : "title";
     setIsEditingTitle(true);
   }, [isSavingTitle, isTitleRegenerating, label, onTitleSave]);
 
   const cancelTitleEdit = useCallback(() => {
     setDraftTitle(label);
     setTitleEditError(null);
-    restoreTitleFocus.current = true;
+    restoreTitleFocus.current ??= "title";
     setIsEditingTitle(false);
   }, [label]);
 
@@ -356,7 +362,7 @@ export function ChatHeader({
     setTitleEditError(null);
     try {
       await onTitleSave(normalized);
-      restoreTitleFocus.current = true;
+      restoreTitleFocus.current ??= "title";
       setIsEditingTitle(false);
     } catch (error) {
       setTitleEditError(
@@ -394,7 +400,7 @@ export function ChatHeader({
     {
       key: "changes",
       title: changesOpen
-        ? `Hide Changes panel (⌘⇧B) · ${CHANGES_FOCUS_SHORTCUT.label} (${presentChatShortcut(CHANGES_FOCUS_SHORTCUT)?.keys.join("")})`
+        ? `Hide Changes panel (⌘⇧B) · ${CHAT_AREA_SHORTCUT.label} (${presentChatShortcut(CHAT_AREA_SHORTCUT)?.keys.join("")})`
         : "Show Changes panel (⌘⇧B when worktree has changes)",
       ariaLabel: "Changes",
       onClick: onToggleChanges!,
@@ -536,7 +542,8 @@ export function ChatHeader({
       <div className="hc-head-top">
         <div className="hc-title">
           {isEditingTitle ? (
-            <span className="hc-title-editor">
+            // Esc cancels the rename, not the whole chat panel.
+            <span className="hc-title-editor" data-owns-escape="">
               <input
                 ref={titleInputRef}
                 className="hc-title-input"

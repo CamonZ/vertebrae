@@ -168,7 +168,7 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
       border border-border
       text-fg
       rounded-md
-      focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:border-[var(--focus-edge)]
+     
       disabled:opacity-50 disabled:cursor-not-allowed
       ${disabled ? "bg-bg-1" : ""}
       ${className}

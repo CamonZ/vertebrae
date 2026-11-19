@@ -345,7 +345,7 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
               <button
                 type="button"
                 onClick={handleClearFilters}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-bg-2/50 px-3 py-1.5 text-xs text-fg-mute transition-all hover:border-err/30 hover:bg-err/10 hover:text-err focus:outline-none focus:ring-2 focus:ring-err/20"
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-bg-2/50 px-3 py-1.5 text-xs text-fg-mute transition-all hover:border-err/30 hover:bg-err/10 hover:text-err"
               >
                 <svg
                   className="h-3.5 w-3.5"

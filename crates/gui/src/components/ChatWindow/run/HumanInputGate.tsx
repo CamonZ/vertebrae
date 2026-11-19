@@ -158,7 +158,7 @@ export function HumanInputGate({
               onResolve ? onResolve(context) : void resolveGateInChat(context)
             }
             disabled={!resolvable}
-            className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-info)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-info)]/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-info)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-info)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-info)]/90 disabled:cursor-not-allowed disabled:opacity-50"
             title={
               resolvable
                 ? "Resolve this gate in a chat"
@@ -187,7 +187,7 @@ export function HumanInputGate({
               data-testid="human-input-gate-answer-directly"
               aria-expanded={answering}
               onClick={() => setAnswering((open) => !open)}
-              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-info)]/60 px-2.5 py-1.5 text-xs font-medium text-[var(--color-info)] transition-colors hover:bg-[var(--color-info)]/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-info)]"
+              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-info)]/60 px-2.5 py-1.5 text-xs font-medium text-[var(--color-info)] transition-colors hover:bg-[var(--color-info)]/10"
               title="Answer this gate in a form, without a chat"
             >
               <span>Answer directly</span>
@@ -199,7 +199,7 @@ export function HumanInputGate({
               data-testid="human-input-gate-stop"
               onClick={onStop}
               disabled={isStopping}
-              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-err)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-err)]/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-err)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-err)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-err)]/90 disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="Stop waiting run"
               title="Stop the orchestrator for this waiting run"
             >

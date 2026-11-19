@@ -19,6 +19,7 @@ function makeDispatch(
     hasActiveSession: true,
     focusPaneByIndex: vi.fn(() => true),
     focusPaneByOffset: vi.fn(() => true),
+    focusAreaByOffset: vi.fn(() => true),
     historyNavigationEnabled: true,
     focusHistorySearch: vi.fn(() => true),
     openPaneFind: vi.fn(() => true),
@@ -160,18 +161,18 @@ describe("useChatKeyboardShortcuts", () => {
     expect(dispatch.focusPaneByOffset).toHaveBeenCalledWith(-1);
   });
 
-  it("focuses right pane on cmd+alt+ArrowRight", () => {
+  it("moves to the next chat area on cmd+alt+ArrowRight", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
     fireKey({ key: "ArrowRight", metaKey: true, altKey: true });
-    expect(dispatch.focusPaneByOffset).toHaveBeenCalledWith(1);
+    expect(dispatch.focusAreaByOffset).toHaveBeenCalledWith(1);
   });
 
-  it("focuses left pane on cmd+alt+ArrowLeft", () => {
+  it("moves to the previous chat area on cmd+alt+ArrowLeft", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
     fireKey({ key: "ArrowLeft", metaKey: true, altKey: true });
-    expect(dispatch.focusPaneByOffset).toHaveBeenCalledWith(-1);
+    expect(dispatch.focusAreaByOffset).toHaveBeenCalledWith(-1);
   });
 
   it("selects the previous and next projects with cmd+alt brackets", () => {

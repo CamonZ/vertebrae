@@ -1,13 +1,30 @@
 import {
+  CHAT_AREA_SHORTCUT,
   CHAT_HELP_SHORTCUT,
-  CHANGED_FILE_LIST_KEYS,
-  CHANGES_FOCUS_SHORTCUT,
-  CHANGES_KEYS,
-  COMPARISON_KEYS,
+  CHANGES_HINT_GROUPS,
   presentChatShortcut,
 } from "./chatShortcuts";
 
 const chatHelpKeys = presentChatShortcut(CHAT_HELP_SHORTCUT)?.keys ?? [];
+
+/** Changes bindings by situation, each listed once (in its first group). */
+function changesSections() {
+  const listed = new Set<string>();
+  return CHANGES_HINT_GROUPS.map(({ title, hints }) => ({
+    title,
+    shortcuts: hints
+      .filter(({ keys, label }) => {
+        const id = `${keys.join(" ")}\u0000${label}`;
+        if (listed.has(id)) return false;
+        listed.add(id);
+        return true;
+      })
+      .map(({ keys, label, splitOnly }) => ({
+        keys,
+        label: splitOnly ? `${label} (split)` : label,
+      })),
+  }));
+}
 
 export const CHAT_SHORTCUT_SECTIONS = [
   {
@@ -27,28 +44,17 @@ export const CHAT_SHORTCUT_SECTIONS = [
       { keys: ["Esc"], label: "Close hints or focused panel" },
     ],
   },
-  {
-    title: "Changes",
-    shortcuts: [
-      {
-        keys: presentChatShortcut(CHANGES_FOCUS_SHORTCUT)?.keys ?? [],
-        label: CHANGES_FOCUS_SHORTCUT.label,
-      },
-      ...Object.values(CHANGES_KEYS).map(({ key, label }) => ({
-        keys: [key],
-        label,
-      })),
-      CHANGED_FILE_LIST_KEYS,
-      ...COMPARISON_KEYS,
-    ],
-  },
+  ...changesSections(),
   {
     title: "Panes",
     shortcuts: [
       { keys: ["⌘", "⌥", "\\"], label: "Split pane" },
       { keys: ["⌘", "⇧", "⌥", "\\"], label: "Close active pane" },
       { keys: ["⌘", "⌥", "M"], label: "Keep only active pane" },
-      { keys: ["⌘", "⌥", "←/→"], label: "Focus adjacent pane" },
+      {
+        keys: presentChatShortcut(CHAT_AREA_SHORTCUT)?.keys ?? [],
+        label: CHAT_AREA_SHORTCUT.label,
+      },
       { keys: ["⌃", "Tab"], label: "Focus next pane" },
       { keys: ["⌘", "⌥", "1-6"], label: "Focus pane by number" },
     ],

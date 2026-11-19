@@ -213,7 +213,7 @@ export function StoryNavigator({
       <button
         ref={toggle}
         type="button"
-        className="flex min-h-10 shrink-0 items-center px-3 text-left text-[13px] font-medium focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+        className="flex min-h-10 shrink-0 items-center px-3 text-left text-[13px] font-medium"
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={`${id}-content`}
@@ -245,7 +245,7 @@ export function StoryNavigator({
           </span>
           <button
             type="button"
-            className="rounded px-2 py-1 hover:bg-[var(--color-bg-2)] focus-visible:ring-2"
+            className="rounded px-2 py-1 hover:bg-[var(--color-bg-2)]"
             onClick={() => {
               setManual(!manual);
               if (manual) jumpToCurrent();
@@ -257,7 +257,7 @@ export function StoryNavigator({
         {manual && (
           <button
             type="button"
-            className="focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] mx-2 rounded border border-[var(--color-line)] p-1 text-[var(--color-accent)]"
+            className=" mx-2 rounded border border-[var(--color-line)] p-1 text-[var(--color-accent)]"
             onClick={() => {
               setManual(false);
               jumpToCurrent();
@@ -410,7 +410,7 @@ const StoryContents = memo(function StoryContents({
   return (
     <>
       <details className="flow-story-whole mb-3" data-testid="flow-evidence">
-        <summary className="focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] cursor-pointer py-1">
+        <summary className=" cursor-pointer py-1">
           Whole flow{" "}
           <span className="font-mono text-fg-mute">
             {flow.attachments.length}
@@ -424,7 +424,7 @@ const StoryContents = memo(function StoryContents({
           data-story-beat={i}
           className="flow-story-beat"
         >
-          <summary className="focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] cursor-pointer font-medium">
+          <summary className=" cursor-pointer font-medium">
             <span className="flow-story-number" aria-hidden>
               {String(i + 1).padStart(2, "0")}
             </span>
@@ -440,7 +440,7 @@ const StoryContents = memo(function StoryContents({
               data-story-actor={actor.key}
               className="flow-story-actor"
             >
-              <summary className="focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] cursor-pointer">
+              <summary className=" cursor-pointer">
                 {actor.label}{" "}
                 <span className="font-mono text-fg-mute">
                   {actor.attachments.length}{" "}

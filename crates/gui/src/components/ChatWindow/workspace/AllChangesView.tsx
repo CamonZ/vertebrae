@@ -1,4 +1,4 @@
-import { CHANGES_KEYS } from "../chatShortcuts";
+import { CHANGES_COMMANDS } from "../chatShortcuts";
 import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
 import type { DiffPreferences } from "../../../utils/codeAppearance";
 import {
@@ -19,6 +19,7 @@ import {
 import type { WorktreeChange } from "../../../bindings";
 import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import { useDiffComments } from "../../../hooks/useDiffComments";
+import { DIFF_CURSOR_ENTRY_ATTRIBUTE } from "../../thread/toolChange/diffCursor";
 import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
 import { DiffReviewContext } from "../../thread/toolChange/DiffReviewContext";
 import type { BackgroundOutputs } from "../../../background/types";
@@ -39,7 +40,21 @@ export interface AllChangesViewProps {
   onOpen(path: string): void;
   renderExternalEditor?(path: string): ReactNode;
   diffStyle?: DiffPreferences["diffStyle"];
+  /** The keyboard line cursor moved into this file. */
+  onCursorFile?(path: string): void;
+  /** Leave the diff for the main chat input. */
+  onExit?(): void;
+  /** ← / → past the diff's outer column. */
+  onEdge?(direction: -1 | 1): void;
+  /** Files marked viewed: shown folded and skipped by the line cursor. */
+  viewedPaths?: ReadonlySet<string>;
+  onViewedChange?(path: string, viewed: boolean): void;
 }
+
+const NO_PATHS: ReadonlySet<string> = new Set();
+
+/** Context kept visible around the keyboard cursor, in pixels (~4 lines). */
+const CURSOR_SCROLL_MARGIN = 80;
 
 const FALLBACK_ATTRIBUTE = "data-changes-fallback";
 
@@ -56,10 +71,24 @@ export default function AllChangesView({
   onOpen,
   renderExternalEditor,
   diffStyle,
+  onCursorFile,
+  onExit,
+  onEdge,
+  viewedPaths = NO_PATHS,
+  onViewedChange,
 }: AllChangesViewProps): ReactNode {
+  const onToggleViewed = onViewedChange
+    ? (path: string) => onViewedChange(path, !viewedPaths.has(path))
+    : undefined;
   const options = usePierreDiffOptions();
-  const [collapsedPaths, setCollapsedPaths] = useState<ReadonlySet<string>>(
+  const [foldedPaths, setCollapsedPaths] = useState<ReadonlySet<string>>(
     new Set()
+  );
+  // A viewed file stays folded until it is unmarked.
+  const collapsedPaths = useMemo<ReadonlySet<string>>(
+    () =>
+      viewedPaths.size ? new Set([...foldedPaths, ...viewedPaths]) : foldedPaths,
+    [foldedPaths, viewedPaths]
   );
   const viewRef = useRef<CodeViewHandle<ReviewAnnotation, undefined>>(null);
   const jumpHeader = useRef<HTMLButtonElement>(null);
@@ -121,7 +150,24 @@ export default function AllChangesView({
       ),
     [parsedPatches, files, collapsedPaths]
   );
-  const review = useDiffComments({ kind: "worktree" }, patchFiles);
+  const layout = diffStyle ?? options.diffStyle;
+  const review = useDiffComments({ kind: "worktree" }, patchFiles, undefined, {
+    layout,
+    onExit,
+    onEdge,
+    onToggleViewed,
+    onCursorMove: (path, lineNumber, side) => {
+      onCursorFile?.(path);
+      viewRef.current?.scrollTo({
+        type: "line",
+        id: path,
+        lineNumber,
+        side,
+        align: "nearest",
+        offset: CURSOR_SCROLL_MARGIN,
+      });
+    },
+  });
   const { annotationsFor, openComposer, onSelectionChange, selectedLinesFor } =
     review;
   const itemVersions = useRef(
@@ -231,6 +277,7 @@ export default function AllChangesView({
     const target = matches.find((placement) => placement.home) ?? matches[0];
     if (!target || !itemPaths.has(target.path)) return;
     if (collapsedPaths.has(target.path)) {
+      onViewedChange?.(target.path, false);
       setCollapsedPaths(
         (current) =>
           new Set([...current].filter((path) => path !== target.path))
@@ -249,7 +296,7 @@ export default function AllChangesView({
           }
         : { type: "item", id: target.path, align: "start" }
     );
-  }, [focus, placements, itemPaths, collapsedPaths]);
+  }, [focus, placements, itemPaths, collapsedPaths, onViewedChange]);
 
   // Jump once per request; background refreshes must not move the viewport.
   const handledJump = useRef<number | null>(null);
@@ -257,6 +304,7 @@ export default function AllChangesView({
     if (!jumpTarget || handledJump.current === jumpTarget.nonce) return;
     const { path } = jumpTarget;
     if (!jumpTarget.focusHeader && collapsedPaths.has(path)) {
+      onViewedChange?.(path, false);
       setCollapsedPaths(
         (current) => new Set([...current].filter((value) => value !== path))
       );
@@ -305,11 +353,14 @@ export default function AllChangesView({
       container.scrollTo({ top, behavior: "auto" });
       if (jumpTarget.focusHeader) target.focus({ preventScroll: true });
     }
-  }, [jumpTarget, itemPaths, collapsedPaths]);
+  }, [jumpTarget, itemPaths, collapsedPaths, onViewedChange]);
 
   return (
     <WorkerPoolContext.Provider value={diffWorkerPool}>
-      <div {...review.keyboardProps} className="flex min-h-0 flex-1 flex-col">
+      <div
+        {...review.keyboardProps}
+        className="diff-line-cursor-host flex min-h-0 flex-1 flex-col"
+      >
         <CodeView
           ref={viewRef}
           containerRef={containerRef}
@@ -337,9 +388,14 @@ export default function AllChangesView({
           renderCustomHeader={(item) => {
             const path = itemPaths.get(item.id) ?? item.id;
             const collapsed = collapsedPaths.has(path);
+            const viewed = viewedPaths.has(path);
             const fileDiff = item.type === "diff" ? item.fileDiff : undefined;
             return (
-              <div className="changes-diff-heading" data-changes-path={path}>
+              <div
+                className="changes-diff-heading"
+                data-changes-path={path}
+                {...{ [DIFF_CURSOR_ENTRY_ATTRIBUTE]: path }}
+              >
                 <button
                   type="button"
                   ref={
@@ -353,6 +409,10 @@ export default function AllChangesView({
                   aria-expanded={!collapsed}
                   onClick={() => {
                     if (!collapsed) review.clearInteraction(path);
+                    if (viewed) {
+                      onViewedChange?.(path, false);
+                      return;
+                    }
                     setCollapsedPaths((current) => {
                       const next = new Set(current);
                       if (collapsed) next.delete(path);
@@ -385,12 +445,27 @@ export default function AllChangesView({
                     </span>
                   </span>
                 )}
+                {onViewedChange && (
+                  <button
+                    type="button"
+                    className="changes-viewed-button"
+                    aria-pressed={viewed}
+                    aria-keyshortcuts="V"
+                    title={`${viewed ? "Unmark" : "Mark"} viewed (v)`}
+                    onClick={() => {
+                      if (!viewed) review.clearInteraction(path);
+                      onViewedChange(path, !viewed);
+                    }}
+                  >
+                    {viewed ? "✓ Viewed" : "Viewed"}
+                  </button>
+                )}
                 {renderExternalEditor?.(path)}
                 <button
                   type="button"
                   className="changes-open-button"
                   aria-label={`Open ${path}`}
-                  title={`Open full diff (${CHANGES_KEYS.diff.key})`}
+                  title={CHANGES_COMMANDS.diff}
                   onClick={() => onOpen(path)}
                 >
                   Open

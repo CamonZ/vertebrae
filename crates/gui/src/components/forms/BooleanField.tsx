@@ -111,7 +111,7 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
     };
 
     // Base toggle classes
-    const baseClasses = "relative inline-flex items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2";
+    const baseClasses = "relative inline-flex items-center rounded-full transition-colors";
 
     // Size classes
     const sizeClasses = {

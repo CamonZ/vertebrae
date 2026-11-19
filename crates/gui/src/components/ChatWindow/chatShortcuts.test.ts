@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CHAT_HELP_SHORTCUT,
+  changesHintsFor,
   matchesChatShortcut,
   presentChatShortcut,
 } from "./chatShortcuts";
@@ -39,5 +40,29 @@ describe("chat-help shortcut metadata", () => {
 
   it("returns no misleading hint when metadata is unavailable", () => {
     expect(presentChatShortcut(null, "MacIntel")).toBeNull();
+  });
+});
+
+describe("changesHintsFor", () => {
+  const labels = (situation: Parameters<typeof changesHintsFor>[0], split = false) =>
+    changesHintsFor(situation, { split }).map((hint) => hint.label);
+
+  it("lists only the bindings for the focused situation", () => {
+    expect(labels("composer")).toEqual([
+      "Create inline discussion",
+      "Send to main chat",
+      "Cancel and return to line",
+      "All shortcuts",
+    ]);
+    expect(labels("outside")).toEqual([
+      "Move between chats and Changes",
+      "All shortcuts",
+    ]);
+    expect(labels("diff")).not.toContain("Base");
+  });
+
+  it("offers side switching only in a split diff", () => {
+    expect(labels("diff")).not.toContain("Switch side");
+    expect(labels("diff", true)).toContain("Switch side");
   });
 });

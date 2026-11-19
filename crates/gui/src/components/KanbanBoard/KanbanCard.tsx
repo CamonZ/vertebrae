@@ -65,7 +65,7 @@ export function KanbanCard({
       data-running={runChip?.isActive || undefined}
       data-completed={isCompleted || undefined}
       data-priority={task.priority ?? undefined}
-      className={`group relative flex shrink-0 cursor-pointer items-start gap-2 overflow-hidden rounded-[var(--radius-md)] border border-t-2 px-3 py-2 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+      className={`group relative flex shrink-0 cursor-pointer items-start gap-2 overflow-hidden rounded-[var(--radius-md)] border border-t-2 px-3 py-2 transition-all duration-150 ${
         isSelected
           ? "border-[var(--color-line-strong)]"
           : isRunning

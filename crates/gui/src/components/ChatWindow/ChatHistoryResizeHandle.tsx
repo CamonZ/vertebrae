@@ -97,6 +97,7 @@ export function ChatHistoryResizeHandle({
   return (
     <div
       className="hc-history-resize-handle"
+      data-focus-halo="none"
       role="separator"
       aria-orientation="vertical"
       aria-label="Resize chat history"

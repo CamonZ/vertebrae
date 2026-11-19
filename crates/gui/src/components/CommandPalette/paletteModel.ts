@@ -5,7 +5,8 @@ export type PaletteScope =
   | "tasks"
   | "chats"
   | "workflows"
-  | "actions";
+  | "actions"
+  | "changes";
 
 export interface PaletteItem {
   id: string;

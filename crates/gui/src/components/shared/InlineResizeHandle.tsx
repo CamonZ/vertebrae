@@ -22,6 +22,7 @@ export function InlineResizeHandle({
     <span
       {...handlers}
       className="evdiff-handle"
+      data-focus-halo="none"
       role="separator"
       aria-orientation="horizontal"
       aria-label={label}

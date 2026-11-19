@@ -357,7 +357,7 @@ export function FlowPlayer({
       aria-keyshortcuts={`Space ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Home End C S N Shift+N${names.length > 1 ? " B Shift+B" : ""}`}
       tabIndex={0}
       onKeyDown={onKeyDown}
-      className="flex flex-col gap-2 rounded-[var(--radius-md)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)]"
+      className="flex flex-col gap-2 rounded-[var(--radius-md)]"
       data-testid="flow-player"
       data-arrangement={diagram.arrangement}
       data-phased={phased ? "true" : undefined}
@@ -626,7 +626,7 @@ function BeatRail({
             />
             <button
               type="button"
-              className="group/dot absolute top-1/2 left-0 z-[1] flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              className="group/dot absolute top-1/2 left-0 z-[1] flex h-4 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full"
               aria-label={`Beat ${i + 1} of ${beats.length}: ${b.caption}${
                 b.changes.length
                   ? `. Changed steps: ${b.changes.map((c) => `${c.change} ${c.label}`).join("; ")}`
@@ -1025,7 +1025,7 @@ function PartInspector({
             <button
               key={id}
               type="button"
-              className="rounded border border-[var(--color-line-strong)] px-1.5 font-mono text-fg hover:border-[var(--color-accent)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
+              className="rounded border border-[var(--color-line-strong)] px-1.5 font-mono text-fg hover:border-[var(--color-accent)]"
               onClick={() => onFollow(id)}
               aria-label={`Follow card ${cardLabel(flow, id)}`}
             >

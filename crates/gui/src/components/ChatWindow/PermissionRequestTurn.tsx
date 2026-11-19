@@ -93,7 +93,7 @@ export function PermissionRequestTurn({
             value={updatedInput}
             onChange={(event) => setUpdatedInput(event.target.value)}
             disabled={disabled}
-            className="h-32 w-full resize-y rounded border border-[var(--color-line)] bg-[var(--color-bg)] p-2 font-mono text-xs text-[var(--color-fg)] outline-none focus:border-[var(--focus-edge)]"
+            className="h-32 w-full resize-y rounded border border-[var(--color-line)] bg-[var(--color-bg)] p-2 font-mono text-xs text-[var(--color-fg)] outline-none"
             spellCheck={false}
           />
         )}

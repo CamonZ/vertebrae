@@ -137,6 +137,7 @@ export function ChatPaneResizeHandle({
   return (
     <div
       className="hc-pane-resize-handle"
+      data-focus-halo="none"
       role="separator"
       aria-orientation="vertical"
       aria-label={label}

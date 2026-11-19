@@ -1,4 +1,5 @@
-import { CHANGES_FOCUS_SHORTCUT, matchesChatShortcut } from "./chatShortcuts";
+import { isEditableShortcutTarget } from "../../utils/keyboard";
+import { moveChatArea } from "./chatAreas";
 import { FileReferenceNavigationContext } from "../shared/FileReferenceNavigationContext";
 import type { FileTarget } from "../shared/FileReferenceNavigationContext";
 import {
@@ -562,23 +563,36 @@ export function ChatWindow({
       data-testid="local-chat-window"
       data-project-path={chat.session.projectPath ?? ""}
       onKeyDownCapture={(event) => {
+        // ⌥←/⌥→ and ⌥= resize the Changes panel while it has focus.
         const changes = changesRef.current;
+        const origin = event.nativeEvent.composedPath()[0];
         if (
           !changes ||
+          !(origin instanceof HTMLElement) ||
+          !changes.contains(origin) ||
+          isEditableShortcutTarget(origin) ||
           event.defaultPrevented ||
           event.nativeEvent.isComposing ||
-          event.altKey ||
+          !event.altKey ||
+          event.metaKey ||
           event.ctrlKey ||
-          !matchesChatShortcut(event, CHANGES_FOCUS_SHORTCUT) ||
+          event.shiftKey ||
+          origin.closest('[role="combobox"][aria-expanded="true"]') ||
           document.querySelector('[role="dialog"][aria-modal="true"]')
         )
           return;
-
+        const resize =
+          event.key === "ArrowLeft"
+            ? () => panelResize.resizeBy(1)
+            : event.key === "ArrowRight"
+              ? () => panelResize.resizeBy(-1)
+              : event.code === "Equal"
+                ? panelResize.cycleWidth
+                : null;
+        if (!resize) return;
         event.preventDefault();
         event.stopPropagation();
-        if (event.repeat) return;
-        if (changes.contains(document.activeElement)) inputRef.current?.focus();
-        else changes.focus();
+        resize();
       }}
     >
       <ChatHeader
@@ -633,6 +647,10 @@ export function ChatWindow({
               ref={changesRef}
               worktreePath={worktreePath}
               onChangesLoaded={handleWorktreeLoaded}
+              onExit={() => inputRef.current?.focus()}
+              onEdge={(direction) =>
+                void moveChatArea(document.activeElement, direction)
+              }
               sourceJump={
                 evidenceJump?.sessionId === sessionId &&
                 evidenceJump.worktreePath === worktreePath

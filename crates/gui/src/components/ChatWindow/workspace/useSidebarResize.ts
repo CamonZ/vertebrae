@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState, type HTMLAttributes } from "react";
 
 const CHANGES_SPLITTER_WIDTH = 2;
+const WIDTH_PRESETS = [1 / 3, 1 / 2, 2 / 3];
 
 export function sidebarBounds(container: number) {
   const max = Math.max(36, Math.min(560, container - 180));
@@ -52,9 +53,13 @@ export function useSidebarResize(
       : sidebarBounds(available);
   const clamp = (value: number) => Math.min(max, Math.max(min, value));
   const width = clamp(preferred);
-  const handleProps: HTMLAttributes<HTMLDivElement> = {
+  const handleProps: HTMLAttributes<HTMLDivElement> & {
+    "data-focus-halo": "none";
+  } = {
     role: "separator",
     tabIndex: 0,
+    // The divider itself lights up instead of the focus halo.
+    "data-focus-halo": "none",
     "aria-label": options.label ?? "Resize files sidebar",
     "aria-orientation": "vertical",
     "aria-valuenow": width,
@@ -111,5 +116,17 @@ export function useSidebarResize(
     },
   };
 
-  return { containerRef, width, handleProps };
+  /** Grow (1) or shrink (-1) by a tenth of the available width. */
+  const resizeBy = (direction: -1 | 1) =>
+    setPreferred(clamp(width + direction * Math.round(available * 0.1)));
+
+  /** Step through ⅓, ½ and ⅔ of the available width, then wrap. */
+  const cycleWidth = () => {
+    const presets = WIDTH_PRESETS.map((fraction) =>
+      clamp(Math.round(available * fraction))
+    );
+    setPreferred(presets.find((preset) => preset > width + 1) ?? presets[0]);
+  };
+
+  return { containerRef, width, handleProps, resizeBy, cycleWidth };
 }

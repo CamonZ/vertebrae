@@ -9,6 +9,11 @@ import {
   DiscussionModelNotice,
   InlineSelectionDiscussion,
 } from "../../ChatWindow/SelectionDiscussionContext";
+import {
+  DIFF_COMPOSER_SEND_SHORTCUT,
+  DIFF_COMPOSER_SUBMIT_SHORTCUT,
+  shortcutText,
+} from "../../ChatWindow/chatShortcuts";
 import { DiffReviewContext, type DiffReviewFocus } from "./DiffReviewContext";
 
 /** Pierre annotation payload: comments (and a composer) at one diff line. */
@@ -113,6 +118,9 @@ function CommentEditor({
   onSendToMain?(): void;
   disabled?: boolean;
 }): ReactNode {
+  const submitKeys = shortcutText(DIFF_COMPOSER_SUBMIT_SHORTCUT);
+  const sendKeys = shortcutText(DIFF_COMPOSER_SEND_SHORTCUT);
+  const canSubmit = !!value.trim() && !disabled;
   return (
     <div className="diff-comment-editor">
       <textarea
@@ -124,27 +132,41 @@ function CommentEditor({
         rows={3}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key === "Escape") onCancel();
-          else if (
-            event.key === "Enter" &&
-            (event.metaKey || event.ctrlKey) &&
-            value.trim() &&
-            !disabled
-          ) {
-            onSubmit();
+          if (event.nativeEvent.isComposing) return;
+          if (event.key === "Escape") {
+            event.preventDefault();
+            onCancel();
+            return;
           }
+          if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+          event.preventDefault();
+          if (event.shiftKey) onSendToMain?.();
+          else if (canSubmit) onSubmit();
         }}
       />
       <div className="diff-comment-editor-actions">
         <span className="diff-comment-editor-hint" aria-hidden="true">
-          <kbd>⌘↵</kbd> {submitLabel.toLowerCase()} · <kbd>esc</kbd> cancel
+          <kbd>{submitKeys}</kbd> {submitLabel.toLowerCase()}
+          {onSendToMain && (
+            <>
+              {" · "}
+              <kbd>{sendKeys}</kbd> send to main chat
+            </>
+          )}
+          {" · "}
+          <kbd>esc</kbd> cancel
         </span>
         <div className="diff-comment-editor-buttons">
-          <button type="button" onClick={onCancel}>
+          <button type="button" title="Cancel (Esc)" onClick={onCancel}>
             Cancel
           </button>
           {onSendToMain && (
-            <button type="button" onClick={onSendToMain}>
+            <button
+              type="button"
+              title={`${DIFF_COMPOSER_SEND_SHORTCUT.label} (${sendKeys})`}
+              aria-keyshortcuts="Meta+Shift+Enter"
+              onClick={onSendToMain}
+            >
               Send to main chat
             </button>
           )}
@@ -152,7 +174,9 @@ function CommentEditor({
             type="button"
             data-primary
             data-testid={`${testIdPrefix}-submit`}
-            disabled={!value.trim() || disabled}
+            title={`${submitLabel} (${submitKeys})`}
+            aria-keyshortcuts="Meta+Enter"
+            disabled={!canSubmit}
             onClick={onSubmit}
           >
             {submitLabel}

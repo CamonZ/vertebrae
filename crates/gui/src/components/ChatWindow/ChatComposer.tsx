@@ -33,6 +33,7 @@ function CommentCard(props: ComponentPropsWithRef<"div">) {
     <div
       {...props}
       className="chat-comment-card chat-comment-card-fixed chat-comment-card-chip"
+      data-focus-halo="surface"
       data-owns-escape=""
     />,
     document.body

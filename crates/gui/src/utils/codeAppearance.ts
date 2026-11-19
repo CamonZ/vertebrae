@@ -200,6 +200,10 @@ export function pierreSelectionCSS(themeSelection: string | null): string {
 [data-gutter-buffer="annotation"][data-selected-line] {
   background-color: var(--diffs-bg);
 }
+/* Keyboard line cursor: the host sets --diff-line-cursor while it has focus. */
+[data-column-number][data-selected-line] {
+  box-shadow: inset 2px 0 0 var(--diff-line-cursor, transparent);
+}
 `;
 }
 
