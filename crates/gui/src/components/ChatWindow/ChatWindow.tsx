@@ -429,13 +429,11 @@ export function ChatWindow({
   const handleNavigateComment = useCallback(
     (id: string) => {
       const comment = pendingComments.find((candidate) => candidate.id === id);
-      if (!comment) return;
+      if (comment?.kind !== "diff") return;
       setFocusState({
         sessionId,
         focus: { commentId: id, nonce: nextFocusNonce++ },
       });
-      // A text comment scrolls its quote into view in the transcript.
-      if (comment.kind !== "diff") return;
       if (comment.home.kind === "worktree") {
         if (!ownWorktreePath) return;
         activate(ownWorktreePath, null);
@@ -762,7 +760,6 @@ export function ChatWindow({
                 onAddComment={handleAddComment}
                 textComments={textComments}
                 activeCommentId={activeCommentId}
-                commentFocus={focus}
                 footer={
                   <>
                     <DiscussionSnapshot snapshot={worktreeSnapshot} />

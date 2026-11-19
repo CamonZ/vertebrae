@@ -167,7 +167,7 @@ function Pane({
   activeId: string | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
-  useCommentHighlights(ref, comments, activeId, null, comments);
+  useCommentHighlights(ref, comments, activeId, comments);
   return (
     <div ref={ref}>
       {RESPONSE_TEXT.map((text, index) => (
