@@ -1,0 +1,60 @@
+/*
+ * The transcript's keyboard caret: one overlay in the scroll content (so it
+ * scrolls with the text), drawn above row backgrounds such as the user
+ * bubble. Only the caret is drawn, a translucent block over the character
+ * after it, light enough to read through; a selection is the native
+ * highlight.
+ */
+[data-transcript-viewport] {
+  position: relative;
+}
+
+.transcript-cursor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.transcript-cursor:not([data-state]),
+.transcript-cursor[hidden] {
+  display: none;
+}
+
+.transcript-cursor-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--caret-width);
+  height: var(--caret-height);
+  transform: translate(var(--caret-x), var(--caret-y));
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--color-accent) 45%, transparent);
+  transition:
+    transform 60ms ease-out,
+    width 60ms ease-out;
+  animation: transcript-caret-blink 1.06s steps(1, end) 0.5s infinite;
+  will-change: transform;
+}
+
+@keyframes transcript-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* Focus is in the selection's comment card: the caret waits, dimmed. */
+.transcript-cursor[data-state="passive"] .transcript-cursor-caret {
+  opacity: 0.45;
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transcript-cursor-caret {
+    transition: none;
+    animation: none;
+  }
+}

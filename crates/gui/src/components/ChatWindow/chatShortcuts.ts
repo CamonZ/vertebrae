@@ -301,3 +301,30 @@ export function changesHintsFor(
   );
   return [...hints, { keys: modifierKeys(CHAT_HELP_SHORTCUT), label: "All shortcuts" }];
 }
+
+/** Opens the comment card for a selection in assistant text. */
+export const TRANSCRIPT_COMMENT_SHORTCUT = {
+  modifiers: ["meta"],
+  keys: ["Enter"],
+  displayKey: "↵",
+  label: "Comment on selection (assistant text)",
+} as const satisfies ChatShortcutDefinition;
+
+/** The transcript caret's bindings, listed in the ⌘⇧/ overlay. */
+export const TRANSCRIPT_HINTS: readonly KeyHint[] = [
+  { keys: ["⌘", "⌥", "↑"], label: "Into the transcript (from input or comments)" },
+  { keys: ["← / →"], label: "Move by character" },
+  { keys: ["↑ / ↓"], label: "Move by line" },
+  { keys: ["⌥", "← / →"], label: "Move by word" },
+  { keys: ["⌥", "↑ / ↓"], label: "Move by paragraph" },
+  { keys: ["⌘", "← / →"], label: "Start / end of line" },
+  { keys: ["⌘", "↑ / ↓"], label: "Start / end of message" },
+  { keys: ["⇧"], label: "With any move: select as the caret moves" },
+  { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: "Copy selection" },
+  {
+    keys: modifierKeys(TRANSCRIPT_COMMENT_SHORTCUT),
+    label: TRANSCRIPT_COMMENT_SHORTCUT.label,
+  },
+  { keys: ["Esc"], label: "Clear selection / back to input" },
+  { keys: ["⌘", "⌥", "↓"], label: "Back to comments / input" },
+];

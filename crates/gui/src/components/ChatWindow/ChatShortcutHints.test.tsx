@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ChatShortcutHints, CHAT_SHORTCUT_SECTIONS } from "./ChatShortcutHints";
+import { TRANSCRIPT_HINTS } from "./chatShortcuts";
 
 describe("ChatShortcutHints", () => {
   it("renders a dialog with the correct aria-label", () => {
@@ -31,6 +32,15 @@ describe("ChatShortcutHints", () => {
     expect(screen.getByText("Previous file")).toBeInTheDocument();
     expect(screen.getByText("Panes")).toBeInTheDocument();
     expect(screen.getByText("Sessions")).toBeInTheDocument();
+  });
+
+  it("lists every transcript caret binding", () => {
+    render(<ChatShortcutHints onClose={vi.fn()} />);
+    const section = screen.getByText("Transcript").closest("section");
+    expect(section).not.toBeNull();
+    for (const { label } of TRANSCRIPT_HINTS) {
+      expect(section).toHaveTextContent(label);
+    }
   });
 
   it("renders kbd elements for shortcut keys", () => {
