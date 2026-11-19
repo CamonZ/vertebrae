@@ -32,7 +32,8 @@ function focusRules(css: string): { selector: string; body: string }[] {
   return rules;
 }
 
-const HALO_PROPERTIES = /(?:^|;|\s)(?:outline(?:-offset)?|box-shadow|border(?:-color)?)\s*:/;
+const HALO_PROPERTIES =
+  /(?:^|;|\s)(?:outline(?:-offset)?|box-shadow|border(?:-color)?)\s*:/;
 
 describe("focus halo", () => {
   it("is not redrawn by Tailwind focus utilities in components", () => {
@@ -65,5 +66,15 @@ describe("focus halo", () => {
     expect(stylesheets["./index.css"]).toContain(
       "box-shadow: var(--focus-shadow) !important;"
     );
+  });
+
+  it("removes the browser focus ring from elements that opt out", () => {
+    const rules = focusRules(stylesheets["./index.css"]).filter(
+      ({ selector }) =>
+        selector.includes('[data-focus-halo="none"]:focus-visible')
+    );
+    expect(rules.map(({ body }) => body.trim())).toEqual([
+      "outline: 1px solid transparent !important;",
+    ]);
   });
 });

@@ -1273,6 +1273,31 @@ describe("ChatComposer", () => {
         expect(input()).toHaveFocus();
       });
 
+      it("climbs from a chip, or an input without comments, to the pane's transcript with ⌘⌥↑", () => {
+        const climb = { key: "ArrowUp", metaKey: true, altKey: true };
+        const pane = (initial: PendingComment[]) => (
+          <div data-pane-id="pane-1">
+            <div
+              data-transcript-viewport
+              tabIndex={-1}
+              data-testid="transcript"
+            />
+            <Harness initial={initial} />
+          </div>
+        );
+        const view = render(pane(comments));
+        act(() => chip(2).focus());
+        fireEvent.keyDown(chip(2), climb);
+        expect(screen.getByTestId("transcript")).toHaveFocus();
+        expect(screen.queryByTestId("local-chat-comment-popover")).toBeNull();
+        view.unmount();
+
+        render(pane([]));
+        input().focus();
+        fireEvent.keyDown(input(), climb);
+        expect(screen.getByTestId("transcript")).toHaveFocus();
+      });
+
       it("edits the focused comment with Enter or E and returns to the chip on cancel", async () => {
         render(<Harness initial={comments} />);
         chip(2).focus();

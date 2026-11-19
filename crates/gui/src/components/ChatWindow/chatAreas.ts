@@ -73,3 +73,45 @@ export function moveChatArea(from: Element | null, offset: -1 | 1): boolean {
   }
   return true;
 }
+
+const COMPOSER_SELECTOR = '[data-testid="local-chat-composer"]';
+const TRANSCRIPT_SELECTOR = "[data-transcript-viewport]";
+
+/** Focus the composer of the pane holding `from`. */
+export function focusPaneComposer(from: Element | null): boolean {
+  const composer = from
+    ?.closest("[data-pane-id]")
+    ?.querySelector<HTMLElement>(COMPOSER_SELECTOR);
+  if (!composer) return false;
+  composer.focus({ preventScroll: true });
+  return document.activeElement === composer;
+}
+
+const PENDING_COMMENT_SELECTOR = ".chat-comment-chip";
+
+function paneOf(from: Element | null): Element | null {
+  return from?.closest("[data-pane-id]") ?? null;
+}
+
+/** ⌘⌥↑ from the composer or its comments: the pane's transcript caret. */
+export function focusPaneTranscript(from: Element | null): boolean {
+  const transcript =
+    paneOf(from)?.querySelector<HTMLElement>(TRANSCRIPT_SELECTOR);
+  if (!transcript) return false;
+  // Focused by the mouse: refocus so the caret starts.
+  if (document.activeElement === transcript) transcript.blur();
+  transcript.focus({ preventScroll: true });
+  return document.activeElement === transcript;
+}
+
+/** ⌘⌥↓ from the transcript: the pending comments, else the composer. */
+export function focusBelowTranscript(from: Element | null): boolean {
+  const pane = paneOf(from);
+  const chip =
+    pane?.querySelector<HTMLElement>(
+      `${PENDING_COMMENT_SELECTOR}[tabindex="0"]`
+    ) ?? null;
+  if (!chip) return focusPaneComposer(from);
+  chip.focus({ preventScroll: true });
+  return document.activeElement === chip;
+}

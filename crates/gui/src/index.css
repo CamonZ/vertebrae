@@ -595,7 +595,9 @@ body {
                                     keeps it off a scrollbar track,
                                     --focus-overlay-glow retints it
    - [data-focus-halo="none"]       the element shows focus another way (resize
-                                    grips)
+                                    grips, the transcript caret); the
+                                    browser's own focus ring is removed too,
+                                    or it shows through as a blue edge
    SVG parts can't take box-shadow; they use --focus-edge / --focus-halo in
    their own stroke rules.
    The halo is !important on purpose: state styles (an active chip, a selected
@@ -620,6 +622,11 @@ body {
   outline: 1px solid transparent !important;
   outline-offset: -1px !important;
   box-shadow: var(--focus-shadow) !important;
+}
+@media not (forced-colors: active) {
+  :root [data-focus-halo="none"]:focus-visible {
+    outline: 1px solid transparent !important;
+  }
 }
 :root [data-focus-halo="within"]:focus-within {
   border-color: var(--focus-edge) !important;

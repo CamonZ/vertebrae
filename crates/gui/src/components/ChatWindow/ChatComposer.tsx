@@ -25,6 +25,7 @@ import {
 } from "./assistantTextComments";
 import { CommentShortcutHint } from "./CommentShortcutHint";
 import { useCommentCardAnchor } from "./useCommentCardAnchor";
+import { focusPaneTranscript } from "./chatAreas";
 import "./chatComments.css";
 
 function CommentCard(props: ComponentPropsWithRef<"div">) {
@@ -417,7 +418,8 @@ export function ChatComposer({
   };
 
   // Keyboard navigation: the chip row is one Tab stop (roving tabindex);
-  // ⌘⌥↑ from the input enters it, since plain ↑/↓ belong to message history.
+  // ⌘⌥↑ from the input enters it, since plain ↑/↓ belong to message history;
+  // ⌘⌥↑ again goes on to the transcript.
   const rovingIndex = Math.min(
     chipFocusIndex ?? pendingComments.length - 1,
     pendingComments.length - 1
@@ -494,6 +496,11 @@ export function ChatComposer({
       case "ArrowDown":
         if (!(event.metaKey && event.altKey)) return;
         leaveChips();
+        break;
+      case "ArrowUp":
+        if (!(event.metaKey && event.altKey)) return;
+        if (!focusPaneTranscript(event.currentTarget)) return;
+        closeCommentPopover();
         break;
       default:
         return;
@@ -810,12 +817,13 @@ export function ChatComposer({
           event.key !== "ArrowUp" ||
           !event.metaKey ||
           !event.altKey ||
-          event.shiftKey ||
-          !pendingComments.length
+          event.shiftKey
         )
           return;
+        // ⌘⌥↑ climbs the pane: comments, then the transcript.
+        if (pendingComments.length) focusChip(rovingIndex);
+        else if (!focusPaneTranscript(inputRef.current)) return;
         event.preventDefault();
-        focusChip(rovingIndex);
       }}
     >
       <div className="hc-ctx">

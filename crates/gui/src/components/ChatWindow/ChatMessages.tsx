@@ -44,7 +44,10 @@ import { useCommentHighlights } from "./commentHighlight";
 import { CommentShortcutHint } from "./CommentShortcutHint";
 import { useScrollFollow } from "./useScrollFollow";
 import { hasInlineScrollFollow } from "./useInlineScrollFollow";
+import { useTranscriptCursor } from "./useTranscriptCursor";
+import { focusBelowTranscript, focusPaneComposer } from "./chatAreas";
 import "./chatComments.css";
+import "./transcriptCursor.css";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const HISTORY_LOAD_THRESHOLD_PX = 240;
@@ -543,6 +546,20 @@ export function ChatMessages({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const commentTriggerRef = useRef<HTMLButtonElement>(null);
+  const cursorOverlayRef = useRef<HTMLDivElement>(null);
+  const cursor = useTranscriptCursor({
+    viewportRef: messagesContainerRef,
+    contentRef,
+    overlayRef: cursorOverlayRef,
+    // A disabled composer cannot take focus; then just leave the transcript.
+    onExit: () => {
+      const transcript = messagesContainerRef.current;
+      if (!focusPaneComposer(transcript)) transcript?.blur();
+    },
+  });
+  const { clear: clearCursor, resume: resumeCursor } = cursor;
+  // The comment card was opened from the caret; closing it goes back.
+  const commentFromCursorRef = useRef(false);
 
   const loadingOlderRef = useRef(isLoadingOlderMessages);
   loadingOlderRef.current = isLoadingOlderMessages;
@@ -669,11 +686,36 @@ export function ChatMessages({
     setCommentEditorOpen(false);
     setCommentDraft("");
     window.getSelection()?.removeAllRanges();
-  }, [sessionId]);
+    clearCursor();
+  }, [sessionId, clearCursor]);
+  const cursorState = cursor.state;
   const openCommentEditor = useCallback(() => {
+    commentFromCursorRef.current = cursorState !== "off";
     setCommentDraft("");
     setCommentEditorOpen(true);
-  }, []);
+  }, [cursorState]);
+  /** Close the card without a comment; the selection and caret come back. */
+  const cancelCommentEditor = useCallback(() => {
+    setCommentEditorOpen(false);
+    if (!commentFromCursorRef.current || !selectionAction) return;
+    commentFromCursorRef.current = false;
+    const { range, backward } = selectionAction;
+    requestAnimationFrame(() => {
+      // Focus first: focusing can reset the document selection.
+      resumeCursor();
+      const [base, extent] = backward
+        ? [range.endContainer, range.startContainer]
+        : [range.startContainer, range.endContainer];
+      window
+        .getSelection()
+        ?.setBaseAndExtent(
+          base,
+          backward ? range.endOffset : range.startOffset,
+          extent,
+          backward ? range.startOffset : range.endOffset
+        );
+    });
+  }, [resumeCursor, selectionAction]);
   const commentShortcut = /Mac|iPhone|iPad|iPod/.test(navigator.platform)
     ? "⌘↵"
     : "Ctrl+Enter";
@@ -716,7 +758,11 @@ export function ChatMessages({
     setCommentEditorOpen(false);
     setSelectionAction(null);
     window.getSelection()?.removeAllRanges();
-  }, [commentDraft, onAddComment, selectionAction]);
+    if (commentFromCursorRef.current) {
+      commentFromCursorRef.current = false;
+      resumeCursor();
+    }
+  }, [commentDraft, onAddComment, resumeCursor, selectionAction]);
   const registerMessageRef = useCallback(
     (id: string, element: HTMLElement | null) => {
       if (element) {
@@ -930,6 +976,16 @@ export function ChatMessages({
           className="min-h-0 flex-1 overflow-y-auto p-4"
           data-testid="chat-messages-scroll"
           data-transcript-viewport
+          tabIndex={-1}
+          role="region"
+          aria-label="Conversation transcript"
+          // The caret is the focus indicator.
+          data-focus-halo="none"
+          data-transcript-cursor={cursor.state}
+          // Esc clears the selection or returns to the composer, not the panel.
+          data-owns-escape={cursor.state === "active" ? "" : undefined}
+          onFocus={cursor.onFocus}
+          onBlur={cursor.onBlur}
           onWheel={(event) => {
             if (event.deltaY < 0) {
               beginUserScroll();
@@ -939,10 +995,26 @@ export function ChatMessages({
           }}
           onTouchStart={beginGesture}
           onPointerDown={(event) => {
+            cursor.onPointerDown();
             // Scrollbar drags target the scroller; clicks in messages do not.
             if (event.target === event.currentTarget) beginGesture();
           }}
-          onKeyDown={(event) => onScrollKeyDown(event.nativeEvent)}
+          onKeyDown={(event) => {
+            if (
+              event.key === "ArrowDown" &&
+              event.metaKey &&
+              event.altKey &&
+              !event.shiftKey &&
+              event.target === event.currentTarget
+            ) {
+              // ⌘⌥↓: down to the pending comments, else the composer.
+              if (focusBelowTranscript(event.currentTarget))
+                event.preventDefault();
+              return;
+            }
+            onScrollKeyDown(event.nativeEvent);
+            cursor.onKeyDown(event);
+          }}
           onMouseUp={updateTextSelection}
           onKeyUp={updateTextSelection}
           onScroll={(event) => {
@@ -965,6 +1037,14 @@ export function ChatMessages({
             }
           }}
         >
+          <div
+            ref={cursorOverlayRef}
+            className="transcript-cursor"
+            aria-hidden="true"
+            data-testid="transcript-cursor"
+          >
+            <span className="transcript-cursor-caret" />
+          </div>
           {isEmpty && !isActive && !isLoadingInitialHistory && (
             <ChatEmptyState notice={notice} />
           )}
@@ -1092,7 +1172,7 @@ export function ChatMessages({
                   onKeyDown={(event) => {
                     if (event.key !== "Escape") return;
                     event.preventDefault();
-                    setCommentEditorOpen(false);
+                    cancelCommentEditor();
                   }}
                 >
                   <div className="chat-comment-card-header">
@@ -1131,7 +1211,7 @@ export function ChatMessages({
                     <button
                       type="button"
                       className="chat-comment-button"
-                      onClick={() => setCommentEditorOpen(false)}
+                      onClick={cancelCommentEditor}
                     >
                       Cancel
                     </button>

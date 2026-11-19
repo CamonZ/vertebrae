@@ -2,6 +2,7 @@ import {
   CHAT_AREA_SHORTCUT,
   CHAT_HELP_SHORTCUT,
   CHANGES_HINT_GROUPS,
+  TRANSCRIPT_HINTS,
   presentChatShortcut,
 } from "./chatShortcuts";
 
@@ -44,6 +45,10 @@ export const CHAT_SHORTCUT_SECTIONS = [
       { keys: ["Esc"], label: "Close hints or focused panel" },
     ],
   },
+  {
+    title: "Transcript",
+    shortcuts: TRANSCRIPT_HINTS.map(({ keys, label }) => ({ keys, label })),
+  },
   ...changesSections(),
   {
     title: "Panes",
@@ -74,7 +79,7 @@ export const CHAT_SHORTCUT_SECTIONS = [
       { keys: ["Enter"], label: "Send message" },
       {
         keys: ["⌘", "⌥", "↑ / ↓"],
-        label: "Focus pending comments / back to input",
+        label: "Up to pending comments, then the transcript / back down",
       },
       { keys: ["⇧", "Enter"], label: "New line" },
     ],
