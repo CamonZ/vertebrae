@@ -1,7 +1,7 @@
 use cucumber::{then, when};
 use fantoccini::{
     Locator,
-    actions::{InputSource, KeyAction, KeyActions, MouseActions, PointerAction},
+    actions::{InputSource, KeyAction, KeyActions},
 };
 
 use crate::GuiWorld;
@@ -70,49 +70,31 @@ async fn click(client: &fantoccini::Client, css: &str, what: &str) {
     gui_acceptance::click_when_ready(client, Locator::Css(css), what).await;
 }
 
-/// Click a diagram part with the real pointer, at the middle of its hit area
-/// once it has stopped moving and nothing covers it. (WebDriver's element
-/// click does not reach SVG groups in WebKitGTK.) Nothing is scrolled: the
-/// diagram frame clips its stage, so scrolling it would show what no user
-/// can reach.
-async fn click_part(client: &fantoccini::Client, id: &str) {
-    let point = std::cell::Cell::new(None);
-    gui_acceptance::wait_until(&format!("the {id} part, settled"), WAIT, || async {
-        let at = client
-            .execute(
-                r#"const g = document.querySelector(
-                    `[data-testid="flow-player"] svg g.md-part[data-part-id="${arguments[0]}"]`);
-                const hit = g?.querySelector(':scope > .md-part-hit');
-                if (!hit) return null;
-                const r = hit.getBoundingClientRect();
-                const [x, y] = [Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)];
-                return g.contains(document.elementFromPoint(x, y)) ? [x, y] : null;"#,
-                vec![id.into()],
-            )
-            .await
-            .map_err(|e| e.to_string())?;
-        let now = at
-            .as_array()
-            .map(|xy| (xy[0].as_i64().unwrap(), xy[1].as_i64().unwrap()));
-        // Settled: the same point on two probes in a row.
-        Ok(now.is_some() && point.replace(now) == now)
-    })
-    .await
-    .unwrap_or_else(|error| panic!("{error}"));
-    let (x, y) = point.get().unwrap();
-    let pointer = MouseActions::new("flow-part".into())
-        .then(PointerAction::MoveTo {
-            duration: None,
-            x,
-            y,
-        })
-        .then(PointerAction::Down { button: 0 })
-        .then(PointerAction::Up { button: 0 });
+/// Pin a diagram part through its keyboard activation (Space while it has
+/// focus), the same single activation path a click takes. A pointer click
+/// needs an uncovered pixel of the part's hit area, and in CI the fitted
+/// diagram is small enough that the Story panel and beat card can cover it.
+async fn activate_part(client: &fantoccini::Client, id: &str) {
+    gui_acceptance::wait_for_js(
+        client,
+        &format!("the {id} part focused"),
+        r#"const g = document.querySelector(
+            `[data-testid="flow-player"] svg g.md-part[data-part-id="${arguments[0]}"]`);
+        if (!g || g.getAttribute('tabindex') !== '0') return false;
+        g.focus();
+        return document.activeElement === g;"#,
+        vec![id.into()],
+        WAIT,
+    )
+    .await;
+    let space = KeyActions::new("flow-part".into())
+        .then(KeyAction::Down { value: ' ' })
+        .then(KeyAction::Up { value: ' ' });
     client
-        .perform_actions(pointer)
+        .perform_actions(space)
         .await
-        .expect("click the part");
-    client.release_actions().await.expect("release the pointer");
+        .expect("press Space on the part");
+    client.release_actions().await.expect("release Space");
 }
 
 /// ⇧B on the focused player, with Shift really held (typing "B" through
@@ -187,7 +169,7 @@ async fn three_options_switch(world: &mut GuiWorld) {
     )
     .await;
     wait_shows(&client, "A", "1").await;
-    click_part(&client, "api").await;
+    activate_part(&client, "api").await;
     gui_acceptance::wait_for_js(
         &client,
         "the api pinned",
