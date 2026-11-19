@@ -480,12 +480,6 @@
 .diff-comment-editor textarea::placeholder {
   color: var(--color-fg-soft);
 }
-.diff-comment-editor textarea:focus {
-  outline: none;
-  border-color: var(--color-line-strong);
-  box-shadow: 0 0 0 1px
-    color-mix(in oklch, var(--color-fg-mute) 28%, transparent);
-}
 
 /* Three disclosure levels: group, call preview, operation evidence and recorded data. */
 .tool-activity-group { margin: 8px 0 12px; min-width: 0; color: var(--color-fg-soft); font-family: var(--sans); font-size: var(--text-12); }
@@ -523,7 +517,6 @@
 .tool-activity-raw-panel pre { margin: 0; padding: 10px 12px; max-height: 340px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--color-fg-soft); font: var(--text-11)/1.65 var(--mono); tab-size: 2; }
 .tool-activity-raw-panel[aria-label="Arguments"] pre { max-height: 180px; }
 .tool-activity-empty { padding: 12px; color: var(--color-fg-mute); font-size: var(--text-11); }
-.tool-activity-group button:focus-visible, .tool-activity-raw-panel pre:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 @media (max-width: 700px) { .tool-activity-summary { flex-wrap: wrap; } .tool-activity-summary-status { width: 100%; padding-left: 21px; } .tool-activity-label { flex: 1; } .tool-activity-details { margin-left: 8px; padding-left: 10px; } .tool-activity-status { white-space: normal; } .tool-activity-raw { margin-left: 0; } }
 @media (prefers-reduced-motion: reduce) { .tool-activity-chevron, .tool-activity-summary { transition: none; } }
 

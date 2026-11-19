@@ -203,7 +203,7 @@ export function InlineEditField({
               disabled={disabled || isSubmitting || isDeleting}
               placeholder={placeholder}
               rows={rows}
-              className={`flex-1 min-h-0 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 disabled:opacity-50 ${resizeClasses[resize]}`}
+              className={`flex-1 min-h-0 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted focus:outline-none focus:border-[var(--focus-edge)] focus:ring-1 focus:ring-accent/30 disabled:opacity-50 ${resizeClasses[resize]}`}
             />
           ) : (
             <input
@@ -214,7 +214,7 @@ export function InlineEditField({
               onKeyDown={handleKeyDown}
               disabled={disabled || isSubmitting || isDeleting}
               placeholder={placeholder}
-              className={`flex-1 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 disabled:opacity-50`}
+              className={`flex-1 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted focus:outline-none focus:border-[var(--focus-edge)] focus:ring-1 focus:ring-accent/30 disabled:opacity-50`}
             />
           )}
 

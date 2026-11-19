@@ -81,3 +81,34 @@ export function presentChatShortcut(
     ].join(" "),
   };
 }
+
+export const CHANGES_FOCUS_SHORTCUT = {
+  modifiers: ["meta", "shift"],
+  keys: ["J", "j"],
+  displayKey: "J",
+  label: "Focus Changes / composer",
+} as const satisfies ChatShortcutDefinition;
+
+export const CHANGES_KEYS = {
+  base: { key: "b", label: "Base" },
+  target: { key: "h", label: "Compare" },
+  files: { key: "l", label: "File list" },
+  previous: { key: "p", label: "Previous file" },
+  next: { key: "n", label: "Next file" },
+  diff: { key: "d", label: "Full diff" },
+  file: { key: "f", label: "Full file" },
+  external: { key: "e", label: "External editor" },
+} as const;
+
+export const CHANGED_FILE_LIST_KEYS = {
+  keys: ["↑", "↓"],
+  label: "Browse file list",
+  directions: { ArrowUp: -1, ArrowDown: 1 },
+} as const;
+
+export const COMPARISON_KEYS = [
+  { keys: ["Type", "⌫"], label: "Filter options" },
+  { keys: ["↑", "↓", "Home", "End"], label: "Navigate options" },
+  { keys: ["↵"], label: "Select option" },
+  { keys: ["Esc"], label: "Close picker" },
+];

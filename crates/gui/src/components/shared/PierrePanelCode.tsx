@@ -65,9 +65,6 @@ export default function PierrePanelCode({
       disableFileHeader: true,
       disableLineNumbers: editable,
       overflow: editable ? ("scroll" as const) : ("wrap" as const),
-      unsafeCSS:
-        theme.unsafeCSS +
-        "\n[contenteditable]:focus-visible { outline: 2px solid var(--diffs-fg); outline-offset: -2px; }",
     }),
     [theme, editable]
   );

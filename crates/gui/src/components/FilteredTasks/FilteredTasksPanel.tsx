@@ -85,7 +85,7 @@ function CreateTaskForm({
           placeholder="Task title..."
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-xs text-fg placeholder:text-fg-mute transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-xs text-fg placeholder:text-fg-mute transition-all focus:border-[var(--focus-edge)] focus:outline-none focus:ring-2 focus:ring-accent/20"
           autoFocus
           disabled={isSubmitting}
         />
@@ -96,7 +96,7 @@ function CreateTaskForm({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
-          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-xs text-fg placeholder:text-fg-mute transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 resize-none"
+          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-xs text-fg placeholder:text-fg-mute transition-all focus:border-[var(--focus-edge)] focus:outline-none focus:ring-2 focus:ring-accent/20 resize-none"
           disabled={isSubmitting}
         />
 
@@ -106,7 +106,7 @@ function CreateTaskForm({
           <select
             value={level}
             onChange={(e) => setLevel(e.target.value as TaskLevel)}
-            className="rounded-lg border border-border bg-bg-2 px-2 py-1 text-xs text-fg transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+            className="rounded-lg border border-border bg-bg-2 px-2 py-1 text-xs text-fg transition-all focus:border-[var(--focus-edge)] focus:outline-none focus:ring-2 focus:ring-accent/20"
             disabled={isSubmitting}
           >
             <option value="task">Task</option>
@@ -297,7 +297,7 @@ export function FilteredTasksPanel({
               onChange={(e) =>
                 setSearch(e.target.value || null)
               }
-              className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 pl-7 text-xs text-fg placeholder:text-fg-mute transition-all focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20"
+              className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 pl-7 text-xs text-fg placeholder:text-fg-mute transition-all focus:border-[var(--focus-edge)] focus:outline-none focus:ring-2 focus:ring-accent/20"
               aria-label="Search tasks"
             />
             <svg

@@ -95,7 +95,9 @@ export function usePierreThemeOptions() {
       theme,
       themeType: isLight ? ("light" as const) : ("dark" as const),
       preferredHighlighter: CODE_HIGHLIGHTER,
-      unsafeCSS: pierreSelectionCSS(selection),
+      unsafeCSS:
+        pierreSelectionCSS(selection) +
+        "\n[contenteditable]:focus-visible { outline: 1px solid transparent; outline-offset: -1px; box-shadow: var(--focus-shadow); }",
     }),
     [theme, isLight, selection]
   );

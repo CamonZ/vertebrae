@@ -1,3 +1,8 @@
+import { flushSync } from "react-dom";
+import { useOpenLocalFile } from "../../hooks/useOpenLocalFile";
+import { ChangesKeyHints } from "./ChangesKeyHints";
+import { isEditableShortcutTarget } from "../../utils/keyboard";
+import { CHANGED_FILE_LIST_KEYS, CHANGES_KEYS } from "./chatShortcuts";
 import { OpenInExternalEditor } from "./workspace/OpenInExternalEditor";
 import { backgroundClient } from "../../background/client";
 import type { BackgroundTask, BackgroundOutputs } from "../../background/types";
@@ -12,6 +17,7 @@ import {
   useState,
   useId,
   type KeyboardEvent,
+  type Ref,
 } from "react";
 import {
   commands,
@@ -79,15 +85,20 @@ type SidebarMode = "changes" | "files";
  * unmounting in the per-worktree store.
  */
 export function WorktreeChanges({
+  ref,
   worktreePath,
   onChangesLoaded,
   sourceJump,
 }: {
+  ref?: Ref<HTMLElement>;
   worktreePath: string;
   sourceJump?: JumpTarget | null;
   /** Called with the parsed All Changes patch after every successful load. */
   onChangesLoaded?: (snapshot: WorktreeSnapshot) => void;
 }) {
+  const baseButton = useRef<HTMLButtonElement>(null);
+  const targetButton = useRef<HTMLButtonElement>(null);
+  const fileList = useRef<HTMLElement>(null);
   const [base, setBase] = useState<ComparisonEndpoint | null>(null);
   const [target, setTarget] = useState<ComparisonEndpoint>({
     kind: "working_tree",
@@ -98,7 +109,11 @@ export function WorktreeChanges({
 
   const [choices, setChoices] = useState<ComparisonChoice[]>([]);
   const [choicesError, setChoicesError] = useState<string | null>(null);
-  const [historicalPath, setHistoricalPath] = useState<string | null>(null);
+  const [historicalDocument, setHistoricalDocument] = useState<{
+    path: string;
+    view: "diff" | "file";
+  } | null>(null);
+  const historicalPath = historicalDocument?.path ?? null;
 
   const comparisonRequest = useMemo<ComparisonRequest>(
     () => ({ base, target, merge_base: wholeBranch }),
@@ -143,7 +158,7 @@ export function WorktreeChanges({
     if (!sourceJump) return;
     // References name the working copy and open beside a collapsed explorer.
     setFilesOpen(false);
-    setHistoricalPath(null);
+    setHistoricalDocument(null);
     setTarget((current) =>
       current.kind === "working_tree" ? current : { kind: "working_tree" }
     );
@@ -353,19 +368,29 @@ export function WorktreeChanges({
     [files]
   );
 
+  const selectedFile =
+    files.find((file) => file.path === activePath) ?? files[0];
+  const external = useOpenLocalFile(
+    worktreePath,
+    selectedFile?.path ?? "",
+    null,
+    null
+  );
+
   const nextLocalJump = useRef(0);
   // Navigating by hand drops a reference's revealed lines.
-  const jumpToFile = (path: string) => {
+  const jumpToFile = (path: string, focusHeader = false) => {
     setReveal(null);
     setActivePath(path);
     activate(worktreePath, null);
-    setJumpTarget({ path, nonce: --nextLocalJump.current });
+    setHistoricalDocument(null);
+    setJumpTarget({ path, nonce: --nextLocalJump.current, focusHeader });
   };
 
   const open = (path: string, view: "file" | "diff") => {
     setReveal(null);
     setActivePath(path);
-    if (historical) setHistoricalPath(path);
+    if (historical) setHistoricalDocument({ path, view });
     else openDocument(worktreePath, path, view);
   };
 
@@ -379,7 +404,32 @@ export function WorktreeChanges({
     else closeDocument(worktreePath, path);
   };
 
-  const onKeyDownCapture = (event: KeyboardEvent) => {
+  const moveFile = (direction: -1 | 1) => {
+    if (!files.length) return;
+    const current = files.findIndex((file) => file.path === activePath);
+    const index =
+      current < 0
+        ? direction === 1
+          ? 0
+          : files.length - 1
+        : (current + direction + files.length) % files.length;
+    jumpToFile(files[index].path, true);
+  };
+
+  const focusFileList = () => {
+    flushSync(() => {
+      setMode("changes");
+      setFilesOpen(true);
+    });
+    const list = fileList.current;
+    (
+      list?.querySelector<HTMLButtonElement>('[aria-current="location"]') ??
+      list?.querySelector<HTMLButtonElement>("button") ??
+      list
+    )?.focus();
+  };
+
+  const onKeyDownCapture = (event: KeyboardEvent<HTMLElement>) => {
     if (
       closing == null &&
       (event.metaKey || event.ctrlKey) &&
@@ -388,7 +438,60 @@ export function WorktreeChanges({
     ) {
       event.preventDefault();
       if (!historical && activeDocument) save(activeDocument);
+      return;
     }
+    const origin = event.nativeEvent.composedPath()[0];
+    if (
+      closing != null ||
+      event.defaultPrevented ||
+      event.nativeEvent.isComposing ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.altKey ||
+      event.shiftKey ||
+      !(origin instanceof HTMLElement) ||
+      !event.currentTarget.contains(origin) ||
+      isEditableShortcutTarget(origin) ||
+      origin.closest('[role="combobox"][aria-expanded="true"]') ||
+      document.querySelector('[role="dialog"][aria-modal="true"]')
+    )
+      return;
+
+    const list = fileList.current;
+    if (
+      list?.contains(origin) &&
+      (event.key === "ArrowUp" || event.key === "ArrowDown")
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      const rows = Array.from(list.querySelectorAll("button"));
+      const index = rows.findIndex((row) => row.contains(origin));
+      rows[index + CHANGED_FILE_LIST_KEYS.directions[event.key]]?.focus();
+      return;
+    }
+
+    const openSelected = (view: "file" | "diff") => {
+      if (!selectedFile) return;
+      // Opening the document removes the focused diff heading.
+      event.currentTarget.focus();
+      open(selectedFile.path, view);
+    };
+    const actions: Record<string, () => void> = {
+      [CHANGES_KEYS.base.key]: () => baseButton.current?.click(),
+      [CHANGES_KEYS.target.key]: () => targetButton.current?.click(),
+      [CHANGES_KEYS.files.key]: focusFileList,
+      [CHANGES_KEYS.previous.key]: () => moveFile(-1),
+      [CHANGES_KEYS.next.key]: () => moveFile(1),
+      [CHANGES_KEYS.diff.key]: () => openSelected("diff"),
+      [CHANGES_KEYS.file.key]: () => openSelected("file"),
+      [CHANGES_KEYS.external.key]: () => {
+        if (selectedFile) void external.open();
+      },
+    };
+    if (!Object.prototype.hasOwnProperty.call(actions, event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.repeat) actions[event.key]();
   };
 
   const changesBody =
@@ -417,6 +520,7 @@ export function WorktreeChanges({
               <OpenInExternalEditor
                 root={worktreePath}
                 path={path}
+                shortcut={CHANGES_KEYS.external.key}
                 line={
                   effectiveJumpTarget?.path === path
                     ? effectiveJumpTarget.line
@@ -437,9 +541,17 @@ export function WorktreeChanges({
 
   return (
     <section
+      ref={ref}
+      tabIndex={-1}
       aria-label="Worktree changes"
-      className="flex min-h-0 flex-1 flex-col gap-2 p-3 text-sm"
+      className="changes-keyboard-region flex min-h-0 flex-1 flex-col gap-2 p-3 text-sm"
       onKeyDownCapture={onKeyDownCapture}
+      onFocusCapture={(event) => {
+        if (!(event.target instanceof HTMLElement)) return;
+        const path = event.target.closest<HTMLElement>("[data-changes-path]")
+          ?.dataset.changesPath;
+        if (path) setActivePath(path);
+      }}
     >
       <div className="flex flex-wrap items-center gap-3">
         <div className="changes-comparison-controls">
@@ -447,6 +559,8 @@ export function WorktreeChanges({
             Base
             <ComparisonSelect
               label="Comparison base"
+              buttonRef={baseButton}
+              shortcut={CHANGES_KEYS.base.key}
               value={base ? endpointKey(base) : "auto"}
               onChange={(value) => {
                 const endpoint = value === "auto" ? null : endpointFor(value);
@@ -478,13 +592,15 @@ export function WorktreeChanges({
             Compare
             <ComparisonSelect
               label="Comparison target"
+              buttonRef={targetButton}
+              shortcut={CHANGES_KEYS.target.key}
               value={endpointKey(target)}
               onChange={(value) => {
                 const endpoint = endpointFor(value);
 
                 if (endpoint) {
                   setTarget(endpoint);
-                  setHistoricalPath(null);
+                  setHistoricalDocument(null);
                   setMode("changes");
                   setRefresh((value) => ({
                     count: value.count + 1,
@@ -629,7 +745,7 @@ export function WorktreeChanges({
               type="button"
               className="changes-files-toggle"
               aria-label={filesOpen ? "Hide files" : "Show files"}
-              title={filesOpen ? "Collapse file list" : "Expand file list"}
+              title={`${filesOpen ? "Collapse" : "Expand"} file list · Focus file list (${CHANGES_KEYS.files.key})`}
               aria-expanded={filesOpen}
               aria-controls={filesOpen ? fileListId : undefined}
               onClick={() => setFilesOpen((value) => !value)}
@@ -651,8 +767,14 @@ export function WorktreeChanges({
           </div>
           {filesOpen && (
             <div id={fileListId} className="flex min-h-0 flex-1 flex-col">
-              {mode === "changes" && files.length > 0 && (
-                <nav aria-label="Changed files" className="changes-files-list">
+              {mode === "changes" && (
+                <nav
+                  ref={fileList}
+                  tabIndex={-1}
+                  aria-label="Changed files"
+                  aria-keyshortcuts="ArrowUp ArrowDown"
+                  className="changes-files-list"
+                >
                   <ul>
                     {files.map((item) => {
                       const slash = item.path.lastIndexOf("/");
@@ -662,11 +784,16 @@ export function WorktreeChanges({
                         ? `${item.old_path} → ${item.path}`
                         : item.path;
                       return (
-                        <li key={item.path} className="changes-file-item">
+                        <li
+                          key={item.path}
+                          data-changes-path={item.path}
+                          className="changes-file-item"
+                        >
                           <button
                             type="button"
                             className="changes-file-row"
                             aria-label={`Jump to ${item.path}`}
+                            tabIndex={item.path === selectedFile?.path ? 0 : -1}
                             aria-current={
                               activePath === item.path ? "location" : undefined
                             }
@@ -702,15 +829,6 @@ export function WorktreeChanges({
                                 </span>
                               </span>
                             )}
-                          </button>
-                          <button
-                            type="button"
-                            className="changes-file-open"
-                            aria-label={`Open ${item.path}`}
-                            title="Open"
-                            onClick={() => open(item.path, "diff")}
-                          >
-                            Open
                           </button>
                         </li>
                       );
@@ -752,7 +870,7 @@ export function WorktreeChanges({
               onClick={() => {
                 setReveal(null);
                 activate(worktreePath, null);
-                setHistoricalPath(null);
+                setHistoricalDocument(null);
               }}
             >
               All changes
@@ -790,11 +908,15 @@ export function WorktreeChanges({
                 </span>
               ))}
           </nav>
-          {historical && historicalPath && state.status === "ready" ? (
+          {historical && historicalDocument && state.status === "ready" ? (
             <HistoricalDocument
               key={`${historicalPath}:${state.data.comparison.base_commit}:${state.data.comparison.target_commit}`}
               worktreePath={worktreePath}
-              path={historicalPath}
+              path={historicalDocument.path}
+              view={historicalDocument.view}
+              onViewChange={(view) =>
+                setHistoricalDocument({ path: historicalDocument.path, view })
+              }
               change={state.data.files.find(
                 (file) => file.path === historicalPath
               )}
@@ -829,6 +951,8 @@ export function WorktreeChanges({
           )}
         </div>
       </div>
+      {external.error && <p role="alert">{external.error}</p>}
+      <ChangesKeyHints hasFiles={files.length > 0} moveFile={moveFile} />
       <UnsavedChangesDialog
         paths={closing ? [closing] : null}
         busy={closeBusy}

@@ -1,3 +1,4 @@
+import { CHANGES_FOCUS_SHORTCUT, matchesChatShortcut } from "./chatShortcuts";
 import { FileReferenceNavigationContext } from "../shared/FileReferenceNavigationContext";
 import type { FileTarget } from "../shared/FileReferenceNavigationContext";
 import {
@@ -150,6 +151,7 @@ export function ChatWindow({
   // Dirty documents that block leaving the Changes view until resolved.
   const [leaving, setLeaving] = useState<string[] | null>(null);
   const [leaveBusy, setLeaveBusy] = useState(false);
+  const changesRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // The All Changes patch as last loaded, kept after the Changes view closes
   // so its comments can still be placed on the conversation's tool calls.
@@ -561,6 +563,25 @@ export function ChatWindow({
       className="chat-association-panel flex h-full min-h-0 flex-col"
       data-testid="local-chat-window"
       data-project-path={chat.session.projectPath ?? ""}
+      onKeyDownCapture={(event) => {
+        const changes = changesRef.current;
+        if (
+          !changes ||
+          event.defaultPrevented ||
+          event.nativeEvent.isComposing ||
+          event.altKey ||
+          event.ctrlKey ||
+          !matchesChatShortcut(event, CHANGES_FOCUS_SHORTCUT) ||
+          document.querySelector('[role="dialog"][aria-modal="true"]')
+        )
+          return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+        if (changes.contains(document.activeElement)) inputRef.current?.focus();
+        else changes.focus();
+      }}
     >
       <ChatHeader
         showProjectContext={showProjectContext}
@@ -612,6 +633,7 @@ export function ChatWindow({
           >
             <WorktreeChanges
               key={`${sessionId}:${worktreePath}`}
+              ref={changesRef}
               worktreePath={worktreePath}
               onChangesLoaded={handleWorktreeLoaded}
               sourceJump={

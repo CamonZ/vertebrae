@@ -64,12 +64,6 @@
   color: var(--color-fg);
 }
 
-.changes-files-toggle:focus-visible,
-.changes-file-row:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
-}
-
 .changes-files-list {
   min-height: 0;
   overflow-y: auto;
@@ -170,11 +164,6 @@
   color: var(--color-fg);
 }
 
-.changes-refresh:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
 .changes-refresh:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -191,7 +180,6 @@
   align-items: center;
 }
 
-.changes-file-open,
 .changes-tab-close,
 .changes-open-button {
   display: grid;
@@ -202,18 +190,12 @@
   cursor: pointer;
 }
 
-.changes-file-open {
-  width: 24px;
-  height: 24px;
-}
-
 .changes-open-button {
   padding: 2px 8px;
   border: 1px solid var(--color-line);
   font-size: 11px;
 }
 
-.changes-file-open:hover,
 .changes-tab-close:hover,
 .changes-open-button:hover,
 .document-views button:hover:not(:disabled):not([aria-pressed="true"]),
@@ -222,16 +204,6 @@
 .files-tree-row:hover:not(:disabled) {
   background: color-mix(in srgb, var(--color-fg) 5%, transparent);
   color: var(--color-fg);
-}
-
-.changes-file-open:focus-visible,
-.changes-tab-close:focus-visible,
-.changes-open-button:focus-visible,
-.files-tree-row:focus-visible,
-.document-views button:focus-visible,
-.document-save:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
 }
 
 .changes-tabs {
@@ -443,7 +415,9 @@
 .changes-resize-handle {
   position: relative;
   flex: 0 0 2px;
-  background: var(--color-line-strong);
+  --changes-divider: var(--color-line);
+  background: linear-gradient(var(--changes-divider), var(--changes-divider))
+    center / 1px 100% no-repeat;
   cursor: ew-resize;
   touch-action: none;
   user-select: none;
@@ -457,21 +431,31 @@
 }
 
 .changes-resize-handle:hover,
-.changes-resize-handle:active,
+.changes-resize-handle:active {
+  --changes-divider: var(--focus-edge);
+}
+
 .changes-resize-handle:focus-visible {
-  background: var(--color-fg-mute);
-  outline: none;
+  --changes-divider: var(--focus-edge);
+  outline: 1px solid transparent;
+  outline-offset: -1px;
+}
+
+.changes-resize-handle:focus-visible::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: var(--focus-edge);
+  pointer-events: none;
 }
 
 .changes-file-row {
   min-width: 0;
-}
-
-.changes-file-open {
-  width: auto;
-  min-width: 36px;
-  margin-right: 4px;
-  font-size: 11px;
 }
 
 .document-toolbar {
@@ -586,11 +570,6 @@
   border-color: var(--color-fg-faint);
 }
 
-.comparison-select:focus-visible {
-  outline: 2px solid var(--color-fg-mute);
-  outline-offset: 2px;
-}
-
 .comparison-select[aria-expanded="true"] {
   border-color: var(--color-fg-mute);
 }
@@ -640,12 +619,13 @@
 /* The custom header remains inside Pierre's sticky, virtualized file heading. */
 .changes-diff-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 4px 8px;
   width: 100%;
   min-width: 0;
   min-height: 36px;
-  padding: 0 8px;
+  padding: 3px 8px;
   box-sizing: border-box;
   color: var(--color-fg);
 }
@@ -655,7 +635,8 @@
   align-items: center;
   gap: 8px;
   flex: 1;
-  min-width: 0;
+  min-width: min(12ch, 100%);
+  min-height: 28px;
   align-self: stretch;
   cursor: pointer;
   text-align: left;
@@ -669,11 +650,6 @@
   font-family: var(--font-mono);
 }
 
-.changes-fold-button:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
-}
-
 .changes-diff-totals {
   display: flex;
   gap: 8px;
@@ -685,4 +661,39 @@
 }
 .changes-diff-additions {
   color: var(--diffs-addition-color-override, #68ad71);
+}
+
+.changes-key-hints {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  border-top: 1px solid var(--color-line);
+  padding-top: 6px;
+  color: var(--color-fg-soft);
+  font-size: 11px;
+}
+
+.changes-key-hints kbd {
+  color: var(--color-fg);
+}
+
+.changes-key-hints button {
+  border-radius: var(--radius-xs, 3px);
+  cursor: pointer;
+}
+
+.changes-key-hints button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.changes-key-hints button:hover:not(:disabled) {
+  color: var(--color-fg);
+}
+
+.comparison-filter {
+  padding: 4px 8px;
+  color: var(--color-fg-soft);
+  overflow-wrap: anywhere;
 }

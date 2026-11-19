@@ -21,12 +21,7 @@
 .chat-association > summary::-webkit-details-marker {
   display: none;
 }
-.chat-association > summary:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 2px var(--color-bg),
-    0 0 0 4px var(--color-accent);
-}
+
 .conversation-associations {
   display: flex;
   align-items: center;
@@ -43,10 +38,7 @@
   cursor: default;
   border-radius: 3px;
 }
-.conversation-associations [tabindex]:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
+
 .association-tooltip-text {
   display: block;
   width: max-content;

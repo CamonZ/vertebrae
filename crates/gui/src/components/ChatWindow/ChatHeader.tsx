@@ -1,3 +1,4 @@
+import { CHANGES_FOCUS_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StopIcon } from "../panels";
 import { OverflowMenu } from "../molecules/OverflowMenu";
@@ -393,7 +394,7 @@ export function ChatHeader({
     {
       key: "changes",
       title: changesOpen
-        ? "Hide Changes panel (⌘⇧B when worktree has changes)"
+        ? `Hide Changes panel (⌘⇧B) · ${CHANGES_FOCUS_SHORTCUT.label} (${presentChatShortcut(CHANGES_FOCUS_SHORTCUT)?.keys.join("")})`
         : "Show Changes panel (⌘⇧B when worktree has changes)",
       ariaLabel: "Changes",
       onClick: onToggleChanges!,

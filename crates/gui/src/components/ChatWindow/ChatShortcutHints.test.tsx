@@ -24,9 +24,11 @@ describe("ChatShortcutHints", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("renders all three shortcut sections", () => {
+  it("renders the shortcut sections", () => {
     render(<ChatShortcutHints onClose={vi.fn()} />);
     expect(screen.getByText("Panel")).toBeInTheDocument();
+    expect(screen.getByText("Changes")).toBeInTheDocument();
+    expect(screen.getByText("Previous file")).toBeInTheDocument();
     expect(screen.getByText("Panes")).toBeInTheDocument();
     expect(screen.getByText("Sessions")).toBeInTheDocument();
   });
@@ -46,10 +48,6 @@ describe("ChatShortcutHints", () => {
 });
 
 describe("CHAT_SHORTCUT_SECTIONS", () => {
-  it("has exactly three sections", () => {
-    expect(CHAT_SHORTCUT_SECTIONS).toHaveLength(3);
-  });
-
   it("each section has a title and at least one shortcut", () => {
     for (const section of CHAT_SHORTCUT_SECTIONS) {
       expect(section.title).toBeTruthy();

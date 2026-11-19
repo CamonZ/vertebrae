@@ -1,3 +1,4 @@
+import { CHANGES_KEYS } from "../chatShortcuts";
 import { OpenInExternalEditor } from "./OpenInExternalEditor";
 import type { DiffPreferences } from "../../../utils/codeAppearance";
 import { lazy, Suspense, useEffect, useState } from "react";
@@ -17,14 +18,17 @@ export function HistoricalDocument({
   change,
   comparison,
   diffStyle,
+  view,
+  onViewChange,
 }: {
   worktreePath: string;
   path: string;
   change: WorktreeChange | undefined;
   comparison: ComparisonSnapshot;
   diffStyle?: DiffPreferences["diffStyle"];
+  view: "file" | "diff";
+  onViewChange(view: "file" | "diff"): void;
 }) {
-  const [view, setView] = useState<"file" | "diff">("diff");
   const [state, setState] = useState<
     { base: FileBody; target: FileBody } | { error: string } | null
   >(null);
@@ -71,10 +75,15 @@ export function HistoricalDocument({
   return (
     <section
       aria-label={`Historical document ${path}`}
+      data-changes-path={path}
       className="flex min-h-0 flex-1 flex-col gap-2"
     >
       <div className="document-toolbar">
-        <OpenInExternalEditor root={worktreePath} path={path} />
+        <OpenInExternalEditor
+          root={worktreePath}
+          path={path}
+          shortcut={CHANGES_KEYS.external.key}
+        />
         <span className="document-path">{path} · Read-only</span>
         <div role="group" aria-label="Document view" className="document-views">
           {(["diff", "file"] as const).map((value) => (
@@ -82,7 +91,8 @@ export function HistoricalDocument({
               key={value}
               type="button"
               aria-pressed={view === value}
-              onClick={() => setView(value)}
+              title={`${CHANGES_KEYS[value].label} (${CHANGES_KEYS[value].key})`}
+              onClick={() => onViewChange(value)}
             >
               {value === "diff" ? "Diff" : "File"}
             </button>

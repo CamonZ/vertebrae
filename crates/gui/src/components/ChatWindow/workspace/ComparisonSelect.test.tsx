@@ -57,6 +57,14 @@ describe("ComparisonSelect", () => {
     expect(
       screen.getByRole("option", { name: "feature/changes" })
     ).toHaveAttribute("id", trigger.getAttribute("aria-activedescendant"));
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.keyDown(trigger, { key: "x" });
+    expect(screen.getByText("No matching options")).toBeVisible();
+    expect(trigger).not.toHaveAttribute("aria-activedescendant");
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    expect(change).not.toHaveBeenCalled();
+    fireEvent.keyDown(trigger, { key: "Backspace" });
+    expect(screen.getAllByRole("option")).toHaveLength(1);
     fireEvent.keyDown(trigger, { key: "Escape" });
 
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -82,7 +90,9 @@ describe("ComparisonSelect", () => {
 
     fireEvent.click(screen.getByRole("combobox"));
     expect(screen.getByRole("combobox")).toHaveFocus();
-    expect(screen.getByRole("listbox")).toHaveClass("comparison-options");
+    expect(
+      screen.getByRole("listbox").closest(".comparison-options")
+    ).not.toBeNull();
     expect(screen.getByRole("option", { name: "main" })).toHaveAttribute(
       "aria-selected",
       "true"

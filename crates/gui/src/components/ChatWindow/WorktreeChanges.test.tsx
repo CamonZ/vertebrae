@@ -26,6 +26,7 @@ vi.mock("./workspace/useWorktreeWatch", () => ({
 vi.mock("../../bindings", () => ({
   commands: {
     loadWorktreeChanges: vi.fn(),
+    openLocalFile: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     listComparisonChoices: vi
       .fn()
       .mockResolvedValue({ status: "ok", data: [] }),
@@ -223,7 +224,7 @@ async function openChangedFile() {
   load.mockResolvedValue({ status: "ok", data: modified });
   const view = render(<WorktreeChanges worktreePath="/worktree" />);
   fireEvent.click(
-    await screen.findByRole("button", { name: "Open src/app.ts" })
+    await screen.findByRole("button", { name: "Open diff src/app.ts" })
   );
   await screen.findByRole("textbox", { name: "Edit src/app.ts" });
   return view;
@@ -237,6 +238,79 @@ function selectComparison(control: HTMLElement, value: string) {
   if (!option) throw new Error(`Missing comparison option: ${value}`);
   fireEvent.click(option);
 }
+
+it("opens the changed-file list and wraps keyboard jumps without capturing editor input", async () => {
+  await openChangedFile();
+  const editor = screen.getByRole("textbox", { name: "Edit src/app.ts" });
+  editor.focus();
+  expect(fireEvent.keyDown(editor, { key: "n" })).toBe(true);
+  expect(fireEvent.keyDown(editor, { key: "b" })).toBe(true);
+  expect(editor).toHaveFocus();
+
+  fireEvent.click(screen.getByRole("button", { name: "Hide files" }));
+  const changes = screen.getByRole("region", { name: "Worktree changes" });
+  changes.focus();
+  fireEvent.keyDown(changes, { key: "l" });
+  const row = screen.getByRole("button", { name: "Jump to src/app.ts" });
+  expect(row).toHaveFocus();
+
+  fireEvent.keyDown(row, { key: "n" });
+  const jump = await screen.findByLabelText("Jump target");
+  expect(jump).toHaveTextContent("gone.txt");
+  fireEvent.keyDown(row, { key: "n" });
+  expect(jump).toHaveTextContent("src/app.ts");
+  fireEvent.keyDown(row, { key: "p" });
+  expect(jump).toHaveTextContent("gone.txt");
+});
+
+it("moves focus with the arrow keys inside the changed-file list", async () => {
+  load.mockResolvedValue({ status: "ok", data: modified });
+  render(<WorktreeChanges worktreePath="/worktree" />);
+  const first = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+  const last = screen.getByRole("button", { name: "Jump to gone.txt" });
+  const changes = screen.getByRole("region", { name: "Worktree changes" });
+  changes.focus();
+  expect(fireEvent.keyDown(changes, { key: "ArrowDown" })).toBe(true);
+  fireEvent.keyDown(changes, { key: "l" });
+  expect(first).toHaveFocus();
+  expect(last).toHaveAttribute("tabindex", "-1");
+
+  expect(fireEvent.keyDown(first, { key: "ArrowDown" })).toBe(false);
+  expect(last).toHaveFocus();
+  expect(first).toHaveAttribute("tabindex", "-1");
+  expect(last).toHaveAttribute("tabindex", "0");
+  fireEvent.keyDown(last, { key: "ArrowDown", repeat: true });
+  expect(last).toHaveFocus();
+  fireEvent.keyDown(last, { key: "ArrowUp" });
+  expect(first).toHaveFocus();
+  fireEvent.keyDown(first, { key: "ArrowUp" });
+  expect(first).toHaveFocus();
+});
+
+it("opens the focused file in Pierre or the configured external editor", async () => {
+  load.mockResolvedValue({ status: "ok", data: modified });
+  render(<WorktreeChanges worktreePath="/worktree" />);
+  const row = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+  act(() => row.focus());
+
+  fireEvent.keyDown(row, { key: "d" });
+  await screen.findByText("diff editor for src/app.ts");
+  const changes = screen.getByRole("region", { name: "Worktree changes" });
+  expect(changes).toHaveFocus();
+
+  fireEvent.keyDown(changes, { key: "f" });
+  await screen.findByText("file editor for src/app.ts");
+  await act(async () => {
+    fireEvent.keyDown(changes, { key: "e" });
+  });
+  expect(commands.openLocalFile).toHaveBeenCalledWith(
+    "/worktree",
+    "src/app.ts",
+    null,
+    null,
+    null
+  );
+});
 
 describe("WorktreeChanges", () => {
   it("retains the diff component on background refresh and resets it for comparison/worktree changes", async () => {
@@ -722,7 +796,7 @@ describe("WorktreeChanges", () => {
         screen.queryByRole("button", { name: "Close src/app.ts" })
       ).toBeNull()
     );
-    fireEvent.click(screen.getByRole("button", { name: "Open src/app.ts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open diff src/app.ts" }));
     fireEvent.change(
       await screen.findByRole("textbox", { name: "Edit src/app.ts" }),
       { target: { value: "throwaway\n" } }
@@ -743,7 +817,7 @@ describe("WorktreeChanges", () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     render(<WorktreeChanges worktreePath="/worktree" />);
     fireEvent.click(
-      await screen.findByRole("button", { name: "Open gone.txt" })
+      await screen.findByRole("button", { name: "Open diff gone.txt" })
     );
     await screen.findByText("Deleted file");
     expect(screen.getByLabelText("Baseline contents")).toHaveTextContent("bye");
@@ -810,7 +884,7 @@ describe("WorktreeChanges", () => {
     });
     view.unmount();
     render(<WorktreeChanges worktreePath="/other" />);
-    await screen.findByRole("button", { name: "Open src/app.ts" });
+    await screen.findByRole("button", { name: "Open diff src/app.ts" });
     expect(
       screen.queryByRole("button", { name: "Close src/app.ts" })
     ).toBeNull();
@@ -874,14 +948,24 @@ it("shows uncapped backend totals and sends independently selected endpoints", a
   expect(totals).toHaveTextContent("−7");
   expect(totals).toHaveTextContent("2 binary");
   expect(screen.queryByText("Comparison details")).not.toBeInTheDocument();
-  selectComparison(
-    screen.getByRole("combobox", { name: "Comparison base" }),
-    JSON.stringify({ kind: "ref", value: "refs/heads/feature-A" })
-  );
-  selectComparison(
-    screen.getByRole("combobox", { name: "Comparison target" }),
-    JSON.stringify({ kind: "worktree", value: "/linked B" })
-  );
+  const changes = screen.getByRole("region", { name: "Worktree changes" });
+  changes.focus();
+  fireEvent.keyDown(changes, { key: "b" });
+  const basePicker = screen.getByRole("combobox", { name: "Comparison base" });
+  expect(basePicker).toHaveFocus();
+  fireEvent.keyDown(basePicker, { key: "f" });
+  fireEvent.keyDown(basePicker, { key: "e" });
+  expect(screen.getAllByRole("option")).toHaveLength(1);
+  fireEvent.keyDown(basePicker, { key: "Enter" });
+
+  fireEvent.keyDown(basePicker, { key: "h" });
+  const targetPicker = screen.getByRole("combobox", {
+    name: "Comparison target",
+  });
+  expect(targetPicker).toHaveFocus();
+  fireEvent.keyDown(targetPicker, { key: "l" });
+  expect(screen.getAllByRole("option")).toHaveLength(1);
+  fireEvent.keyDown(targetPicker, { key: "Enter" });
   await waitFor(() =>
     expect(load).toHaveBeenLastCalledWith("/worktree", {
       base: { kind: "ref", value: "refs/heads/feature-A" },
@@ -905,7 +989,7 @@ it("keeps a local draft while committed targets open read-only with pinned basel
   }));
   render(<WorktreeChanges worktreePath="/worktree" />);
   await screen.findByLabelText("Diff for src/app.ts");
-  fireEvent.click(screen.getByRole("button", { name: "Open src/app.ts" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open diff src/app.ts" }));
   fireEvent.change(
     await screen.findByRole("textbox", { name: "Edit src/app.ts" }),
     { target: { value: "draft" } }
@@ -915,8 +999,14 @@ it("keeps a local draft while committed targets open read-only with pinned basel
     "head"
   );
   await screen.findByLabelText("Diff for src/app.ts");
-  fireEvent.click(screen.getByRole("button", { name: "Open src/app.ts" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open diff src/app.ts" }));
   await screen.findByLabelText("Historical document src/app.ts");
+  const changes = screen.getByRole("region", { name: "Worktree changes" });
+  changes.focus();
+  fireEvent.keyDown(changes, { key: "f" });
+  await screen.findByText("file editor for src/app.ts");
+  fireEvent.keyDown(changes, { key: "d" });
+  await screen.findByText("diff editor for src/app.ts");
   expect(
     screen.queryByRole("button", { name: "Save" })
   ).not.toBeInTheDocument();
@@ -946,7 +1036,7 @@ it("offers only Base and Compare and switches diff layout without reloading Git 
     "data-layout",
     "split"
   );
-  fireEvent.click(screen.getByRole("button", { name: "Open src/app.ts" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open diff src/app.ts" }));
   const editor = await screen.findByRole("textbox", {
     name: "Edit src/app.ts",
   });
@@ -965,8 +1055,8 @@ it("offers only Base and Compare and switches diff layout without reloading Git 
   expect(
     within(
       screen.getByRole("navigation", { name: "Changed files" })
-    ).getAllByText("Open")
-  ).toHaveLength(2);
+    ).queryByRole("button", { name: /^Open/ })
+  ).toBeNull();
 });
 
 describe("WorktreeChanges source references", () => {

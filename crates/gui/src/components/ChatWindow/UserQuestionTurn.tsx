@@ -224,7 +224,7 @@ export function UserQuestionTurn({
                       question.multi_select
                     )
                   }
-                  className="mt-1 w-full rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-2 py-1.5 text-sm text-[var(--color-fg)] outline-none focus:border-[var(--color-accent)]"
+                  className="mt-1 w-full rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-2 py-1.5 text-sm text-[var(--color-fg)] outline-none focus:border-[var(--focus-edge)]"
                 />
               </label>
             </fieldset>

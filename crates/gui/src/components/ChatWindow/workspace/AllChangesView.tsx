@@ -1,3 +1,4 @@
+import { CHANGES_KEYS } from "../chatShortcuts";
 import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
 import type { DiffPreferences } from "../../../utils/codeAppearance";
 import {
@@ -27,6 +28,7 @@ import { diffWorkerPool } from "../../thread/toolChange/diffWorkerPool";
 export interface JumpTarget extends SourceLocation {
   /** Distinguishes repeated jumps to the same file. */
   nonce: number;
+  focusHeader?: boolean;
 }
 
 export interface AllChangesViewProps {
@@ -60,6 +62,7 @@ export default function AllChangesView({
     new Set()
   );
   const viewRef = useRef<CodeViewHandle<ReviewAnnotation, undefined>>(null);
+  const jumpHeader = useRef<HTMLButtonElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { items, fallbacks, itemPaths } = useMemo(() => {
     const items: CodeViewDiffItem<ReviewAnnotation>[] = [];
@@ -253,7 +256,7 @@ export default function AllChangesView({
   useEffect(() => {
     if (!jumpTarget || handledJump.current === jumpTarget.nonce) return;
     const { path } = jumpTarget;
-    if (collapsedPaths.has(path)) {
+    if (!jumpTarget.focusHeader && collapsedPaths.has(path)) {
       setCollapsedPaths(
         (current) => new Set([...current].filter((value) => value !== path))
       );
@@ -264,6 +267,7 @@ export default function AllChangesView({
       // A request made while Changes mounts arrives before Pierre's first
       // layout; scroll once that frame has been laid out. A re-run before
       // then cancels this frame and schedules the jump again.
+      let focusFrame: number | undefined;
       const frame = requestAnimationFrame(() => {
         handledJump.current = target.nonce;
         viewRef.current?.scrollTo(
@@ -277,8 +281,16 @@ export default function AllChangesView({
               }
             : { type: "item", id: path, align: "start" }
         );
+        if (target.focusHeader) {
+          focusFrame = requestAnimationFrame(() =>
+            jumpHeader.current?.focus({ preventScroll: true })
+          );
+        }
       });
-      return () => cancelAnimationFrame(frame);
+      return () => {
+        cancelAnimationFrame(frame);
+        if (focusFrame !== undefined) cancelAnimationFrame(focusFrame);
+      };
     }
     const container = containerRef.current;
     const target = container?.querySelector<HTMLElement>(
@@ -291,6 +303,7 @@ export default function AllChangesView({
         container.getBoundingClientRect().top +
         container.scrollTop;
       container.scrollTo({ top, behavior: "auto" });
+      if (jumpTarget.focusHeader) target.focus({ preventScroll: true });
     }
   }, [jumpTarget, itemPaths, collapsedPaths]);
 
@@ -326,11 +339,17 @@ export default function AllChangesView({
             const collapsed = collapsedPaths.has(path);
             const fileDiff = item.type === "diff" ? item.fileDiff : undefined;
             return (
-              <div className="changes-diff-heading">
+              <div className="changes-diff-heading" data-changes-path={path}>
                 <button
                   type="button"
+                  ref={
+                    jumpTarget?.path === path && jumpTarget.focusHeader
+                      ? jumpHeader
+                      : undefined
+                  }
                   className="changes-fold-button"
                   aria-label={`Toggle diff for ${path}`}
+                  title={path}
                   aria-expanded={!collapsed}
                   onClick={() => {
                     if (!collapsed) review.clearInteraction(path);
@@ -371,6 +390,7 @@ export default function AllChangesView({
                   type="button"
                   className="changes-open-button"
                   aria-label={`Open ${path}`}
+                  title={`Open full diff (${CHANGES_KEYS.diff.key})`}
                   onClick={() => onOpen(path)}
                 >
                   Open
@@ -385,6 +405,8 @@ export default function AllChangesView({
                     {fallbacks.map(({ file, text }) => (
                       <p
                         key={file.path}
+                        tabIndex={-1}
+                        data-changes-path={file.path}
                         className="changes-file-fallback"
                         {...{ [FALLBACK_ATTRIBUTE]: file.path }}
                       >

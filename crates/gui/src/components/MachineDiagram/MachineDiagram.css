@@ -194,15 +194,13 @@
 }
 .md-part[tabindex="0"]:focus-visible .md-part-ring {
   opacity: 1;
-  stroke-width: 6;
+  stroke: var(--focus-edge);
+  stroke-width: 3;
   stroke-dasharray: none;
+  filter: drop-shadow(0 0 3px var(--focus-halo));
 }
 .md-card[role="button"]:focus-visible {
-  filter: drop-shadow(0 0 3px var(--color-accent));
-}
-.md-viewport .uv-zoom button:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
+  filter: drop-shadow(0 0 3px var(--focus-halo));
 }
 
 /* Live topology is opt-in; all emphasis decorates the original routed path. */
@@ -239,8 +237,9 @@
   stroke: var(--color-accent);
 }
 .md-region-header:focus-visible .md-header-hit {
-  stroke: var(--color-accent);
-  stroke-width: 4;
+  stroke: var(--focus-edge);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 3px var(--focus-halo));
 }
 .md-live-count {
   pointer-events: none;

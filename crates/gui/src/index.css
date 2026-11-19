@@ -572,11 +572,29 @@ body {
   }
 }
 
-/* A full-strength keyboard outline also covers legacy utility-only controls.
-   Component-specific focus treatments can still refine this base rule. */
-:where(button, a, input, textarea, select, [tabindex]):focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+/* The inset edge stays visible when a scroll container clips the halo. */
+:root {
+  --focus-edge: color-mix(in oklch, var(--color-accent) 32%, var(--color-line-strong));
+  --focus-halo-opacity: 9%;
+  --focus-depth: 0 6px 18px -8px rgb(0 0 0 / 45%);
+  --focus-halo: color-mix(in oklch, var(--color-accent) var(--focus-halo-opacity), transparent);
+  --focus-shadow: inset 0 0 0 1px var(--focus-edge), 0 0 0 3px var(--focus-halo), var(--focus-depth);
+}
+.light {
+  --focus-halo-opacity: 10%;
+  --focus-depth: 0 6px 18px -10px rgb(68 52 31 / 25%);
+}
+:root :where(button, a, input, textarea, select, summary, [tabindex], [contenteditable]):not(:where(.changes-resize-handle)):focus-visible {
+  outline: 1px solid transparent;
+  outline-offset: -1px;
+  box-shadow: var(--focus-shadow);
+}
+
+@media (forced-colors: active) {
+  :root :focus-visible {
+    outline: 1px solid Highlight;
+    box-shadow: none;
+  }
 }
 
 /* Text selection uses an accent tint with readable foreground text. */
@@ -1289,11 +1307,6 @@ html.light ::selection {
     box-shadow var(--t-fast) var(--ease);
 }
 
-.fr-input:focus {
-  border-color: var(--fg-mute);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--fg) 10%, transparent);
-}
-
 .fr-input::placeholder {
   color: var(--fg-faint);
 }
@@ -1752,13 +1765,6 @@ html.light ::selection {
   border: 1px solid transparent;
 }
 
-.btn:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 2px var(--color-bg),
-    0 0 0 4px var(--color-accent);
-}
-
 /* Shared action treatment for native, legacy and React controls. Keep these
    rules outside utility layers so disabled/pressed states win over utilities. */
 .action-primary,
@@ -1782,13 +1788,6 @@ html.light ::selection {
 .btn--primary:enabled:active {
   background-color: var(--color-primary-pressed);
   border-color: var(--color-primary-pressed);
-}
-
-.action-primary:focus-visible,
-.btn--primary:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-  box-shadow: none;
 }
 
 .action-primary:disabled,
@@ -1841,16 +1840,6 @@ html.light ::selection {
 
 .input::placeholder {
   color: var(--color-fg-faint);
-}
-
-.input:focus {
-  outline: none;
-  border-color: var(--color-accent);
-}
-
-.input:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
 }
 
 /* =============================================================================
@@ -1950,16 +1939,14 @@ html.light ::selection {
   transition: box-shadow var(--t-base);
 }
 
-.react-flow__node.selected {
+.react-flow__node.selected:not(:focus-visible) {
   outline: 1px solid var(--color-accent);
   outline-offset: 2px;
 }
 
-/* Remove focus/selection glow from step and task zone nodes */
-.react-flow__node-stepNode:focus,
-.react-flow__node-stepNode.selected,
-.react-flow__node-taskZoneNode:focus,
-.react-flow__node-taskZoneNode.selected {
+/* React Flow selection styling is separate from keyboard focus. */
+.react-flow__node-stepNode.selected:not(:focus-visible),
+.react-flow__node-taskZoneNode.selected:not(:focus-visible) {
   box-shadow: none !important;
   outline: none !important;
 }
@@ -2499,11 +2486,6 @@ html.light ::selection {
   background: var(--bg-3);
 }
 
-.c-id-chip:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
 /* In the task detail panel, id chips sit directly on the glass surface — keep
    them transparent on hover/active rather than filling, so they match the rest
    of the panel. The `.copied` green confirmation wash is preserved. */
@@ -2583,13 +2565,7 @@ html.light ::selection {
     0 0 28px var(--accent-glow);
   transform: translateY(-1px);
 }
-.hc-launch:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow:
-    var(--shadow-2),
-    0 0 0 3px var(--accent-wash);
-}
+
 .hc-launch .ic {
   display: inline-flex;
   color: var(--accent);
@@ -2715,10 +2691,7 @@ html.light ::selection {
 .hc-panel .hc-history-resize-handle:focus-visible::after {
   background: var(--fg-mute);
 }
-.hc-panel .hc-history-resize-handle:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -1px;
-}
+
 .hc-panel .hc-chat-panes {
   min-width: 0;
   min-height: 0;
@@ -2773,13 +2746,6 @@ html.light ::selection {
 .hc-panel .hc-pane-resize-handle:focus-visible::after {
   background: var(--fg-mute);
 }
-.hc-panel .hc-pane-resize-handle:focus-visible {
-  outline: 1px solid var(--accent);
-  outline-offset: -1px;
-}
-.hc-panel[data-maximized] .hc-chat-pane:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
 
 /* Keep the composer surface neutral; its focus outline identifies the active
    input without tinting the conversation. */
@@ -2791,30 +2757,13 @@ html.light ::selection {
     box-shadow var(--t-fast, 120ms) var(--ease, ease);
 }
 .chat-input-shell textarea:focus-visible {
-  outline: none;
+  box-shadow: none;
 }
 
-/* The composer and its comment chips share the same soft focus treatment. */
-:root {
-  --chat-focus-edge: color-mix(in oklch, var(--color-accent) 32%, var(--color-line-strong));
-  --chat-focus-halo-opacity: 9%;
-  --chat-focus-depth: 0 6px 18px -8px rgba(0, 0, 0, 0.45);
-}
-.light {
-  --chat-focus-halo-opacity: 10%;
-  --chat-focus-depth: 0 6px 18px -10px rgba(68, 52, 31, 0.25);
-}
-.chat-input-shell:focus-within,
-.chat-comment-chips .chat-comment-chip:focus-visible {
-  border-color: var(--chat-focus-edge);
-  box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--color-accent) var(--chat-focus-halo-opacity), transparent),
-    var(--chat-focus-depth);
-  outline: 2px solid transparent;
-  outline-offset: 1px;
-}
 .chat-input-shell:focus-within {
+  border-color: var(--focus-edge);
   background-color: var(--color-bg);
+  box-shadow: 0 0 0 3px var(--focus-halo), var(--focus-depth);
 }
 
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
@@ -2945,7 +2894,6 @@ html.light ::selection {
 .hc-panel .hc-title-button:hover,
 .hc-panel .hc-title-button:focus-visible {
   color: var(--accent);
-  outline: none;
 }
 .hc-panel .hc-title-button:disabled {
   cursor: default;
@@ -3114,7 +3062,6 @@ html.light ::selection {
 .ovf-item:focus-visible {
   background: var(--bg-4);
   color: var(--fg);
-  outline: none;
 }
 .ovf-item:disabled {
   cursor: not-allowed;
@@ -3284,14 +3231,7 @@ html.light ::selection {
 .hc-panel .hc-effort-picker select {
   max-width: 112px;
 }
-.hc-panel .hc-model-picker select:not(.ctl):focus-visible,
-.hc-panel .hc-effort-picker select:not(.ctl):focus-visible,
-.hc-panel .hc-speed-picker select:not(.ctl):focus-visible,
-.hc-panel .hc-provider-picker select:not(.ctl):focus-visible {
-  border-color: var(--accent);
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
+
 .hc-panel .hc-model-picker select:disabled,
 .hc-panel .hc-effort-picker select:disabled,
 .hc-panel .hc-speed-picker select:disabled,
@@ -3389,10 +3329,7 @@ html.light ::selection {
   margin-left: auto;
   text-transform: none;
 }
-.hc-panel .hc-mini-history-projects-toggle:focus-visible {
-  outline: 2px solid var(--fg);
-  outline-offset: 2px;
-}
+
 .hc-panel .hc-mini-history-list[hidden] {
   display: none;
 }
@@ -3457,10 +3394,7 @@ html.light ::selection {
   transform: translateX(10px);
   background: var(--fg);
 }
-.app-toggle:focus-visible {
-  outline: 2px solid var(--fg-mute);
-  outline-offset: 3px;
-}
+
 .hc-panel .hc-mini-history-body {
   min-width: 0;
   min-height: 0;
@@ -3611,10 +3545,8 @@ html.light ::selection {
 }
 .hc-panel .hc-mini-history-new:hover,
 .hc-panel .hc-mini-history-new:focus-visible {
-  border-color: color-mix(in oklch, var(--fg) 28%, transparent);
   background: var(--bg-4);
   color: var(--fg);
-  outline: none;
 }
 .hc-panel .hc-mini-history-new:disabled {
   cursor: not-allowed;
@@ -3635,8 +3567,6 @@ html.light ::selection {
 }
 .hc-panel .hc-mini-history-toggle:focus-visible {
   color: var(--fg);
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
 }
 .hc-panel .hc-mini-history-row {
   display: flex;
@@ -3675,10 +3605,7 @@ html.light ::selection {
   text-align: left;
   cursor: pointer;
 }
-.hc-panel .hc-mini-history-open:focus-visible {
-  outline: 1px solid color-mix(in oklch, var(--fg) 28%, transparent);
-  outline-offset: -1px;
-}
+
 .hc-panel .hc-mini-history-open .label,
 .hc-panel .hc-mini-history-secondary .meta {
   overflow: hidden;
@@ -3830,10 +3757,7 @@ html.light ::selection {
   background: color-mix(in oklch, var(--fg) 8%, transparent);
   color: var(--fg);
 }
-.hc-panel .hc-mini-history-agent:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
+
 .hc-panel .hc-mini-history-agent .label,
 .hc-panel .hc-mini-history-agent .meta {
   overflow: hidden;
@@ -4094,10 +4018,6 @@ html.light ::selection {
   /* Plain `--row-hover` token, NOT a live color-mix(): WKWebView flashes a cool
      (blue) intermediate when animating a background toward a color-mix() value. */
   background: var(--row-hover);
-}
-
-.tasks-v2 .t-row:focus {
-  outline: none;
 }
 
 .tasks-v2 .t-row.sel {
@@ -4769,13 +4689,6 @@ html.light ::selection {
   background: var(--accent-wash);
 }
 
-.tasks-v2-detail-shell .t-traces:focus-visible {
-  outline: none;
-  border-style: solid;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-wash);
-}
-
 .tasks-v2-detail-shell .t-traces em {
   color: var(--fg);
   font-family: var(--serif);
@@ -5158,11 +5071,7 @@ html.light ::selection {
   border-color: var(--ctl-line-hover);
   background: var(--bg-2);
 }
-.palette-search-btn:focus-visible {
-  outline: none;
-  border-color: var(--ctl-ring);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
-}
+
 .palette-search-btn.compact {
   width: var(--ctl-h);
   justify-content: center;
@@ -5247,10 +5156,7 @@ html.light ::selection {
   border-color: var(--ctl-line-hover);
 }
 /* Keyboard focus: a soft halo instead of a hard 2px outline. */
-.ctl:focus-visible {
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
-  border-color: var(--ctl-ring);
-}
+
 .ctl:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -5454,11 +5360,7 @@ select.ctl.ctl-field {
   border-color: color-mix(in oklch, var(--accent) 45%, transparent);
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
 }
-.type-card:focus-visible {
-  outline: none;
-  border-color: var(--ctl-ring);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
-}
+
 .type-card-display {
   font-family: var(--font-serif);
   font-size: 22px;
@@ -5637,10 +5539,6 @@ input.no-spin {
     0 0 0 1px color-mix(in oklch, var(--fg) 9%, transparent),
     0 4px 10px -6px rgba(68, 52, 31, 0.3);
 }
-.split-nav-item:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
-}
 
 /* Activity (notifications) trigger: a quiet header control with a bell; an
    unread count rides as a small accent badge instead of a boxed "N new". */
@@ -5794,10 +5692,7 @@ input.no-spin {
   border-color: var(--ctl-line-hover);
   box-shadow: 0 1px 0 color-mix(in oklch, var(--fg) 6%, transparent) inset;
 }
-.daemon-row:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
-}
+
 .daemon-row-dot {
   width: 8px;
   height: 8px;
@@ -5926,10 +5821,7 @@ input.no-spin {
   color: var(--fg);
   background-color: color-mix(in oklch, var(--fg) 3%, transparent);
 }
-.daemon-group-head:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
-}
+
 .daemon-group-head h2 {
   font-family: var(--font-sans);
   font-size: var(--text-12);
@@ -6026,10 +5918,6 @@ input.no-spin {
   border-radius: 1px;
   background: var(--accent);
 }
-.settings-tree-section:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 22%, transparent);
-}
 
 /* Settings › Appearance › Accent: one swatch per accent. Each button carries
    data-accent, so its chip shows that accent (ACCENTS below). */
@@ -6059,10 +5947,7 @@ input.no-spin {
   background: var(--color-accent-wash);
   color: var(--color-fg);
 }
-.accent-swatch:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
+
 .accent-swatch-chip {
   width: 16px;
   height: 16px;
