@@ -8,7 +8,7 @@ const thread = document.querySelector('[data-testid="selection-mini-thread"]');
 thread.style.width = `${width}px`;
 thread.style.maxWidth = "none";
 thread.scrollIntoView({
-  block: "center",
+  block: "end",
   inline: "center",
   behavior: "instant",
 });
@@ -16,8 +16,6 @@ thread.scrollIntoView({
 const threadStyle = getComputedStyle(thread);
 const threadBackground = threadStyle.backgroundColor;
 const messages = thread.querySelector(".selection-mini-messages");
-
-messages.scrollTop = messages.scrollHeight;
 
 const bounds = messages.getBoundingClientRect();
 const messageAreaRight = bounds.left + messages.clientWidth;
@@ -185,6 +183,7 @@ const pass =
   bubblesPass &&
   assistantsPass &&
   noOverflow &&
+  messages.scrollHeight <= messages.clientHeight + 1 &&
   labelContrast &&
   placeholderContrast &&
   errorContrast &&
@@ -197,7 +196,8 @@ return {
   pass,
   pending,
   themeApplied,
-  historyScrollable: messages.scrollHeight > messages.clientHeight,
+  historyHeight: messages.clientHeight,
+  historyScrollable: messages.scrollHeight > messages.clientHeight + 1,
   background: bubbles[0]?.background,
   bubbles,
   assistants,

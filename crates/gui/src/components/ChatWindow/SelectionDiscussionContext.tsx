@@ -1,3 +1,4 @@
+import { useInlineScrollFollow } from "./useInlineScrollFollow";
 import { loadWorktreeDiscussions, placeWorktreeDiscussions } from "./restoreSelectionDiscussions";
 import { discussionBinding } from "../../utils/localChatDiscussion";
 import { useUIStore } from "../../stores/uiStore";
@@ -487,11 +488,13 @@ function MiniThread({
   );
 
   const activeTurn = session?.activeTurn ?? null;
+  const cardRef = useInlineScrollFollow(activeTurn?.localId);
   const failed = getLocalChatLifecycle(session) === "error";
   const announcement = useTurnAnnouncement(activeTurn, failed);
 
   return (
     <section
+      ref={cardRef}
       className="selection-mini-thread"
       aria-label="Selection discussion"
       data-testid="selection-mini-thread"

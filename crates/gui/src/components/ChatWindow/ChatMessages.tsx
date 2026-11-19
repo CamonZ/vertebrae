@@ -43,13 +43,12 @@ import {
 import type { DiffReviewFocus } from "../thread/toolChange/DiffReviewContext";
 import { useCommentHighlights } from "./commentHighlight";
 import { CommentShortcutHint } from "./CommentShortcutHint";
+import { useScrollFollow } from "./useScrollFollow";
+import { hasInlineScrollFollow } from "./useInlineScrollFollow";
 import "./chatComments.css";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
-const BOTTOM_SCROLL_TOLERANCE_PX = 24;
 const HISTORY_LOAD_THRESHOLD_PX = 240;
-// Stay inside WebKit's signed scrolling range; MAX_SAFE_INTEGER wraps to zero.
-const BOTTOM_SCROLL_TARGET_PX = 1_000_000_000;
 const COMMENT_EDITOR_MAX_WIDTH_PX = 384;
 const COMMENT_EDITOR_HEIGHT_PX = 230;
 const COMMENT_TRIGGER_WIDTH_PX = 96;
@@ -537,45 +536,8 @@ export function ChatMessages({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const visibleRef = useRef(isVisible);
-  visibleRef.current = isVisible;
-
   const loadingOlderRef = useRef(isLoadingOlderMessages);
   loadingOlderRef.current = isLoadingOlderMessages;
-
-  const bottomFollowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
-
-  const scheduleBottomFollow = useCallback(() => {
-    if (
-      !visibleRef.current ||
-      document.hidden ||
-      bottomFollowTimerRef.current !== null
-    )
-      return;
-
-    bottomFollowTimerRef.current = setTimeout(() => {
-      bottomFollowTimerRef.current = null;
-
-      const container = messagesContainerRef.current;
-      if (
-        !container ||
-        !visibleRef.current ||
-        document.hidden ||
-        !keepAtBottomRef.current ||
-        activeScrollGestureRef.current ||
-        prependAnchorRef.current
-      )
-        return;
-
-      // The browser clamps this write. Do not force a full-transcript height read.
-      container.scrollTop = BOTTOM_SCROLL_TARGET_PX;
-      lastScrollTopRef.current = container.scrollTop;
-
-      if (!activeScrollGestureRef.current) userScrollRef.current = false;
-    }, 32);
-  }, []);
 
   const latestMessagesRef = useRef(messages);
   latestMessagesRef.current = messages;
@@ -585,18 +547,23 @@ export function ChatMessages({
     scrollTop: number;
   } | null>(null);
   const messageRefs = useRef(new Map<string, HTMLElement>());
-  const keepAtBottomRef = useRef(true);
-  const lastScrollTopRef = useRef<number | null>(null);
-  const userScrollRef = useRef(false);
-  const activeScrollGestureRef = useRef(false);
-
-  const beginUserScroll = useCallback(() => {
-    userScrollRef.current = true;
-
-    if (bottomFollowTimerRef.current !== null)
-      clearTimeout(bottomFollowTimerRef.current);
-    bottomFollowTimerRef.current = null;
-  }, []);
+  const blockBottomFollow = useCallback(
+    (viewport: HTMLElement) =>
+      !!prependAnchorRef.current || hasInlineScrollFollow(viewport),
+    []
+  );
+  const {
+    schedule: scheduleBottomFollow,
+    reset: resetBottomFollow,
+    following: keepAtBottomRef,
+    lastTop: lastScrollTopRef,
+    beginUserScroll,
+    beginGesture,
+    onKeyDown: onScrollKeyDown,
+    onScroll: trackScroll,
+  } = useScrollFollow(messagesContainerRef, isVisible, {
+    blocked: blockBottomFollow,
+  });
   const [projectRoots, setProjectRoots] = useState<readonly string[]>(
     projectPath ? [projectPath] : []
   );
@@ -768,6 +735,7 @@ export function ChatMessages({
       isVisible,
       messages,
       onLoadOlderMessages,
+      keepAtBottomRef,
     ]
   );
 
@@ -795,20 +763,13 @@ export function ChatMessages({
   }, [projectPath]);
 
   useLayoutEffect(() => {
-    keepAtBottomRef.current = true;
-    userScrollRef.current = false;
-    activeScrollGestureRef.current = false;
-    lastScrollTopRef.current = messagesContainerRef.current?.scrollTop ?? null;
+    resetBottomFollow();
     prependAnchorRef.current = null;
-
-    if (bottomFollowTimerRef.current !== null)
-      clearTimeout(bottomFollowTimerRef.current);
-    bottomFollowTimerRef.current = null;
 
     return () => {
       prependAnchorRef.current = null;
     };
-  }, [sessionId]);
+  }, [sessionId, resetBottomFollow]);
 
   // Keep streaming updates inside this scroll container. Calling
   // scrollIntoView on every delta also scrolls ancestor containers and queues
@@ -834,7 +795,6 @@ export function ChatMessages({
       prependAnchorRef.current = null;
       return;
     }
-    if (!keepAtBottomRef.current) return;
     scheduleBottomFollow();
   }, [
     isLoadingOlderMessages,
@@ -842,6 +802,7 @@ export function ChatMessages({
     messages,
     streamingAssistant,
     scheduleBottomFollow,
+    lastScrollTopRef,
   ]);
 
   // Live text subscribers and lazy diffs can resize without rebuilding history.
@@ -874,50 +835,14 @@ export function ChatMessages({
     if (content) observer?.observe(content);
     if (container) observer?.observe(container);
 
-    document.addEventListener("visibilitychange", scheduleBottomFollow);
     scheduleBottomFollow();
 
     return () => {
       disposed = true;
 
       observer?.disconnect();
-      document.removeEventListener("visibilitychange", scheduleBottomFollow);
-
-      if (bottomFollowTimerRef.current !== null)
-        clearTimeout(bottomFollowTimerRef.current);
-      bottomFollowTimerRef.current = null;
     };
   }, [sessionId, isVisible, scheduleBottomFollow]);
-
-  useEffect(() => {
-    const endGesture = () => {
-      if (!activeScrollGestureRef.current) return;
-
-      activeScrollGestureRef.current = false;
-
-      const container = messagesContainerRef.current;
-      if (
-        container &&
-        container.scrollHeight - container.clientHeight - container.scrollTop <=
-          BOTTOM_SCROLL_TOLERANCE_PX
-      ) {
-        // The gesture finished near the bottom. Its intent must not outlive it
-        // and turn a later viewport clamp into an upward user scroll. Read the
-        // current position because the final gesture scroll may still be queued.
-        userScrollRef.current = false;
-      }
-
-      scheduleBottomFollow();
-    };
-
-    const events = ["pointerup", "pointercancel", "touchend", "touchcancel"];
-    for (const event of events) document.addEventListener(event, endGesture);
-
-    return () => {
-      for (const event of events)
-        document.removeEventListener(event, endGesture);
-    };
-  }, [sessionId, scheduleBottomFollow]);
 
   useEffect(() => {
     const handleScrollToSpawn = (event: Event) => {
@@ -946,7 +871,7 @@ export function ChatMessages({
         LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT,
         handleScrollToSpawn
       );
-  }, [sessionId, beginUserScroll]);
+  }, [sessionId, beginUserScroll, keepAtBottomRef]);
 
   return (
     <VtbEntityCopyProvider>
@@ -958,6 +883,7 @@ export function ChatMessages({
           ref={messagesContainerRef}
           className="min-h-0 flex-1 overflow-y-auto p-4"
           data-testid="chat-messages-scroll"
+          data-transcript-viewport
           onWheel={(event) => {
             if (event.deltaY < 0) {
               beginUserScroll();
@@ -965,86 +891,31 @@ export function ChatMessages({
                 handleLoadOlderMessages();
             }
           }}
-          onTouchStart={() => {
-            activeScrollGestureRef.current = true;
-
-            beginUserScroll();
-          }}
+          onTouchStart={beginGesture}
           onPointerDown={(event) => {
             // Scrollbar drags target the scroller; clicks in messages do not.
-            if (event.target === event.currentTarget) {
-              activeScrollGestureRef.current = true;
-
-              beginUserScroll();
-            }
+            if (event.target === event.currentTarget) beginGesture();
           }}
-          onKeyDown={(event) => {
-            const target = event.target as HTMLElement;
-            const editableTarget = target.closest(
-              "input, textarea, [contenteditable=true]"
-            );
-
-            if (editableTarget) return;
-
-            const upwardKeys = ["ArrowUp", "PageUp", "Home"];
-            const isUpwardKey = upwardKeys.includes(event.key);
-            const isReversePage = event.key === " " && event.shiftKey;
-
-            if (isUpwardKey || isReversePage) beginUserScroll();
-          }}
+          onKeyDown={(event) => onScrollKeyDown(event.nativeEvent)}
           onMouseUp={updateTextSelection}
           onKeyUp={updateTextSelection}
-          onScroll={() => {
-            const container = messagesContainerRef.current;
-            if (container) {
-              const scrollRange =
-                container.scrollHeight - container.clientHeight;
-              const max = Math.max(0, scrollRange);
+          onScroll={(event) => {
+            const container = event.currentTarget;
+            if (hasInlineScrollFollow(container)) {
+              // An inline turn owns this viewport while it streams. Its scroll
+              // writes must not load main-chat history or trigger an end jump.
+              keepAtBottomRef.current = false;
+              lastScrollTopRef.current = container.scrollTop;
+              return;
+            }
+            const { top, movedUp } = trackScroll(container);
+            if (top <= HISTORY_LOAD_THRESHOLD_PX && movedUp)
+              handleLoadOlderMessages();
 
-              // Normalize elastic overscroll and compare against the current
-              // range: shrink/clamping and bottom rebound are not user scrolls.
-              const boundedTop = Math.min(container.scrollTop, max);
-              const top = Math.max(0, boundedTop);
-              const previous = lastScrollTopRef.current;
-              const boundedPrevious =
-                previous === null ? null : Math.min(previous, max);
-              const nearBottom = max - top <= BOTTOM_SCROLL_TOLERANCE_PX;
-
-              if (
-                nearBottom &&
-                (keepAtBottomRef.current ||
-                  boundedPrevious === null ||
-                  top > boundedPrevious)
-              ) {
-                keepAtBottomRef.current = true;
-                if (!activeScrollGestureRef.current)
-                  userScrollRef.current = false;
-                scheduleBottomFollow();
-              } else if (
-                !nearBottom &&
-                userScrollRef.current &&
-                (boundedPrevious === null || top < boundedPrevious)
-              ) {
-                keepAtBottomRef.current = false;
-
-                if (bottomFollowTimerRef.current !== null)
-                  clearTimeout(bottomFollowTimerRef.current);
-                bottomFollowTimerRef.current = null;
-              }
-
-              if (
-                top <= HISTORY_LOAD_THRESHOLD_PX &&
-                (boundedPrevious === null || top < boundedPrevious)
-              ) {
-                handleLoadOlderMessages();
-              }
-              lastScrollTopRef.current = top;
-
-              const anchor = prependAnchorRef.current;
-              if (anchor) {
-                anchor.scrollHeight = container.scrollHeight;
-                anchor.scrollTop = container.scrollTop;
-              }
+            const anchor = prependAnchorRef.current;
+            if (anchor) {
+              anchor.scrollHeight = container.scrollHeight;
+              anchor.scrollTop = container.scrollTop;
             }
           }}
         >

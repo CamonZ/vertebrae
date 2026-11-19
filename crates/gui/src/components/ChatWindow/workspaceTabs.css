@@ -155,9 +155,7 @@
 }
 
 .selection-mini-messages {
-  max-height: 420px;
   padding-top: 16px;
-  overflow: auto;
   overflow-wrap: anywhere;
 }
 
