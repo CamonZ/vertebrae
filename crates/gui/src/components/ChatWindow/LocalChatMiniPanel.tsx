@@ -1,3 +1,4 @@
+import { CatalogSaveWarning } from "./CatalogSaveWarning";
 import {
   memo,
   useCallback,
@@ -802,6 +803,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                               />
                             ) : null}
 
+                            <CatalogSaveWarning sessionId={session.id} />
                             <div className="hc-mini-history-row-actions">
                               {!activityBySessionId?.has(session.id) && (
                                 <HarnessBadge harness={session.harness} />

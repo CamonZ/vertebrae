@@ -724,7 +724,7 @@ impl SacrumSocket {
             api_token
         );
 
-        log::info!("[WebSocket] Connecting to {}", ws_url);
+        log::info!("[WebSocket] Connecting to Sacrum");
 
         let _url = Url::parse(&ws_url).map_err(|e| format!("Invalid URL: {}", e))?;
         let (socket, _) = tokio_tungstenite::connect_async(&ws_url)

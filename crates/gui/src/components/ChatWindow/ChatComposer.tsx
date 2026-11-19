@@ -1,3 +1,4 @@
+import { CatalogSaveWarning } from "./CatalogSaveWarning";
 import {
   useEffect,
   useRef,
@@ -862,6 +863,7 @@ export function ChatComposer({
           }
           footerRight={
             <div className="hc-chat-controls right">
+              <CatalogSaveWarning sessionId={session.id} announce />
               {picker?.selectedModelUnsupported && !picker.hasConversation && (
                 <span role="alert" className="hc-composer-alert">
                   Choose an available model or reset to Default model to start

@@ -71,6 +71,33 @@ const pendingDeletedIds = new Set<string>();
 
 // A per-entry generation keeps a second edit pending while its first write awaits.
 const pendingChangedIds = new Map<string, number>();
+const failedCatalogSaves = new Set<string>();
+const catalogSaveListeners = new Set<() => void>();
+
+export function subscribeToCatalogSaves(listener: () => void): () => void {
+  catalogSaveListeners.add(listener);
+  return () => catalogSaveListeners.delete(listener);
+}
+
+export function hasFailedCatalogSave(sessionId: string): boolean {
+  return failedCatalogSaves.has(sessionId);
+}
+
+export function retryCatalogSave(): Promise<boolean> {
+  return scheduleIndexSave();
+}
+
+function setCatalogSaveFailed(ids: Iterable<string>, failed: boolean): void {
+  let changed = false;
+  for (const id of ids) {
+    if (failed === failedCatalogSaves.has(id)) continue;
+    if (failed) failedCatalogSaves.add(id);
+    else failedCatalogSaves.delete(id);
+    changed = true;
+  }
+  if (changed) catalogSaveListeners.forEach((listener) => listener());
+}
+
 let nextChangeGeneration = 0;
 let indexSaveInFlight = false;
 let indexSaveQueued = false;
@@ -598,6 +625,7 @@ async function flushIndexSaveQueue(): Promise<boolean> {
     if (!hydrated) {
       indexSaveQueued = true;
       blockedByHydration = true;
+      setCatalogSaveFailed(pendingChangedIds.keys(), true);
       return false;
     }
     while (indexSaveQueued) {
@@ -613,18 +641,22 @@ async function flushIndexSaveQueue(): Promise<boolean> {
 
       if (result.status === "error") {
         succeeded = false;
+        setCatalogSaveFailed(changes.keys(), true);
         console.warn("[ChatCatalogSync] index_save_failed");
       } else {
         for (const id of deletedIds) pendingDeletedIds.delete(id);
+        setCatalogSaveFailed(deletedIds, false);
         for (const [id, generation] of changes) {
           if (pendingChangedIds.get(id) === generation) {
             pendingChangedIds.delete(id);
+            setCatalogSaveFailed([id], false);
           }
         }
       }
     }
   } catch {
     succeeded = false;
+    setCatalogSaveFailed(pendingChangedIds.keys(), true);
     console.warn("[ChatCatalogSync] index_save_failed");
   } finally {
     indexSaveInFlight = false;
