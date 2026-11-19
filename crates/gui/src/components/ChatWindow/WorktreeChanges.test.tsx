@@ -46,8 +46,12 @@ vi.mock("./workspace/AllChangesView", () => ({
     onOpen,
     diffStyle,
     onExit,
+    loadContents,
   }: AllChangesViewProps) {
     const [folded, setFolded] = useState(false);
+    // Stand-in for the cursor resting on collapsed lines.
+    const [onGap, setOnGap] = useState(false);
+    const [contents, setContents] = useState("");
     return (
       <div data-testid="all-diffs" data-layout={diffStyle}>
         <div
@@ -55,10 +59,23 @@ vi.mock("./workspace/AllChangesView", () => ({
           aria-label="Code diff selection"
           tabIndex={0}
           data-diff-cursor-host=""
+          data-line-cursor={onGap ? "gap" : ""}
           onKeyDown={(event) => {
             if (event.key === "Escape") onExit?.();
+            if (event.key === "ArrowDown") setOnGap((value) => !value);
           }}
         />
+        <button
+          type="button"
+          onClick={() =>
+            void loadContents?.(files[0]).then((loaded) =>
+              setContents(loaded ? loaded.newFile.contents : "none")
+            )
+          }
+        >
+          Load contents
+        </button>
+        <output aria-label="Loaded contents">{contents}</output>
         <button aria-expanded={!folded} onClick={() => setFolded(!folded)}>
           Test fold
         </button>
@@ -1208,6 +1225,45 @@ describe("contextual Changes key hints", () => {
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
+  it("lists the expand bindings while the cursor is on collapsed lines", async () => {
+    load.mockResolvedValue({ status: "ok", data: modified });
+    render(<WorktreeChanges worktreePath="/worktree" />);
+    const cursor = await screen.findByRole("group", { name: "Code diff selection" });
+    act(() => cursor.focus());
+
+    fireEvent.keyDown(cursor, { key: "ArrowDown" });
+    fireEvent.keyUp(cursor, { key: "ArrowDown" });
+    expect(footer()).toHaveAttribute("data-situation", "gap");
+    expect(footer()).toHaveTextContent("Expand toward where you came from");
+    expect(footer()).toHaveTextContent("Expand the other way");
+    expect(footer()).not.toHaveTextContent("Expand all");
+
+    fireEvent.keyDown(cursor, { key: "ArrowDown" });
+    fireEvent.keyUp(cursor, { key: "ArrowDown" });
+    expect(footer()).toHaveAttribute("data-situation", "diff");
+  });
+
+  it("reads both sides of a change for revealing unchanged lines", async () => {
+    load.mockResolvedValue({ status: "ok", data: modified });
+    const text = (contents: string) => ({
+      status: "ok" as const,
+      data: { kind: "text" as const, contents, revision: "r" },
+    });
+    readBaseline.mockResolvedValue(text("old\n"));
+    read.mockResolvedValue(text("new\n"));
+    render(<WorktreeChanges worktreePath="/worktree" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load contents" }));
+    expect(
+      await screen.findByRole("status", { name: "Loaded contents" })
+    ).toHaveTextContent("new");
+    expect(readBaseline).toHaveBeenCalledWith(
+      "/worktree",
+      "src/app.ts",
+      modified.comparison.base_commit
+    );
+    expect(read).toHaveBeenCalledWith("/worktree", "src/app.ts");
+  });
+
   it("switches hints with focus and falls back when focus leaves", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     render(
@@ -1260,6 +1316,48 @@ describe("Changes palette and viewed files", () => {
       "1/2 viewed"
     );
     fireEvent.keyDown(row, { key: "v" });
+    expect(screen.getByLabelText("Comparison totals")).not.toHaveTextContent(
+      "viewed"
+    );
+  });
+
+  it("unmarks the last viewed file with ⇧V, also from the diff", async () => {
+    load.mockResolvedValue({ status: "ok", data: modified });
+    render(<WorktreeChanges worktreePath="/worktree" />);
+    const row = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+    act(() => row.focus());
+    fireEvent.keyDown(row, { key: "v" });
+    expect(screen.getByLabelText("Comparison totals")).toHaveTextContent(
+      "1/2 viewed"
+    );
+
+    const cursor = screen.getByRole("group", { name: "Code diff selection" });
+    expect(fireEvent.keyDown(cursor, { key: "V", shiftKey: true })).toBe(false);
+    expect(screen.getByLabelText("Comparison totals")).not.toHaveTextContent(
+      "viewed"
+    );
+    expect(screen.getByRole("status", { name: "Jump target" })).toHaveTextContent(
+      "src/app.ts"
+    );
+  });
+
+  it("lists every viewed file to unmark, and all of them, in the palette", async () => {
+    load.mockResolvedValue({ status: "ok", data: modified });
+    render(<WorktreeChanges worktreePath="/worktree" />);
+    const app = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+    act(() => app.focus());
+    fireEvent.keyDown(app, { key: "v" });
+    const gone = screen.getByRole("button", { name: "Jump to gone.txt" });
+    act(() => gone.focus());
+    fireEvent.keyDown(gone, { key: "v" });
+
+    fireEvent.keyDown(gone, { key: "k", metaKey: true });
+    const items = useCommandPaletteStore.getState().contextItems;
+    const unmark = items.filter((item) => item.label === "Unmark file viewed");
+    expect(unmark.map((item) => item.hint)).toEqual(["gone.txt", "src/app.ts"]);
+    expect(items.map((item) => item.label)).not.toContain("Mark file viewed");
+
+    act(() => items.find((item) => item.label === "Unmark all viewed files")!.run());
     expect(screen.getByLabelText("Comparison totals")).not.toHaveTextContent(
       "viewed"
     );

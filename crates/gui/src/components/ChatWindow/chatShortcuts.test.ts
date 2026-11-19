@@ -61,6 +61,17 @@ describe("changesHintsFor", () => {
     expect(labels("diff")).not.toContain("Base");
   });
 
+  it("lists the expand bindings on collapsed lines", () => {
+    const hints = changesHintsFor("gap", { split: false });
+    expect(hints.map((hint) => [hint.keys.join(""), hint.label])).toEqual(
+      expect.arrayContaining([
+        ["↵", "Expand toward where you came from"],
+        ["⌥↵", "Expand the other way"],
+      ])
+    );
+    expect(labels("gap")).not.toContain("Discuss selection");
+  });
+
   it("offers side switching only in a split diff", () => {
     expect(labels("diff")).not.toContain("Switch side");
     expect(labels("diff", true)).toContain("Switch side");

@@ -38,7 +38,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       },
       ref
     ) {
-      useImperativeHandle(ref, () => ({ scrollTo }));
+      useImperativeHandle(ref, () => ({ scrollTo, getInstance: () => undefined }));
       renderedItems = props.items;
       renderedSelection = props.selectedLines;
       renderedDiffStyle = props.options.diffStyle;

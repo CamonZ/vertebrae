@@ -756,3 +756,10 @@
   --diff-line-cursor: var(--color-accent);
 }
 
+/* The focus halo hugs the diffs, leaving the scrollbar track (8px) outside;
+   gray so it doesn't compete with the diff's own colours. */
+.diff-line-cursor-host {
+  --focus-overlay-inset: 0 8px 0 0;
+  --focus-overlay-glow: color-mix(in oklch, var(--color-fg-mute) 30%, transparent);
+}
+

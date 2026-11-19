@@ -99,7 +99,10 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       },
       ref
     ) {
-      useImperativeHandle(ref, () => ({ scrollTo: seen.scrollTo }));
+      useImperativeHandle(ref, () => ({
+        scrollTo: seen.scrollTo,
+        getInstance: () => undefined,
+      }));
       seen.codeView = props as unknown as Record<string, unknown>;
       return (
         <div data-testid="code-view">
@@ -853,6 +856,153 @@ describe("Changes keyboard line cursor", () => {
     expect(
       screen.getByRole("button", { name: "Discuss inline" })
     ).toHaveAttribute("title", expect.stringMatching(/Discuss inline \(.+↵\)/));
+  });
+});
+
+describe("Changes collapsed unchanged lines", () => {
+  // Hunks 7–13 and 47–53 of a 60-line file: gaps of 6, 33 and 7 lines.
+  const LONG_BEFORE = numbered("m", 60);
+  const LONG_AFTER = LONG_BEFORE.map((line) =>
+    line === "m10" ? "M10" : line === "m50" ? "M50" : line
+  );
+  const LONG: WorktreeChange = {
+    ...worktreeFiles[0],
+    path: "m.ts",
+    patch: filePatch({ path: "m.ts", before: LONG_BEFORE, after: LONG_AFTER }),
+  };
+  const text = (lines: string[]) => `${lines.join("\n")}\n`;
+  const load = vi.fn((change: WorktreeChange) =>
+    Promise.resolve(
+      change.path === "m.ts"
+        ? {
+            oldFile: { name: "m.ts", contents: text(LONG_BEFORE) },
+            newFile: { name: "m.ts", contents: text(LONG_AFTER) },
+          }
+        : {
+            oldFile: { name: "f.ts", contents: text(BASE) },
+            newFile: { name: "f.ts", contents: text(WITHOUT_L12) },
+          }
+    )
+  );
+
+  beforeEach(() => {
+    load.mockClear();
+    seen.scrollTo.mockReset();
+  });
+
+  async function renderGaps(files: WorktreeChange[]) {
+    render(
+      <Harness>
+        <AllChangesView
+          files={files}
+          jumpTarget={null}
+          onOpen={vi.fn()}
+          onExit={vi.fn()}
+          loadContents={load}
+        />
+      </Harness>
+    );
+    const group = screen.getByRole("group", { name: "Code diff selection" });
+    act(() => group.focus());
+    return group;
+  }
+  const selected = () =>
+    (seen.codeView as unknown as { selectedLines: unknown }).selectedLines;
+  const line = (id: string, n: number) => ({
+    id,
+    range: { start: n, end: n, side: "additions" },
+  });
+  const press = async (key: string, init: Record<string, unknown> = {}) => {
+    fireEvent.keyDown(document.activeElement!, { key, ...init });
+    // Let a contents load triggered by the move settle.
+    await act(async () => {});
+  };
+  async function downUntilGap(group: HTMLElement) {
+    for (let step = 0; step < 80; step++) {
+      await press("ArrowDown");
+      if (group.getAttribute("data-line-cursor") === "gap") return;
+    }
+    throw new Error("no gap below");
+  }
+
+  it("steps onto the gap above the first hunk and reveals it from the top of the file", async () => {
+    const group = await renderGaps([worktreeFiles[0]]);
+    await press("ArrowDown");
+    expect(group).toHaveAttribute("data-line-cursor", "gap");
+    expect(selected()).toBeNull();
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(codeViewItem().fileDiff).toMatchObject({ isPartial: false });
+
+    await press("Enter");
+    expect(selected()).toEqual(line("f.ts", 1));
+    await press("ArrowDown");
+    expect(selected()).toEqual(line("f.ts", 2));
+    await press("ArrowDown");
+    expect(selected()).toEqual(line("f.ts", 3));
+  });
+
+  it("reveals the gap below the last hunk, then stops at the end of the file", async () => {
+    const group = await renderGaps([worktreeFiles[0]]);
+    await press("ArrowDown"); // gap above
+    await press("ArrowDown"); // line 3
+    await downUntilGap(group);
+    expect(selected()).toBeNull();
+    await press("Enter");
+    // The first revealed line below the hunk the cursor came from.
+    expect(selected()).toEqual(line("f.ts", 16));
+    for (let step = 0; step < 6; step++) await press("ArrowDown");
+    expect(selected()).toEqual(line("f.ts", 20));
+  });
+
+  it("keeps expanding with repeated ↵ until the gap merges with the next hunk", async () => {
+    const group = await renderGaps([LONG]);
+    await press("ArrowDown"); // gap above
+    await press("ArrowDown"); // line 7
+    await downUntilGap(group);
+    // Arriving with ↓ reveals a batch below the hunk above; the cursor
+    // lands on the revealed line beside what is still hidden.
+    await press("Enter");
+    expect(selected()).toEqual(line("m.ts", 33));
+    expect(group).toHaveAttribute("data-line-cursor", "gap");
+    await press("Enter");
+    // The gap closed: the cursor continues from the first newly shown line.
+    expect(selected()).toEqual(line("m.ts", 34));
+    expect(group).toHaveAttribute("data-line-cursor", "");
+    await press("ArrowDown", { altKey: true });
+    expect(selected()).toEqual(line("m.ts", 47));
+    // ↵ on an ordinary line still opens the comment box.
+    await press("Enter");
+    expect(screen.getByRole("textbox", { name: "New diff comment" })).toBeInTheDocument();
+  });
+
+  it("reveals a section at the other end with ⌥↵, and ⇧↵ does not reveal the gap", async () => {
+    const group = await renderGaps([LONG]);
+    await press("ArrowDown");
+    await press("ArrowDown");
+    await downUntilGap(group);
+    await press("Enter", { altKey: true });
+    // The batch above the hunk below: lines 27–46; the cursor lands on 27.
+    expect(selected()).toEqual(line("m.ts", 27));
+    await press("ArrowUp");
+    expect(group).toHaveAttribute("data-line-cursor", "gap");
+    await press("Enter", { shiftKey: true });
+    // No whole-gap expansion: the cursor stays on the 13 hidden lines.
+    expect(group).toHaveAttribute("data-line-cursor", "gap");
+    expect(selected()).toBeNull();
+    await press("Enter");
+    // Arriving with ↑ reveals the section above the lines shown below.
+    expect(selected()).toEqual(line("m.ts", 26));
+  });
+
+  it("never expands on wheel scrolling", async () => {
+    const group = await renderGaps([LONG]);
+    await press("ArrowDown");
+    const before = codeViewItem();
+    fireEvent.wheel(group, { deltaY: 400 });
+    await act(async () => {});
+    expect(group).toHaveAttribute("data-line-cursor", "gap");
+    expect(codeViewItem().version).toBe(before.version);
+    expect(selected()).toBeNull();
   });
 });
 

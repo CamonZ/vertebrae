@@ -16,10 +16,14 @@ import {
   type CodeViewDiffItem,
   type CodeViewHandle,
 } from "@pierre/diffs/react";
+import type { FileDiffLoadedChangedFiles } from "@pierre/diffs";
 import type { WorktreeChange } from "../../../bindings";
 import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import { useDiffComments } from "../../../hooks/useDiffComments";
 import { DIFF_CURSOR_ENTRY_ATTRIBUTE } from "../../thread/toolChange/diffCursor";
+import { GAP_BATCH } from "../../thread/toolChange/diffGaps";
+import { canonicalPath, type FilePatch } from "../../thread/toolChange/diffLineMapper";
+import { GAP_CURSOR_ATTRIBUTE, useChangeGaps } from "./useChangeGaps";
 import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
 import { DiffReviewContext } from "../../thread/toolChange/DiffReviewContext";
 import type { BackgroundOutputs } from "../../../background/types";
@@ -49,6 +53,11 @@ export interface AllChangesViewProps {
   /** Files marked viewed: shown folded and skipped by the line cursor. */
   viewedPaths?: ReadonlySet<string>;
   onViewedChange?(path: string, viewed: boolean): void;
+  /**
+   * Both sides of a changed file, so its collapsed unchanged lines can be
+   * revealed; null when they cannot be shown.
+   */
+  loadContents?(change: WorktreeChange): Promise<FileDiffLoadedChangedFiles | null>;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
@@ -57,6 +66,50 @@ const NO_PATHS: ReadonlySet<string> = new Set();
 const CURSOR_SCROLL_MARGIN = 80;
 
 const FALLBACK_ATTRIBUTE = "data-changes-fallback";
+
+const CODE_VIEW_LAYOUT = { paddingTop: 0, paddingBottom: 8, gap: 8 };
+
+/** Separator styles that count unchanged lines and can expand them. */
+const LINE_INFO_SEPARATORS = new Set(["line-info", "line-info-basic"]);
+
+/**
+ * Collapsed gaps in Changes: every separator carries its expand key; the one
+ * under the keyboard cursor wears the cursor bar and lists its bindings.
+ */
+const GAP_CSS = `
+/* Gaps open one section at a time; there is no whole-gap control. */
+[data-expand-all-button] {
+  display: none;
+}
+[data-separator] [data-unmodified-lines]::after {
+  content: "↵";
+  margin-inline-start: 8px;
+  padding: 0 4px;
+  border: 1px solid color-mix(in lab, var(--diffs-fg) 22%, transparent);
+  border-radius: 4px;
+  font-size: 0.85em;
+  line-height: 1.4;
+  opacity: 0.75;
+}
+[data-separator][${GAP_CURSOR_ATTRIBUTE}] {
+  box-shadow: inset 2px 0 0 var(--diff-line-cursor, transparent);
+}
+[data-separator][${GAP_CURSOR_ATTRIBUTE}] [data-unmodified-lines]::after {
+  opacity: 1;
+}
+[data-separator][${GAP_CURSOR_ATTRIBUTE}="up"] [data-unmodified-lines]::after {
+  content: "↵ expand down · ⌥↵ up";
+}
+[data-separator][${GAP_CURSOR_ATTRIBUTE}="down"] [data-unmodified-lines]::after {
+  content: "↵ expand up · ⌥↵ down";
+}
+[data-separator-first][${GAP_CURSOR_ATTRIBUTE}] [data-unmodified-lines]::after {
+  content: "↵ expand up";
+}
+[data-separator-last][${GAP_CURSOR_ATTRIBUTE}] [data-unmodified-lines]::after {
+  content: "↵ expand down";
+}
+`;
 
 /**
  * Every changed file in one virtualized Pierre viewport. Files without text
@@ -76,6 +129,7 @@ export default function AllChangesView({
   onEdge,
   viewedPaths = NO_PATHS,
   onViewedChange,
+  loadContents,
 }: AllChangesViewProps): ReactNode {
   const onToggleViewed = onViewedChange
     ? (path: string) => onViewedChange(path, !viewedPaths.has(path))
@@ -151,13 +205,34 @@ export default function AllChangesView({
     [parsedPatches, files, collapsedPaths]
   );
   const layout = diffStyle ?? options.diffStyle;
+  const changes = useMemo(
+    () => new Map(files.map((file) => [file.path, file])),
+    [files]
+  );
+  const patchesByPath = useMemo(() => {
+    const byPath = new Map<string, FilePatch>();
+    for (const result of parsedPatches)
+      for (const file of result.reviewFiles) byPath.set(canonicalPath(file), file);
+    return byPath;
+  }, [parsedPatches]);
+  const gaps = useChangeGaps({
+    changes,
+    patches: patchesByPath,
+    loadContents,
+    enabled: !!loadContents && LINE_INFO_SEPARATORS.has(options.hunkSeparators),
+    viewRef,
+  });
+  const { fileDiffFor } = gaps;
   const review = useDiffComments({ kind: "worktree" }, patchFiles, undefined, {
     layout,
     onExit,
     onEdge,
     onToggleViewed,
+    context: gaps.context,
+    onRevealGap: gaps.reveal,
     onCursorMove: (path, lineNumber, side) => {
       onCursorFile?.(path);
+      gaps.request(path);
       viewRef.current?.scrollTo({
         type: "line",
         id: path,
@@ -185,7 +260,12 @@ export default function AllChangesView({
   // diff and folding changes through that same reconciliation contract.
   const reviewItems = useMemo(
     () =>
-      items.map((item): CodeViewDiffItem<ReviewAnnotation> => {
+      items.map((patchItem): CodeViewDiffItem<ReviewAnnotation> => {
+        // Expandable once the file's contents are loaded.
+        const item =
+          patchItem.id === itemPaths.get(patchItem.id)
+            ? { ...patchItem, fileDiff: fileDiffFor(patchItem.id, patchItem.fileDiff) }
+            : patchItem;
         const annotations =
           item.id === itemPaths.get(item.id)
             ? annotationsFor(item.id)
@@ -207,8 +287,12 @@ export default function AllChangesView({
         });
         return { ...item, annotations, collapsed, version };
       }),
-    [items, itemPaths, annotationsFor, collapsedPaths]
+    [items, itemPaths, annotationsFor, collapsedPaths, fileDiffFor]
   );
+  const { gapCursor } = review;
+  const { markCursor } = gaps;
+  // The cursor's gap lives in Pierre's DOM; redraw it when the cursor moves.
+  useEffect(() => markCursor(gapCursor), [markCursor, gapCursor]);
   // Controlled selection (null when none) so a composer can clear it.
   const selectedPath = reviewItems.find(
     (item) => !item.collapsed && selectedLinesFor(item.id)
@@ -242,6 +326,11 @@ export default function AllChangesView({
       ...options,
       ...(diffStyle ? { diffStyle } : {}),
       stickyHeaders: true,
+      // No top padding: the focus halo sits flush on the first file.
+      layout: CODE_VIEW_LAYOUT,
+      expansionLineCount: GAP_BATCH,
+      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}`,
+      onPostRender: gaps.onPostRender,
       ...(review.enabled
         ? {
             enableGutterUtility: true,
@@ -259,7 +348,7 @@ export default function AllChangesView({
           }
         : {}),
     }),
-    [options, diffStyle, review.enabled, openComposer, itemPaths]
+    [options, diffStyle, review.enabled, openComposer, itemPaths, gaps.onPostRender]
   );
 
   // Bring a requested comment into view once per request.
@@ -359,6 +448,7 @@ export default function AllChangesView({
     <WorkerPoolContext.Provider value={diffWorkerPool}>
       <div
         {...review.keyboardProps}
+        onClickCapture={gaps.onClickCapture}
         className="diff-line-cursor-host flex min-h-0 flex-1 flex-col"
       >
         <CodeView
