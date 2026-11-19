@@ -235,6 +235,7 @@
 }
 
 .changes-viewport {
+  container: changes-diff / inline-size;
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -516,7 +517,7 @@
 
 .changes-comparison-controls {
   display: flex;
-  flex: 1;
+  flex: 1 1 220px;
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
@@ -665,8 +666,12 @@
 
 .changes-key-hints {
   display: flex;
+  flex-shrink: 0;
   flex-wrap: wrap;
+  align-content: start;
   align-items: center;
+  max-height: max(2rem, 12%);
+  overflow: auto;
   gap: 4px 12px;
   border-top: 1px solid var(--color-line);
   padding-top: 6px;
@@ -696,4 +701,43 @@
   padding: 4px 8px;
   color: var(--color-fg-soft);
   overflow-wrap: anywhere;
+}
+
+@container changes-diff (max-width: 230px) {
+  .changes-diff-heading {
+    gap: 2px 4px;
+  }
+
+  .changes-diff-heading .changes-fold-button {
+    flex-basis: 100%;
+    min-height: 20px;
+  }
+
+  .changes-diff-heading .changes-diff-totals {
+    display: none;
+  }
+
+  .changes-diff-heading .evidence-action {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.changes-keyboard-region {
+  container: changes-pane / inline-size;
+}
+
+@container changes-pane (max-width: 300px) {
+  .changes-comparison-controls label {
+    grid-template-columns: minmax(0, 1fr);
+    flex-basis: 0;
+    gap: 2px;
+  }
+
+  .changes-key-hints {
+    max-height: 2rem;
+  }
 }

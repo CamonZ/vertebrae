@@ -16,6 +16,7 @@ export function ChangesKeyHints({
   return (
     <footer
       className="changes-key-hints"
+      tabIndex={0}
       aria-label="Changes keyboard shortcuts"
     >
       <span>
