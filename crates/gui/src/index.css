@@ -3240,6 +3240,11 @@ html.light ::selection {
   cursor: not-allowed;
   opacity: 0.55;
 }
+.hc-panel .hc-catalog-save-warning {
+  color: var(--warn);
+  flex-shrink: 0;
+}
+
 .hc-panel .hc-provider-unavailable {
   max-width: 220px;
   overflow: hidden;

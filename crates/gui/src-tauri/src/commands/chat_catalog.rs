@@ -372,7 +372,7 @@ async fn scope_identity(
     if online {
         let response = client
             .execute::<Value>(
-                "mutation($id:Uuid4!){registerChatInstallation(installationId:$id){id userId}}",
+                "mutation RegisterChatInstallation($id:Uuid4!){registerChatInstallation(installationId:$id){id userId}}",
                 json!({"id": machine}),
                 "registerChatInstallation",
             )

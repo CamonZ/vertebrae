@@ -719,6 +719,38 @@ describe("localChatPersistence", () => {
     ).toBeUndefined();
   });
 
+  it.each(["codex", "claude"] as const)(
+    "reports a failed %s catalog save until the pending entry is retried",
+    async (harness) => {
+      vi.resetModules();
+      const { commands: freshCommands } = await import("../bindings");
+      vi.spyOn(freshCommands, "loadLocalChatSessionIndex")
+        .mockResolvedValueOnce({ status: "error", error: { message: "Read failed" } })
+        .mockResolvedValue({ status: "ok", data: [] });
+      const save = vi.spyOn(freshCommands, "saveLocalChatSessionIndex")
+        .mockResolvedValueOnce({ status: "error", error: { message: "Write failed" } })
+        .mockResolvedValue({ status: "ok", data: null });
+      const persistence = await import("./localChatPersistence");
+      const onChange = vi.fn();
+      const unsubscribe = persistence.subscribeToCatalogSaves(onChange);
+
+      expect(await persistence.persistLocalChatSession(makeSession({ harness }))).toBe(false);
+      expect(save).not.toHaveBeenCalled();
+      expect(persistence.hasFailedCatalogSave("s-1")).toBe(true);
+      expect(persistence.hasFailedCatalogSave("other")).toBe(false);
+      expect(await persistence.retryCatalogSave()).toBe(false);
+      expect(persistence.hasFailedCatalogSave("s-1")).toBe(true);
+
+      expect(await persistence.retryCatalogSave()).toBe(true);
+      expect(save.mock.lastCall?.[0].sessions).toEqual([
+        expect.objectContaining({ id: "s-1", providerResumeId: "conv-1", harness }),
+      ]);
+      expect(persistence.hasFailedCatalogSave("s-1")).toBe(false);
+      expect(onChange).toHaveBeenCalledTimes(2);
+      unsubscribe();
+    }
+  );
+
   it("merges existing app index entries before the first async save", async () => {
     vi.resetModules();
     const { commands: freshCommands } = await import("../bindings");

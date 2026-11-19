@@ -267,8 +267,11 @@ pub(super) async fn deliver(
     for id in pending_order(catalog, project) {
         let kind = id.kind();
         let query = format!(
-            "mutation($p:Uuid4!,$m:Uuid4!,$c:{scalar}!,$r:Int!,$n:Uuid4!,$v:Json!){{{mutation}(projectId:$p,installationId:$m,{field}:$c,expectedRevision:$r,mutationId:$n,payload:$v){{status entry{{id:{field} revision payload}}}}}}",
-            scalar = kind.scalar(), mutation = kind.mutation(), field = kind.field(),
+            "mutation {operation}($p:Uuid4!,$m:Uuid4!,$c:{scalar}!,$r:Int!,$n:Uuid4!,$v:Json!){{{mutation}(projectId:$p,installationId:$m,{field}:$c,expectedRevision:$r,mutationId:$n,payload:$v){{status entry{{id:{field} revision payload}}}}}}",
+            operation = kind.mutation_operation(),
+            scalar = kind.scalar(),
+            mutation = kind.mutation(),
+            field = kind.field(),
         );
 
         for _ in 0..DELIVERY_ATTEMPTS {

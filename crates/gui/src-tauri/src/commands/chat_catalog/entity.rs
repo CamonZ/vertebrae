@@ -219,6 +219,13 @@ impl EntityKind {
         }
     }
 
+    pub(super) fn mutation_operation(self) -> &'static str {
+        match self {
+            Self::Chat => "PutChatCatalog",
+            Self::Thread => "PutReviewThread",
+        }
+    }
+
     pub(super) fn mutation(self) -> &'static str {
         match self {
             Self::Chat => "putChatCatalog",
@@ -250,12 +257,12 @@ impl EntityKind {
     fn snapshot_query(self) -> &'static str {
         match self {
             Self::Chat => concat!(
-                "query($p:Uuid4!,$m:Uuid4!,$after:String){",
+                "query ChatCatalog($p:Uuid4!,$m:Uuid4!,$after:String){",
                 "chatCatalog(projectId:$p,installationId:$m,after:$after,limit:100,includeCompleted:true){",
                 "entries{id:chatId revision payload} nextCursor}}"
             ),
             Self::Thread => concat!(
-                "query($p:Uuid4!,$m:Uuid4!,$after:Uuid4){",
+                "query ReviewThreads($p:Uuid4!,$m:Uuid4!,$after:Uuid4){",
                 "reviewThreads(projectId:$p,installationId:$m,after:$after,limit:100){",
                 "entries{id:threadId revision payload} nextCursor}}"
             ),
