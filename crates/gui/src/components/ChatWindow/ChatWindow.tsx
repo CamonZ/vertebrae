@@ -596,7 +596,6 @@ export function ChatWindow({
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
       />
-      <DiscussionSnapshot snapshot={worktreeSnapshot} />
       <div
         ref={panelResize.containerRef}
         className="chat-with-changes min-h-0 flex-1"
@@ -743,14 +742,17 @@ export function ChatWindow({
                 activeCommentId={activeCommentId}
                 commentFocus={focus}
                 footer={
-                  gate && gateStatus && gateDraft ? (
-                    <GateSteering
-                      sessionId={sessionId}
-                      gate={gate}
-                      status={gateStatus}
-                      draft={gateDraft}
-                    />
-                  ) : null
+                  <>
+                    <DiscussionSnapshot snapshot={worktreeSnapshot} />
+                    {gate && gateStatus && gateDraft && (
+                      <GateSteering
+                        sessionId={sessionId}
+                        gate={gate}
+                        status={gateStatus}
+                        draft={gateDraft}
+                      />
+                    )}
+                  </>
                 }
               />
             </Profiler>
