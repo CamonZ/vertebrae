@@ -113,6 +113,7 @@ export const CHANGES_COMMANDS = {
 /** Toggle a file's viewed mark (folds it; the cursor skips it). */
 export const CHANGES_VIEWED_KEY = "v";
 
+
 export const CHANGED_FILE_LIST_KEYS = {
   keys: ["↑", "↓"],
   label: "Browse file list",
@@ -165,6 +166,7 @@ export type ChangesSituation =
   | "files"
   | "picker"
   | "diff"
+  | "gap"
   | "composer";
 
 export interface KeyHint {
@@ -175,6 +177,12 @@ export interface KeyHint {
   /** Only meaningful in a split diff. */
   splitOnly?: boolean;
 }
+
+/** ⇧V: unmark the file most recently marked viewed and return to it. */
+export const CHANGES_UNVIEW_HINT: KeyHint = {
+  keys: ["⇧", "V"],
+  label: "Unmark last viewed file",
+};
 
 const modifierKeys = (shortcut: ChatShortcutDefinition) =>
   presentChatShortcut(shortcut)?.keys ?? [];
@@ -214,6 +222,7 @@ export const CHANGES_HINT_GROUPS: readonly {
       ...PALETTE_HINTS,
       { keys: ["↓"], label: "Line cursor (from a file heading)" },
       { keys: [CHANGES_VIEWED_KEY], label: "Mark file viewed" },
+      CHANGES_UNVIEW_HINT,
       ...RESIZE_HINTS,
     ],
   },
@@ -245,8 +254,23 @@ export const CHANGES_HINT_GROUPS: readonly {
       { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: DIFF_COPY_SHORTCUT.label },
       { keys: ["c / ↵"], label: "Discuss selection" },
       { keys: [CHANGES_VIEWED_KEY], label: "Mark file viewed, go to next" },
+      CHANGES_UNVIEW_HINT,
       ...PALETTE_HINTS,
       { keys: ["Esc"], label: "Single line / back to chat" },
+    ],
+  },
+  {
+    situation: "gap",
+    title: "Changes · unchanged lines",
+    hints: [
+      { keys: ["↑", "↓"], label: "Move line cursor" },
+      { keys: ["↵"], label: "Expand toward where you came from" },
+      { keys: ["⌥", "↵"], label: "Expand the other way" },
+      { keys: ["⌥", "↑ / ↓"], label: "Previous / next hunk or comment" },
+      ...FILE_JUMP_HINTS,
+      { keys: [CHANGES_VIEWED_KEY], label: "Mark file viewed, go to next" },
+      CHANGES_UNVIEW_HINT,
+      { keys: ["Esc"], label: "Back to chat" },
     ],
   },
   {

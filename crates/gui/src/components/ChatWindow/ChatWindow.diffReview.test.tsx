@@ -123,7 +123,10 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       },
       ref
     ) {
-      useImperativeHandle(ref, () => ({ scrollTo: seen.scroll }));
+      useImperativeHandle(ref, () => ({
+        scrollTo: seen.scroll,
+        getInstance: () => undefined,
+      }));
       if (props.className === "changes-code-view" && !props.renderCustomHeader)
         seen.evidence = {
           items: props.items as unknown as Array<{ id: string; type: string }>,

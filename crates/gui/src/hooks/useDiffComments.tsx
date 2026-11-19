@@ -27,12 +27,25 @@ import type {
 import {
   DIFF_CURSOR_ENTRY_ATTRIBUTE,
   DIFF_CURSOR_HOST_ATTRIBUTE,
+  cursorSide,
+  gapScrollPoint,
+  lineCursor,
   moveCursor,
   moveToLandmark,
   selectedCode,
   switchCursorSide,
+  type CursorPoint,
+  type CursorView,
+  type DiffCursor,
   type DiffLayout,
+  type GapCursor,
 } from "../components/thread/toolChange/diffCursor";
+import {
+  revealGap,
+  type FileContext,
+  type GapReach,
+  type GapReveal,
+} from "../components/thread/toolChange/diffGaps";
 import { DIFF_COMMENT_KEYS } from "../components/ChatWindow/chatShortcuts";
 import {
   DiffCommentThread,
@@ -82,6 +95,8 @@ export interface DiffCommentsApi {
     ref: RefObject<HTMLDivElement | null>;
   };
   renderAnnotation(annotation: { metadata: ReviewAnnotation }): ReactNode;
+  /** The keyboard cursor when it rests on a collapsed gap; null otherwise. */
+  gapCursor: GapCursor | null;
 }
 
 const NONE: ReviewDiffAnnotation[] = [];
@@ -100,6 +115,20 @@ export interface DiffCursorOptions {
   onEdge?(direction: -1 | 1): void;
   /** `v`: mark a file as viewed (or unviewed, from its heading). */
   onToggleViewed?(path: string): void;
+  /**
+   * A file's collapsed gaps and revealed lines. Gaps become cursor rows only
+   * where this is provided (with `onRevealGap`).
+   */
+  context?(path: string): FileContext | undefined;
+  /** ↵ on a gap: show these lines of gap `gap`. */
+  onRevealGap?(path: string, gap: number, reveal: GapReveal): void;
+}
+
+/** ↵ reveals a section toward the arrival, ⌥↵ one at the other end. */
+function gapReach(event: KeyboardEvent<HTMLDivElement>): GapReach | null {
+  if (event.key !== "Enter" || event.metaKey || event.ctrlKey) return null;
+  if (event.shiftKey) return null;
+  return event.altKey ? "other" : "batch";
 }
 
 
@@ -134,7 +163,13 @@ export function useDiffComments(
     onExit,
     onEdge,
     onToggleViewed,
+    context,
+    onRevealGap,
   } = cursor;
+  const view: CursorView = {
+    layout,
+    context: onRevealGap ? context : undefined,
+  };
   const groupRef = useRef<HTMLDivElement | null>(null);
   const review = useContext(DiffReviewContext);
   const discussion = useContext(SelectionDiscussionActionsContext);
@@ -146,6 +181,15 @@ export function useDiffComments(
   const [selection, setSelection] = useState<{
     path: string;
     range: SelectedLineRange;
+  } | null>(null);
+  // The cursor on a collapsed gap; the line selection is empty meanwhile.
+  const [gapCursor, setGapCursor] = useState<GapCursor | null>(null);
+  // After ↵ revealed lines of a gap that is still collapsed, the cursor sits
+  // on the revealed line beside it; until the cursor moves, ↵ keeps
+  // expanding that gap.
+  const [revealing, setRevealing] = useState<{
+    gap: GapCursor;
+    at: CursorPoint;
   } | null>(null);
   // Pierre reports the selection a gutter press completed right after the
   // press itself; ignore that echo so the draft keeps its captured range.
@@ -256,6 +300,8 @@ export function useDiffComments(
       if (ignoreSelection.current || draft) return;
 
       setSelection(range ? { path, range } : null);
+      if (range) setGapCursor(null);
+      setRevealing(null);
       const file = files.find((file) => canonicalPath(file) === path);
       const anchor =
         file && range ? captureCodeSelection(file, range, home) : null;
@@ -269,6 +315,7 @@ export function useDiffComments(
     (path: string) => {
       setDraft((current) => (current?.path === path ? null : current));
       setSelection((current) => (current?.path === path ? null : current));
+      setGapCursor((current) => (current?.path === path ? null : current));
       ignoreSelection.current = false;
       if (sharedSelection?.path === path) discussion?.select(null);
     },
@@ -379,9 +426,20 @@ export function useDiffComments(
     ]
   );
 
-  const moveTo = (path: string, range: SelectedLineRange) => {
-    onSelectionChange(path, range);
-    onCursorMove?.(path, range.end, range.endSide ?? range.side ?? "additions");
+  const moveTo = (next: DiffCursor) => {
+    setRevealing(null);
+    if (next.kind === "line") {
+      const { path, range } = next;
+      setGapCursor(null);
+      onSelectionChange(path, range);
+      onCursorMove?.(path, range.end, range.endSide ?? range.side ?? "additions");
+      return;
+    }
+    if (draft) return;
+    onSelectionChange(next.path, null);
+    setGapCursor(next);
+    const near = gapScrollPoint(files, view, next);
+    if (near) onCursorMove?.(next.path, near.line, near.side);
   };
 
   const landmarkMarks = (path: string) =>
@@ -401,20 +459,61 @@ export function useDiffComments(
 
     const command = event.metaKey || event.ctrlKey;
     const plain = !command && !event.shiftKey && !event.altKey;
-    const current = selection;
+    const current: DiffCursor | null = gapCursor
+      ? gapCursor
+      : selection
+        ? { kind: "line", ...selection }
+        : null;
     const vertical = event.key === "ArrowDown" || event.key === "ArrowUp";
     const direction = event.key === "ArrowDown" ? 1 : -1;
+    // The gap ↵ expands: the cursor's, or the one just revealed beside it.
+    const expanding =
+      current?.kind === "gap"
+        ? current
+        : revealing &&
+            current?.path === revealing.gap.path &&
+            current.range.start === revealing.at.line &&
+            current.range.end === revealing.at.line &&
+            cursorSide(current) === revealing.at.side &&
+            (current.range.side ?? "additions") === revealing.at.side
+          ? revealing.gap
+          : null;
 
     // ⌥↑/⌥↓: hunks, comments and discussions; ⌥⇧↑/⌥⇧↓: files only.
     if (vertical && event.altKey && !command) {
-      const next = moveToLandmark(files, layout, current, direction, {
+      const next = moveToLandmark(files, view, current, direction, {
         filesOnly: event.shiftKey,
         marks: landmarkMarks,
       });
       if (!next) return;
       event.preventDefault();
       if (entry) group.focus({ preventScroll: true });
-      moveTo(next.path, next.range);
+      moveTo(next);
+      return;
+    }
+
+    // ↵ / ⌥↵ on a gap reveal a section of its hidden lines; the cursor lands on
+    // the revealed line beside what is still hidden.
+    const reach = !entry && expanding ? gapReach(event) : null;
+    if (reach && expanding) {
+      event.preventDefault();
+      const file = files.find((candidate) => canonicalPath(candidate) === expanding.path);
+      const fileContext = view.context?.(expanding.path);
+      const result =
+        file && fileContext
+          ? revealGap(file, fileContext, expanding.gap, expanding.arrival, reach)
+          : null;
+      if (!result) return;
+      onRevealGap?.(expanding.path, expanding.gap, result.reveal);
+      const at: CursorPoint = {
+        side: expanding.side,
+        line:
+          expanding.side === "deletions"
+            ? result.landing.oldLine
+            : result.landing.newLine,
+      };
+      moveTo(lineCursor(expanding.path, at));
+      if (result.hidden > 0) setRevealing({ gap: expanding, at });
       return;
     }
     if (event.altKey) return;
@@ -434,37 +533,39 @@ export function useDiffComments(
       // A file heading: ↓ starts the cursor on that file's first line.
       if (!plain || event.key !== "ArrowDown") return;
       const file = files.find((candidate) => canonicalPath(candidate) === path);
-      const start = file && moveCursor([file], layout, null, 1, false);
+      const start = file && moveCursor([file], view, null, 1, false);
       if (!start) return;
       event.preventDefault();
       group.focus({ preventScroll: true });
-      moveTo(start.path, start.range);
+      moveTo(start);
       return;
     }
 
     if (vertical) {
       if (command) return;
-      const next = moveCursor(files, layout, current, direction, event.shiftKey);
+      const next = moveCursor(files, view, current, direction, event.shiftKey);
       if (!next) return;
       event.preventDefault();
-      if (next !== current) moveTo(next.path, next.range);
+      if (next !== current) moveTo(next);
       return;
     }
 
     if (event.key === "Escape") {
       if (!plain) return;
-      const end = current && {
-        side: current.range.endSide ?? current.range.side ?? "additions",
-        line: current.range.end,
+      // A range collapses to its end line; a single line or a gap leaves.
+      const line = current?.kind === "line" ? current : null;
+      const end = line && {
+        side: line.range.endSide ?? line.range.side ?? "additions",
+        line: line.range.end,
       };
       const multiLine =
-        current &&
+        line &&
         end &&
-        (current.range.start !== end.line ||
-          (current.range.side ?? "additions") !== end.side);
-      if (current && end && multiLine) {
+        (line.range.start !== end.line ||
+          (line.range.side ?? "additions") !== end.side);
+      if (line && end && multiLine) {
         event.preventDefault();
-        moveTo(current.path, { start: end.line, end: end.line, side: end.side });
+        moveTo(lineCursor(line.path, end));
       } else if (onExit) {
         event.preventDefault();
         onExit();
@@ -474,15 +575,13 @@ export function useDiffComments(
 
     if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && plain) {
       const toward = event.key === "ArrowLeft" ? -1 : 1;
-      const side = current
-        ? (current.range.endSide ?? current.range.side ?? "additions")
-        : null;
-      // Past the outer column (or in a one-column diff) focus leaves the diff.
-      const atEdge =
+      // Past the outer column (or in a one-column diff, or from a gap that
+      // spans both columns) focus leaves the diff.
+      if (
         layout === "unified" ||
-        !current ||
-        (toward === -1 ? side === "deletions" : side === "additions");
-      if (atEdge) {
+        current?.kind !== "line" ||
+        cursorSide(current) === (toward === -1 ? "deletions" : "additions")
+      ) {
         if (!onEdge) return;
         event.preventDefault();
         onEdge(toward);
@@ -491,11 +590,11 @@ export function useDiffComments(
       event.preventDefault();
       const next = switchCursorSide(
         files,
-        layout,
+        view,
         current,
         toward === -1 ? "deletions" : "additions"
       );
-      if (next !== current) moveTo(next.path, next.range);
+      if (next !== current) moveTo(next);
       return;
     }
 
@@ -506,11 +605,15 @@ export function useDiffComments(
       if (event.repeat) return;
       // Mark the file reviewed and carry on with the next one.
       const at = files.findIndex((file) => canonicalPath(file) === current.path);
-      const next = moveCursor(files.slice(at + 1), layout, null, 1, false);
+      const next = moveCursor(files.slice(at + 1), view, null, 1, false);
       onToggleViewed(current.path);
-      if (next) moveTo(next.path, next.range);
+      if (next) moveTo(next);
+      else setGapCursor(null);
       return;
     }
+
+    // Copying and commenting apply to lines.
+    if (current.kind === "gap") return;
 
     if (
       command &&
@@ -520,7 +623,7 @@ export function useDiffComments(
     ) {
       const code =
         selectedFile &&
-        (selectedCode(selectedFile, layout, current.range) ?? anchor?.code);
+        (selectedCode(selectedFile, view, current.range) ?? anchor?.code);
       if (code == null) return;
       event.preventDefault();
       writeClipboard(code);
@@ -543,10 +646,10 @@ export function useDiffComments(
     tabIndex: review ? 0 : undefined,
     role: "group",
     "aria-label": "Code diff selection",
-    "data-line-cursor": selection ? "" : undefined,
-    // The cursor line's accent bar is the focus indicator once there is one.
-    "data-focus-halo": selection ? "none" : undefined,
+    "data-line-cursor": gapCursor || revealing ? "gap" : selection ? "" : undefined,
     [DIFF_CURSOR_HOST_ATTRIBUTE]: "",
+    // The diff fills the host and its scroller clips an outer ring.
+    "data-focus-halo": "overlay",
     // Esc steps out of the cursor here instead of closing the chat panel.
     "data-owns-escape": onExit ? "" : undefined,
     onKeyDown,
@@ -560,5 +663,6 @@ export function useDiffComments(
     selectedLinesFor,
     onSelectionChange,
     renderAnnotation,
+    gapCursor,
   };
 }

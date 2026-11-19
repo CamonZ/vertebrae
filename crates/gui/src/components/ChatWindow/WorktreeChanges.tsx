@@ -40,6 +40,7 @@ import {
   type ComparisonRequest,
   type ComparisonEndpoint,
   type ComparisonChoice,
+  type WorktreeChange,
   type WorktreeChanges as Changes,
 } from "../../bindings";
 import { usePierreDiffOptions } from "../../hooks/useCodeAppearance";
@@ -67,6 +68,7 @@ import { FilesTree } from "./workspace/FilesTree";
 import { STATUS_LETTER } from "./workspace/status";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import type { JumpTarget } from "./workspace/AllChangesView";
+import { loadChangeContents } from "./workspace/changeContents";
 import { routeSource, type FileReveal } from "./workspace/sourceRoute";
 import "./workspaceTabs.css";
 import "./worktreeChanges.css";
@@ -106,11 +108,9 @@ function changesSituation(
   if (focused.getAttribute("role") === "combobox") return "picker";
   if (fileList?.contains(focused)) return "files";
   if (isEditableShortcutTarget(focused)) return "outside";
-  if (
-    focused.closest(`[${DIFF_CURSOR_HOST_ATTRIBUTE}]`) &&
-    !focused.closest(`[${DIFF_CURSOR_ENTRY_ATTRIBUTE}]`)
-  )
-    return "diff";
+  const host = focused.closest<HTMLElement>(`[${DIFF_CURSOR_HOST_ATTRIBUTE}]`);
+  if (host && !focused.closest(`[${DIFF_CURSOR_ENTRY_ATTRIBUTE}]`))
+    return host.dataset.lineCursor === "gap" ? "gap" : "diff";
   return "panel";
 }
 
@@ -390,6 +390,17 @@ export function WorktreeChanges({
     });
   }, [state]);
 
+  const comparison = state.status === "ready" ? state.data.comparison : null;
+  // Both sides of a change, so Changes can reveal its unchanged lines.
+  const loadContents = useMemo(
+    () =>
+      comparison
+        ? (change: WorktreeChange) =>
+            loadChangeContents(worktreePath, comparison, change)
+        : undefined,
+    [worktreePath, comparison]
+  );
+
   const refreshAll = useCallback(() => {
     setRefresh((value) => ({ count: value.count + 1, background: true }));
     setTreeToken((value) => value + 1);
@@ -454,6 +465,14 @@ export function WorktreeChanges({
 
   const nextLocalJump = useRef(0);
   // Navigating by hand drops a reference's revealed lines.
+  /** ⇧V: the file most recently marked viewed comes back, under the cursor. */
+  const unviewLast = () => {
+    const last = [...viewedPaths].at(-1);
+    if (!last) return;
+    setViewed(last, false);
+    jumpToFile(last, true);
+  };
+
   const jumpToFile = (path: string, focusHeader = false) => {
     setReveal(null);
     setActivePath(path);
@@ -533,6 +552,33 @@ export function WorktreeChanges({
       keywords: "file go to jump",
       run: () => jumpToFile(file.path, true),
     }));
+    const viewedItems: PaletteItem[] = [...viewedPaths].reverse().map((path) => ({
+      id: `changes-unview-${path}`,
+      scope: "changes",
+      label: "Unmark file viewed",
+      hint: path,
+      keywords: "unviewed reviewed undo show",
+      run: () => {
+        setViewed(path, false);
+        jumpToFile(path, true);
+      },
+    }));
+    const unviewAll: PaletteItem[] =
+      viewedPaths.size > 1
+        ? [
+            {
+              id: "changes-unview-all",
+              scope: "changes",
+              label: "Unmark all viewed files",
+              hint: `${viewedPaths.size} files`,
+              keywords: "unviewed reviewed reset clear",
+              run: () => {
+                for (const path of viewedPaths) setViewed(path, false);
+                refocus();
+              },
+            },
+          ]
+        : [];
     const viewed = selectedFile && viewedPaths.has(selectedFile.path);
     const commands: PaletteItem[] = [
       { id: "changes-base", scope: "changes", label: CHANGES_COMMANDS.base, keywords: "comparison branch", run: pick(baseButton.current) },
@@ -543,20 +589,27 @@ export function WorktreeChanges({
             { id: "changes-diff", scope: "changes", label: CHANGES_COMMANDS.diff, hint: selectedFile.path, run: () => openSelected("diff") },
             { id: "changes-file", scope: "changes", label: CHANGES_COMMANDS.file, hint: selectedFile.path, run: () => openSelected("file") },
             { id: "changes-external", scope: "changes", label: CHANGES_COMMANDS.external, hint: selectedFile.path, run: () => void external.open() },
-            {
-              id: "changes-viewed",
-              scope: "changes",
-              label: viewed ? "Unmark file viewed" : "Mark file viewed",
-              hint: selectedFile.path,
-              detail: CHANGES_VIEWED_KEY,
-              keywords: "reviewed done",
-              run: () => {
-                setViewed(selectedFile.path, !viewed);
-                refocus();
-              },
-            },
+            // A viewed file's unmark entry is listed with the others below.
+            ...(viewed
+              ? []
+              : [
+                  {
+                    id: "changes-viewed",
+                    scope: "changes",
+                    label: "Mark file viewed",
+                    hint: selectedFile.path,
+                    detail: CHANGES_VIEWED_KEY,
+                    keywords: "reviewed done",
+                    run: () => {
+                      setViewed(selectedFile.path, true);
+                      refocus();
+                    },
+                  } satisfies PaletteItem,
+                ]),
           ] satisfies PaletteItem[])
         : []),
+      ...viewedItems,
+      ...unviewAll,
       {
         id: "changes-layout",
         scope: "changes",
@@ -640,6 +693,19 @@ export function WorktreeChanges({
       moveFile(event.key === "ArrowDown" ? 1 : -1);
       return;
     }
+    // ⇧V anywhere in Changes, the diff included: unmark the last viewed file.
+    if (
+      event.key.toLowerCase() === CHANGES_VIEWED_KEY &&
+      event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) unviewLast();
+      return;
+    }
     if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)
       return;
 
@@ -706,6 +772,7 @@ export function WorktreeChanges({
             onEdge={onEdge}
             viewedPaths={viewedPaths}
             onViewedChange={setViewed}
+            loadContents={loadContents}
           />
         </Suspense>
       </div>
