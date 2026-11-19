@@ -80,7 +80,6 @@ describe("localChatPersistence", () => {
     };
     const association = { ticketId: "shared-task", entityLevel: "task" };
     await persistence.persistLocalChatSession(makeSession({ association }));
-    await persistence.persistLocalChatSession(makeSession({ id: "unbound", discussion: "unbound" }));
     await persistence.persistLocalChatSession(makeSession({
       id: "bound",
       discussion: discussionBinding,
@@ -101,21 +100,6 @@ describe("localChatPersistence", () => {
     expect(persistence.findPersistedLocalChatSession("/repo")?.id).toBe("s-1");
     expect(persistence.loadPersistedLocalChatSession("bound")).toBeNull();
     expect(Object.keys(persistence.loadPersistedLocalChatSessions())).toEqual(["s-1"]);
-  });
-
-  it("never sends an unbound discussion to the session index command", async () => {
-    vi.resetModules();
-    const { commands } = await import("../bindings");
-    vi.spyOn(commands, "loadLocalChatSessionIndex").mockResolvedValue({ status: "ok", data: [] });
-    const save = vi.spyOn(commands, "saveLocalChatSessionIndex")
-      .mockResolvedValue({ status: "ok", data: null });
-    const persistence = await import("./localChatPersistence");
-
-    await persistence.persistLocalChatSession(makeSession({ id: "unbound", discussion: "unbound" }));
-    expect(save).not.toHaveBeenCalled();
-    await persistence.persistLocalChatSession(makeSession({ id: "main" }));
-    expect(save.mock.calls[0][0].changedIds).toEqual(["main"]);
-    expect(save.mock.calls[0][0].sessions.map(({ id }) => id)).toEqual(["main"]);
   });
 
   it("round-trips resumable local chat metadata", () => {

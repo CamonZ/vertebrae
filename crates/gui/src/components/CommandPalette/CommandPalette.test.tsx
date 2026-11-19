@@ -260,7 +260,7 @@ describe("palette helpers", () => {
         { id: "a", label: "A", status: "open" },
         { id: "inline", label: "Inline", status: "open", hasUserMessage: true,
           discussion: { parentChatId: "a", reviewThreadId: "thread", worktreePath: "/checkout" } },
-        { id: "unbound", label: "Transient", status: "open", discussion: "unbound" },
+        { id: "unbound", label: "Transient", status: "open", discussion: { parentChatId: "main", reviewThreadId: "thread", worktreePath: null } },
         {
           id: "c",
           label: "C",

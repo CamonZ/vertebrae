@@ -160,7 +160,7 @@ describe("useChatAssociation", () => {
   });
 
   it("ignores ticket IDs in an inline discussion", async () => {
-    seed([user(`Look at ticket ${TICKET.id}`, 1)], null, { discussion: "unbound" });
+    seed([user(`Look at ticket ${TICKET.id}`, 1)], null, { discussion: { parentChatId: "main", reviewThreadId: "thread", worktreePath: null } });
     const { result } = renderHook(() => useDriven("s1"));
     await act(async () => result.current.correct(TICKET.id));
     expect(resolve).not.toHaveBeenCalled();

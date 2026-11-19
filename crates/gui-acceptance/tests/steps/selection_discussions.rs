@@ -10,7 +10,7 @@ use fantoccini::{
     },
 };
 use serde_json::{Value, json};
-use std::time::Duration;
+use std::{io::Write, time::Duration};
 
 const DEEP: &str = r#"
 function deep(root, selector) {
@@ -28,6 +28,17 @@ function deep(root, selector) {
   return null;
 }
 "#;
+
+fn fixture_home() -> &'static std::path::Path {
+    let home = std::path::Path::new("/root");
+    assert!(
+        std::env::var("VTB_GUI_ACCEPTANCE_FIXTURE_WRITES").as_deref() == Ok("1")
+            && std::path::Path::new("/.dockerenv").is_file()
+            && std::env::var_os("HOME").as_deref() == Some(home.as_os_str()),
+        "Tool-patch fixtures require the disposable Docker GUI runner."
+    );
+    home
+}
 
 fn harness_capture(filename: &str) -> Vec<Value> {
     let path = std::path::Path::new(gui_acceptance::HARNESS_CAPTURE_DIR).join(filename);
@@ -258,7 +269,8 @@ async fn selection_fixture(world: &mut GuiWorld, unborn: bool) {
                 "files": [{"path": "selection.ts", "status": "modified"}],
                 "worktree": path,
                 "aggregate": false,
-                "overlapping": false
+                "overlapping": false,
+                "review_post_images": {"selection.ts": "const first = 1;\nconst selected = 42;\nconst third = 3;\n"}
             }
         });
         // Simulate the recorder publishing a tool patch through the same
@@ -276,20 +288,26 @@ async fn selection_fixture(world: &mut GuiWorld, unborn: bool) {
                 return window.__TAURI_INTERNALS__.invoke("plugin:event|emit", {
                     event: "local-chat-annotation-event",
                     payload: {session_id: id, annotation},
-                });
+                }).then(() => annotation);
             })
-                .then(() => done(true))
+                .then(done)
                 .catch(error => done(String(error)));
         "#,
                 vec![annotation],
             )
             .await
             .unwrap();
-        assert_eq!(
-            emitted,
-            json!(true),
-            "publish the native tool patch fixture"
-        );
+        let chat = emitted["session_id"]
+            .as_str()
+            .expect("published tool patch fixture");
+        let dir = fixture_home().join(".local/share/vertebrae/local-chat-annotations");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut log = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(format!("{chat}.jsonl")))
+            .unwrap();
+        writeln!(log, "{emitted}").unwrap();
     }
 
     composer
@@ -1017,8 +1035,145 @@ async fn persisted_before_restart(world: &mut GuiWorld) {
     }));
 }
 
+async fn review_ipc(client: &fantoccini::Client, command: &str, args: Value) -> Value {
+    let result = client
+        .execute_async(
+            r#"const [command, args, done] = arguments;
+           window.__TAURI_INTERNALS__.invoke(command, args)
+             .then(data => done({data}), error => done({error}));"#,
+            vec![json!(command), args],
+        )
+        .await
+        .unwrap();
+    assert!(result.get("error").is_none(), "{command}: {result}");
+    result["data"].clone()
+}
+
+async fn stored_discussion_identity(
+    client: &fantoccini::Client,
+    project: &str,
+    path: &std::path::Path,
+) -> Value {
+    let session = persisted_discussion(client, path).await;
+    let thread_id = &session["discussionBinding"]["reviewThreadId"];
+    let rows = review_ipc(client, "list_review_threads", json!({"projectId": project})).await;
+    let thread = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| &row["threadId"] == thread_id)
+        .expect("saved thread");
+    json!({"session": session["id"], "resume": session["providerResumeId"],
+        "thread": thread_id, "status": thread["payload"]["status"],
+        "start": thread["payload"]["startLine"], "line": thread["payload"]["line"]})
+}
+
+#[when("I close and reopen the Changes view")]
+async fn remount_changes(world: &mut GuiWorld) {
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    let project = world.project_id.as_deref().unwrap();
+    let path = world.temp_dir.as_deref().unwrap();
+    let before = stored_discussion_identity(&client, project, path).await;
+    let toggle = "[data-testid=local-chat-view-changes]";
+    gui_acceptance::click_pane_action(&client, toggle, "close Changes").await;
+    gui_acceptance::wait_for_js(
+        &client,
+        "Changes is unmounted",
+        "return !document.querySelector('[aria-label=\"Changes panel\"]');",
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+    gui_acceptance::click_pane_action(&client, toggle, "reopen Changes").await;
+    gui_acceptance::wait_for_js(
+        &client,
+        "the discussion returns after remount",
+        r#"return !!document.querySelector('[data-testid="selection-mini-thread"], [aria-label="Reopen selection discussion"]');"#,
+        vec![],
+        Duration::from_secs(10),
+    ).await;
+    if client
+        .find(Locator::Css("[data-testid=selection-mini-thread]"))
+        .await
+        .is_err()
+    {
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::Css("[aria-label='Reopen selection discussion']"),
+            "reopen the discussion after remount",
+        )
+        .await;
+    }
+    assert_eq!(
+        stored_discussion_identity(&client, project, path).await,
+        before
+    );
+}
+
+#[when("I ask an outdated follow-up and collapse the discussion")]
+async fn note_outdated_and_collapse(world: &mut GuiWorld) {
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    client
+        .find(Locator::Css("[aria-label='Ask about selected code']"))
+        .await
+        .unwrap()
+        .send_keys("Is the selected code still correct?")
+        .await
+        .unwrap();
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath("//button[normalize-space(.)='Ask']"),
+        "ask about the outdated code",
+    )
+    .await;
+    gui_acceptance::wait_until(
+        "the outdated note is saved",
+        Duration::from_secs(20),
+        || async {
+            let saved = client
+                .execute_async(
+                    r#"
+            const [projectId, done] = arguments;
+            window.__TAURI_INTERNALS__.invoke("list_review_threads", { projectId })
+              .then((rows) => done(rows.length === 1 &&
+                rows[0].payload.status === "outdated" && rows[0].payload.outdatedNoted),
+                () => done(false));
+            "#,
+                    vec![json!(world.project_id)],
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok(saved == true)
+        },
+    )
+    .await
+    .unwrap();
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[aria-label='Close discussion']"),
+        "collapse the outdated discussion",
+    )
+    .await;
+}
+
+#[then("the outdated discussion resumes without repeating the note")]
+async fn outdated_after_restart(world: &mut GuiWorld) {
+    verify_resume_after_restart(world, true).await;
+    assert_eq!(
+        discussion_prompts()
+            .iter()
+            .filter(|prompt| prompt.starts_with("Note: the selected code has changed"))
+            .count(),
+        1
+    );
+}
+
 #[then("the discussion stays out of chat history and resumes from its diff marker")]
 async fn resume_after_restart(world: &mut GuiWorld) {
+    verify_resume_after_restart(world, false).await;
+}
+
+async fn verify_resume_after_restart(world: &mut GuiWorld, outdated: bool) {
     let client = world.webdriver.as_ref().unwrap().lock().await;
     gui_acceptance::wait_for_page(&client, "/tasks", world.project_slug.as_deref()).await;
     let before = persisted_discussion(&client, world.temp_dir.as_deref().unwrap()).await;
@@ -1110,6 +1265,17 @@ async fn resume_after_restart(world: &mut GuiWorld) {
         "reopen the saved discussion",
     )
     .await;
+    if outdated {
+        gui_acceptance::wait_for_js(
+            &client,
+            "the detached discussion shows the original anchor snippet",
+            r#"return document.querySelector('[aria-label="Original selected code"]')
+                ?.textContent === 'const selected = 42;';"#,
+            vec![],
+            Duration::from_secs(10),
+        )
+        .await;
+    }
     client
         .find(Locator::Css("[aria-label='Ask about selected code']"))
         .await
@@ -2206,4 +2372,156 @@ async fn first_commit_enables_inline_ask(world: &mut GuiWorld) {
         )
         .await;
     }
+}
+
+#[when("I save a tool-patch anchor without starting a discussion")]
+async fn capture_sessionless_tool_thread(world: &mut GuiWorld) {
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    let path = world.temp_dir.as_deref().unwrap();
+    let project = world.project_id.as_deref().unwrap();
+    let sessions = review_ipc(&client, "load_local_chat_session_index", json!({})).await;
+    let parent_session = sessions
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|session| {
+            session["projectPath"] == json!(path) && session["providerResumeId"].is_string()
+        })
+        .expect("persisted parent chat");
+    let parent = parent_session["id"].as_str().unwrap();
+    let resume = parent_session["providerResumeId"].as_str().unwrap();
+
+    // The mock emits a stream but does not write Claude's replay transcript.
+    let project_dir: String = path
+        .to_string_lossy()
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect();
+    let replay_dir = fixture_home().join(".claude/projects").join(project_dir);
+    std::fs::create_dir_all(&replay_dir).unwrap();
+    let init = json!({"type": "system", "subtype": "init", "session_id": resume, "model": "claude-sonnet-4"});
+    std::fs::write(
+        replay_dir.join(format!("{resume}.jsonl")),
+        format!(
+            "{init}\n{}",
+            READ_TOOL_TURN.replace("\"fixture\"", &json!(resume).to_string())
+        ),
+    )
+    .unwrap();
+    let annotations = review_ipc(
+        &client,
+        "load_local_chat_annotations",
+        json!({"sessionId": parent}),
+    )
+    .await;
+    let tool = annotations
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|annotation| annotation["kind"] == "worktree_delta")
+        .expect("saved tool patch");
+    let id = uuid::Uuid::new_v4();
+    review_ipc(
+        &client,
+        "capture_review_anchor",
+        json!({"request": {
+            "worktree": path, "threadId": id,
+            "location": {"path": "selection.ts", "side": "RIGHT",
+                "source": {"kind": "tool_call", "chatId": parent, "toolUseId": tool["tool_id"]}},
+            "range": {"startLine": 2, "line": 2}, "selectedText": "const selected = 42;",
+            "parent": {"chatId": parent, "projectPath": path}
+        }}),
+    )
+    .await;
+    let rows = review_ipc(
+        &client,
+        "list_review_threads",
+        json!({"projectId": project}),
+    )
+    .await;
+    assert_eq!(rows[0]["threadId"], json!(id));
+    assert_eq!(rows[0]["payload"]["toolUseId"], tool["tool_id"]);
+    let sessions = review_ipc(&client, "load_local_chat_session_index", json!({})).await;
+    assert!(
+        !sessions
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["discussionBinding"]["reviewThreadId"] == json!(id))
+    );
+}
+
+#[then("I can start the restored discussion on the recorded tool patch")]
+async fn ask_restored_tool_thread(world: &mut GuiWorld) {
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    gui_acceptance::wait_for_page(&client, "/tasks", world.project_slug.as_deref()).await;
+    if client
+        .find(Locator::Css("[data-testid='local-chat-mini-panel']"))
+        .await
+        .is_err()
+    {
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::Css("[data-testid='local-chat-launcher']"),
+            "open main chat",
+        )
+        .await;
+    }
+    if client
+        .find(Locator::Css("[data-testid='local-chat-history-drawer']"))
+        .await
+        .is_err()
+    {
+        gui_acceptance::click_pane_action(
+            &client,
+            "[title='Toggle chat history']",
+            "open conversation history",
+        )
+        .await;
+    }
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[data-testid='local-chat-history-drawer'] .hc-mini-history-open"),
+        "open the saved parent",
+    )
+    .await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css(".tool-activity-summary[aria-expanded='false']"),
+        "expand saved tool activity",
+    )
+    .await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css(
+            "[data-testid='tool-change-block'] [aria-label='Reopen selection discussion']",
+        ),
+        "open the restored tool-patch discussion",
+    )
+    .await;
+    client
+        .find(Locator::Css("[aria-label='Ask about selected code']"))
+        .await
+        .unwrap()
+        .send_keys("Explain the restored tool selection")
+        .await
+        .unwrap();
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath("//button[normalize-space(.)='Ask']"),
+        "send the first question",
+    )
+    .await;
+    gui_acceptance::wait_until(
+        "the first question reached the provider",
+        Duration::from_secs(20),
+        || async {
+            Ok(discussion_prompts().last().is_some_and(|prompt| {
+                prompt.contains("const selected = 42;")
+                    && prompt.contains("Question: Explain the restored tool selection")
+            }))
+        },
+    )
+    .await
+    .unwrap();
 }

@@ -1,5 +1,5 @@
 use super::*;
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "UPPERCASE")]
@@ -89,6 +89,7 @@ impl ReviewThreadInput {
 pub struct ReviewThread {
     pub thread_id: Uuid,
     pub revision: u32,
+    pub checkout_path: Option<String>,
     pub payload: ReviewThreadInput,
 }
 
@@ -121,7 +122,12 @@ pub(crate) struct ReviewThreadChange {
     pub payload: Value,
 }
 
-fn visible_thread(id: Uuid, record: &Record) -> Option<ReviewThread> {
+fn visible_thread(
+    catalog: &Catalog,
+    project: &str,
+    id: Uuid,
+    record: &Record,
+) -> Option<ReviewThread> {
     if record.tombstoned() {
         return None;
     }
@@ -131,6 +137,11 @@ fn visible_thread(id: Uuid, record: &Record) -> Option<ReviewThread> {
     Some(ReviewThread {
         thread_id: id,
         revision,
+        checkout_path: catalog
+            .anchor_checkouts
+            .get(project)
+            .and_then(|paths| paths.get(&id))
+            .cloned(),
         payload,
     })
 }
@@ -140,7 +151,9 @@ pub(super) fn thread_views(catalog: &Catalog, project: &str) -> BTreeMap<Uuid, R
         .records(project)
         .filter_map(|(id, record)| match id {
             EntityKey::Chat(_) => None,
-            EntityKey::Thread(ThreadId(id)) => visible_thread(*id, record).map(|view| (*id, view)),
+            EntityKey::Thread(ThreadId(id)) => {
+                visible_thread(catalog, project, *id, record).map(|view| (*id, view))
+            }
         })
         .collect()
 }
@@ -187,29 +200,35 @@ pub(super) async fn publish_thread_changes<R: Runtime>(
     publish_thread_delta(app, project, before.visible, after.visible);
 }
 
+fn publish_thread<R: Runtime>(
+    app: &AppHandle<R>,
+    project: &str,
+    thread_id: Uuid,
+    thread: Option<ReviewThread>,
+) {
+    let _ = app.emit(
+        "review-thread-changed",
+        ReviewThreadChanged {
+            project_id: project.into(),
+            thread_id,
+            thread,
+        },
+    );
+}
+
 fn publish_thread_delta<R: Runtime>(
     app: &AppHandle<R>,
     project: &str,
     mut visible: BTreeMap<Uuid, ReviewThread>,
     after: BTreeMap<Uuid, ReviewThread>,
 ) {
-    let publish = |thread_id, thread| {
-        let _ = app.emit(
-            "review-thread-changed",
-            ReviewThreadChanged {
-                project_id: project.into(),
-                thread_id,
-                thread,
-            },
-        );
-    };
     for (id, thread) in after {
         if visible.remove(&id).as_ref() != Some(&thread) {
-            publish(id, Some(thread));
+            publish_thread(app, project, id, Some(thread));
         }
     }
     for id in visible.into_keys() {
-        publish(id, None);
+        publish_thread(app, project, id, None);
     }
 }
 
@@ -247,8 +266,15 @@ async fn release_anchors(catalog: &mut Catalog, project: &str, path: &Path, thre
     }).await;
     match result {
         Ok(released) if !released.is_empty() => {
+            let checkouts = catalog.anchor_checkouts.get_mut(project);
             for id in released {
                 repositories.remove(&id);
+            }
+            if let Some(checkouts) = checkouts {
+                checkouts.retain(|id, _| repositories.contains_key(id));
+                if checkouts.is_empty() {
+                    catalog.anchor_checkouts.remove(project);
+                }
             }
             if repositories.is_empty() {
                 catalog.anchor_repositories.remove(project);
@@ -286,6 +312,41 @@ pub(super) fn publish_thread_recovered<R: Runtime>(app: &AppHandle<R>, project: 
     );
 }
 
+type ObservedThread = (std::path::PathBuf, String, Uuid);
+const RECENT_THREAD_REVISIONS: usize = 1024;
+
+#[derive(Default)]
+pub(crate) struct ReviewThreadObservations(std::sync::Mutex<RecentThreadRevisions>);
+
+#[derive(Default)]
+struct RecentThreadRevisions(std::collections::VecDeque<(ObservedThread, u64)>);
+
+impl RecentThreadRevisions {
+    fn apply(
+        &mut self,
+        key: ObservedThread,
+        revision: u64,
+        cached_revision: Option<u64>,
+        merge: impl FnOnce() -> Result<(), CommandError>,
+    ) -> Result<bool, CommandError> {
+        let previous = self.0.iter().position(|(seen, _)| *seen == key);
+        if previous.is_some_and(|index| self.0[index].1 >= revision)
+            && cached_revision.is_some_and(|cached| cached >= revision)
+        {
+            return Ok(false);
+        }
+        merge()?;
+        if let Some(index) = previous {
+            self.0.remove(index);
+        }
+        if self.0.len() == RECENT_THREAD_REVISIONS {
+            self.0.pop_front();
+        }
+        self.0.push_back((key, revision));
+        Ok(true)
+    }
+}
+
 pub(crate) async fn apply_review_thread_change<R: Runtime>(
     state: &AppState,
     app: &AppHandle<R>,
@@ -315,20 +376,59 @@ pub(crate) async fn apply_review_thread_change<R: Runtime>(
     }
     u32::try_from(change.revision).map_err(|_| error())?;
 
+    let id = EntityKey::Thread(ThreadId(change.thread_id));
+    let cached_revision = catalog
+        .record(&change.project_id, &id)
+        .map(|record| record.remote.revision);
     let before = thread_changes(&catalog, &change.project_id);
-    apply_entry(
-        &mut catalog,
-        &path,
-        &change.project_id,
-        Entry {
-            id: EntityKey::Thread(ThreadId(change.thread_id)),
-            revision: change.revision,
-            payload,
-        },
-    )?;
+    let observations = app.state::<ReviewThreadObservations>();
+    let applied = observations
+        .0
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .apply(
+            (path.clone(), change.project_id.clone(), change.thread_id),
+            change.revision,
+            cached_revision,
+            || {
+                apply_entry(
+                    &mut catalog,
+                    &path,
+                    &change.project_id,
+                    Entry {
+                        id,
+                        revision: change.revision,
+                        payload,
+                    },
+                )?;
+                Ok(())
+            },
+        )?;
+    if !applied {
+        return Ok(());
+    }
 
+    // Another GUI process can have already written the same CDC row into
+    // our shared catalog. Its write doesn't notify this process's webview.
+    if let Some(thread) =
+        shared_thread_notification(&before, &catalog, &change.project_id, change.thread_id)
+    {
+        publish_thread(app, &change.project_id, change.thread_id, thread);
+    }
     publish_thread_changes(app, &change.project_id, &path, before, &mut catalog).await;
     Ok(())
+}
+
+fn shared_thread_notification(
+    before: &ThreadChanges,
+    catalog: &Catalog,
+    project: &str,
+    id: Uuid,
+) -> Option<Option<ReviewThread>> {
+    let visible = catalog
+        .record(project, &EntityKey::Thread(ThreadId(id)))
+        .and_then(|record| visible_thread(catalog, project, id, record));
+    (before.visible.get(&id) == visible.as_ref()).then_some(visible)
 }
 
 #[tauri::command]
@@ -351,6 +451,52 @@ pub async fn list_review_threads(
         .collect())
 }
 
+#[derive(Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ReviewThreadUpdate {
+    Position { position: ReviewThreadPosition },
+    OutdatedNote,
+    Anchor { anchor: ReviewThreadInput },
+}
+
+#[derive(Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReviewThreadPosition {
+    status: ReviewThreadStatus,
+    start_line: Option<u32>,
+    line: Option<u32>,
+}
+
+fn edit_review_thread(
+    current: Option<&Record>,
+    update: ReviewThreadUpdate,
+) -> Result<Option<Value>, CommandError> {
+    let Some(record) = current else {
+        return match update {
+            ReviewThreadUpdate::Anchor { anchor } => Ok(Some(anchor.into_wire())),
+            _ => Err(thread_error("Review thread was not found.")),
+        };
+    };
+    if record.tombstoned() {
+        return Err(thread_error("Review thread has been deleted."));
+    }
+    let mut stored: ReviewThreadInput = serde_json::from_value(record.visible().clone())
+        .map_err(|_| thread_error("The saved review thread is corrupt."))?;
+    let previous = stored.clone();
+    match update {
+        ReviewThreadUpdate::OutdatedNote => stored.outdated_noted = true,
+        ReviewThreadUpdate::Position { position } => {
+            stored.status = position.status;
+            stored.start_line = position.start_line;
+            stored.line = position.line;
+        }
+        ReviewThreadUpdate::Anchor { .. } => {
+            return Err(thread_error("The captured review anchor is immutable."));
+        }
+    }
+    Ok((stored != previous).then(|| stored.into_wire()))
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn put_review_thread(
@@ -358,13 +504,10 @@ pub async fn put_review_thread(
     state: State<'_, AppState>,
     project_id: String,
     thread_id: Uuid,
-    payload: ReviewThreadInput,
+    payload: ReviewThreadUpdate,
 ) -> Result<(), CommandError> {
     write_thread(&app, &state, &project_id, thread_id, move |current| {
-        if current.is_some_and(Record::tombstoned) {
-            return Err(thread_error("Review thread has been deleted."));
-        }
-        Ok(Some(payload.into_wire()))
+        edit_review_thread(current, payload)
     })
     .await
 }
@@ -406,7 +549,7 @@ pub(super) struct ThreadWrite {
     catalog: Catalog,
     project: String,
     id: EntityKey,
-    anchor_repository: Option<std::path::PathBuf>,
+    anchor_repository: Option<(std::path::PathBuf, String)>,
 }
 
 impl ThreadWrite {
@@ -437,8 +580,8 @@ impl ThreadWrite {
                 .is_some_and(|record| !record.tombstoned())
     }
 
-    pub(super) fn retain_in(&mut self, common_dir: std::path::PathBuf) {
-        self.anchor_repository = Some(common_dir);
+    pub(super) fn retain_in(&mut self, common_dir: std::path::PathBuf, checkout: String) {
+        self.anchor_repository = Some((common_dir, checkout));
     }
 
     /// A failed save can occur after activation. Release a staged ref only
@@ -459,7 +602,7 @@ impl ThreadWrite {
         }
         let before = thread_changes(catalog, project);
         enqueue_entity(catalog, project, &self.id, payload);
-        if let (EntityKey::Thread(ThreadId(id)), Some(path)) =
+        if let (EntityKey::Thread(ThreadId(id)), Some((path, checkout))) =
             (&self.id, self.anchor_repository.take())
         {
             catalog
@@ -467,6 +610,11 @@ impl ThreadWrite {
                 .entry(project.clone())
                 .or_default()
                 .insert(*id, path);
+            catalog
+                .anchor_checkouts
+                .entry(project.clone())
+                .or_default()
+                .insert(*id, checkout);
         }
         save(&self.path, catalog)?;
         let queued = thread_views(catalog, project);
@@ -566,6 +714,193 @@ mod tests {
         assert_eq!(serde_json::to_value(decoded).unwrap(), ipc);
     }
 
+    #[test]
+    fn edits_only_live_thread_positions_and_notes() {
+        let anchor = ReviewThreadInput {
+            parent_chat_id: "parent".into(),
+            path: "file.rs".into(),
+            side: ReviewThreadSide::Right,
+            home_kind: ReviewThreadHome::Worktree,
+            tool_use_id: None,
+            original_commit_id: "commit".into(),
+            original_blob_id: "blob".into(),
+            original_start_line: 1,
+            original_line: 2,
+            start_line: Some(1),
+            line: Some(2),
+            status: ReviewThreadStatus::Open,
+            outdated_noted: false,
+            origin_kind: ReviewThreadOrigin::Local,
+            origin_ref: None,
+        };
+        let position = |start_line, line| ReviewThreadUpdate::Position {
+            position: ReviewThreadPosition {
+                status: ReviewThreadStatus::Open,
+                start_line,
+                line,
+            },
+        };
+        let mut record = Record::default();
+        record.remote.payload = anchor.clone().into_wire();
+        assert!(
+            edit_review_thread(Some(&record), position(Some(1), Some(2)))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            edit_review_thread(None, ReviewThreadUpdate::OutdatedNote)
+                .unwrap_err()
+                .message,
+            "Review thread was not found."
+        );
+        assert_eq!(
+            edit_review_thread(Some(&record), ReviewThreadUpdate::Anchor { anchor })
+                .unwrap_err()
+                .message,
+            "The captured review anchor is immutable."
+        );
+
+        record.remote.payload = edit_review_thread(Some(&record), ReviewThreadUpdate::OutdatedNote)
+            .unwrap()
+            .unwrap();
+        assert!(
+            edit_review_thread(Some(&record), ReviewThreadUpdate::OutdatedNote)
+                .unwrap()
+                .is_none()
+        );
+        let moved = edit_review_thread(Some(&record), position(Some(4), Some(5)))
+            .unwrap()
+            .unwrap();
+        assert_eq!(moved["start_line"], 4);
+        assert_eq!(moved["line"], 5);
+        assert_eq!(moved["original_start_line"], 1);
+        assert_eq!(moved["outdated_noted"], true);
+
+        let id = Uuid::new_v4();
+        let mut catalog = Catalog::default();
+        *catalog.upsert("project", &EntityKey::Thread(ThreadId(id))) = record.clone();
+        assert!(thread_views(&catalog, "project")[&id]
+            .checkout_path
+            .is_none());
+        catalog
+            .anchor_checkouts
+            .entry("project".into())
+            .or_default()
+            .insert(id, "/checkout".into());
+        assert_eq!(
+            thread_views(&catalog, "project")[&id]
+                .checkout_path
+                .as_deref(),
+            Some("/checkout")
+        );
+
+        let before = thread_changes(&catalog, "project");
+        assert_eq!(
+            shared_thread_notification(&before, &catalog, "project", id),
+            Some(before.visible.get(&id).cloned())
+        );
+        catalog
+            .upsert("project", &EntityKey::Thread(ThreadId(id)))
+            .remote
+            .payload["deleted"] = json!(true);
+        assert_eq!(
+            shared_thread_notification(&before, &catalog, "project", id),
+            None
+        );
+        let after = thread_changes(&catalog, "project");
+        assert_eq!(
+            shared_thread_notification(&after, &catalog, "project", id),
+            Some(None)
+        );
+
+        record.remote.payload["deleted"] = json!(true);
+        assert_eq!(
+            edit_review_thread(Some(&record), ReviewThreadUpdate::OutdatedNote)
+                .unwrap_err()
+                .message,
+            "Review thread has been deleted."
+        );
+        record.remote.payload = json!({});
+        assert_eq!(
+            edit_review_thread(Some(&record), ReviewThreadUpdate::OutdatedNote)
+                .unwrap_err()
+                .message,
+            "The saved review thread is corrupt."
+        );
+    }
+
+    #[test]
+    fn cdc_deduplication_follows_the_cache_and_is_bounded_to_one_observer() {
+        let key = ("/test-catalog".into(), "project".into(), Uuid::new_v4());
+        let mut observed = RecentThreadRevisions::default();
+        assert!(observed.apply(key.clone(), 2, Some(2), || Ok(())).unwrap());
+        assert!(!observed
+            .apply(key.clone(), 2, Some(2), || panic!(
+                "duplicate must not merge"
+            ))
+            .unwrap());
+        assert!(!observed
+            .apply(key.clone(), 1, Some(2), || panic!(
+                "stale event must not merge"
+            ))
+            .unwrap());
+        assert!(observed.apply(key.clone(), 2, None, || Ok(())).unwrap());
+        assert!(observed.apply(key.clone(), 2, Some(1), || Ok(())).unwrap());
+        assert!(RecentThreadRevisions::default()
+            .apply(key, 2, Some(2), || Ok(()))
+            .unwrap());
+        for revision in 0..RECENT_THREAD_REVISIONS as u64 {
+            let key = ("/test-catalog".into(), "project".into(), Uuid::new_v4());
+            assert!(observed.apply(key, revision, None, || Ok(())).unwrap());
+        }
+        assert_eq!(observed.0.len(), RECENT_THREAD_REVISIONS);
+    }
+
+    #[test]
+    fn replayed_cdc_recreates_a_reset_catalog_in_the_same_observer() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("catalog.json");
+        let id = Uuid::new_v4();
+        let entity = EntityKey::Thread(ThreadId(id));
+        let key = (path.clone(), "project".into(), id);
+        let mut observed = RecentThreadRevisions::default();
+
+        for (iteration, expected) in [true, false, true].into_iter().enumerate() {
+            if iteration == 2 {
+                fs::remove_file(&path).unwrap();
+            }
+            let mut catalog = load(&path).unwrap();
+            let revision = catalog
+                .record("project", &entity)
+                .map(|record| record.remote.revision);
+            let applied = observed
+                .apply(key.clone(), 2, revision, || {
+                    apply_entry(
+                        &mut catalog,
+                        &path,
+                        "project",
+                        Entry {
+                            id: entity.clone(),
+                            revision: 2,
+                            payload: json!({"deleted": true}),
+                        },
+                    )?;
+                    Ok(())
+                })
+                .unwrap();
+            assert_eq!(applied, expected);
+            assert_eq!(
+                load(&path)
+                    .unwrap()
+                    .record("project", &entity)
+                    .unwrap()
+                    .remote
+                    .revision,
+                2
+            );
+        }
+    }
+
     #[tokio::test]
     async fn only_an_acknowledged_tombstone_releases_an_anchor() {
         let directory = tempfile::tempdir().unwrap();
@@ -593,17 +928,25 @@ mod tests {
             .entry("project".into())
             .or_default()
             .insert(id, repo.commondir().to_path_buf());
+        catalog
+            .anchor_checkouts
+            .entry("project".into())
+            .or_default()
+            .insert(id, "/linked-checkout".into());
         let catalog_path = project_directory.path().join("catalog.json");
         catalog.upsert("project", &key).desired = Some(json!({"deleted": true}));
         recover_anchor_cleanup(&mut catalog, "project", &catalog_path).await;
         assert_eq!(repo.refname_to_id(&name).unwrap(), blob);
 
         let mut catalog = storage::decode(&storage::encode(&catalog).unwrap()).unwrap();
+        assert_eq!(catalog.anchor_checkouts["project"][&id], "/linked-checkout");
         catalog.upsert("project", &key).remote.payload = json!({"deleted": true});
         recover_anchor_cleanup(&mut catalog, "project", &catalog_path).await;
         assert!(repo.find_reference(&name).is_err());
         assert!(other_repo.find_reference(&name).is_ok());
-        assert!(load(&catalog_path).unwrap().anchor_repositories.is_empty());
+        let saved = load(&catalog_path).unwrap();
+        assert!(saved.anchor_repositories.is_empty());
+        assert!(saved.anchor_checkouts.is_empty());
     }
 
     #[tokio::test]

@@ -5,6 +5,7 @@ import { parsePatch } from "../thread/toolChange/diffLineMapper";
 import {
   captureCodeSelection,
   discussionTurn,
+  isOutdated,
   SelectionDiscussions,
 } from "./selectionDiscussions";
 import { createDiffComment } from "../thread/toolChange/diffComments";
@@ -50,10 +51,11 @@ const fixtures = [
     },
   },
 ];
+const capture = { originalBlobId: "blob", originalCommitId: "commit" };
+
 const home = {
   kind: "worktree" as const,
   wholeBranch: true,
-  comparisonIdentity: "base",
 };
 
 function anchor(index = 0) {
@@ -69,10 +71,22 @@ function threadOn(selected = anchor()) {
   const controller = new SelectionDiscussions();
 
   controller.select(selected);
-  const id = controller.ask()!;
+  const id = controller.ask(selected, "thread", capture);
 
   return { controller, id, thread: () => controller.thread(id)! };
 }
+
+it("does not publish a new renderer selection for the same patch and range", () => {
+  const controller = new SelectionDiscussions();
+  const selected = anchor();
+  let publications = 0;
+  controller.subscribe(() => { publications++; });
+  controller.select(selected);
+  controller.select({ ...selected, home: { ...selected.home } });
+  expect(publications).toBe(1);
+  controller.select({ ...selected, startLine: 6 });
+  expect(publications).toBe(2);
+});
 
 describe("selection context oracle", () => {
   for (const [index, fixture] of fixtures.entries())
@@ -120,8 +134,7 @@ describe("turn oracle", () => {
   const fourth = "Thanks";
   const edited = {
     wholeBranch: true,
-    comparisonIdentity: "base",
-    files: [parsePatch(fixtures[0].patch.replace("+new", "+changed"))[0]],
+      files: [parsePatch(fixtures[0].patch.replace("+new", "+changed"))[0]],
   };
 
   it("sends the anchor once and only the question on later turns", () => {
@@ -138,6 +151,7 @@ describe("turn oracle", () => {
     turn("Please explain what this file does");
     turn(second);
     controller.reconcile(edited);
+    controller.applyMappings(edited, [{ threadId: id, status: "outdated", startLine: null, line: null }]);
     turn("Is it still correct?");
     turn(fourth);
 
@@ -149,6 +163,7 @@ describe("turn oracle", () => {
     const { controller, id, thread } = threadOn();
 
     controller.reconcile(edited);
+    controller.applyMappings(edited, [{ threadId: id, status: "outdated", startLine: null, line: null }]);
     const next = discussionTurn(thread(), false, "Why?");
     controller.sent(id, "session-2", next.notesOutdated);
 
@@ -175,6 +190,8 @@ it("generated discussion state machine agrees with an independent observable mod
       let ids: string[] = [];
       let facts: {
         outdated: boolean;
+        start: number;
+        unavailable: boolean;
         noted: boolean;
         session: string | null;
       }[] = [];
@@ -185,14 +202,10 @@ it("generated discussion state machine agrees with an independent observable mod
           selected = true;
         }
 
-        if (operation === 1) {
-          const id = controller.ask();
-
-          if (selected) {
-            ids.push(id!);
-            facts.push({ outdated: false, noted: false, session: null });
-            active = facts.length - 1;
-          } else expect(id).toBeNull();
+        if (operation === 1 && selected) {
+          ids.push(controller.ask(anchor(), String(ids.length), capture));
+          facts.push({ outdated: false, start: 5, unavailable: false, noted: false, session: null });
+          active = facts.length - 1;
         }
 
         if ((operation === 2 || operation === 3) && active !== null) {
@@ -230,14 +243,16 @@ it("generated discussion state machine agrees with an independent observable mod
         }
 
         if (operation === 6) {
-          controller.reconcile({
-            wholeBranch: true,
-            comparisonIdentity: "changed",
-            files: [],
-          });
+          const snapshot = { wholeBranch: true, files: [] };
+          controller.reconcile(snapshot);
+          controller.applyMappings(snapshot, ids.map((threadId) => ({
+            threadId, status: "outdated", startLine: null, line: null,
+          })));
           selected = false;
           facts.forEach((fact) => {
             fact.outdated = true;
+            fact.unavailable = false;
+            fact.start = 5;
           });
         }
 
@@ -250,6 +265,23 @@ it("generated discussion state machine agrees with an independent observable mod
           selected = false;
         }
 
+        if (operation === 8) {
+          const snapshot = { wholeBranch: true, files: [] };
+          selected = false;
+          controller.reconcile(snapshot);
+          controller.applyMappings(snapshot, ids.map((threadId, index) => index % 2 === 0
+            ? { threadId, status: "unavailable", startLine: null, line: null }
+            : { threadId, status: "open", startLine: 9, line: 10 }
+          ));
+          facts.forEach((fact, index) => {
+            fact.unavailable = index % 2 === 0;
+            if (!fact.unavailable) {
+              fact.outdated = false;
+              fact.start = 9;
+            }
+          });
+        }
+
         const state = controller.getSnapshot();
 
         expect(state.selection !== null).toBe(selected);
@@ -257,7 +289,9 @@ it("generated discussion state machine agrees with an independent observable mod
         expect(
           state.threads.map((thread) => ({
             code: thread.anchor.code,
-            outdated: thread.outdated,
+            outdated: isOutdated(thread),
+            start: thread.anchor.startLine,
+            unavailable: thread.status.kind === "unavailable",
             noted: thread.outdatedNoted,
             session: thread.sessionId,
           }))
@@ -265,6 +299,8 @@ it("generated discussion state machine agrees with an independent observable mod
           facts.map((fact) => ({
             code: "new\nlast",
             outdated: fact.outdated,
+            start: fact.start,
+            unavailable: fact.unavailable,
             noted: fact.noted,
             session: fact.session,
           }))

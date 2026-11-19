@@ -21,6 +21,8 @@ Feature: Discuss code beside the main conversation
     When I select fixture code with the real diff renderer
     And I ask about that selection and follow up
     Then the captured discussion has a resumable catalog entry
+    When I close and reopen the Changes view
+    Then the anchored discussion and main draft are preserved
     When I restart the GUI application
     Then the discussion stays out of chat history and resumes from its diff marker
 
@@ -58,6 +60,12 @@ Feature: Discuss code beside the main conversation
   Scenario: Review threads stream across GUI processes and recover after cache loss
     When two GUI processes create, cascade-delete and recover review threads
 
+  Scenario: Deleting the main chat clears an open Changes view in both GUI processes
+    Given a Changes selection fixture is open beside a drafted main conversation
+    When I select fixture code with the real diff renderer
+    And I ask about that selection and follow up
+    Then deleting the main chat removes the discussion in both GUI processes
+
   @multi_project
   Scenario: Reconnect delivers queued discussions in reference order and isolates rejections
     When an offline GUI queues discussions, including under a parent deleted by another GUI
@@ -76,6 +84,23 @@ Feature: Discuss code beside the main conversation
     And I ask about that selection and follow up
     Then the discussion follows shifted lines and shows the original snippet when edited
 
+  Scenario: The outdated note survives collapsing the thread and restarting the GUI
+    Given a Changes selection fixture is open beside a drafted main conversation
+    When I select fixture code with the real diff renderer
+    And I ask about that selection and follow up
+    Then the discussion follows shifted lines and shows the original snippet when edited
+    When I ask an outdated follow-up and collapse the discussion
+    Then the captured discussion has a resumable catalog entry
+    When I restart the GUI application
+    Then the outdated discussion resumes without repeating the note
+
   Scenario: Inline Ask becomes available on both surfaces after the first commit
     Given an unborn Git checkout is open with a recorded tool patch
     Then Changes and tool patches offer inline Ask only after the first commit
+
+  Scenario: A captured tool-patch thread with no discussion accepts its first question after restart
+    Given an unborn Git checkout is open with a recorded tool patch
+    Then Changes and tool patches offer inline Ask only after the first commit
+    When I save a tool-patch anchor without starting a discussion
+    And I restart the GUI application
+    Then I can start the restored discussion on the recorded tool patch

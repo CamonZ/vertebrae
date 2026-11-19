@@ -266,6 +266,7 @@ pub fn run() {
     let builder = create_builder();
     let tauri_app_builder = tauri::Builder::default()
         .manage(worktree_watch::WorktreeWatches::default())
+        .manage(commands::chat_catalog::ReviewThreadObservations::default())
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 window

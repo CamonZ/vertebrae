@@ -123,6 +123,7 @@ export CLAUDE_CODE_PATH=/usr/local/bin/mock-claude
 export CODEX_PATH=/usr/local/bin/mock-codex
 mkdir -p /mocks
 export MOCK_OUTPUT_DIR=/mocks
+export VTB_GUI_ACCEPTANCE_FIXTURE_WRITES=1
 # The GUI inherits this from tauri-driver; gate chat scenarios read the mock
 # harness launches back from it (gui_acceptance::HARNESS_CAPTURE_DIR).
 export MOCK_CAPTURE_DIR=/tmp/gui-acceptance-harness-capture

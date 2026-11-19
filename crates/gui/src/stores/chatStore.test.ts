@@ -1942,14 +1942,15 @@ describe("chatStore", () => {
         harness: "codex",
         providerId: "custom",
         projectPath: "/repo",
+        discussionBinding: { parentChatId: "main", reviewThreadId: "thread", worktreePath: "/repo" },
       });
 
-    it("adds a hidden discussion that is never persisted, listed or reused", () => {
+    it("adds a hidden discussion that is never listed or reused", () => {
       const id = open();
       const store = useChatStore.getState();
 
       expect(store.sessions[id]).toMatchObject({
-        discussion: "unbound",
+        discussion: { parentChatId: "main", reviewThreadId: "thread", worktreePath: "/repo" },
         harness: "codex",
         providerId: "custom",
         projectPath: "/repo",
@@ -1965,7 +1966,6 @@ describe("chatStore", () => {
       void persistLocalChatSession(useChatStore.getState().sessions[id]);
 
       expect(loadPersistedLocalChatSession(id)).toBeNull();
-      expect(useChatStore.getState().localSessionSummaries).toEqual({});
       expect(useChatStore.getState().listLocalSessions("/repo")).toEqual([]);
 
       // Opening a chat for the same project never picks the discussion.

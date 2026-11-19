@@ -428,7 +428,7 @@ pub async fn capture_review_anchor(
         rollback_ref(common_dir, thread_id).await;
         return Err(ReviewAnchorError::ParentUnavailable);
     }
-    write.retain_in(common_dir.clone());
+    write.retain_in(common_dir.clone(), worktree);
     if write.persist(&app, payload.into_wire()).await.is_err() {
         let unregistered = write.registration_absent();
         drop(write);
