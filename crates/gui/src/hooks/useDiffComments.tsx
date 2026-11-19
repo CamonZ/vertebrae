@@ -46,7 +46,12 @@ import {
   type GapReach,
   type GapReveal,
 } from "../components/thread/toolChange/diffGaps";
-import { DIFF_COMMENT_KEYS } from "../components/ChatWindow/chatShortcuts";
+import {
+  DIFF_COMMENT_KEYS,
+  DISCUSSION_COLLAPSE_SHORTCUT,
+  DISCUSSION_OPEN_KEY,
+  matchesChatShortcut,
+} from "../components/ChatWindow/chatShortcuts";
 import {
   DiffCommentThread,
   type ReviewAnnotation,
@@ -196,6 +201,9 @@ export function useDiffComments(
   const ignoreSelection = useRef(false);
   const placements = review?.placements;
   const toolUseId = surface.kind === "tool_call" ? surface.toolUseId : null;
+  // Closing a discussion puts the cursor back on its anchor; set each render
+  // so the memoized annotation renderer calls the current cursor state.
+  const returnToAnchor = useRef<(anchor: CodeSelection) => void>(() => {});
 
   const annotationsByPath = useMemo(() => {
     const byPath = new Map<string, Map<string, ReviewDiffAnnotation>>();
@@ -333,6 +341,7 @@ export function useDiffComments(
       return (
         <DiffCommentThread
           annotation={annotation.metadata}
+          onDiscussionClosed={(anchor) => returnToAnchor.current(anchor)}
           onCancelDraft={() => {
             // The selection stays; the cursor resumes from its line.
             setDraft(null);
@@ -440,6 +449,36 @@ export function useDiffComments(
     setGapCursor(next);
     const near = gapScrollPoint(files, view, next);
     if (near) onCursorMove?.(next.path, near.line, near.side);
+  };
+
+  returnToAnchor.current = (anchor) => {
+    moveTo({
+      kind: "line",
+      path: anchor.path,
+      range: {
+        start: anchor.startLine,
+        end: anchor.endLine,
+        side: anchor.side === "old" ? "deletions" : "additions",
+      },
+    });
+    groupRef.current?.focus({ preventScroll: true });
+  };
+
+  /** The discussion whose anchor covers the line cursor's end line. */
+  const discussionAt = (cursor: DiffCursor) => {
+    if (cursor.kind !== "line") return undefined;
+    const side = cursorSide(cursor);
+    const line = cursor.range.end;
+    return threadAnchors.find(
+      ({ anchor, detached }) =>
+        !detached &&
+        anchor.home.kind === surface.kind &&
+        (anchor.home.kind !== "tool_call" || anchor.home.toolUseId === toolUseId) &&
+        anchor.path === cursor.path &&
+        (anchor.side === "old" ? "deletions" : "additions") === side &&
+        anchor.startLine <= line &&
+        line <= anchor.endLine
+    );
   };
 
   const landmarkMarks = (path: string) =>
@@ -612,8 +651,20 @@ export function useDiffComments(
       return;
     }
 
-    // Copying and commenting apply to lines.
+    // Copying, commenting and discussions apply to lines.
     if (current.kind === "gap") return;
+
+    const thread = discussion && discussionAt(current);
+    if (thread && event.key === DISCUSSION_OPEN_KEY && plain) {
+      event.preventDefault();
+      if (!event.repeat) discussion.reopen(thread.id, { focus: true });
+      return;
+    }
+    if (thread && matchesChatShortcut(event, DISCUSSION_COLLAPSE_SHORTCUT)) {
+      event.preventDefault();
+      if (!event.repeat) discussion.toggleCollapsed(thread.id);
+      return;
+    }
 
     if (
       command &&

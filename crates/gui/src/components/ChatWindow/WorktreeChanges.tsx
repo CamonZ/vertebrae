@@ -1,23 +1,30 @@
 import { flushSync } from "react-dom";
 import { useOpenLocalFile } from "../../hooks/useOpenLocalFile";
-import { ChangesKeyHints } from "./ChangesKeyHints";
 import { isEditableShortcutTarget } from "../../utils/keyboard";
 import {
   CHANGED_FILE_LIST_KEYS,
   CHANGES_COMMANDS,
+  CHANGES_UNVIEW_HINT,
   CHANGES_VIEWED_KEY,
-  type ChangesSituation,
+  DISCUSSION_ASK_SHORTCUT,
+  DISCUSSION_COLLAPSE_SHORTCUT,
+  DISCUSSION_OPEN_KEY,
+  DISCUSSION_SEND_SHORTCUT,
+  shortcutText,
 } from "./chatShortcuts";
+import {
+  SelectionDiscussionContext,
+  type DiscussionValue,
+} from "./selectionDiscussionState";
+import { isOutdated, selectionLabel } from "./selectionDiscussions";
+import { useChatStore } from "../../stores/chatStore";
 import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
 import { CHAT_AREA_ATTRIBUTE } from "./chatAreas";
 import {
   isPaletteShortcut,
   type PaletteItem,
 } from "../CommandPalette/paletteModel";
-import {
-  DIFF_CURSOR_ENTRY_ATTRIBUTE,
-  DIFF_CURSOR_HOST_ATTRIBUTE,
-} from "../thread/toolChange/diffCursor";
+import { DIFF_CURSOR_HOST_ATTRIBUTE } from "../thread/toolChange/diffCursor";
 import { OpenInExternalEditor } from "./workspace/OpenInExternalEditor";
 import { backgroundClient } from "../../background/client";
 import type { BackgroundTask, BackgroundOutputs } from "../../background/types";
@@ -26,6 +33,7 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -96,22 +104,99 @@ type SidebarMode = "changes" | "files";
 
 const NO_VIEWED: ReadonlySet<string> = new Set();
 
-/** Which bindings apply for the focused element inside a Changes panel. */
-function changesSituation(
-  section: HTMLElement,
-  focused: EventTarget | null,
-  fileList: HTMLElement | null
-): ChangesSituation {
-  if (!(focused instanceof HTMLElement) || !section.contains(focused))
-    return "outside";
-  if (focused.closest(".diff-comment-editor")) return "composer";
-  if (focused.getAttribute("role") === "combobox") return "picker";
-  if (fileList?.contains(focused)) return "files";
-  if (isEditableShortcutTarget(focused)) return "outside";
-  const host = focused.closest<HTMLElement>(`[${DIFF_CURSOR_HOST_ATTRIBUTE}]`);
-  if (host && !focused.closest(`[${DIFF_CURSOR_ENTRY_ATTRIBUTE}]`))
-    return host.dataset.lineCursor === "gap" ? "gap" : "diff";
-  return "panel";
+/**
+ * Discussions in the ⌘K palette, each with the binding that does the same
+ * from the diff: every action on the open discussion, then every other
+ * discussion to open.
+ */
+function changesDiscussionItems(
+  discussion: DiscussionValue | null,
+  refocus: () => void
+): PaletteItem[] {
+  if (!discussion) return [];
+  const active = discussion.threads.find(({ id }) => id === discussion.activeId);
+  const activeItems: PaletteItem[] = [];
+  if (active) {
+    const hint = selectionLabel(active.anchor);
+    const inline = active.status.kind === "inline";
+    const readable = active.status.kind !== "unreadable";
+    const item = (
+      id: string,
+      label: string,
+      detail: string | undefined,
+      keywords: string,
+      run: () => void
+    ): PaletteItem => ({
+      id: `changes-discussion-${id}`,
+      scope: "changes",
+      label,
+      hint,
+      detail,
+      keywords: `discussion ${keywords}`,
+      run,
+    });
+    const session = active.sessionId
+      ? useChatStore.getState().sessions[active.sessionId]
+      : undefined;
+    if (readable) {
+      activeItems.push(
+        item("ask", "Ask follow-up", shortcutText(DISCUSSION_ASK_SHORTCUT), "question composer", () =>
+          discussion.reopen(active.id, { focus: true })
+        ),
+        item(
+          "send",
+          "Send selection to main chat",
+          shortcutText(DISCUSSION_SEND_SHORTCUT),
+          "attach",
+          () => discussion.attach(active.anchor, isOutdated(active))
+        )
+      );
+    }
+    if (session?.activeTurn) {
+      activeItems.push(
+        item("stop", "Stop response", undefined, "cancel", () =>
+          discussion.cancel(active.id)
+        )
+      );
+    }
+    activeItems.push(
+      item(
+        "collapse",
+        discussion.collapsed.has(active.id)
+          ? "Show all turns"
+          : "Show only the latest response",
+        shortcutText(DISCUSSION_COLLAPSE_SHORTCUT),
+        "collapse expand earlier turns",
+        () => discussion.toggleCollapsed(active.id)
+      )
+    );
+    if (inline) {
+      activeItems.push(
+        item("highlight", "Highlight selected code", undefined, "select anchor", () =>
+          discussion.select(active.anchor)
+        )
+      );
+    }
+    activeItems.push(
+      item("close", "Close discussion", "Esc", "", () => {
+        discussion.reopen(null);
+        refocus();
+      })
+    );
+  }
+  const openItems: PaletteItem[] = discussion.threads
+    .filter(({ id }) => id !== discussion.activeId)
+    .map((thread) => ({
+      id: `changes-discussion-open-${thread.id}`,
+      scope: "changes",
+      label: "Open discussion",
+      hint: selectionLabel(thread.anchor),
+      // `o` works on the anchor's line, which only an inline thread has.
+      detail: thread.status.kind === "inline" ? DISCUSSION_OPEN_KEY : undefined,
+      keywords: "discussion reopen thread",
+      run: () => discussion.reopen(thread.id, { focus: true }),
+    }));
+  return [...activeItems, ...openItems];
 }
 
 /**
@@ -144,7 +229,7 @@ export function WorktreeChanges({
   const fileList = useRef<HTMLElement>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
   const openPalette = useCommandPaletteStore((state) => state.openPalette);
-  const [situation, setSituation] = useState<ChangesSituation>("outside");
+  const discussion = useContext(SelectionDiscussionContext);
   const [base, setBase] = useState<ComparisonEndpoint | null>(null);
   const [target, setTarget] = useState<ComparisonEndpoint>({
     kind: "working_tree",
@@ -552,11 +637,13 @@ export function WorktreeChanges({
       keywords: "file go to jump",
       run: () => jumpToFile(file.path, true),
     }));
-    const viewedItems: PaletteItem[] = [...viewedPaths].reverse().map((path) => ({
+    const viewedItems: PaletteItem[] = [...viewedPaths].reverse().map((path, index) => ({
       id: `changes-unview-${path}`,
       scope: "changes",
       label: "Unmark file viewed",
       hint: path,
+      // ⇧V unmarks the most recently viewed file, which is listed first.
+      detail: index === 0 ? CHANGES_UNVIEW_HINT.keys.join("") : undefined,
       keywords: "unviewed reviewed undo show",
       run: () => {
         setViewed(path, false);
@@ -631,9 +718,12 @@ export function WorktreeChanges({
         },
       },
     ];
+    const discussionItems = changesDiscussionItems(discussion, refocus);
     openPalette(
       "changes",
-      filesFirst ? [...fileItems, ...commands] : [...commands, ...fileItems]
+      filesFirst
+        ? [...fileItems, ...commands, ...discussionItems]
+        : [...commands, ...discussionItems, ...fileItems]
     );
   };
 
@@ -808,31 +898,11 @@ export function WorktreeChanges({
             return;
           }
         }
-        setSituation(changesSituation(section, event.target, fileList.current));
         if (!(event.target instanceof HTMLElement)) return;
         const path = event.target.closest<HTMLElement>("[data-changes-path]")
           ?.dataset.changesPath;
         if (path) setActivePath(path);
       }}
-      onBlurCapture={(event) =>
-        setSituation(
-          changesSituation(
-            event.currentTarget,
-            event.relatedTarget,
-            fileList.current
-          )
-        )
-      }
-      onKeyUpCapture={(event) =>
-        // Focus can move without a blur here (an editor unmounting).
-        setSituation(
-          changesSituation(
-            event.currentTarget,
-            document.activeElement,
-            fileList.current
-          )
-        )
-      }
     >
       <div className="flex flex-wrap items-center gap-3">
         <div className="changes-comparison-controls">
@@ -1236,12 +1306,6 @@ export function WorktreeChanges({
         </div>
       </div>
       {external.error && <p role="alert">{external.error}</p>}
-      <ChangesKeyHints
-        situation={situation}
-        split={diffStyle === "split"}
-        hasFiles={files.length > 0}
-        moveFile={moveFile}
-      />
       <UnsavedChangesDialog
         paths={closing ? [closing] : null}
         busy={closeBusy}

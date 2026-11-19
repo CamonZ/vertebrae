@@ -673,39 +673,6 @@
   color: var(--diffs-addition-color-override, #68ad71);
 }
 
-.changes-key-hints {
-  display: flex;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-  align-content: start;
-  align-items: center;
-  max-height: max(2rem, 12%);
-  overflow: auto;
-  gap: 4px 12px;
-  border-top: 1px solid var(--color-line);
-  padding-top: 6px;
-  color: var(--color-fg-soft);
-  font-size: 11px;
-}
-
-.changes-key-hints kbd {
-  color: var(--color-fg);
-}
-
-.changes-key-hints button {
-  border-radius: var(--radius-xs, 3px);
-  cursor: pointer;
-}
-
-.changes-key-hints button:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.changes-key-hints button:hover:not(:disabled) {
-  color: var(--color-fg);
-}
-
 .comparison-filter {
   padding: 4px 8px;
   color: var(--color-fg-soft);
@@ -744,10 +711,6 @@
     grid-template-columns: minmax(0, 1fr);
     flex-basis: 0;
     gap: 2px;
-  }
-
-  .changes-key-hints {
-    max-height: 2rem;
   }
 }
 

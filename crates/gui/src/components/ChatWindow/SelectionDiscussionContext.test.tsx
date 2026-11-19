@@ -530,7 +530,7 @@ function CodeFixture({
   const range = { start: 1, end: 1, side };
 
   return (
-    <div data-testid="code-fixture">
+    <div data-testid="code-fixture" {...review.keyboardProps}>
       <pre>selected</pre>
       <button onClick={() => review.onSelectionChange("a", range)}>
         Select code
@@ -1301,6 +1301,156 @@ it("renders Markdown replies and highlights the source from the discussion heade
     side: "additions",
   });
   expect(commands.createLocalChatSession).toHaveBeenCalledOnce();
+});
+
+it("asks with ⌘↵ and sends to the main chat with ⌘⇧↵ from the discussion composer", async () => {
+  const onAttach = vi.fn();
+  render(codeFixture(onAttach));
+  fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "New diff comment" }), {
+    target: { value: "Explain this code" },
+  });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Discuss inline" })).toBeEnabled()
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
+  await waitFor(() =>
+    expect(commands.createLocalChatSession).toHaveBeenCalledOnce()
+  );
+  const id = vi.mocked(commands.createLocalChatSession).mock.calls[0][0]
+    .backend_session_id;
+  startTurn(id);
+  act(() => {
+    transport.text?.({
+      payload: {
+        backend_session_id: id,
+        harness: "claude",
+        text: "first answer",
+        is_partial: false,
+        parent_tool_use_id: null,
+      },
+    });
+    end(id);
+  });
+
+  const composer = screen.getByRole("textbox", { name: "Ask about selected code" });
+  fireEvent.change(composer, { target: { value: "Send this along" } });
+  fireEvent.keyDown(composer, { key: "Enter", metaKey: true, shiftKey: true });
+  expect(onAttach).toHaveBeenCalledWith(
+    expect.objectContaining({ path: "a", startLine: 1, endLine: 1 }),
+    false,
+    "Send this along"
+  );
+  expect(composer).toHaveValue("");
+
+  fireEvent.change(composer, { target: { value: "And a follow-up?" } });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Ask" })).toBeEnabled()
+  );
+  fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+  expect(composer).toHaveValue("");
+  await waitFor(() =>
+    expect(
+      vi.mocked(commands.sendLocalChatMessage).mock.calls.length +
+        vi.mocked(commands.createLocalChatSession).mock.calls.length
+    ).toBeGreaterThan(1)
+  );
+});
+
+it("opens and closes a discussion from its anchor line and collapses earlier turns", async () => {
+  render(codeFixture());
+  fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "New diff comment" }), {
+    target: { value: "Explain this code" },
+  });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Discuss inline" })).toBeEnabled()
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
+  await waitFor(() =>
+    expect(commands.createLocalChatSession).toHaveBeenCalledOnce()
+  );
+  const id = vi.mocked(commands.createLocalChatSession).mock.calls[0][0]
+    .backend_session_id;
+  act(() => {
+    transport.text?.({
+      payload: {
+        backend_session_id: id,
+        harness: "claude",
+        text: "first answer",
+        is_partial: false,
+        parent_tool_use_id: null,
+      },
+    });
+    end(id);
+  });
+
+  const composer = () =>
+    screen.getByRole("textbox", { name: "Ask about selected code" });
+  const group = screen.getByRole("group", { name: "Code diff selection" });
+
+  // Esc closes the discussion and returns to its anchor line.
+  composer().focus();
+  fireEvent.keyDown(composer(), { key: "Escape" });
+  expect(screen.queryByTestId("selection-mini-thread")).toBeNull();
+  expect(group).toHaveFocus();
+  expect(codeSelections.at(-1)).toEqual({ start: 1, end: 1, side: "additions" });
+
+  // The marker and the line cursor both open it with the caret in the composer.
+  fireEvent.click(screen.getByRole("button", { name: "Reopen selection discussion" }));
+  await waitFor(() => expect(composer()).toHaveFocus());
+  fireEvent.keyDown(composer(), { key: "Escape" });
+  expect(group).toHaveFocus();
+  fireEvent.keyDown(group, { key: "o" });
+  await waitFor(() => expect(composer()).toHaveFocus());
+
+  // Already open: the line cursor still moves focus into the composer.
+  group.focus();
+  fireEvent.click(screen.getByRole("button", { name: "Select code" }));
+  fireEvent.keyDown(group, { key: "o" });
+  await waitFor(() => expect(composer()).toHaveFocus());
+
+  const session = Object.values(useChatStore.getState().sessions).find(
+    (candidate) => candidate.discussion
+  )!;
+  const add = (kind: "user" | "assistant", text: string) =>
+    act(() =>
+      useChatStore
+        .getState()
+        .addMessage(session.id, { kind, text, timestamp: new Date().toISOString() })
+    );
+  add("user", "second question");
+  add("assistant", "second answer");
+  add("user", "third question");
+  add("assistant", "third answer");
+  const closed = vi.mocked(commands.closeLocalChatSession).mock.calls.length;
+  const thread = screen.getByTestId("selection-mini-thread");
+
+  fireEvent.keyDown(composer(), { key: "E", metaKey: true, shiftKey: true });
+  expect(screen.getByRole("button", { name: "2 earlier turns" })).toBeInTheDocument();
+  expect(thread).toHaveTextContent("third answer");
+  expect(thread).not.toHaveTextContent("first answer");
+  expect(thread).not.toHaveTextContent("second answer");
+  expect(thread).not.toHaveTextContent("third question");
+
+  fireEvent.keyDown(composer(), { key: "E", metaKey: true, shiftKey: true });
+  expect(screen.queryByRole("button", { name: "2 earlier turns" })).toBeNull();
+  expect(thread).toHaveTextContent("first answer");
+
+  fireEvent.click(screen.getByRole("button", { name: "Show only the latest response" }));
+  add("user", "fourth question");
+  add("assistant", "fourth answer");
+  expect(screen.getByRole("button", { name: "3 earlier turns" })).toBeInTheDocument();
+  expect(thread).toHaveTextContent("fourth answer");
+  expect(thread).not.toHaveTextContent("third answer");
+
+  fireEvent.click(screen.getByRole("button", { name: "3 earlier turns" }));
+  expect(thread).toHaveTextContent("third answer");
+
+  // Presentation only: the session was neither restarted nor closed.
+  expect(commands.createLocalChatSession).toHaveBeenCalledOnce();
+  expect(commands.closeLocalChatSession).toHaveBeenCalledTimes(closed);
+  expect(commands.interruptLocalChatTurn).not.toHaveBeenCalled();
 });
 
 it("restores each discussion's range when switching between two comments", async () => {

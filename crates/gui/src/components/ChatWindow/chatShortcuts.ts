@@ -154,26 +154,41 @@ export const DIFF_COMPOSER_SEND_SHORTCUT = {
 /** Keys that open the composer for the keyboard line selection. */
 export const DIFF_COMMENT_KEYS = ["c", "Enter"] as const;
 
+/** Line cursor on a discussion's anchor: open it and focus its composer. */
+export const DISCUSSION_OPEN_KEY = "o";
+
+/** Discussion composer: ask the follow-up inline. */
+export const DISCUSSION_ASK_SHORTCUT = {
+  modifiers: ["meta"],
+  keys: ["Enter"],
+  displayKey: "↵",
+  label: "Ask follow-up",
+} as const satisfies ChatShortcutDefinition;
+
+/** Discussion composer: send the selection and follow-up to the main chat. */
+export const DISCUSSION_SEND_SHORTCUT = {
+  modifiers: ["meta", "shift"],
+  keys: ["Enter"],
+  displayKey: "↵",
+  label: "Send follow-up to main chat",
+} as const satisfies ChatShortcutDefinition;
+
+/** Show only the latest response of a discussion, or every turn again. */
+export const DISCUSSION_COLLAPSE_SHORTCUT = {
+  modifiers: ["meta", "shift"],
+  keys: ["e", "E"],
+  displayKey: "E",
+  label: "Collapse or expand earlier turns",
+} as const satisfies ChatShortcutDefinition;
+
 /** Display string for a modifier shortcut, e.g. `⌘⇧↵`. */
 export function shortcutText(shortcut: ChatShortcutDefinition): string {
   return presentChatShortcut(shortcut)?.keys.join("") ?? "";
 }
 
-/** Where focus is relative to a Changes panel; hints are listed per situation. */
-export type ChangesSituation =
-  | "outside"
-  | "panel"
-  | "files"
-  | "picker"
-  | "diff"
-  | "gap"
-  | "composer";
-
 export interface KeyHint {
   keys: readonly string[];
   label: string;
-  /** A file-jump hint the footer renders as a button. */
-  move?: -1 | 1;
   /** Only meaningful in a split diff. */
   splitOnly?: boolean;
 }
@@ -192,8 +207,8 @@ const AREA_HINT: KeyHint = {
   label: CHAT_AREA_SHORTCUT.label,
 };
 const FILE_JUMP_HINTS: KeyHint[] = [
-  { keys: ["⌥", "⇧", "↑"], label: "Previous file", move: -1 },
-  { keys: ["⌥", "⇧", "↓"], label: "Next file", move: 1 },
+  { keys: ["⌥", "⇧", "↑"], label: "Previous file" },
+  { keys: ["⌥", "⇧", "↓"], label: "Next file" },
 ];
 const PALETTE_HINTS: KeyHint[] = [
   { keys: ["/"], label: "Find file" },
@@ -205,16 +220,14 @@ const RESIZE_HINTS: KeyHint[] = [
 ];
 
 /**
- * Every Changes binding, grouped by the situation it applies to. The key-hint
- * footer shows the group for the current focus; the ⌘⇧/ overlay lists them all.
+ * Every Changes binding, grouped by where focus is when it applies, for the
+ * ⌘⇧/ overlay. Actions without a single key are in the ⌘K palette.
  */
 export const CHANGES_HINT_GROUPS: readonly {
-  situation: Exclude<ChangesSituation, "outside">;
   title: string;
   hints: readonly KeyHint[];
 }[] = [
   {
-    situation: "panel",
     title: "Changes",
     hints: [
       AREA_HINT,
@@ -227,7 +240,6 @@ export const CHANGES_HINT_GROUPS: readonly {
     ],
   },
   {
-    situation: "files",
     title: "Changes · file list",
     hints: [
       { keys: CHANGED_FILE_LIST_KEYS.keys, label: CHANGED_FILE_LIST_KEYS.label },
@@ -237,12 +249,10 @@ export const CHANGES_HINT_GROUPS: readonly {
     ],
   },
   {
-    situation: "picker",
     title: "Changes · base and compare pickers",
     hints: COMPARISON_KEYS,
   },
   {
-    situation: "diff",
     title: "Changes · line cursor",
     hints: [
       { keys: ["↑", "↓"], label: "Move line cursor" },
@@ -253,6 +263,11 @@ export const CHANGES_HINT_GROUPS: readonly {
       { keys: ["← / →"], label: "Past the edge: chat / next area" },
       { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: DIFF_COPY_SHORTCUT.label },
       { keys: ["c / ↵"], label: "Discuss selection" },
+      { keys: [DISCUSSION_OPEN_KEY], label: "Open discussion at line" },
+      {
+        keys: modifierKeys(DISCUSSION_COLLAPSE_SHORTCUT),
+        label: "Collapse or expand the discussion at line",
+      },
       { keys: [CHANGES_VIEWED_KEY], label: "Mark file viewed, go to next" },
       CHANGES_UNVIEW_HINT,
       ...PALETTE_HINTS,
@@ -260,7 +275,6 @@ export const CHANGES_HINT_GROUPS: readonly {
     ],
   },
   {
-    situation: "gap",
     title: "Changes · unchanged lines",
     hints: [
       { keys: ["↑", "↓"], label: "Move line cursor" },
@@ -274,7 +288,6 @@ export const CHANGES_HINT_GROUPS: readonly {
     ],
   },
   {
-    situation: "composer",
     title: "Changes · comment box",
     hints: [
       {
@@ -288,19 +301,27 @@ export const CHANGES_HINT_GROUPS: readonly {
       { keys: ["Esc"], label: "Cancel and return to line" },
     ],
   },
+  {
+    title: "Changes · inline discussion",
+    hints: [
+      { keys: ["↵"], label: "Open discussion (on its marker)" },
+      {
+        keys: modifierKeys(DISCUSSION_ASK_SHORTCUT),
+        label: DISCUSSION_ASK_SHORTCUT.label,
+      },
+      {
+        keys: modifierKeys(DISCUSSION_SEND_SHORTCUT),
+        label: DISCUSSION_SEND_SHORTCUT.label,
+      },
+      {
+        keys: modifierKeys(DISCUSSION_COLLAPSE_SHORTCUT),
+        label: DISCUSSION_COLLAPSE_SHORTCUT.label,
+      },
+      { keys: ["↵"], label: "Show all turns (on “▸ N earlier turns”)" },
+      { keys: ["Esc"], label: "Close and return to line" },
+    ],
+  },
 ];
-
-/** The footer's hints for one situation; ⌘⇧/ always closes the list. */
-export function changesHintsFor(
-  situation: ChangesSituation,
-  options: { split: boolean }
-): KeyHint[] {
-  const group = CHANGES_HINT_GROUPS.find((entry) => entry.situation === situation);
-  const hints = (group?.hints ?? [AREA_HINT]).filter(
-    (hint) => options.split || !hint.splitOnly
-  );
-  return [...hints, { keys: modifierKeys(CHAT_HELP_SHORTCUT), label: "All shortcuts" }];
-}
 
 /** Opens the comment card for a selection in assistant text. */
 export const TRANSCRIPT_COMMENT_SHORTCUT = {

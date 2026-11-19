@@ -40,6 +40,15 @@ import {
 } from "./selectionDiscussions";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 import { ChatTranscript } from "./ChatMessages";
+import { collapseTurns, earlierTurnsLabel } from "./discussionTurns";
+import {
+  DISCUSSION_ASK_SHORTCUT,
+  DISCUSSION_COLLAPSE_SHORTCUT,
+  DISCUSSION_SEND_SHORTCUT,
+  DISCUSSION_OPEN_KEY,
+  matchesChatShortcut,
+  shortcutText,
+} from "./chatShortcuts";
 import {
   SelectionDiscussionModelContext,
   SelectionDiscussionContext,
@@ -86,6 +95,9 @@ export function SelectionDiscussionProvider({
   const [readyWorktree, setReadyWorktree] = useState<string | null>(null);
   const [anchorError, setAnchorError] = useState<string | null>(null);
   const [mappingError, setMappingError] = useState<string | null>(null);
+  // Presentation only: collapsing never touches a thread's session.
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const [focusRequest, setFocusRequest] = useState<string | null>(null);
   const capabilityVersion = useRef(0);
   const snapshotRef = useRef<WorktreeSnapshot | null>(null);
   const capturing = useRef(false);
@@ -322,8 +334,9 @@ export function SelectionDiscussionProvider({
       },
       discuss: begin,
       attach: (...args) => callbacks.current.onAttach(...args),
-      reopen: (id) => {
+      reopen: (id, options) => {
         controller.reopen(id);
+        setFocusRequest(id && options?.focus ? id : null);
         const thread = id ? controller.thread(id) : undefined;
 
         if (thread?.anchor.home.kind === "worktree") callbacks.current.onOpen();
@@ -339,6 +352,14 @@ export function SelectionDiscussionProvider({
       },
       cancel,
       reconcile,
+      toggleCollapsed: (id) =>
+        setCollapsed((current) => {
+          const next = new Set(current);
+          if (!next.delete(id)) next.add(id);
+          return next;
+        }),
+      focusTaken: (id) =>
+        setFocusRequest((current) => (current === id ? null : current)),
     }),
     [controller, send, cancel, canAsk, begin, reconcile, checkAvailability]
   );
@@ -346,8 +367,15 @@ export function SelectionDiscussionProvider({
   const unreadable = state.threads.find(({ status }) => status.kind === "unreadable")?.status;
   const readError = unreadable?.kind === "unreadable" ? unreadable.message : null;
   const value = useMemo<DiscussionValue>(
-    () => ({ ...state, ...actions, projectPath: worktreePath, anchorError: anchorError ?? readError ?? mappingError }),
-    [state, actions, worktreePath, anchorError, readError, mappingError]
+    () => ({
+      ...state,
+      ...actions,
+      collapsed,
+      focusRequest,
+      projectPath: worktreePath,
+      anchorError: anchorError ?? readError ?? mappingError,
+    }),
+    [state, actions, collapsed, focusRequest, worktreePath, anchorError, readError, mappingError]
   );
 
   return (
@@ -406,21 +434,41 @@ function anchorNotice(status: ThreadStatus) {
   }
 }
 
-/** Rendered in the diff annotation at the thread's anchor, never in a footer. */
-export function InlineSelectionDiscussion({ threadId }: { threadId: string }) {
+const collapseKeys = shortcutText(DISCUSSION_COLLAPSE_SHORTCUT);
+const askKeys = shortcutText(DISCUSSION_ASK_SHORTCUT);
+const sendKeys = shortcutText(DISCUSSION_SEND_SHORTCUT);
+
+/**
+ * Rendered in the diff annotation at the thread's anchor, never in a footer.
+ * `onClosed` returns focus to the anchor line after the thread closes.
+ */
+export function InlineSelectionDiscussion({
+  threadId,
+  onClosed,
+}: {
+  threadId: string;
+  onClosed?(anchor: CodeSelection): void;
+}) {
   const discussion = useContext(SelectionDiscussionContext);
   const thread = discussion?.threads.find((thread) => thread.id === threadId);
   if (!thread || !discussion) return null;
   const notice = anchorNotice(thread.status);
 
   return discussion.activeId === thread.id ? (
-    <MiniThread key={thread.id} thread={thread} discussion={discussion} />
+    <MiniThread
+      key={thread.id}
+      thread={thread}
+      discussion={discussion}
+      onClosed={thread.status.kind === "inline" ? onClosed : undefined}
+    />
   ) : (
     <button
       type="button"
       className="selection-mini-marker"
       aria-label="Reopen selection discussion"
-      onClick={() => discussion.reopen(thread.id)}
+      title={`Open discussion (${DISCUSSION_OPEN_KEY.toUpperCase()} on its line)`}
+      aria-keyshortcuts={DISCUSSION_OPEN_KEY}
+      onClick={() => discussion.reopen(thread.id, { focus: true })}
     >
       Discussion · {selectionLabel(thread.anchor)}
       {notice && ` · ${notice.marker}`}
@@ -431,11 +479,14 @@ export function InlineSelectionDiscussion({ threadId }: { threadId: string }) {
 function MiniThread({
   thread,
   discussion,
+  onClosed,
 }: {
   thread: DiscussionState["threads"][number];
   discussion: DiscussionValue;
+  onClosed?(anchor: CodeSelection): void;
 }) {
   const [question, setQuestion] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   const thinkingStyle = useUIStore((state) => state.thinkingIndicatorStyle);
   const choice = useContext(SelectionDiscussionModelContext);
   const session = useChatStore((state) =>
@@ -448,12 +499,66 @@ function MiniThread({
   const announcement = useTurnAnnouncement(activeTurn, failed);
   const notice = anchorNotice(thread.status);
 
+  // Opening from the keyboard puts the caret in the composer, once. Opening
+  // also highlights the anchor, and the diff re-renders its rows a frame
+  // later, which can blur the slotted composer; focus again after that.
+  const { focusRequest, focusTaken } = discussion;
+  useEffect(() => {
+    if (focusRequest !== thread.id) return;
+    const focus = () => {
+      const composer = composerRef.current;
+      if (composer && document.activeElement !== composer) composer.focus();
+    };
+    focus();
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        focus();
+        focusTaken(thread.id);
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [focusRequest, focusTaken, thread.id]);
+
+  const collapsed = discussion.collapsed.has(thread.id);
+  const turns = collapsed && session ? collapseTurns(session.messages) : null;
+  const hidden = turns && turns.earlier > 0 ? turns : null;
+  const toggleCollapsed = () => discussion.toggleCollapsed(thread.id);
+  const close = () => {
+    discussion.reopen(null);
+    onClosed?.(thread.anchor);
+  };
+  const unreadable = thread.status.kind === "unreadable";
+  const canAsk = !unreadable && !activeTurn && !!question.trim() && !choice?.error;
+  const ask = () => {
+    if (!canAsk) return;
+    discussion.send(thread.id, question);
+    setQuestion("");
+  };
+  const sendToMain = () => {
+    if (unreadable) return;
+    discussion.attach(thread.anchor, isOutdated(thread), question);
+    setQuestion("");
+  };
+
   return (
     <section
       ref={cardRef}
       className="selection-mini-thread"
       aria-label="Selection discussion"
       data-testid="selection-mini-thread"
+      onKeyDown={(event) => {
+        if (event.defaultPrevented || event.nativeEvent.isComposing) return;
+        if (matchesChatShortcut(event, DISCUSSION_COLLAPSE_SHORTCUT)) {
+          event.preventDefault();
+          if (!event.repeat) toggleCollapsed();
+          return;
+        }
+        const plain =
+          !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+        if (event.key !== "Escape" || !plain) return;
+        event.preventDefault();
+        close();
+      }}
       onClick={(event) => {
         if (thread.status.kind !== "inline" ||
           (event.target instanceof Element &&
@@ -493,9 +598,33 @@ function MiniThread({
         <button
           type="button"
           className="selection-mini-close"
+          aria-label={collapsed ? "Show all turns" : "Show only the latest response"}
+          aria-pressed={collapsed}
+          aria-keyshortcuts="Meta+Shift+E"
+          title={`${collapsed ? "Show all turns" : "Show only the latest response"} (${collapseKeys})`}
+          onClick={toggleCollapsed}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d={collapsed ? "m7 9 5-5 5 5M7 15l5 5 5-5" : "m7 4 5 5 5-5M7 20l5-5 5 5"} />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="selection-mini-close"
           aria-label="Close discussion"
-          title="Close discussion"
-          onClick={() => discussion.reopen(null)}
+          aria-keyshortcuts="Escape"
+          title="Close discussion (Esc)"
+          onClick={close}
         >
           <svg
             width="16"
@@ -516,10 +645,21 @@ function MiniThread({
       )}
       <DiscussionModelNotice />
       <div className="selection-mini-messages">
+        {hidden && (
+          <button
+            type="button"
+            className="selection-mini-earlier"
+            title={`Show all turns (${collapseKeys})`}
+            onClick={toggleCollapsed}
+          >
+            <span aria-hidden="true">▸</span>
+            {earlierTurnsLabel(hidden.earlier)}
+          </button>
+        )}
         {session && (
           <ChatTranscript
             sessionId={session.id}
-            messages={session.messages}
+            messages={hidden?.latest ?? session.messages}
             // Discussions show no model labels; the composer owns that choice.
             assistantLabel="Assistant"
             isActive={!!session.backendSessionId}
@@ -548,17 +688,24 @@ function MiniThread({
         className="diff-comment-editor selection-mini-composer"
         onSubmit={(event) => {
           event.preventDefault();
-          if (choice?.error || thread.status.kind === "unreadable") return;
-          discussion.send(thread.id, question);
-          setQuestion("");
+          ask();
         }}
       >
         <textarea
+          ref={composerRef}
           aria-label="Ask about selected code"
           value={question}
           onChange={(event) => setQuestion(event.target.value)}
           rows={3}
           placeholder="Ask a follow-up question…"
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
+            if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+            event.preventDefault();
+            if (event.repeat) return;
+            if (event.shiftKey) sendToMain();
+            else ask();
+          }}
         />
         <div className="diff-comment-editor-actions selection-mini-actions">
           {activeTurn && (
@@ -572,18 +719,19 @@ function MiniThread({
           )}
           <button
             type="button"
-            disabled={thread.status.kind === "unreadable"}
-            onClick={() => {
-              discussion.attach(thread.anchor, isOutdated(thread), question);
-              setQuestion("");
-            }}
+            disabled={unreadable}
+            title={`Send to main chat (${sendKeys})`}
+            aria-keyshortcuts="Meta+Shift+Enter"
+            onClick={sendToMain}
           >
             Send to main chat
           </button>
           <button
             type="submit"
             data-primary
-            disabled={thread.status.kind === "unreadable" || !!activeTurn || !question.trim() || !!choice?.error}
+            disabled={!canAsk}
+            title={`Ask (${askKeys})`}
+            aria-keyshortcuts="Meta+Enter"
           >
             Ask
           </button>
