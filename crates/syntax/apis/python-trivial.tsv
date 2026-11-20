@@ -1,0 +1,21 @@
+# Python calls too common to report (value plumbing, not behaviour).
+len                     ignore
+str                     ignore
+int                     ignore
+float                   ignore
+bool                    ignore
+list                    ignore
+dict                    ignore
+tuple                   ignore
+set                     ignore
+isinstance              ignore
+range                   ignore
+enumerate               ignore
+zip                     ignore
+sorted                  ignore
+**.get                  ignore
+**.items                ignore
+**.keys                 ignore
+**.values               ignore
+**.strip                ignore
+**.join                 ignore

@@ -1,0 +1,12 @@
+# Tauri, Rust side.
+**::tauri::command              ipc_command
+**::async_runtime::spawn        spawn
+**::async_runtime::spawn_blocking spawn
+**.emit                         event
+**.emit_to                      event
+**.emit_all                     event
+**.emit_filter                  event
+**.listen                       event
+**.listen_any                   event
+**.once                         event
+**.unlisten                     event

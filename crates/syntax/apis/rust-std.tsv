@@ -1,0 +1,16 @@
+# Rust standard library.
+**::env::*              env
+**::fs::*               filesystem
+**::File::*             filesystem
+**::OpenOptions::*      filesystem
+**::process::*          process
+**::Command::*          process
+**::net::*              network
+**::TcpStream::*        network
+**::TcpListener::*      network
+**::UdpSocket::*        network
+**::thread::spawn       spawn
+**::thread::scope       spawn
+**::Builder::spawn      spawn
+**.lock                 lock
+**.try_lock             lock

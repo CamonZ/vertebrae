@@ -1,0 +1,26 @@
+# Browser and webview APIs.
+fetch                       network
+window.fetch                network
+XMLHttpRequest              network
+WebSocket                   network
+EventSource                 network
+navigator.sendBeacon        network
+localStorage.*              database
+sessionStorage.*            database
+window.localStorage.*       database
+window.sessionStorage.*     database
+indexedDB.*                 database
+document.*                  ui
+alert                       ui
+window.alert                ui
+window.confirm              ui
+window.prompt               ui
+window.open                 ui
+navigator.clipboard.*       ui
+**.addEventListener         event
+**.removeEventListener      event
+**.dispatchEvent            event
+**.postMessage              event
+Worker                      spawn
+SharedWorker                spawn
+navigator.locks.request     lock

@@ -408,20 +408,29 @@ struct Touch<'d> {
     old: Option<LineSpan>,
     new: Option<LineSpan>,
     sites: &'d [Occurrence],
+    /// What kind of code it touches.
+    facts: &'d [semantic::Fact],
 }
 
 fn touches(declaration: &DeclarationDiff) -> Vec<Touch<'_>> {
-    let whole = |fact, (old, new), sites| Touch {
+    let whole = |fact, (old, new), sites, facts| Touch {
         fact,
         old,
         new,
         sites,
+        facts,
     };
     let spans = declaration.change.spans();
     let mut out: Vec<Touch> = match &declaration.change {
-        DeclarationChange::Added { .. } => vec![whole(Fact::Added, spans, &[])],
-        DeclarationChange::Removed { .. } => vec![whole(Fact::Removed, spans, &[])],
-        DeclarationChange::Moved { .. } => vec![whole(Fact::Moved, spans, &[])],
+        DeclarationChange::Added { .. } => {
+            vec![whole(Fact::Added, spans, &[], &declaration.facts.items)]
+        }
+        DeclarationChange::Removed { .. } => {
+            vec![whole(Fact::Removed, spans, &[], &declaration.facts.items)]
+        }
+        DeclarationChange::Moved { .. } => {
+            vec![whole(Fact::Moved, spans, &[], &declaration.facts.items)]
+        }
         DeclarationChange::Renamed {
             from, to, sites, ..
         } => vec![whole(
@@ -431,6 +440,7 @@ fn touches(declaration: &DeclarationDiff) -> Vec<Touch<'_>> {
             },
             spans,
             sites,
+            &declaration.facts.items,
         )],
         DeclarationChange::Modified => Vec::new(),
     };
@@ -451,7 +461,7 @@ fn touches(declaration: &DeclarationDiff) -> Vec<Touch<'_>> {
                 sites,
             ),
         };
-        out.push(whole(fact, part.spans(), sites));
+        out.push(whole(fact, part.spans(), sites, &part.facts().items));
     }
     out
 }
@@ -475,7 +485,12 @@ fn mirror(declaration: &DeclarationDiff) -> String {
                 .iter()
                 .map(|site| (site.new_line, site.old_line))
                 .collect();
-            format!("{fact:?} {:?} {:?} {sites:?}", touch.new, touch.old)
+            let mut facts: Vec<_> = touch.facts.iter().map(semantic::Fact::mirrored).collect();
+            facts.sort();
+            format!(
+                "{fact:?} {:?} {:?} {sites:?} {facts:?}",
+                touch.new, touch.old
+            )
         })
         .collect();
     touched.sort();
@@ -496,7 +511,10 @@ fn unmirrored(declaration: &DeclarationDiff) -> String {
                 .iter()
                 .map(|site| (site.old_line, site.new_line))
                 .collect();
-            format!("{:?} {:?} {:?} {sites:?}", touch.fact, touch.old, touch.new)
+            format!(
+                "{:?} {:?} {:?} {sites:?} {:?}",
+                touch.fact, touch.old, touch.new, touch.facts
+            )
         })
         .collect();
     touched.sort();
@@ -766,12 +784,13 @@ fn semantic_diff_invariants_hold_under_random_edits(tc: TestCase) {
         .collect();
     match mutation {
         Mutation::Reformat => assert!(forward.is_empty(), "{forward:#?}"),
-        // One rename is one declaration reporting just that rename.
+        // One rename is one declaration reporting just that rename, which
+        // changes no facts.
         Mutation::Rename => assert!(
             matches!(
                 (forward.as_slice(), facts.as_slice()),
                 ([_], [Fact::Renamed { .. }])
-            ),
+            ) && forward.iter().flat_map(touches).all(|t| t.facts.is_empty()),
             "{old}\n---\n{new}\n{forward:#?}"
         ),
         Mutation::Move => assert!(

@@ -2,6 +2,7 @@
 //! hashes, heights and sizes the matcher needs. Node `i`'s descendants are
 //! exactly the ids `i + 1 .. i + size`.
 
+use super::facts::{Captures, FactsQuery};
 use super::profile::Declarations;
 use super::{Deadline, DeclarationKind, FallbackReason, LineSpan};
 use std::collections::hash_map::Entry;
@@ -11,14 +12,16 @@ use tree_sitter::{QueryCursor, StreamingIterator, Tree};
 
 pub(crate) type NodeId = usize;
 
-pub(crate) struct Node {
-    pub(crate) kind: &'static str,
+/// Kinds and field names borrow from the tree-sitter tree the node was
+/// copied from.
+pub(crate) struct Node<'s> {
+    pub(crate) kind: &'s str,
     pub(crate) kind_id: u16,
     pub(crate) named: bool,
     pub(crate) parent: Option<NodeId>,
     pub(crate) children: Vec<NodeId>,
     /// This node's field name in its parent.
-    pub(crate) field: Option<&'static str>,
+    pub(crate) field: Option<&'s str>,
     pub(crate) bytes: Range<usize>,
     pub(crate) lines: LineSpan,
     /// Kind, leaf text and children; equal hashes mean isomorphic subtrees.
@@ -31,7 +34,7 @@ pub(crate) struct Node {
     pub(crate) size: usize,
 }
 
-impl Node {
+impl Node<'_> {
     pub(crate) fn is_leaf(&self) -> bool {
         self.children.is_empty()
     }
@@ -44,7 +47,7 @@ impl Node {
 /// A declaration node: what it declares and how to label it.
 pub(crate) struct Declaration {
     pub(crate) kind: DeclarationKind,
-    pub(crate) keyword: &'static str,
+    pub(crate) keyword: String,
     pub(crate) name: String,
     /// The node holding the name.
     pub(crate) name_node: NodeId,
@@ -52,8 +55,10 @@ pub(crate) struct Declaration {
 
 pub(crate) struct SyntaxTree<'s> {
     pub(crate) source: &'s str,
-    pub(crate) nodes: Vec<Node>,
+    pub(crate) nodes: Vec<Node<'s>>,
     pub(crate) scopes: HashMap<NodeId, Declaration>,
+    /// The facts query's captures.
+    pub(crate) captures: Captures,
 }
 
 /// Tokens that qualify a declaration rather than name its kind.
@@ -97,13 +102,14 @@ fn content(text: &str, literal: bool) -> impl Iterator<Item = u8> + '_ {
 impl<'s> SyntaxTree<'s> {
     pub(crate) fn build(
         source: &'s str,
-        syntax: &Tree,
+        syntax: &'s Tree,
         declarations: &Declarations,
+        facts: &FactsQuery,
         literals: &[&str],
         max_nodes: usize,
         deadline: &Deadline,
     ) -> Result<Self, FallbackReason> {
-        let mut nodes: Vec<Node> = Vec::new();
+        let mut nodes: Vec<Node<'s>> = Vec::new();
         // tree-sitter node ids to arena ids, for query captures.
         let mut ids: HashMap<usize, NodeId> = HashMap::new();
         let mut parents: Vec<NodeId> = Vec::new();
@@ -158,9 +164,11 @@ impl<'s> SyntaxTree<'s> {
                         source,
                         nodes,
                         scopes: HashMap::new(),
+                        captures: Captures::default(),
                     };
                     tree.summarize(literals);
                     tree.scopes = tree.find_scopes(syntax, declarations, &ids, deadline)?;
+                    tree.captures = Captures::find(&tree, syntax, facts, &ids, deadline)?;
                     return Ok(tree);
                 }
                 parents.pop();
@@ -241,7 +249,7 @@ impl<'s> SyntaxTree<'s> {
             }
             let mut name = None;
             let mut declaration = None;
-            for capture in found_match.captures {
+            for capture in found_match.captures() {
                 if capture.index == declarations.name {
                     name = ids.get(&capture.node.id()).copied();
                 } else if let Some(Some(kind)) = declarations.kinds.get(capture.index as usize) {
@@ -288,7 +296,7 @@ impl<'s> SyntaxTree<'s> {
     /// The first keyword token before a declaration's name (`fn`, `class`,
     /// `def`), else before the declaration in its parent (`const` for a
     /// declarator), else a word for the kind.
-    fn keyword(&self, id: NodeId, name: NodeId, kind: DeclarationKind) -> &'static str {
+    fn keyword(&self, id: NodeId, name: NodeId, kind: DeclarationKind) -> String {
         let words = |parent: NodeId, before: usize| {
             self.nodes[parent]
                 .children
@@ -316,6 +324,7 @@ impl<'s> SyntaxTree<'s> {
                     .flatten()
             })
             .unwrap_or(kind.word())
+            .to_owned()
     }
 
     pub(crate) fn text(&self, id: NodeId) -> &'s str {
@@ -375,7 +384,7 @@ fn line(row: usize) -> u32 {
 }
 
 /// Collapse whitespace and keep names short enough for a label.
-fn display_name(text: &str) -> String {
+pub(crate) fn display_name(text: &str) -> String {
     const MAX: usize = 80;
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     match collapsed.char_indices().nth(MAX) {

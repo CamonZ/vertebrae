@@ -2,6 +2,7 @@
 
 mod activity;
 mod classification;
+mod registry;
 pub mod semantic;
 
 pub use activity::{
@@ -9,39 +10,12 @@ pub use activity::{
     LiteralCommand, Operation,
 };
 
+pub use registry::Grammar;
+use std::ops::ControlFlow;
 use std::time::Instant;
-use tree_sitter::{Language, ParseOptions, Parser, Tree};
-
-#[derive(Clone, Copy)]
-pub enum Grammar {
-    Bash,
-    JavaScript,
-    Python,
-    Rust,
-    TypeScript,
-    Tsx,
-}
+use tree_sitter::{ParseOptions, Parser, Tree};
 
 impl Grammar {
-    pub fn name(self) -> &'static str {
-        self.entry().0
-    }
-
-    pub fn language(self) -> Language {
-        self.entry().1.into()
-    }
-
-    fn entry(self) -> (&'static str, tree_sitter_language::LanguageFn) {
-        match self {
-            Self::Bash => ("bash", tree_sitter_bash::LANGUAGE),
-            Self::JavaScript => ("javascript", tree_sitter_javascript::LANGUAGE),
-            Self::Python => ("python", tree_sitter_python::LANGUAGE),
-            Self::Rust => ("rust", tree_sitter_rust::LANGUAGE),
-            Self::TypeScript => ("typescript", tree_sitter_typescript::LANGUAGE_TYPESCRIPT),
-            Self::Tsx => ("tsx", tree_sitter_typescript::LANGUAGE_TSX),
-        }
-    }
-
     pub fn parse(self, source: &str) -> Option<Tree> {
         self.parse_with_deadline(source, None)
     }
@@ -55,7 +29,13 @@ impl Grammar {
         parser.set_language(&self.language()).ok()?;
         match deadline {
             Some(deadline) => {
-                let mut expired = |_: &tree_sitter::ParseState| Instant::now() >= deadline;
+                let mut expired = |_: &tree_sitter::ParseState| {
+                    if Instant::now() >= deadline {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                };
                 parser.parse_with_options(
                     &mut |offset, _| source.as_bytes().get(offset..).unwrap_or_default(),
                     None,

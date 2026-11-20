@@ -107,11 +107,13 @@ const results: Record<string, SemanticOutcome> = {
           new_line: 10,
         },
         change: { kind: "modified" },
+        facts: { items: [], omitted: 0 },
         parts: [
           {
             kind: "changed",
             old: { start: 15, end: 15 },
             new: { start: 15, end: 15 },
+            facts: { items: [], omitted: 0 },
           },
         ],
       },
@@ -363,6 +365,7 @@ describe("AllChangesView semantic mode", () => {
             old: { start: 1, end: 3 },
             new: { start: 7, end: 9 },
           },
+          facts: { items: [], omitted: 0 },
           parts: [],
         },
       ],

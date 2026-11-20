@@ -3,16 +3,16 @@
 //! can check both against the patch at once.
 //!
 //! Sides are read with the Files sidebar's readers (and path policy). Diffs
-//! are cached by the sides' revisions: the engine is deterministic, so the
-//! same grammar and two texts always give the same answer, whichever
-//! comparison asked.
+//! are cached by the engine version and the sides' revisions: the engine is
+//! deterministic, so the same engine, grammar and two texts always give the
+//! same answer, whichever comparison asked.
 
 use super::changes::ComparisonSnapshot;
 use super::worktree_files::{self, FileBody, FilesError};
 use std::collections::{BTreeMap, VecDeque};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use vertebrae_syntax::semantic::{self, Budget, FallbackReason, SemanticOutcome};
+use vertebrae_syntax::semantic::{self, Budget, FallbackReason, SemanticOutcome, ENGINE_VERSION};
 
 #[derive(Debug, serde::Serialize, specta::Type)]
 pub struct ChangeSides {
@@ -26,8 +26,9 @@ pub struct ChangeSides {
 const CACHE_ENTRIES: usize = 512;
 const CACHE_BYTES: usize = 16 * 1024 * 1024;
 
-/// A path and both sides' revisions (empty for a missing side).
-type Key = (String, String, String);
+/// The engine version, a path and both sides' revisions (empty for a
+/// missing side).
+type Key = (u32, String, String, String);
 
 /// Oldest-first eviction. Concurrent misses for one key compute twice and
 /// store the same value; that costs time, never correctness.
@@ -82,6 +83,7 @@ fn diff(path: &str, old: &FileBody, new: &FileBody) -> Arc<SemanticOutcome> {
         }
     };
     let key = (
+        ENGINE_VERSION,
         path.to_owned(),
         old_revision.to_owned(),
         new_revision.to_owned(),

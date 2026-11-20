@@ -1,7 +1,9 @@
 //! Semantic (syntax-aware) diffs: parse both versions of a file, match
 //! their syntax nodes, and report what happened to each changed
 //! declaration ([`DeclarationDiff`]): added, removed, moved, renamed, or
-//! changed inside, with the scopes that enclose it.
+//! changed inside, with the scopes that enclose it, and the [`Fact`]s about
+//! what kind of code each change touches (calls, effects, control flow,
+//! error handling, data, API surface, concurrency, test code).
 //!
 //! The output is a pure function of the grammar and both texts (no clocks or
 //! hash-map order feed into it), so it can be cached by content. Every file
@@ -13,19 +15,36 @@
 //!   and renames swap sides;
 //! - whitespace-only edits produce no changes (except where the grammar
 //!   makes layout significant, such as Python blocks); whitespace inside a
-//!   string or character literal is content, not layout.
+//!   string or character literal is content, not layout;
+//! - facts mirror too (added ↔ removed), and appear for a change exactly
+//!   when the facts query's captures it touches differ between the sides
+//!   (literals and types only where replaced or themselves changed, calls
+//!   as the API tables classify them; see `facts`).
 
 mod declarations;
+mod facts;
 mod matching;
-mod profile;
+pub(crate) mod profile;
 mod script;
 mod tree;
 
 use crate::Grammar;
 pub use declarations::{DeclarationChange, DeclarationDiff, Part};
+pub use facts::{EffectKind, Fact, FactCategory, FactChange, FactKind, Facts};
 use serde::Serialize;
 use std::cell::Cell;
 use std::time::{Duration, Instant};
+
+/// Identifies the engine's output format and behaviour: callers caching
+/// results by content key them with it too. Bump it whenever output for
+/// the same input changes (a query, table, or derivation edit), and update
+/// [`ENGINE_INPUTS`] with it.
+pub const ENGINE_VERSION: u32 = 2;
+
+/// A digest of every query and API table the engine reads, pinned with
+/// [`ENGINE_VERSION`]: a test fails when they change without a bump.
+#[cfg(test)]
+pub(crate) const ENGINE_INPUTS: (u32, u64) = (ENGINE_VERSION, 0xc61e_8423_5ec4_4c9a);
 
 /// 1-based inclusive line range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -151,6 +170,11 @@ pub(crate) struct SemanticChange {
     /// The edit inserts, deletes, moves or renames the innermost scope
     /// segment's declaration itself, not something inside it.
     pub(crate) declares: bool,
+    /// What kind of code it touches.
+    pub(crate) facts: Facts,
+    /// For a declaration added or removed as a whole: its own first line
+    /// (past leading comments and attributes).
+    pub(crate) head: Option<u32>,
 }
 
 /// Why a file is shown as a line diff instead.
@@ -268,7 +292,7 @@ pub(crate) fn node_changes(
     new: &str,
     budget: &Budget,
 ) -> Result<Vec<SemanticChange>, FallbackReason> {
-    let (Some(profile), Some(declarations)) = (grammar.profile(), grammar.declarations()) else {
+    let (Some(profile), Some(compiled)) = (grammar.profile(), grammar.compiled()) else {
         return Err(FallbackReason::UnsupportedLanguage);
     };
     if old.len() > budget.max_bytes || new.len() > budget.max_bytes {
@@ -292,7 +316,8 @@ pub(crate) fn node_changes(
         tree::SyntaxTree::build(
             source,
             tree,
-            declarations,
+            &compiled.declarations,
+            &compiled.facts,
             profile.literals,
             budget.max_nodes,
             &deadline,
@@ -301,7 +326,14 @@ pub(crate) fn node_changes(
     let (old_tree, new_tree) = (build(old, &old_tree)?, build(new, &new_tree)?);
     let mapping = matching::match_trees(&old_tree, &new_tree, &deadline)?;
     deadline.check()?;
-    let changes = script::changes(&old_tree, &new_tree, &mapping, profile, &deadline)?;
+    let changes = script::changes(
+        &old_tree,
+        &new_tree,
+        &mapping,
+        profile,
+        &compiled.apis,
+        &deadline,
+    )?;
     deadline.check()?;
     Ok(changes)
 }

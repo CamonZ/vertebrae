@@ -782,7 +782,8 @@
    tinted pills. */
 .semantic-label {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
   align-items: center;
   gap: 4px 6px;
   padding: 3px 12px;
@@ -796,8 +797,10 @@
 
 .semantic-scope {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex: 0 1 auto;
   min-width: 0;
+  overflow: hidden;
   color: var(--color-fg-soft);
   font-family: var(--font-mono);
 }
@@ -813,6 +816,7 @@
 }
 
 .semantic-chip {
+  flex-shrink: 0;
   padding: 0 6px;
   border-radius: 999px;
   background: color-mix(in oklch, var(--color-fg) 6%, transparent);
@@ -838,6 +842,106 @@ button.semantic-chip--moved {
 
 button.semantic-chip--moved:hover {
   color: var(--color-fg);
+}
+
+/* Facts about the code a change touches, on the label's one row:
+   outlined (not tinted) so they read as evidence beside the edit chips.
+   Only effects, the system-boundary signal, carry the accent. Chips that
+   do not fit are clipped; the `+N more` button stays and lists them all. */
+.semantic-facts {
+  display: inline-flex;
+  flex: 0 1 auto;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.semantic-fact {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg-soft);
+  font: inherit;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.semantic-fact--effects {
+  border-color: color-mix(in oklch, var(--color-accent) 40%, transparent);
+  color: var(--color-fg);
+}
+
+.semantic-fact--count,
+.semantic-fact--more {
+  color: var(--color-fg-faint);
+  font-family: var(--font-sans);
+}
+
+.semantic-fact--more {
+  border-style: dashed;
+  cursor: pointer;
+}
+
+.semantic-fact--more:hover,
+.semantic-fact--more[aria-expanded="true"] {
+  color: var(--color-fg);
+}
+
+/* Test code: a muted tag on the scope, not a fact. */
+.semantic-test-tag {
+  margin-inline-start: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--color-fg) 6%, transparent);
+  color: var(--color-fg-faint);
+  font-family: var(--font-sans);
+}
+
+.semantic-facts-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  padding: 6px 12px 8px;
+  background: var(--color-bg-1);
+  border-block-end: 1px solid var(--color-line-soft);
+  color: var(--color-fg-soft);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.semantic-facts-section {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+}
+
+.semantic-facts-owner {
+  flex-basis: 100%;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.semantic-facts-category h5 {
+  margin: 0;
+  color: var(--color-fg-faint);
+  font-size: inherit;
+  font-weight: 500;
+}
+
+.semantic-facts-category ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-mono);
+}
+
+.semantic-facts-omitted {
+  margin: 0;
+  color: var(--color-fg-faint);
 }
 
 /* Header marker: this file is shown as a line diff (or is only whitespace). */
