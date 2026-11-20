@@ -694,9 +694,17 @@ describe("ChatComposer", () => {
     expect(textarea).toHaveAttribute("placeholder", "Type a message...");
   });
 
-  it("disables the textarea when canUseComposer is false", () => {
-    render(<ChatComposer {...defaultProps({ canUseComposer: false })} />);
-    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+  it("keeps the textarea editable but blocks submitting when canUseComposer is false", () => {
+    const props = defaultProps({ canUseComposer: false });
+    render(<ChatComposer {...props} />);
+    const textarea = screen.getByTestId("local-chat-composer");
+    // A disabled textarea drops focus; typing continues, submitting does not.
+    expect(textarea).toBeEnabled();
+    fireEvent.change(textarea, { target: { value: "queued thought" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(props.onSend).not.toHaveBeenCalled();
+    expect(props.onStartSession).not.toHaveBeenCalled();
+    expect(screen.getByTitle("Start session")).toBeDisabled();
   });
 
   // --- Mutation-killing tests ---
@@ -808,7 +816,8 @@ describe("ChatComposer", () => {
     ).toHaveTextContent(
       "Local chat unavailable because neither Claude nor Codex was found."
     );
-    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+    expect(screen.getByTestId("local-chat-composer")).toBeEnabled();
+    expect(screen.getByTitle("Start session")).toBeDisabled();
   });
 
   it("keeps a locked unavailable harness from being resumed or replaced", () => {
@@ -835,7 +844,8 @@ describe("ChatComposer", () => {
       screen.getByTestId("local-chat-provider-unavailable")
     ).toHaveTextContent("This chat session's harness is no longer available.");
     expect(getComposerPicker("local-chat-provider-picker")).toBeDisabled();
-    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+    expect(screen.getByTestId("local-chat-composer")).toBeEnabled();
+    expect(screen.getByTitle("Start session")).toBeDisabled();
   });
 
   it("keeps the effort picker enabled when resuming", () => {

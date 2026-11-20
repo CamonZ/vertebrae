@@ -48,6 +48,25 @@ npm run generate:types   # Generate TypeScript types from Rust
 3. Edit Rust backend in `src-tauri/src/` — Tauri rebuilds automatically
 4. Run `npm run generate:types` after changing Rust command signatures
 
+### Keyboard focus in composers
+
+Text inputs the user writes into (the chat composer, diff comment and inline
+discussion composers) carry `focusKeepProps` and use `useKeepFocus`. They keep
+focus until a pointer press, Tab, Escape or a shortcut moves it. A loss to
+nothing (including WebKit's silent loss when a diff re-renders the slot an
+annotation is projected into) is restored with the selection. When a focused
+input unmounts, focus goes to its pane's composer. The composer textarea is
+never disabled: an unusable composer blocks submitting, not typing, and its
+draft lives in `composerDraftStore` so remounts keep it.
+
+Only user actions focus a composer. Store actions that open or show a chat
+raise `composerFocusRevision`; the active pane's composer takes it once.
+
+Dev builds install a focus tracer (`src/utils/focusTrace.ts`). A composer
+losing focus without a user action logs a `[FOCUS_TRACE]` warning with the
+preceding `focus()` stack and chat-store change, and shows a badge;
+⌃⌥⇧F (or clicking the badge) copies the trace as JSON.
+
 ### Machine-parts dev gallery
 
 Dev builds (`npm run tauri:dev`) add a sidebar item, **Machine parts (dev)**,

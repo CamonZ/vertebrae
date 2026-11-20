@@ -249,8 +249,13 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
     return session ? session.title?.trim() || session.label : undefined;
   });
   const isForeground = !isMaximized || paneIsActive;
+  // Only the active pane takes a pending composer focus request, once.
   const composerFocusRevision = useChatStore((state) =>
-    state.panelOpen && isForeground ? state.composerFocusRevision : null
+    state.panelOpen &&
+    paneIsActive &&
+    state.composerFocusRevision > state.composerFocusHandledRevision
+      ? state.composerFocusRevision
+      : null
   );
   const onStartFresh = useCallback(
     () => void startFreshActiveSession(pane.id),
@@ -325,7 +330,7 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
           isMaximized && paneCount > 1 ? onUnsplitPanes : undefined
         }
         onClosePane={isMaximized && paneCount > 1 ? onClosePane : undefined}
-        autoFocusComposer={isForeground}
+        isForegroundPane={isForeground}
         composerFocusRevision={composerFocusRevision}
         showProjectContext={paneCount > 1}
         projectLabel={projectLabelBySessionId?.get(sessionId)}

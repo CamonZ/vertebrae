@@ -17,6 +17,12 @@ import { installActionableReferenceClickRecovery } from "./utils/actionableRefer
 
 void preloadTaskDetailFontAfterStyles();
 
+// Dev builds trace focus moves to attribute composer focus losses.
+if (import.meta.env.DEV && import.meta.env.MODE !== "test")
+  void import("./utils/focusTrace").then(({ installFocusTrace }) =>
+    installFocusTrace()
+  );
+
 function App() {
   const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState("Loading configuration...");

@@ -16,6 +16,8 @@ import {
   shortcutText,
 } from "../../ChatWindow/chatShortcuts";
 import { DiffReviewContext, type DiffReviewFocus } from "./DiffReviewContext";
+import { focusKeepProps } from "../../../utils/focusKeep";
+import { useKeepFocus } from "../../../hooks/useKeepFocus";
 
 /** Pierre annotation payload: comments (and a composer) at one diff line. */
 export interface ReviewAnnotation {
@@ -122,10 +124,14 @@ function CommentEditor({
   const submitKeys = shortcutText(DIFF_COMPOSER_SUBMIT_SHORTCUT);
   const sendKeys = shortcutText(DIFF_COMPOSER_SEND_SHORTCUT);
   const canSubmit = !!value.trim() && !disabled;
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  useKeepFocus(inputRef);
   return (
     <div className="diff-comment-editor">
       <textarea
+        ref={inputRef}
         autoFocus
+        {...focusKeepProps}
         aria-label={label}
         placeholder={placeholder}
         data-testid={`${testIdPrefix}-input`}

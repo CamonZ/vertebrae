@@ -1657,7 +1657,7 @@ describe("Changes panel shortcut registration", () => {
     const view = render(
       <ChatWindow
         sessionId="test-session"
-        autoFocusComposer={false}
+        isForegroundPane={false}
         registerChangesToggle={register}
       />
     );
@@ -1709,7 +1709,7 @@ describe("Changes panel shortcut registration", () => {
     view.rerender(
       <ChatWindow
         sessionId="test-session"
-        autoFocusComposer={false}
+        isForegroundPane={false}
         registerChangesToggle={register}
       />
     );

@@ -49,6 +49,7 @@ export function useChatPaneManagement({
 }: UseChatPaneManagementOptions): UseChatPaneManagementResult {
   const paneLayout = useChatStore((s) => s.paneLayout);
   const focusPane = useChatStore((s) => s.focusPane);
+  const requestComposerFocus = useChatStore((s) => s.requestComposerFocus);
   const closePane = useChatStore((s) => s.closePane);
   const unsplitPanes = useChatStore((s) => s.unsplitPanes);
 
@@ -93,9 +94,11 @@ export function useChatPaneManagement({
       const pane = visiblePanes[index];
       if (!pane) return false;
       focusPane(pane.id);
+      // Pane shortcuts move the keyboard into the pane they select.
+      requestComposerFocus();
       return true;
     },
-    [focusPane, visiblePanes]
+    [focusPane, requestComposerFocus, visiblePanes]
   );
 
   const focusPaneByOffset = useCallback(
@@ -108,9 +111,10 @@ export function useChatPaneManagement({
       const nextIndex =
         (currentIndex + offset + visiblePanes.length) % visiblePanes.length;
       focusPane(visiblePanes[nextIndex].id);
+      requestComposerFocus();
       return true;
     },
-    [activePaneId, focusPane, visiblePanes]
+    [activePaneId, focusPane, requestComposerFocus, visiblePanes]
   );
 
   const closeActivePane = useCallback(() => {

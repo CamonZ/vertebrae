@@ -5,6 +5,8 @@ import {
   useRef,
   type ReactNode,
 } from "react";
+import { focusKeepProps } from "../../utils/focusKeep";
+import { useKeepFocus } from "../../hooks/useKeepFocus";
 
 const CHAT_INPUT_MIN_HEIGHT = 40;
 const CHAT_INPUT_MAX_HEIGHT = 160;
@@ -13,6 +15,10 @@ export interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  /**
+   * Blocks submitting, not typing: the textarea stays editable so a focused
+   * composer keeps focus and keystrokes while a turn starts or runs.
+   */
   disabled?: boolean;
   canSubmit?: boolean;
   ariaLabel?: string;
@@ -49,6 +55,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     ref
   ) {
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+    useKeepFocus(textareaRef);
     const hasFooter = footerLeft != null || footerRight != null;
     const setRefs = useCallback(
       (node: HTMLTextAreaElement | null) => {
@@ -133,8 +140,8 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
     );
 
     const textareaClassName = hasFooter
-      ? "block w-full resize-none rounded-t-lg bg-transparent px-3 py-2 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] disabled:cursor-not-allowed disabled:opacity-50"
-      : "block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)] disabled:cursor-not-allowed disabled:opacity-50";
+      ? "block w-full resize-none rounded-t-lg bg-transparent px-3 py-2 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)]"
+      : "block w-full resize-none rounded-lg bg-transparent py-2 pl-3 pr-10 chat-composer-input text-[var(--color-fg)] placeholder:text-[var(--color-fg-mute)]";
 
     return (
       <div
@@ -155,7 +162,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
           aria-label={ariaLabel}
           placeholder={placeholder}
           data-testid={textareaTestId}
-          disabled={disabled}
+          {...focusKeepProps}
           rows={1}
           style={{
             minHeight: CHAT_INPUT_MIN_HEIGHT,

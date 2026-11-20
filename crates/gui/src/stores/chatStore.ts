@@ -76,6 +76,7 @@ import type {
 import { commands, type AssociationWorktree, type LocalChatDiscussionBinding } from "../bindings";
 import { emptyChatAssociation } from "../utils/chatAssociation/defaultWorktree";
 import { usePendingCommentsStore } from "./pendingCommentsStore";
+import { useComposerDraftStore } from "./composerDraftStore";
 import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
 import {
   gateChatLabel,
@@ -635,8 +636,13 @@ interface ChatStoreState {
   paneLayout: ChatPaneLayout;
   /** Whether the chat panel is visible */
   panelOpen: boolean;
-  /** Requests composer focus when New Chat reuses a mounted session. */
+  /**
+   * Bumped by user actions that open or show a chat; the active pane's
+   * composer takes focus once per revision. Nothing else focuses a composer.
+   */
   composerFocusRevision: number;
+  /** The last revision a composer took focus for. */
+  composerFocusHandledRevision: number;
   /** Persisted metadata index used by history surfaces. */
   localSessionSummaries: Record<string, LocalChatSessionSummary>;
   /** Revisions for changes visible in shared activity/spawn projections. */
@@ -941,6 +947,10 @@ interface ChatStoreActions {
   clearMessages: (sessionId: string) => void;
   /** Toggle the chat panel open/closed */
   togglePanel: () => void;
+  /** Record that the active composer took focus for `revision`. */
+  markComposerFocusHandled: (revision: number) => void;
+  /** A user action asks the active pane's composer to take focus. */
+  requestComposerFocus: () => void;
   /** Set panel open state explicitly */
   setPanelOpen: (open: boolean) => void;
   /** Reset local chat sessions */
@@ -962,6 +972,7 @@ const emptyState: ChatStoreState = {
   paneLayout: emptyPaneLayout,
   panelOpen: false,
   composerFocusRevision: 0,
+  composerFocusHandledRevision: 0,
   localSessionSummaries: {},
   activityRevisions: {},
   spawnOutlineRevisions: {},
@@ -2284,6 +2295,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         set((state) => ({
           ...focusSessionInPaneLayout(state, existing),
           panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
         }));
         return existing;
       }
@@ -2309,6 +2321,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               hydrated.id
             ),
             panelOpen: true,
+            composerFocusRevision: state.composerFocusRevision + 1,
           };
         });
         hydrateProviderMessagesInPlace(hydrated.id, hydrated);
@@ -2330,6 +2343,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ),
           ...focusSessionInPaneLayout({ ...state, sessions: nextSessions }, id),
           panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
         };
       });
 
@@ -2385,6 +2399,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               hydrated.id
             ),
             panelOpen: true,
+            composerFocusRevision: state.composerFocusRevision + 1,
           };
         });
         return hydrated.id;
@@ -2405,6 +2420,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             session.id
           ),
           panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
         };
       });
       return session.id;
@@ -2437,6 +2453,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
             panes: paneLayout.panes,
             activePaneId: pane.id,
           },
+          // Choosing a pane supersedes a composer focus request not yet taken.
+          composerFocusHandledRevision: state.composerFocusRevision,
         };
       });
     },
@@ -2497,6 +2515,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ),
           ...addSessionPane({ ...state, sessions: nextSessions }, session.id),
           panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
         };
       });
       return session.id;
@@ -2712,6 +2731,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             sessions: state.sessions,
             ...focusSessionInPaneLayout(state, sessionId, preferredPaneId),
             panelOpen: true,
+            composerFocusRevision: state.composerFocusRevision + 1,
           };
         });
         return true;
@@ -2740,6 +2760,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             preferredPaneId
           ),
           panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
         };
       });
       void hydrateProviderMessagesInPlace(hydrated.id, hydrated);
@@ -2757,6 +2778,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         set((state) => ({
           ...focusSessionInPaneLayout(state, runtime.id),
           panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
         }));
         return {
           sessionId: runtime.id,
@@ -2787,6 +2809,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               hydrated.id
             ),
             panelOpen: true,
+            composerFocusRevision: state.composerFocusRevision + 1,
           };
         });
         void hydrateProviderMessagesInPlace(hydrated.id, hydrated);
@@ -2815,6 +2838,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             session.id
           ),
           panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
         };
       });
       return {
@@ -3237,6 +3261,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           input.preferredPaneId
         ),
         panelOpen: true,
+        composerFocusRevision: state.composerFocusRevision + 1,
       }));
 
       return runtimeSessionId;
@@ -3277,6 +3302,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 hydrated.id
               ),
               panelOpen: true,
+              composerFocusRevision: state.composerFocusRevision + 1,
             };
           });
           hydrateProviderMessagesInPlace(hydrated.id, hydrated);
@@ -3302,6 +3328,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             session.id
           ),
           panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
         };
       });
       return session.id;
@@ -3359,6 +3386,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         deleted.add(id);
         markLocalChatSessionCleared(id);
         usePendingCommentsStore.getState().clearSession(id);
+        useComposerDraftStore.getState().setDraft(id, "");
         if (typeof commands.deleteLocalChatAnnotations === "function")
           cleanup.push(
             commands.deleteLocalChatAnnotations(id).then((result) => {
@@ -4537,11 +4565,33 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     togglePanel: () => {
-      set((state) => ({ panelOpen: !state.panelOpen }));
+      set((state) => ({
+        panelOpen: !state.panelOpen,
+        composerFocusRevision:
+          state.composerFocusRevision + (state.panelOpen ? 0 : 1),
+      }));
+    },
+
+    requestComposerFocus: () => {
+      set((state) => ({
+        composerFocusRevision: state.composerFocusRevision + 1,
+      }));
+    },
+
+    markComposerFocusHandled: (revision) => {
+      set((state) =>
+        state.composerFocusHandledRevision >= revision
+          ? state
+          : { composerFocusHandledRevision: revision }
+      );
     },
 
     setPanelOpen: (open) => {
-      set({ panelOpen: open });
+      set((state) => ({
+        panelOpen: open,
+        composerFocusRevision:
+          state.composerFocusRevision + (open && !state.panelOpen ? 1 : 0),
+      }));
     },
 
     reset: () => {
