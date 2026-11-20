@@ -22,17 +22,45 @@ const SELECT_ENTITY: Intent = Intent {
         "Does `message` ask to look at, discuss, implement, create a worktree for, or tie ",
         "this conversation to an epic, ticket or task? An entity may be named only by its ID, without naming its ",
         "level: its full UUID, or its short ID, which is the first 8 characters ",
-        "of the UUID. `named_entities` lists the entities whose full or short IDs appear in `message`."
+        "of the UUID."
     ),
-    yes: concat!(
-        "`message` asks to work with or about an entity: one it describes, or one of ",
-        "`named_entities` named by its full UUID or by its 8-character short ID."
-    ),
+    yes: "`message` asks to work with or about an entity it describes or names by ID.",
     no: concat!(
         "`message` asks nothing about an entity, or an ID in it only appears in passing, ",
-        "such as a commit hash, a log line or quoted output."
+        "such as a commit hash, a log line, quoted output, a comparison, a dependency or ",
+        "a \"see also\" reference."
     ),
 };
+
+/// Asked instead of `SELECT_ENTITY` when the message names exactly one
+/// resolvable entity: the judgement is about that entity, not any entity.
+const TARGET_NAMED_ENTITY: Intent = Intent {
+    instructions: concat!(
+        "`named_entities` holds the one epic, ticket or task whose full UUID or 8-character ",
+        "short ID appears in `message`. Is that entity itself what `message` asks this ",
+        "conversation to be about: to look at, review, discuss, implement, create a worktree ",
+        "for, or tie, bind or switch this conversation to? `current_entity` is the entity this ",
+        "conversation is already about, if any."
+    ),
+    yes: concat!(
+        "`message` asks to work on or about the named entity: it asks to look at, review, ",
+        "discuss or implement it, to create a worktree for it (also \"create a worktree for ",
+        "it\" right after naming it), or to tie, bind or switch this conversation to it."
+    ),
+    no: concat!(
+        "The named entity only appears in passing while `message` is about something else: ",
+        "a comparison or resemblance (\"similar to X\", \"same bug as X\"), a dependency or ",
+        "blocker (\"blocked by X\", \"depends on X\"), background or an example, a \"see also X\" ",
+        "reference, a negation (\"not X\", \"unlike X\"), quoted output, a log line or a commit ",
+        "hash. A worktree requested for another subject does not make the named entity the target."
+    ),
+};
+
+/// Above this a yes/no intent is yes; it is also the bar for a first entity binding.
+const YES: f64 = 0.5;
+/// Replacing an already bound entity with another one needs a stricter answer
+/// than binding the first one, so an ambiguous mention keeps the association.
+const REPLACE: f64 = 0.8;
 
 const CREATE_TICKET: Intent = Intent {
     instructions: "Does `message` explicitly ask the agent to create a new ticket now?",
@@ -108,12 +136,25 @@ impl EventSink for DiscardEvents {
 
 /// The intent questions a message warrants. A missing part is always asked
 /// about; a known association changes only on an explicit entity ID or a
-/// message about a worktree. Empty means the message cannot change anything.
-pub(super) fn questions(message: &str, state: State<'_>) -> BTreeMap<&'static str, Intent> {
+/// message about a worktree. `named` is the single entity the message names by
+/// ID, when known: its binding is judged on that entity alone, and naming the
+/// entity that is already bound asks nothing about it.
+pub(super) fn questions(
+    message: &str,
+    state: State<'_>,
+    named: Option<&AssociationEntity>,
+) -> BTreeMap<&'static str, Intent> {
     let names_entity = !references::entity_tokens(message).is_empty();
     let mut questions = BTreeMap::from([("create_ticket", CREATE_TICKET)]);
-    if state.current_entity.is_none() || names_entity {
-        questions.insert("select_entity", SELECT_ENTITY);
+    match named {
+        Some(entity) if state.current_entity.is_some_and(|c| c.id == entity.id) => (),
+        Some(_) => {
+            questions.insert("target_named_entity", TARGET_NAMED_ENTITY);
+        }
+        None if state.current_entity.is_none() || names_entity => {
+            questions.insert("select_entity", SELECT_ENTITY);
+        }
+        None => (),
     }
 
     if state.worktree_path.is_none() || names_entity {
@@ -124,6 +165,18 @@ pub(super) fn questions(message: &str, state: State<'_>) -> BTreeMap<&'static st
         questions.insert("select_worktree", SELECT_WORKTREE);
     }
     questions
+}
+
+/// Whether a judgement that the named entity is the message's subject binds
+/// it: a first binding needs a yes, replacing a different bound entity needs
+/// the stricter replacement bar, and the bound entity itself is never rebound.
+fn binds_named(named: &AssociationEntity, state: State<'_>, probability: Option<f64>) -> bool {
+    let bar = match state.current_entity {
+        None => YES,
+        Some(current) if current.id == named.id => return false,
+        Some(_) => REPLACE,
+    };
+    probability.is_some_and(|p| p > bar)
 }
 
 /// Asks the warranted intent questions in one request, then resolves explicit
@@ -168,7 +221,14 @@ async fn decide_inner(
         diagnostic: None,
     };
 
-    let questions = questions(message, state);
+    // IDs are matched here, not by the model; it sees what they resolve to.
+    let named = references::named_entity(message, scope.lookup).await;
+    let named_one = match &named {
+        Named::One(entity) => Some(entity),
+        _ => None,
+    };
+
+    let questions = questions(message, state, named_one);
     if questions.is_empty() {
         return Ok(decision);
     }
@@ -205,32 +265,26 @@ async fn decide_inner(
         })
         .collect();
 
-    // IDs are matched here, not by the model; it sees what they resolve to.
-    let named = references::named_entity(message, scope.lookup).await;
-    let named_entities = match &named {
-        Named::One(entity) => vec![entity.clone()],
-        _ => vec![],
-    };
-
+    let named_entities: Vec<AssociationEntity> = named_one.cloned().into_iter().collect();
     let answers = ask(&instance, request, message, state, &named_entities, attempt).await?;
 
-    let intents = questions
+    let probabilities = questions
         .keys()
         .map(|name| {
             answers[*name]["noul"]
                 .as_f64()
                 .filter(|value| (0.0..=1.0).contains(value))
-                .map(|value| (*name, value > 0.5))
+                .map(|value| (*name, value))
                 .ok_or_else(|| HarnessError::Operation("Invalid intent answer.".into()))
         })
         .collect::<Result<BTreeMap<_, _>, _>>()?;
 
-    let asked = |name: &str| intents.get(name) == Some(&true);
+    let asked = |name: &str| probabilities.get(name).is_some_and(|p| *p > YES);
     decision.create_worktree = asked("create_worktree");
     decision.create_ticket = asked("create_ticket");
 
-    log::info!(target: "chat_association", "attempt={} phase=intent select_entity={} create_worktree={} select_worktree={} candidates={}",
-        attempt, asked("select_entity"), decision.create_worktree, asked("select_worktree"), scope.candidates.len());
+    log::info!(target: "chat_association", "attempt={} phase=intent select_entity={} target_named_entity={:?} create_worktree={} select_worktree={} candidates={}",
+        attempt, asked("select_entity"), probabilities.get("target_named_entity"), decision.create_worktree, asked("select_worktree"), scope.candidates.len());
 
     let mut unresolved = vec![];
 
@@ -246,15 +300,24 @@ async fn decide_inner(
         }
     }
 
-    if !decision.create_ticket && (asked("select_entity") || decision.create_worktree) {
+    // A worktree request alone never binds an entity: the named entity binds
+    // only when it is judged to be the subject of the message.
+    if !decision.create_ticket {
         match named {
             Named::One(entity) => {
-                decision.selection = AssociationSelection::Entity {
-                    id: entity.id,
-                    title: entity.title,
-                    level: entity.level,
+                if binds_named(
+                    &entity,
+                    state,
+                    probabilities.get("target_named_entity").copied(),
+                ) {
+                    decision.selection = AssociationSelection::Entity {
+                        id: entity.id,
+                        title: entity.title,
+                        level: entity.level,
+                    }
                 }
             }
+            _ if !asked("select_entity") => (),
             Named::Unresolved(reason) => unresolved.push(reason),
             // A named worktree never implies an entity.
             Named::Nothing if state.current_entity.is_some() || decision.worktree.is_some() => (),
@@ -573,7 +636,7 @@ mod tests {
 
         let noul = |p| json!({ "type": "noul", "noul": p });
         for (template, candidates, expected) in [
-            (ResponseTemplate::new(200).set_body_json(json!({ "model": "jev-1.14.0", "answers": {"create_ticket": noul(0.1), "select_entity": noul(0.9), "create_worktree": noul(0.1)}, "usage": {"input_tokens": 1, "output_tokens": 1} })), entities(), "entity"),
+            (ResponseTemplate::new(200).set_body_json(json!({ "model": "jev-1.14.0", "answers": {"create_ticket": noul(0.1), "target_named_entity": noul(0.9), "create_worktree": noul(0.1)}, "usage": {"input_tokens": 1, "output_tokens": 1} })), entities(), "entity"),
             (ResponseTemplate::new(200).set_body_json(json!({ "model": "jev-1.14.0", "answers": {"create_ticket": noul(0.1), "select_entity": noul(0.9), "create_worktree": noul(0.1)}, "usage": {"input_tokens": 1, "output_tokens": 1} })), vec![], "keep"),
             (ResponseTemplate::new(503).set_body_string("secret-response"), entities(), "error"),
             (ResponseTemplate::new(200).set_body_string("secret-malformed-json"), entities(), "error"),
@@ -711,12 +774,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn worktree_request_naming_a_ticket_selects_it_without_a_choice() {
-        let message = format!("Let's check the {ID}, is it clear? Let's create a worktree for it");
+    async fn worktree_request_for_a_named_ticket_selects_it_without_a_choice() {
+        let message = format!("Lets check the {ID}, is it clear? Lets create a worktree for it");
         let (decision, requests) = run(
             &message,
             State::default(),
-            json!({ "create_worktree": 0.9, "select_entity": 0.3, "select_worktree": 0.2 }),
+            json!({ "create_worktree": 0.9, "target_named_entity": 0.9, "select_worktree": 0.2 }),
             None,
         )
         .await;
@@ -725,6 +788,59 @@ mod tests {
         assert_eq!(decision.worktree, None);
         assert!(decision.create_worktree);
         assert_eq!(requests.len(), 1);
+        let asked = requests[0]["questions"].as_object().unwrap();
+
+        assert!(asked.contains_key("target_named_entity"));
+        assert!(!asked.contains_key("select_entity"));
+    }
+
+    #[tokio::test]
+    async fn worktree_request_never_binds_a_passing_mention() {
+        let message = format!("Create a worktree for the login fix, see also {UNCACHED}");
+        for state in [
+            State::default(),
+            State {
+                current_entity: Some(&CURRENT),
+                worktree_path: Some("/p"),
+            },
+        ] {
+            let (decision, requests) = run(
+                &message,
+                state,
+                json!({ "create_worktree": 0.9, "target_named_entity": 0.2, "select_worktree": 0.1 }),
+                Some(ID),
+            )
+            .await;
+
+            assert_eq!(decision.selection, AssociationSelection::Keep);
+            assert!(decision.create_worktree);
+            assert_eq!(decision.diagnostic, None);
+            // No descriptive choice either: the message names its only entity.
+            assert_eq!(requests.len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn naming_the_bound_entity_asks_nothing_about_it() {
+        let state = State {
+            current_entity: Some(&CURRENT),
+            worktree_path: Some("/p"),
+        };
+        let (decision, requests) = run(
+            &format!("is {ID} done yet?"),
+            state,
+            json!({ "create_worktree": 0.1 }),
+            None,
+        )
+        .await;
+
+        assert_eq!(decision.selection, AssociationSelection::Keep);
+        let asked = requests[0]["questions"].as_object().unwrap();
+
+        assert_eq!(
+            asked.keys().collect::<Vec<_>>(),
+            ["create_ticket", "create_worktree"]
+        );
     }
 
     #[tokio::test]
@@ -776,7 +892,7 @@ mod tests {
                 (format!("Create a worktree for the following entity {id}"), 0.9),
                 (format!("Let’s tie this conversation with the following entity {id}"), 0.1),
             ] {
-                let mut intents = json!({ "create_worktree": create, "select_entity": 0.9 });
+                let mut intents = json!({ "create_worktree": create, "target_named_entity": 0.9 });
                 if message.contains("worktree") {
                     intents["select_worktree"] = json!(0.2);
                 }
@@ -796,10 +912,11 @@ mod tests {
                 assert_eq!(named.as_array().unwrap().len(), 1, "{message}");
                 assert_eq!(named[0]["id"], json!(full), "{message}");
                 assert_eq!(named[0]["short_id"], json!(&full[..8]), "{message}");
-                let criteria = &asked["select_entity"]["criteria"];
+                let target = &asked["target_named_entity"];
 
-                assert!(criteria["true"].as_str().unwrap().contains("short ID"));
-                assert!(criteria["false"].is_string());
+                assert!(!asked.contains_key("select_entity"), "{message}");
+                assert!(target["instructions"].as_str().unwrap().contains("short ID"));
+                assert!(target["criteria"]["false"].as_str().unwrap().contains("see also"));
             }
         }
     }
@@ -812,7 +929,7 @@ mod tests {
         };
 
         assert_eq!(
-            questions("what does this function do?", state)
+            questions("what does this function do?", state, None)
                 .keys()
                 .copied()
                 .collect::<Vec<_>>(),
@@ -822,7 +939,7 @@ mod tests {
         let (decision, requests) = run(
             &message,
             state,
-            json!({ "create_worktree": 0.1, "select_entity": 0.9 }),
+            json!({ "create_worktree": 0.1, "target_named_entity": 0.9 }),
             None,
         )
         .await;
@@ -833,12 +950,49 @@ mod tests {
         let (decision, _) = run(
             &format!("this resembles {UNCACHED}"),
             state,
-            json!({ "create_worktree": 0.1, "select_entity": 0.2 }),
+            json!({ "create_worktree": 0.1, "target_named_entity": 0.2 }),
             None,
         )
         .await;
 
         assert_eq!(decision.selection, AssociationSelection::Keep);
+    }
+
+    #[tokio::test]
+    async fn replacing_a_bound_entity_needs_a_stricter_answer_than_a_first_binding() {
+        let bound = State {
+            current_entity: Some(&CURRENT),
+            worktree_path: Some("/p"),
+        };
+        let message = format!("look at {UNCACHED}");
+        // (state, probability, binds): YES < 0.6 < REPLACE < 0.85.
+        for (state, probability, binds) in [
+            (State::default(), 0.4, false),
+            (State::default(), 0.6, true),
+            (bound, 0.6, false),
+            (bound, REPLACE, false),
+            (bound, 0.85, true),
+        ] {
+            let (decision, _) = run(
+                &message,
+                state,
+                json!({ "create_worktree": 0.1, "target_named_entity": probability }),
+                None,
+            )
+            .await;
+
+            let expected = if binds {
+                picked(UNCACHED)
+            } else {
+                AssociationSelection::Keep
+            };
+            assert_eq!(
+                decision.selection,
+                expected,
+                "bound={} p={probability}",
+                state.current_entity.is_some()
+            );
+        }
     }
 
     #[tokio::test]
@@ -909,13 +1063,182 @@ mod tests {
         }
     }
 
+    /// Labelled association fixture against the user's configured decision
+    /// model. Evidence only: it prints the message, raw probabilities and the
+    /// decision for each case and never asserts model accuracy. Run with
+    /// `VTB_ASSOCIATION_DIAGNOSTIC_PAYLOADS=1 cargo test --lib live_decision_model_fixture -- --ignored --nocapture`;
+    /// `VTB_ASSOCIATION_FIXTURE_REPEATS=<n>` repeats every case.
+    #[tokio::test]
+    #[ignore = "calls the configured decision model"]
+    async fn live_decision_model_fixture() {
+        assert_eq!(
+            std::env::var("VTB_ASSOCIATION_DIAGNOSTIC_PAYLOADS").as_deref(),
+            Ok("1"),
+            "probabilities are read from the payload diagnostic log"
+        );
+        LOGGER.call_once(|| {
+            log::set_logger(&LOGS).unwrap();
+            log::set_max_level(log::LevelFilter::Info);
+        });
+        let config = vertebrae_sacrum_client::load_config_file().expect("config");
+        assert!(config.decision_model.enabled, "decision model disabled");
+        let repeats = std::env::var("VTB_ASSOCIATION_FIXTURE_REPEATS")
+            .ok()
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or(1);
+
+        let x = UNCACHED;
+        let short = &UNCACHED[..8];
+        let named = |label, message: String, binds: bool| {
+            let expected = binds.then_some(x);
+            (label, message, expected, expected)
+        };
+        // (label, message, entity selected when unbound, entity selected when
+        // CURRENT is bound); None means the association is kept.
+        let cases = [
+            named(
+                "comparison",
+                format!("This resembles {x}; why does the retry loop hang?"),
+                false,
+            ),
+            named(
+                "dependency",
+                format!("Fix the retry hang first, it is blocked by {x}."),
+                false,
+            ),
+            named(
+                "see-also",
+                format!("Create a worktree for the login fix, see also {x}"),
+                false,
+            ),
+            named(
+                "negation",
+                format!("Not {short}, the other one. What does this function do?"),
+                false,
+            ),
+            named(
+                "quoted-output",
+                format!("Why does the log print `failed to load {x}: not found`?"),
+                false,
+            ),
+            named(
+                "commit-hash",
+                format!("Run git show {short} and explain the diff"),
+                false,
+            ),
+            named(
+                "explicit-switch",
+                format!("Let's switch this conversation to {short}"),
+                true,
+            ),
+            named("explicit-bind", format!("Let's implement {x}"), true),
+            named(
+                "worktree-for-named",
+                format!("Lets check the {short}, is it clear? Lets create a worktree for it"),
+                true,
+            ),
+            // Without a resolvable ID: `select_entity` and the descriptive choice.
+            (
+                "descriptive-bind",
+                "Let's implement the codex retry status epic".into(),
+                Some(ID),
+                None,
+            ),
+            (
+                "descriptive-worktree",
+                "Create a worktree for the codex retry status epic".into(),
+                Some(ID),
+                None,
+            ),
+            (
+                "unnamed-worktree",
+                "Create a worktree for the login fix".into(),
+                None,
+                None,
+            ),
+            (
+                "descriptive-comparison",
+                "Is this similar to the conversation associations task?".into(),
+                None,
+                None,
+            ),
+            (
+                "unresolved-id",
+                "Tie this conversation to 0123abcd".into(),
+                None,
+                None,
+            ),
+        ];
+        let lookup = project();
+        let candidates = entities();
+        let mut runs = 0;
+        let mut mismatches = 0;
+        for _ in 0..repeats {
+            for (label, message, unbound, bound) in &cases {
+                for (state, expected) in [
+                    (State::default(), unbound),
+                    (
+                        State {
+                            current_entity: Some(&CURRENT),
+                            worktree_path: Some("/p"),
+                        },
+                        bound,
+                    ),
+                ] {
+                    let attempt = uuid::Uuid::new_v4().to_string();
+                    let scope = Scope {
+                        candidates: &candidates,
+                        lookup: &lookup,
+                        worktrees: &[],
+                    };
+                    let decision = decide(&config, message, scope, state, &attempt).await;
+                    let probabilities: Vec<Value> = LOGS
+                        .0
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|line| {
+                            line.contains(&attempt) && line.contains("phase=response_summary")
+                        })
+                        .filter_map(|line| line.split("content=").nth(1))
+                        .filter_map(|content| serde_json::from_str(content).ok())
+                        .collect();
+                    let selected = match &decision {
+                        Ok(Decision {
+                            selection: AssociationSelection::Entity { id, .. },
+                            ..
+                        }) => Some(id.as_str()),
+                        _ => None,
+                    };
+                    runs += 1;
+                    mismatches += usize::from(decision.is_err() || selected != *expected);
+                    println!(
+                        "{}",
+                        json!({
+                            "case": label,
+                            "bound_before": state.current_entity.is_some(),
+                            "message": message,
+                            "probabilities": probabilities,
+                            "expected": expected,
+                            "selected": selected,
+                            "create_worktree": decision.as_ref().is_ok_and(|d| d.create_worktree),
+                            "diagnostic": decision.as_ref().ok().and_then(|d| d.diagnostic.clone()),
+                            "error": decision.as_ref().err().map(diagnostic),
+                        })
+                    );
+                }
+            }
+        }
+        println!("mismatches={mismatches} of {runs}");
+    }
+
     #[tokio::test]
     async fn descriptive_choice_and_named_state_distinguish_all_levels() {
         for entity in project().entities {
             let (decision, requests) = run(
                 &format!("discuss {}", entity.id),
                 State::default(),
-                json!({"select_entity": 0.9, "create_worktree": 0.1}),
+                json!({"target_named_entity": 0.9, "create_worktree": 0.1}),
                 None,
             )
             .await;

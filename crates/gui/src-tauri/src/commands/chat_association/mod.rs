@@ -156,7 +156,7 @@ async fn resolve(
     };
 
     if input.event_kind == AssociationEventKind::User
-        && inference::questions(&input.text, state).is_empty()
+        && inference::questions(&input.text, state, None).is_empty()
     {
         return Ok(result);
     }

@@ -639,6 +639,39 @@ describe("useChatAssociation", () => {
     });
   });
 
+  it.each([
+    ["a bound worktree", bound()],
+    [
+      "a pending worktree creation",
+      bound({ worktreePath: null, branch: null, awaitingWorktree: ["/p"] }),
+    ],
+  ])(
+    "keeps the ticket and %s when a message mentions another ticket in passing",
+    async (_, association) => {
+      reply({});
+      seed(
+        [user(`This looks like the same bug as ${UNCACHED.id}`, 1)],
+        association
+      );
+      const { result } = renderHook(() => useDriven("s1"));
+      await waitFor(() =>
+        expect(result.current.record.lastProcessedAt).toBe(at(1))
+      );
+
+      expect(resolve.mock.calls[0][0]).toMatchObject({
+        event_kind: "user",
+        entity: TICKET,
+      });
+      expect(result.current.record).toMatchObject({
+        ticketId: association.ticketId,
+        ticketTitle: association.ticketTitle,
+        worktreePath: association.worktreePath,
+        branch: association.branch,
+        awaitingWorktree: association.awaitingWorktree,
+      });
+    }
+  );
+
   it("keeps the association and surfaces an unresolved reference", async () => {
     const reason =
       "No single ticket in this project matches 0123abcd. Use its full ID or a unique 8-character short ID.";
