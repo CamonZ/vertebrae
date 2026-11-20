@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
   type ReactNode,
+  type Ref,
 } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorktreeChange } from "../../../bindings";
@@ -96,6 +97,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
         options: Props["options"];
         renderCustomHeader(item: unknown): ReactNode;
         renderAnnotation?: (...args: unknown[]) => ReactNode;
+        containerRef?: Ref<HTMLDivElement>;
       },
       ref
     ) {
@@ -105,7 +107,8 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       }));
       seen.codeView = props as unknown as Record<string, unknown>;
       return (
-        <div data-testid="code-view">
+        // Pierre's scroller is click-focusable (tabIndex -1).
+        <div data-testid="code-view" ref={props.containerRef} tabIndex={-1}>
           {props.items.map((item) => (
             <div key={item.id}>
               {props.renderCustomHeader(item)}
@@ -604,7 +607,6 @@ describe("Changes keyboard line cursor", () => {
   });
 
   const onExit = vi.fn();
-  const onEdge = vi.fn();
 
   function ViewedChanges({ diffStyle }: { diffStyle?: "unified" | "split" }) {
     const [viewed, setViewed] = useState<ReadonlySet<string>>(new Set());
@@ -614,7 +616,6 @@ describe("Changes keyboard line cursor", () => {
         jumpTarget={null}
         onOpen={vi.fn()}
         onExit={onExit}
-        onEdge={onEdge}
         diffStyle={diffStyle}
         viewedPaths={viewed}
         onViewedChange={(path, value) =>
@@ -631,7 +632,6 @@ describe("Changes keyboard line cursor", () => {
 
   function renderChanges(diffStyle?: "unified" | "split") {
     onExit.mockClear();
-    onEdge.mockClear();
     render(
       <Harness>
         <SelectionDiscussionActionsContext.Provider value={actions}>
@@ -808,20 +808,65 @@ describe("Changes keyboard line cursor", () => {
     });
   });
 
-  it("leaves the diff with ←/→ past its outer column", () => {
+  it("keeps the cursor in the diff when ←/→ reach its outer column", () => {
     renderChanges("split");
     press("ArrowDown");
-    // Additions column: → is the edge, ← switches column.
-    press("ArrowRight");
-    expect(onEdge).toHaveBeenLastCalledWith(1);
+    const group = document.activeElement;
+    const additions = {
+      id: "f.ts",
+      range: { start: 3, end: 3, side: "additions" },
+    };
+    // Additions column: → is the edge, ← switches column, ← again is the edge.
+    expect(press("ArrowRight")).toBe(false);
+    expect(selected()).toEqual(additions);
     press("ArrowLeft");
-    expect(onEdge).toHaveBeenCalledTimes(1);
     expect(selected()).toEqual({
       id: "f.ts",
       range: { start: 3, end: 3, side: "deletions" },
     });
-    press("ArrowLeft");
-    expect(onEdge).toHaveBeenLastCalledWith(-1);
+    expect(press("ArrowLeft")).toBe(false);
+    expect(selected()).toEqual({
+      id: "f.ts",
+      range: { start: 3, end: 3, side: "deletions" },
+    });
+    expect(document.activeElement).toBe(group);
+    expect(onExit).not.toHaveBeenCalled();
+  });
+
+  it("scrolls the diff a page with PgDn/PgUp from the line cursor", () => {
+    renderChanges();
+    const scroller = screen.getByTestId("code-view");
+    // Two lines of overlap on a 100px scroller with 20px lines.
+    Object.defineProperty(scroller, "clientHeight", { value: 100 });
+    const scrollBy = vi.fn();
+    scroller.scrollBy = scrollBy;
+    press("ArrowDown");
+
+    expect(press("PageDown")).toBe(false);
+    expect(scrollBy).toHaveBeenLastCalledWith({ top: 60, behavior: "instant" });
+    expect(press("PageUp", { shiftKey: true })).toBe(false);
+    expect(scrollBy).toHaveBeenLastCalledWith({ top: -60, behavior: "instant" });
+    // ⌘PgDn stays with the app.
+    expect(press("PageDown", { metaKey: true })).toBe(true);
+    expect(scrollBy).toHaveBeenCalledTimes(2);
+  });
+
+  it("hands focus from the scroller to the line cursor", () => {
+    const group = renderChanges();
+    act(() => screen.getByTestId("code-view").focus());
+    expect(document.activeElement).toBe(group);
+  });
+
+  it("ignores ←/→ in a unified diff without leaving it", () => {
+    renderChanges("unified");
+    press("ArrowDown");
+    const group = document.activeElement;
+    const before = selected();
+    expect(press("ArrowLeft")).toBe(false);
+    expect(press("ArrowRight")).toBe(false);
+    expect(selected()).toEqual(before);
+    expect(document.activeElement).toBe(group);
+    expect(onExit).not.toHaveBeenCalled();
   });
 
   it("marks a file viewed with v, folds it and moves on", () => {

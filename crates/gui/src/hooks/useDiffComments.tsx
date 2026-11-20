@@ -116,10 +116,13 @@ export interface DiffCursorOptions {
    * and after sending a selection to the main chat.
    */
   onExit?(): void;
-  /** ← or → past the diff's outer column: move focus to the neighbouring area. */
-  onEdge?(direction: -1 | 1): void;
   /** `v`: mark a file as viewed (or unviewed, from its heading). */
   onToggleViewed?(path: string): void;
+  /**
+   * PgUp/PgDn (⇧ extends the range): the surface scrolls a page in
+   * `direction` and moves the line cursor with it.
+   */
+  page?(direction: -1 | 1, extend: boolean): void;
   /**
    * A file's collapsed gaps and revealed lines. Gaps become cursor rows only
    * where this is provided (with `onRevealGap`).
@@ -166,8 +169,8 @@ export function useDiffComments(
     layout = "unified",
     onCursorMove,
     onExit,
-    onEdge,
     onToggleViewed,
+    page,
     context,
     onRevealGap,
   } = cursor;
@@ -580,6 +583,13 @@ export function useDiffComments(
       return;
     }
 
+    if (event.key === "PageDown" || event.key === "PageUp") {
+      if (command || !page) return;
+      event.preventDefault();
+      page(event.key === "PageDown" ? 1 : -1, event.shiftKey);
+      return;
+    }
+
     if (vertical) {
       if (command) return;
       const next = moveCursor(files, view, current, direction, event.shiftKey);
@@ -614,19 +624,16 @@ export function useDiffComments(
 
     if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && plain) {
       const toward = event.key === "ArrowLeft" ? -1 : 1;
-      // Past the outer column (or in a one-column diff, or from a gap that
-      // spans both columns) focus leaves the diff.
+      // ← / → only switch split columns. At the outer column (or in a
+      // one-column diff, or on a gap spanning both) they are inert: the cursor
+      // stays in the diff and Esc is the way out.
+      event.preventDefault();
       if (
         layout === "unified" ||
         current?.kind !== "line" ||
         cursorSide(current) === (toward === -1 ? "deletions" : "additions")
-      ) {
-        if (!onEdge) return;
-        event.preventDefault();
-        onEdge(toward);
+      )
         return;
-      }
-      event.preventDefault();
       const next = switchCursorSide(
         files,
         view,

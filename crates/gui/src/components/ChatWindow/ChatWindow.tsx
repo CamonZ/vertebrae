@@ -1,5 +1,4 @@
 import { isEditableShortcutTarget } from "../../utils/keyboard";
-import { moveChatArea } from "./chatAreas";
 import { FileReferenceNavigationContext } from "../shared/FileReferenceNavigationContext";
 import type { FileTarget } from "../shared/FileReferenceNavigationContext";
 import {
@@ -639,7 +638,7 @@ export function ChatWindow({
         {showChanges && (
           <aside
             aria-label="Changes panel"
-            className="changes-side-panel"
+            className={`changes-side-panel${panelResize.easing ? " is-easing" : ""}`}
             style={{ flexBasis: panelResize.width }}
           >
             <WorktreeChanges
@@ -648,9 +647,6 @@ export function ChatWindow({
               worktreePath={worktreePath}
               onChangesLoaded={handleWorktreeLoaded}
               onExit={() => inputRef.current?.focus()}
-              onEdge={(direction) =>
-                void moveChatArea(document.activeElement, direction)
-              }
               sourceJump={
                 evidenceJump?.sessionId === sessionId &&
                 evidenceJump.worktreePath === worktreePath
@@ -667,7 +663,7 @@ export function ChatWindow({
                 ? "File reference panel"
                 : "Evidence panel"
             }
-            className="changes-side-panel"
+            className={`changes-side-panel${panelResize.easing ? " is-easing" : ""}`}
             style={{ flexBasis: panelResize.width }}
           >
             <SourceEvidence
@@ -681,7 +677,7 @@ export function ChatWindow({
         {showBackground && (
           <aside
             aria-label="Background tasks panel"
-            className="changes-side-panel"
+            className={`changes-side-panel${panelResize.easing ? " is-easing" : ""}`}
             style={{ flexBasis: panelResize.width }}
           >
             <BackgroundActivityPanel
