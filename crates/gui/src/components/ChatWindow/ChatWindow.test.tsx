@@ -21,8 +21,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import * as hegel from "@hegeldev/hegel";
+import * as gs from "@hegeldev/hegel/generators";
 import { ChatWindow } from "./ChatWindow";
 import { useChatStore } from "../../stores/chatStore";
+import { useComposerDraftStore } from "../../stores/composerDraftStore";
 import type { ChatSession } from "../../stores/chatStore";
 import {
   applyBackgroundUpdate,
@@ -1700,7 +1703,7 @@ describe("ChatWindow", () => {
       "codex"
     );
     expect(getComposerPicker("local-chat-model-picker")).toBeDisabled();
-    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+    expect(screen.getByTestId("local-chat-composer")).toBeEnabled();
 
     await user.type(screen.getByTestId("local-chat-composer"), "Start Codex");
 
@@ -1757,7 +1760,7 @@ describe("ChatWindow", () => {
     ).toHaveTextContent(
       "Local chat unavailable because neither Claude nor Codex was found."
     );
-    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+    expect(screen.getByTestId("local-chat-composer")).toBeEnabled();
     expect(screen.getByTitle("Start session")).toBeDisabled();
     expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
   });
@@ -2073,8 +2076,8 @@ describe("ChatWindow", () => {
     expect(picker).toHaveTextContent("Unsupported: claude-opus-4-8");
     await user.type(screen.getByTestId("local-chat-composer"), "Start");
     expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
-    chooseDropdownValue(picker, "opus");
-    await user.type(screen.getByTestId("local-chat-composer"), "Start");
+    expect(screen.getByTitle("Start session")).toBeDisabled();
+    chooseDropdownValue(getComposerPicker("local-chat-model-picker"), "opus");
     await user.click(screen.getByTitle("Start session"));
     await waitFor(() =>
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
@@ -2474,9 +2477,10 @@ describe("ChatWindow", () => {
     expect(useChatStore.getState().sessions["test-session"].lifecycle).toBe(
       "closing"
     );
-    expect(composer).toBeDisabled();
+    expect(composer).toBeEnabled();
     await user.type(composer, "must not send{Enter}");
-    expect(composer).toHaveValue("");
+    // Typing is kept as a draft; Enter does not send while closing.
+    expect(composer).toHaveValue("must not send");
     expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
 
     await act(async () => resolveClose({ status: "ok", data: null }));
@@ -2921,14 +2925,13 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTestId("local-chat-composer")).toBeDisabled();
+    expect(screen.getByTitle("Send message")).toBeDisabled();
     fireEvent.keyDown(window, { key: ".", metaKey: true });
 
     await waitFor(() => {
       expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledWith(
         "claude-question"
       );
-      expect(screen.getByTestId("local-chat-composer")).toBeEnabled();
       expect(
         useChatStore.getState().sessions["test-session"].messages[0]
       ).toMatchObject({ kind: "user_question", status: "unavailable" });
@@ -2989,19 +2992,42 @@ describe("ChatWindow", () => {
     ).toBeInTheDocument();
   });
 
-  it("focuses the composer on mount, before any session is started", () => {
+  it("focuses the composer for a pending focus request, once", () => {
+    const session = createSession({ backendSessionId: null });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+      composerFocusRevision: 1,
+      composerFocusHandledRevision: 0,
+    });
+
+    const { unmount } = render(
+      <ChatWindow sessionId="test-session" composerFocusRevision={1} />
+    );
+
+    expect(
+      screen.getByPlaceholderText("Type a message to start...")
+    ).toHaveFocus();
+    expect(useChatStore.getState().composerFocusHandledRevision).toBe(1);
+    unmount();
+  });
+
+  it("does not take focus on mount without a focus request", () => {
     const session = createSession({ backendSessionId: null });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
       panelOpen: true,
     });
+    const other = document.createElement("textarea");
+    document.body.append(other);
+    other.focus();
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(
-      screen.getByPlaceholderText("Type a message to start...")
-    ).toHaveFocus();
+    expect(other).toHaveFocus();
+    other.remove();
   });
 
   it("shows placeholder text for active session", () => {
@@ -3579,7 +3605,7 @@ describe("ChatWindow", () => {
     expect(
       screen.queryByTestId("chat-lifecycle-label")
     ).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Starting...")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Starting...")).toBeEnabled();
     expect(screen.getByTitle("Start session")).toBeDisabled();
   });
 
@@ -3686,7 +3712,7 @@ describe("ChatWindow", () => {
       screen.getByPlaceholderText(
         "Answer Claude's question above to continue..."
       )
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
       screen.getByRole("button", { name: "Submit answers" })
     ).toBeDisabled();
@@ -3781,7 +3807,7 @@ describe("ChatWindow", () => {
     expect(
       screen.queryByTestId("chat-lifecycle-label")
     ).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Resuming...")).toBeDisabled();
+    expect(screen.getByPlaceholderText("Resuming...")).toBeEnabled();
     expect(screen.getByTitle("Resume session")).toBeDisabled();
   });
 
@@ -4087,5 +4113,230 @@ describe("ChatWindow", () => {
         "250,000 / 200,000 current request input context tokens"
       )
     ).toBeInTheDocument();
+  });
+});
+
+describe("ChatWindow composer focus", () => {
+  const SESSION = "test-session";
+  const OTHER = "other-session";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useLocalChatDefaultsStore.setState({ defaults: {}, defaultProvider: null });
+    useChatStore.setState({
+      sessions: {
+        [SESSION]: createSession({ backendSessionId: null }),
+        [OTHER]: createSession({ id: OTHER, label: "Other" }),
+      },
+      activeSessionId: SESSION,
+      paneLayout: { panes: [], activePaneId: null },
+      panelOpen: true,
+      composerFocusRevision: 0,
+      composerFocusHandledRevision: 0,
+    });
+  });
+
+  const composer = () =>
+    screen.getByTestId("local-chat-composer") as HTMLTextAreaElement;
+
+  /** A keystroke reaches whatever holds focus, if it accepts text. */
+  function press(char: string) {
+    const target = document.activeElement;
+    if (
+      !(target instanceof HTMLTextAreaElement) ||
+      target.disabled ||
+      target.readOnly
+    )
+      return;
+    fireEvent.change(target, { target: { value: target.value + char } });
+  }
+
+  const store = () => useChatStore.getState();
+  const events = {
+    start: () => store().setSessionLifecycle(SESSION, "starting"),
+    bind: () => {
+      store().setBackendSessionId(SESSION, "backend-1");
+      store().setSessionLifecycle(SESSION, "sending");
+    },
+    stream: (text: string) => {
+      store().setSessionLifecycle(SESSION, "streaming");
+      store().updateLastAssistantMessage(SESSION, text);
+    },
+    finish: () => {
+      store().finalizeLastAssistantMessage(SESSION, "done");
+      store().settleActiveTurn(SESSION);
+      store().setSessionLifecycle(SESSION, "idle");
+    },
+    lifecycle: (
+      lifecycle: "resuming" | "compacting" | "closing" | "idle" | "error"
+    ) => store().setSessionLifecycle(SESSION, lifecycle),
+    otherSession: (text: string) => {
+      store().setSessionLifecycle(OTHER, "streaming");
+      store().updateLastAssistantMessage(OTHER, text);
+    },
+    summaries: () =>
+      useChatStore.setState((state) => ({
+        localSessionSummaries: { ...state.localSessionSummaries },
+        activityRevisions: { ...state.activityRevisions, [OTHER]: Date.now() },
+      })),
+  };
+
+  it("keeps every keystroke in the composer while a turn starts, streams and finishes", () => {
+    render(<ChatWindow sessionId={SESSION} />);
+    composer().focus();
+
+    press("a");
+    act(events.start);
+    press("b");
+    act(events.bind);
+    press("c");
+    act(() => events.stream("Hel"));
+    press("d");
+    act(() => events.stream("Hello"));
+    act(events.finish);
+    press("e");
+
+    expect(composer()).toHaveFocus();
+    expect(composer()).toHaveValue("abcde");
+  });
+
+  it("keeps focus while other sessions stream and summaries refresh", () => {
+    render(<ChatWindow sessionId={SESSION} />);
+    composer().focus();
+
+    press("x");
+    act(() => events.otherSession("elsewhere"));
+    act(events.summaries);
+    press("y");
+
+    expect(composer()).toHaveFocus();
+    expect(composer()).toHaveValue("xy");
+  });
+
+  it("does not let a focus request for another pane move focus here", () => {
+    render(<ChatWindow sessionId={SESSION} />);
+    const elsewhere = document.createElement("textarea");
+    document.body.append(elsewhere);
+    elsewhere.focus();
+
+    act(() => store().requestComposerFocus());
+
+    expect(elsewhere).toHaveFocus();
+    elsewhere.remove();
+  });
+
+  it("refocuses the replacement composer when the pane remounts its chat", async () => {
+    const { rerender } = render(
+      <div data-pane-id="pane-1">
+        <ChatWindow key="a" sessionId={SESSION} />
+      </div>
+    );
+    composer().focus();
+    press("q");
+
+    rerender(
+      <div data-pane-id="pane-1">
+        <ChatWindow key="b" sessionId={SESSION} />
+      </div>
+    );
+
+    await waitFor(() => expect(composer()).toHaveFocus());
+  });
+
+  it("keeps the unsent draft when the pane remounts its chat (split, maximize)", () => {
+    const { rerender } = render(<ChatWindow key="a" sessionId={SESSION} />);
+    composer().focus();
+    press("d");
+    press("r");
+
+    rerender(<ChatWindow key="b" sessionId={SESSION} />);
+
+    expect(composer()).toHaveValue("dr");
+  });
+
+  describe("property", () => {
+    type Model = { typed: string; phase: "idle" | "started" | "bound" };
+    const CHARS = ["a", "b", " ", "1", "?"];
+
+    const machine: hegel.stateful.StateMachine<Model> = {
+      rules: {
+        key: (tc, model) => {
+          const char = tc.draw(gs.sampledFrom(CHARS));
+          press(char);
+          model.typed += char;
+        },
+        start: (tc, model) => {
+          tc.assume(model.phase === "idle");
+          act(events.start);
+          model.phase = "started";
+        },
+        bind: (tc, model) => {
+          tc.assume(model.phase === "started");
+          act(events.bind);
+          model.phase = "bound";
+        },
+        stream: (tc, model) => {
+          tc.assume(model.phase === "bound");
+          const text = tc.draw(gs.sampledFrom(["H", "He", "Hello"]));
+          act(() => events.stream(text));
+        },
+        finish: (tc, model) => {
+          tc.assume(model.phase === "bound");
+          act(events.finish);
+          model.phase = "idle";
+        },
+        lifecycle: (tc) => {
+          const lifecycle = tc.draw(
+            gs.sampledFrom([
+              "resuming",
+              "compacting",
+              "closing",
+              "idle",
+              "error",
+            ] as const)
+          );
+          act(() => events.lifecycle(lifecycle));
+        },
+        otherSession: (tc) => {
+          const text = tc.draw(gs.sampledFrom(["x", "xy"]));
+          act(() => events.otherSession(text));
+        },
+        summaries: () => act(events.summaries),
+      },
+      invariants: {
+        focusAndText: {
+          alwaysCheck: true,
+          check: (_tc, model) => {
+            expect(document.activeElement).toBe(composer());
+            expect(composer().value).toBe(model.typed);
+          },
+        },
+      },
+    };
+
+    it("keeps focus and exactly the typed text across any interleaving of app events", () => {
+      hegel.test(
+        (tc) => {
+          useComposerDraftStore.setState({ bySession: {} });
+          useChatStore.setState({
+            sessions: {
+              [SESSION]: createSession({ backendSessionId: null }),
+              [OTHER]: createSession({ id: OTHER, label: "Other" }),
+            },
+          });
+          const view = render(<ChatWindow sessionId={SESSION} />);
+          try {
+            composer().focus();
+            hegel.stateful.run(tc, machine, { typed: "", phase: "idle" }, {
+              stepCount: 30,
+            });
+          } finally {
+            view.unmount();
+          }
+        },
+        { testCases: 25 }
+      );
+    }, 120_000);
   });
 });

@@ -2635,6 +2635,52 @@ describe("ChatWindowManager", () => {
     ]);
   });
 
+  it("gives a composer focus request to the active pane only, and only once", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1800,
+    });
+    useChatStore.getState().openSession("Task One");
+    const second = useChatStore
+      .getState()
+      .startFreshSessionInNewPane("Task Two");
+
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+
+    const composers = () =>
+      screen.getAllByTestId("local-chat-composer") as HTMLTextAreaElement[];
+    const active = () =>
+      composers().find((composer) =>
+        composer.closest('[data-pane-active="true"]')
+      );
+    expect(useChatStore.getState().activeSessionId).toBe(second);
+    expect(active()).toHaveFocus();
+
+    // Typing elsewhere: store updates and remaining revisions never pull focus.
+    const first = composers().find((composer) => composer !== active())!;
+    first.focus();
+    act(() => {
+      useChatStore.getState().setSessionLifecycle(second, "streaming");
+      useChatStore.getState().updateLastAssistantMessage(second, "chunk");
+    });
+    expect(first).toHaveFocus();
+  });
+
+  it("cancels a pending composer focus request when the user picks a pane", () => {
+    useChatStore.getState().openSession("Task One");
+    useChatStore.getState().setPanelOpen(false);
+    act(() => useChatStore.getState().requestComposerFocus());
+    const { composerFocusRevision } = useChatStore.getState();
+    const paneId = useChatStore.getState().paneLayout.panes[0].id;
+
+    useChatStore.getState().focusPane(paneId);
+
+    expect(useChatStore.getState().composerFocusHandledRevision).toBe(
+      composerFocusRevision
+    );
+  });
+
   it("uses keyboard shortcuts to focus, close, and merge split panes", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

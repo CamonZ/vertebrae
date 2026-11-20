@@ -66,7 +66,7 @@ export function moveChatArea(from: Element | null, offset: -1 | 1): boolean {
   const store = useChatStore.getState();
   if (store.paneLayout.activePaneId !== next.paneId) {
     store.focusPane(next.paneId);
-    // Activating a pane focuses its composer; take focus after that settles.
+    // A maximized layout shows the pane once it is active; focus after that.
     requestAnimationFrame(() => next.element.focus({ preventScroll: true }));
   } else {
     next.element.focus({ preventScroll: true });

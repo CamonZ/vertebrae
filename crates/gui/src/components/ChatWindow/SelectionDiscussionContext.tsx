@@ -58,6 +58,8 @@ import {
   type DiscussionActions,
   type DiscussionValue,
 } from "./selectionDiscussionState";
+import { focusKeepProps } from "../../utils/focusKeep";
+import { useKeepFocus } from "../../hooks/useKeepFocus";
 
 export function SelectionDiscussionProvider({
   children,
@@ -298,6 +300,8 @@ export function SelectionDiscussionProvider({
         !supportsInlineDiscussion(anchor)) return false;
     capturing.current = true;
     setAnchorError(null);
+    // Where the user asked from (the draft composer or its button).
+    const origin = document.activeElement;
     const id = crypto.randomUUID();
     const generation = getProjectScopeGeneration();
     try {
@@ -311,6 +315,11 @@ export function SelectionDiscussionProvider({
       }));
       if (!mounted.current || generation !== getProjectScopeGeneration()) return false;
       controller.ask(anchor, id, capture);
+      // The draft the user typed in gives way to the discussion's composer,
+      // unless they moved focus elsewhere while the anchor was captured.
+      const active = document.activeElement;
+      if (active === origin || !active || active === document.body)
+        setFocusRequest(id);
     } catch (error) {
       if (generation === getProjectScopeGeneration()) reportCatalogError(error);
       return false;
@@ -487,6 +496,7 @@ function MiniThread({
 }) {
   const [question, setQuestion] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  useKeepFocus(composerRef);
   const thinkingStyle = useUIStore((state) => state.thinkingIndicatorStyle);
   const choice = useContext(SelectionDiscussionModelContext);
   const session = useChatStore((state) =>
@@ -693,6 +703,7 @@ function MiniThread({
       >
         <textarea
           ref={composerRef}
+          {...focusKeepProps}
           aria-label="Ask about selected code"
           value={question}
           onChange={(event) => setQuestion(event.target.value)}

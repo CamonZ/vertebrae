@@ -108,8 +108,9 @@ interface ChatWindowProps {
   onUnsplitPanes?: () => void;
   /** Closes this pane without closing the underlying chat session. */
   onClosePane?: () => void;
-  /** Whether this pane should receive composer autofocus. */
-  autoFocusComposer?: boolean;
+  /** Whether this pane is visible in front (not behind a maximized pane). */
+  isForegroundPane?: boolean;
+  /** A pending composer focus request this pane should take. */
   composerFocusRevision?: number | null;
   /** Label resolved from this session's captured project association. */
   projectLabel?: string;
@@ -133,8 +134,8 @@ export function ChatWindow({
   canSplitPane = true,
   onUnsplitPanes,
   onClosePane,
-  autoFocusComposer = true,
-  composerFocusRevision = 0,
+  isForegroundPane = true,
+  composerFocusRevision = null,
   projectLabel,
   showProjectContext = false,
   renderObserver,
@@ -461,11 +462,16 @@ export function ChatWindow({
     gateStatus?.draftUpdatedAt
   );
 
-  // Reopening or reusing a chat can leave this composer mounted.
+  // A user action that opened or showed this chat asked for its composer.
+  // Nothing else moves focus here: store updates and remounts leave it be.
+  const markComposerFocusHandled = useChatStore(
+    (state) => state.markComposerFocusHandled
+  );
   useEffect(() => {
-    if (!autoFocusComposer || composerFocusRevision === null) return;
+    if (composerFocusRevision === null) return;
     inputRef.current?.focus();
-  }, [autoFocusComposer, composerFocusRevision]);
+    markComposerFocusHandled(composerFocusRevision);
+  }, [composerFocusRevision, markComposerFocusHandled]);
 
   const worktreePath = association.record?.worktreePath;
   const showChanges = !!worktreePath && changesSession === sessionId;
@@ -504,7 +510,7 @@ export function ChatWindow({
   }, [showBackground, sessionId]);
 
   useEffect(() => {
-    if (!registerChangesToggle || !worktreePath || !autoFocusComposer) return;
+    if (!registerChangesToggle || !worktreePath || !isForegroundPane) return;
 
     let current = true;
     let pending = false;
@@ -540,7 +546,7 @@ export function ChatWindow({
       current = false;
       registerChangesToggle(null);
     };
-  }, [registerChangesToggle, worktreePath, autoFocusComposer, toggleChanges]);
+  }, [registerChangesToggle, worktreePath, isForegroundPane, toggleChanges]);
 
   const conversationRef = useRef<HTMLDivElement>(null);
   const find = usePaneFind(conversationRef);

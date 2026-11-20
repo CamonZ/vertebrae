@@ -773,6 +773,52 @@ it("can attach selected code from the dialog before writing a question", () => {
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
+async function openDraft() {
+  fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));
+  const draft = screen.getByRole("textbox", { name: "New diff comment" });
+  fireEvent.change(draft, { target: { value: "Why?" } });
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Discuss inline" })).toBeEnabled()
+  );
+  return draft;
+}
+
+it("moves focus from the draft to the new discussion's composer once it starts", async () => {
+  render(codeFixture());
+  const draft = await openDraft();
+  draft.focus();
+
+  fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
+
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Ask about selected code" })
+    ).toHaveFocus()
+  );
+});
+
+it("leaves focus where the user moved it while the discussion was starting", async () => {
+  let capture!: (value: Awaited<ReturnType<typeof commands.captureReviewAnchor>>) => void;
+  vi.mocked(commands.captureReviewAnchor).mockImplementationOnce(
+    () => new Promise((resolve) => (capture = resolve))
+  );
+  render(codeFixture());
+  const draft = await openDraft();
+  draft.focus();
+  fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }));
+  const elsewhere = document.createElement("input");
+  document.body.append(elsewhere);
+  elsewhere.focus();
+
+  await act(async () =>
+    capture({ status: "ok", data: { originalBlobId: "blob", originalCommitId: "commit" } })
+  );
+  await screen.findByRole("textbox", { name: "Ask about selected code" });
+
+  expect(elsewhere).toHaveFocus();
+  elsewhere.remove();
+});
+
 it("keeps diff callbacks stable during streaming and announces only completed turns", async () => {
   render(codeFixture());
   fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));

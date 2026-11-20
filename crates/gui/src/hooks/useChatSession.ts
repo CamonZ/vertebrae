@@ -35,6 +35,7 @@ import {
   lifecycleLabel,
   isSessionHarnessLocked,
 } from "../components/ChatWindow/chatHelpers";
+import { useComposerDraftStore } from "../stores/composerDraftStore";
 
 // ---------------------------------------------------------------------------
 // useChatSession
@@ -45,7 +46,15 @@ export function useChatSession(sessionId: string) {
     (state) => state.revision
   );
   const hasLoadedCatalog = useRef(false);
-  const [inputValue, setInputValue] = useState("");
+  // The draft outlives a remount of this chat's window (split, maximize).
+  const inputValue = useComposerDraftStore(
+    (state) => state.bySession[sessionId] ?? ""
+  );
+  const setDraft = useComposerDraftStore((state) => state.setDraft);
+  const setInputValue = useCallback(
+    (text: string) => setDraft(sessionId, text),
+    [sessionId, setDraft]
+  );
   const [harnessCatalog, setHarnessCatalog] =
     useState<LocalChatHarnessCatalog | null>(null);
 
