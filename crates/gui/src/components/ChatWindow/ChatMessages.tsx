@@ -41,7 +41,8 @@ import {
   type TextSelectionAnchor,
 } from "./assistantTextComments";
 import { useCommentHighlights } from "./commentHighlight";
-import { CommentShortcutHint } from "./CommentShortcutHint";
+import { TranscriptCommentCard } from "./TranscriptCommentCard";
+import { VIEWPORT_GUTTER_PX } from "./commentCardPlacement";
 import { useScrollFollow } from "./useScrollFollow";
 import { hasInlineScrollFollow } from "./useInlineScrollFollow";
 import { useTranscriptCursor } from "./useTranscriptCursor";
@@ -51,11 +52,8 @@ import "./transcriptCursor.css";
 
 const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 const HISTORY_LOAD_THRESHOLD_PX = 240;
-const COMMENT_EDITOR_MAX_WIDTH_PX = 384;
-const COMMENT_EDITOR_HEIGHT_PX = 230;
 const COMMENT_TRIGGER_WIDTH_PX = 144;
 const COMMENT_TRIGGER_HEIGHT_PX = 28;
-const VIEWPORT_GUTTER_PX = 8;
 
 interface SelectionAction {
   anchor: TextSelectionAnchor;
@@ -116,19 +114,12 @@ function triggerPosition(action: SelectionAction) {
   };
 }
 
-function editorPosition(action: SelectionAction) {
+/** Where the selection is now, for placing the comment card. */
+function editorAnchor(action: SelectionAction) {
   const edge = selectionEdge(action) ?? new DOMRect();
   return {
-    top: clamp(
-      edge.bottom + 6,
-      VIEWPORT_GUTTER_PX,
-      window.innerHeight - COMMENT_EDITOR_HEIGHT_PX
-    ),
-    left: clamp(
-      edge.left,
-      VIEWPORT_GUTTER_PX,
-      window.innerWidth - COMMENT_EDITOR_MAX_WIDTH_PX - VIEWPORT_GUTTER_PX
-    ),
+    edge,
+    selection: action.range.getBoundingClientRect?.() ?? edge,
   };
 }
 
@@ -1162,71 +1153,14 @@ export function ChatMessages({
             : null}
           {selectionAction && commentEditorOpen
             ? createPortal(
-                <div
-                  className="chat-comment-card chat-comment-card-fixed"
-                  data-focus-halo="surface"
-                  data-owns-escape=""
-                  role="group"
-                  aria-label="Add a comment to selected text"
-                  style={editorPosition(selectionAction)}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Escape") return;
-                    event.preventDefault();
-                    cancelCommentEditor();
-                  }}
-                >
-                  <div className="chat-comment-card-header">
-                    <span className="chat-comment-card-title">
-                      Comment on selection
-                    </span>
-                  </div>
-                  <blockquote className="chat-comment-quote">
-                    <mark>{selectionAction.anchor.quote.trim()}</mark>
-                  </blockquote>
-                  <label htmlFor="local-chat-comment-draft" className="sr-only">
-                    Comment on selected text
-                  </label>
-                  <textarea
-                    id="local-chat-comment-draft"
-                    data-testid="local-chat-comment-draft"
-                    aria-label="Comment on selected text"
-                    className="chat-comment-textarea"
-                    placeholder="Add your comment…"
-                    value={commentDraft}
-                    onChange={(event) => setCommentDraft(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (
-                        event.key !== "Enter" ||
-                        !(event.metaKey || event.ctrlKey)
-                      )
-                        return;
-                      event.preventDefault();
-                      submitCommentDraft();
-                    }}
-                    autoFocus
-                    rows={3}
-                  />
-                  <div className="chat-comment-card-footer">
-                    <CommentShortcutHint action="add" />
-                    <button
-                      type="button"
-                      className="chat-comment-button"
-                      onClick={cancelCommentEditor}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="local-chat-save-comment"
-                      className="chat-comment-button"
-                      data-primary=""
-                      disabled={!commentDraft.trim()}
-                      onClick={submitCommentDraft}
-                    >
-                      Add to reply
-                    </button>
-                  </div>
-                </div>,
+                <TranscriptCommentCard
+                  {...editorAnchor(selectionAction)}
+                  quote={selectionAction.anchor.quote.trim()}
+                  draft={commentDraft}
+                  onDraftChange={setCommentDraft}
+                  onSubmit={submitCommentDraft}
+                  onCancel={cancelCommentEditor}
+                />,
                 document.body
               )
             : null}
