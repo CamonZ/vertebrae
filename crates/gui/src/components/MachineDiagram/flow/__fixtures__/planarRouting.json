@@ -1054,5 +1054,64 @@
       ],
       "arrangements": ["current", "A", "B"]
     }
+  },
+  {
+    "name": "self-loop with grouped parts and shared boundary",
+    "spec": {
+      "version": 1,
+      "parts": [
+        {
+          "id": "p0",
+          "kind": "wait children"
+        },
+        {
+          "id": "p1",
+          "kind": "run end"
+        },
+        {
+          "id": "p2",
+          "kind": "boundary"
+        },
+        {
+          "id": "p3",
+          "kind": "circuit breaker"
+        }
+      ],
+      "rails": [
+        {
+          "id": "r0",
+          "from": "p0.out",
+          "to": "p2.in",
+          "change": "added"
+        },
+        {
+          "id": "r1",
+          "from": "p1.out",
+          "to": "p0.in"
+        },
+        {
+          "id": "r2",
+          "from": "p3.out",
+          "to": "p1.in"
+        },
+        {
+          "id": "r3",
+          "from": "p0.out",
+          "to": "p0.in"
+        },
+        {
+          "id": "r6",
+          "from": "p1.out",
+          "to": "p2.in",
+          "change": "added"
+        }
+      ],
+      "regions": [
+        {
+          "id": "g0",
+          "parts": ["p0", "p3"]
+        }
+      ]
+    }
   }
 ]
