@@ -226,9 +226,9 @@ function ActivityGroup({
   );
   const id = useId();
   const [retryToken, setRetryToken] = useState(0);
-  const parsed = useActivities(calls, retryToken);
   const sessionId = useContext(ChatSessionContext);
-  const rows = useDecisionActivities(parsed, sessionId, open);
+  const syntax = useActivities(calls, retryToken);
+  const rows = useDecisionActivities(syntax, sessionId, open);
   const summary = activitySummary(rows);
   const pending = calls.filter((call) => call.status === "pending").length;
   const errors = calls.filter(

@@ -6,19 +6,17 @@ import type { ActivityAnalysis } from "./types";
 
 /** Only actual syntax-separated, unresolved invocations enter inference. */
 export function decisionSources(rows: ActivityAnalysis[]): string[] {
-  return [
-    ...new Set(
-      rows.flatMap((row) =>
-        row.operations
-          .filter(
-            (op) =>
-              op.decisionEligible &&
-              new TextEncoder().encode(op.source).length <= 4096
-          )
-          .map((op) => op.source)
-      )
-    ),
-  ].slice(0, 16);
+  const sources = new Set<string>();
+  const encoder = new TextEncoder();
+  for (const row of rows) {
+    for (const op of row.operations) {
+      if (op.decisionEligible && encoder.encode(op.source).length <= 4096) {
+        sources.add(op.source);
+        if (sources.size === 16) return [...sources];
+      }
+    }
+  }
+  return [...sources];
 }
 
 export function applyDecisions(

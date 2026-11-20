@@ -1,0 +1,43 @@
+{"name":"git","args":["-C","/repo","-c","color.ui=false","--no-pager","diff"],"expected":"Git inspection"}
+{"name":"git","args":["--git-dir=/repo/.git","log","--oneline"],"expected":"Git inspection"}
+{"name":"git","args":["-C/repo","rev-parse","HEAD"],"expected":"Git inspection"}
+{"name":"git","args":["show","HEAD:src/main.rs"],"expected":"Git inspection"}
+{"name":"git","args":["branch","-a"],"expected":"Git inspection"}
+{"name":"git","args":["branch","--contains","main"],"expected":"Git inspection"}
+{"name":"git","args":["branch","new-branch"],"expected":"Git changes"}
+{"name":"git","args":["branch","-D","old"],"expected":"Git changes"}
+{"name":"git","args":["branch","--set-upstream-to=origin/main"],"expected":"Git changes"}
+{"name":"git","args":["branch","-uorigin/main"],"expected":"Git changes"}
+{"name":"git","args":["branch","--edit-description"],"expected":"Git changes"}
+{"name":"git","args":["tag","-a","v1"],"expected":"Git changes"}
+{"name":"git","args":["worktree","list"],"expected":"Git inspection"}
+{"name":"git","args":["worktree","add","/tmp/w","main"],"expected":"environment management"}
+{"name":"git","args":["fetch","origin"],"expected":"Git synchronization"}
+{"name":"git","args":["push","--force-with-lease"],"expected":"Git synchronization"}
+{"name":"git","args":["commit","-m","show status"],"expected":"Git changes"}
+{"name":"git","args":["rebase","--continue"],"expected":"Git changes"}
+{"name":"git","args":["remote","-v"],"expected":"Git inspection"}
+{"name":"git","args":["remote","set-url","origin","url"],"expected":"Git changes"}
+{"name":"git","args":["config","--get","remote.origin.url"],"expected":"Git inspection"}
+{"name":"git","args":["status","--help"],"expected":"documentation"}
+{"name":"git","args":["-C",null,"status"],"expected":null}
+{"name":"git","args":["some-alias","status"],"expected":null}
+{"name":"git","args":["--unknown","status"],"expected":null}
+{"name":"gh","args":["pr","view","531","--json","url,headRefOid"],"expected":"GitHub inspection"}
+{"name":"gh","args":["-R","owner/repo","pr","checks","531"],"expected":"GitHub inspection"}
+{"name":"gh","args":["pr","--repo=owner/repo","diff"],"expected":"GitHub inspection"}
+{"name":"gh","args":["pr","create","--title","view"],"expected":"GitHub changes"}
+{"name":"gh","args":["pr","merge","531"],"expected":"GitHub changes"}
+{"name":"gh","args":["pr","checkout","531"],"expected":"Git changes"}
+{"name":"gh","args":["run","view","123","--log-failed"],"expected":"GitHub inspection"}
+{"name":"gh","args":["run","rerun","123"],"expected":"GitHub changes"}
+{"name":"gh","args":["api","repos/o/r/pulls"],"expected":"GitHub inspection"}
+{"name":"gh","args":["api","repos/o/r/pulls","-f","title=foo"],"expected":"GitHub changes"}
+{"name":"gh","args":["api","-X","GET","repos/o/r/pulls","-f","state=all"],"expected":"GitHub inspection"}
+{"name":"gh","args":["api","--method=DELETE","repos/o/r/issues/1"],"expected":"GitHub changes"}
+{"name":"gh","args":["api","graphql","-f","query=query { viewer { login } }"],"expected":"GitHub inspection"}
+{"name":"gh","args":["api","graphql","-f","query=mutation { deleteThing }"],"expected":"GitHub changes"}
+{"name":"gh","args":["api","graphql","--input","query.json"],"expected":null}
+{"name":"gh","args":["api","repos/o/r/pulls","-f","-XGET"],"expected":"GitHub changes"}
+{"name":"gh","args":["api","repos/o/r/pulls","--method"],"expected":null}
+{"name":"gh","args":["custom-alias","view"],"expected":null}

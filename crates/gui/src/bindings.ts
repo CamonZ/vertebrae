@@ -991,8 +991,18 @@ async getMainChatWorktree(projectRoot: string) : Promise<AssociationWorktree | n
     return await TAURI_INVOKE("get_main_chat_worktree", { projectRoot });
 },
 /**
- * Uses the configured decision role only. Disabled/unavailable models leave
- * commands unclassified. No transcript, result, or worktree delta is supplied.
+ * Publish syntax independently of optional decision inference.
+ */
+async analyzeToolActivities(calls: ActivityInput[]) : Promise<Result<(ActivityAnalysis | null)[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("analyze_tool_activities", { calls }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Classify syntax-separated invocations using the configured decision role.
  */
 async classifyToolOperations(commands: string[], projectPath: string | null, sessionId: string | null) : Promise<Result<string[][], CommandError>> {
     try {
@@ -1628,6 +1638,8 @@ worktreeChangedEvent: "worktree-changed-event"
 
 /** user-defined types **/
 
+export type ActivityAnalysis = { operations: Operation[] }
+export type ActivityInput = { name: string; input: Partial<{ [key in string]: JsonValue }> }
 /**
  * Agent configuration for workflow steps - mirrors db::AgentConfig
  */
@@ -2065,6 +2077,7 @@ project_created: boolean }
  */
 export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+export type LiteralCommand = { name: string; args: string[] }
 /**
  * Config of an `llm_inference` step.
  */
@@ -2310,6 +2323,7 @@ export type NotificationPage = { notifications: Notification[]; has_more: boolea
  */
 export type NotificationSeverity = "info" | "success" | "warning" | "error"
 export type ObservabilitySettings = { enabled: boolean; endpoint: string; protocol: string; signals: string[]; subsystems: string[]; level: string; capture_message_content: boolean }
+export type Operation = { source: string; activities: string[]; relationships: string[]; targets?: string[] | null; literalCommand?: LiteralCommand | null; unresolved?: string | null; decisionEligible?: boolean | null; inferredActivities?: string[] | null }
 export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode
