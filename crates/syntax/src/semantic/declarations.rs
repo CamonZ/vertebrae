@@ -2,7 +2,7 @@
 //! changed declaration, saying what happened to it as a whole and what
 //! changed inside it.
 
-use super::{Edit, LineSpan, Occurrence, ScopeSegment, SemanticChange};
+use super::{Edit, Facts, LineSpan, Occurrence, ScopeSegment, SemanticChange};
 use serde::Serialize;
 
 /// One changed declaration (or the code outside every declaration).
@@ -17,6 +17,9 @@ pub struct DeclarationDiff {
     /// removed, moved or renamed.
     pub subject: Option<ScopeSegment>,
     pub change: DeclarationChange,
+    /// Facts of `change` when it is one to all of the declaration (an
+    /// added declaration's are those of everything in it); else empty.
+    pub facts: Facts,
     /// What changed inside it, in line order.
     pub parts: Vec<Part>,
 }
@@ -28,15 +31,17 @@ pub struct DeclarationDiff {
 pub enum DeclarationChange {
     Added {
         new: LineSpan,
+        /// The declaration's own first line, past the comments and
+        /// attributes before it: where a label for it belongs.
+        head: u32,
     },
     Removed {
         old: LineSpan,
+        /// As for `Added`, on the old side.
+        head: u32,
     },
     /// It now sits elsewhere (and may be edited inside).
-    Moved {
-        old: LineSpan,
-        new: LineSpan,
-    },
+    Moved { old: LineSpan, new: LineSpan },
     /// Its name changed; the spans locate the name and `sites` every
     /// changed use, the name included.
     Renamed {
@@ -57,23 +62,28 @@ pub enum DeclarationChange {
 pub enum Part {
     Added {
         new: LineSpan,
+        facts: Facts,
     },
     Removed {
         old: LineSpan,
+        facts: Facts,
     },
     /// Code that stayed in place and changed.
     Changed {
         old: LineSpan,
         new: LineSpan,
+        facts: Facts,
     },
     /// A change to a callable's header (parameters, return type, ...).
     Signature {
         old: Option<LineSpan>,
         new: Option<LineSpan>,
+        facts: Facts,
     },
     Moved {
         old: LineSpan,
         new: LineSpan,
+        facts: Facts,
     },
     /// A local name changed consistently; `sites` are every changed use.
     Renamed {
@@ -82,6 +92,7 @@ pub enum Part {
         from: String,
         to: String,
         sites: Vec<Occurrence>,
+        facts: Facts,
     },
 }
 
@@ -89,12 +100,24 @@ impl Part {
     /// The part's lines on the old and new side, where it has them.
     pub fn spans(&self) -> (Option<LineSpan>, Option<LineSpan>) {
         match self {
-            Self::Added { new } => (None, Some(*new)),
-            Self::Removed { old } => (Some(*old), None),
-            Self::Signature { old, new } => (*old, *new),
-            Self::Changed { old, new }
-            | Self::Moved { old, new }
+            Self::Added { new, .. } => (None, Some(*new)),
+            Self::Removed { old, .. } => (Some(*old), None),
+            Self::Signature { old, new, .. } => (*old, *new),
+            Self::Changed { old, new, .. }
+            | Self::Moved { old, new, .. }
             | Self::Renamed { old, new, .. } => (Some(*old), Some(*new)),
+        }
+    }
+
+    /// What kind of code the part touches.
+    pub fn facts(&self) -> &Facts {
+        match self {
+            Self::Added { facts, .. }
+            | Self::Removed { facts, .. }
+            | Self::Changed { facts, .. }
+            | Self::Signature { facts, .. }
+            | Self::Moved { facts, .. }
+            | Self::Renamed { facts, .. } => facts,
         }
     }
 }
@@ -103,8 +126,8 @@ impl DeclarationChange {
     /// The declaration's own lines on each side, for a change to all of it.
     pub fn spans(&self) -> (Option<LineSpan>, Option<LineSpan>) {
         match self {
-            Self::Added { new } => (None, Some(*new)),
-            Self::Removed { old } => (Some(*old), None),
+            Self::Added { new, .. } => (None, Some(*new)),
+            Self::Removed { old, .. } => (Some(*old), None),
             Self::Moved { old, new } | Self::Renamed { old, new, .. } => (Some(*old), Some(*new)),
             Self::Modified => (None, None),
         }
@@ -132,16 +155,17 @@ fn same_place(
         && entry.scope.iter().zip(scope).all(|(x, y)| same(x, y))
 }
 
-fn part(edit: Edit, signature: bool) -> Part {
-    if signature {
-        let (old, new) = edit.spans();
-        return Part::Signature { old, new };
+fn part(change: SemanticChange) -> Part {
+    let facts = change.facts;
+    if change.signature {
+        let (old, new) = change.edit.spans();
+        return Part::Signature { old, new, facts };
     }
-    match edit {
-        Edit::Insert { new } => Part::Added { new },
-        Edit::Delete { old } => Part::Removed { old },
-        Edit::Update { old, new } => Part::Changed { old, new },
-        Edit::Move { old, new } => Part::Moved { old, new },
+    match change.edit {
+        Edit::Insert { new } => Part::Added { new, facts },
+        Edit::Delete { old } => Part::Removed { old, facts },
+        Edit::Update { old, new } => Part::Changed { old, new, facts },
+        Edit::Move { old, new } => Part::Moved { old, new, facts },
         Edit::Rename {
             old,
             new,
@@ -154,15 +178,23 @@ fn part(edit: Edit, signature: bool) -> Part {
             from,
             to,
             sites: occurrences,
+            facts,
         },
     }
 }
 
 /// A change to all of the declaration, when the edit is one.
-fn whole(edit: &Edit) -> Option<DeclarationChange> {
-    Some(match edit.clone() {
-        Edit::Insert { new } => DeclarationChange::Added { new },
-        Edit::Delete { old } => DeclarationChange::Removed { old },
+fn whole(change: &SemanticChange) -> Option<DeclarationChange> {
+    let head = |span: LineSpan| change.head.unwrap_or(span.start);
+    Some(match change.edit.clone() {
+        Edit::Insert { new } => DeclarationChange::Added {
+            new,
+            head: head(new),
+        },
+        Edit::Delete { old } => DeclarationChange::Removed {
+            old,
+            head: head(old),
+        },
         Edit::Move { old, new } => DeclarationChange::Moved { old, new },
         Edit::Rename {
             old,
@@ -205,7 +237,7 @@ pub(crate) fn group(changes: Vec<SemanticChange>) -> Vec<DeclarationDiff> {
     let mut entries: Vec<Entry> = Vec::new();
     for change in changes {
         let new_side = !matches!(change.edit, Edit::Delete { .. });
-        let declared = change.declares && whole(&change.edit).is_some();
+        let declared = change.declares && whole(&change).is_some();
         let mut scope = change.scope.clone();
         // The declaration changed as a whole is the subject; otherwise the
         // innermost container around the change.
@@ -223,6 +255,7 @@ pub(crate) fn group(changes: Vec<SemanticChange>) -> Vec<DeclarationDiff> {
                     scope: Vec::new(),
                     subject: None,
                     change: DeclarationChange::Modified,
+                    facts: Facts::default(),
                     parts: Vec::new(),
                 },
                 named_new: false,
@@ -247,17 +280,18 @@ pub(crate) fn group(changes: Vec<SemanticChange>) -> Vec<DeclarationDiff> {
                 .iter()
                 .enumerate()
                 .filter(|(_, change)| change.declares)
-                .filter_map(|(index, change)| Some((index, whole(&change.edit)?)))
+                .filter_map(|(index, change)| Some((index, whole(change)?)))
                 .min_by_key(|(_, change)| precedence(change));
-            if let Some((_, change)) = &main {
+            if let Some((index, change)) = &main {
                 diff.change = change.clone();
+                diff.facts = entry.edits[*index].facts.clone();
             }
             diff.parts = entry
                 .edits
                 .into_iter()
                 .enumerate()
                 .filter(|(index, _)| main.as_ref().map(|(main, _)| main) != Some(index))
-                .map(|(_, change)| part(change.edit, change.signature))
+                .map(|(_, change)| part(change))
                 .collect();
             diff
         })

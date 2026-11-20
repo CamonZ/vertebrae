@@ -1,10 +1,12 @@
 //! Turns a node mapping into the reported change list.
 
+use super::facts::{self, ApiTable, Facts, Touched};
 use super::matching::{self, Mapping};
 use super::profile::Profile;
 use super::tree::{NodeId, SyntaxTree};
 use super::{Deadline, Edit, FallbackReason, LineSpan, Occurrence, ScopeSegment, SemanticChange};
 use std::collections::BTreeMap;
+use std::ops::Range;
 
 /// Which tree a node belongs to.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -13,11 +15,26 @@ enum Side {
     New,
 }
 
+/// How far a change's facts look beyond its own nodes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    /// Also the nodes enclosing them, and the counterparts of all of these
+    /// on the other side: what the change's nodes were or became.
+    Full,
+    /// Its nodes only, against nothing on the other side: a pairing
+    /// artefact reported as a removal and an addition reads as one.
+    Alone,
+    /// Only whether it is in test code: a rename changes names, not what
+    /// the code does.
+    Context,
+}
+
 struct Script<'a, 's> {
     old: &'a SyntaxTree<'s>,
     new: &'a SyntaxTree<'s>,
     m: &'a Mapping,
     profile: &'static Profile,
+    apis: &'a ApiTable,
     deadline: &'a Deadline,
 }
 
@@ -26,6 +43,7 @@ pub(crate) fn changes(
     new: &SyntaxTree,
     m: &Mapping,
     profile: &'static Profile,
+    apis: &ApiTable,
     deadline: &Deadline,
 ) -> Result<Vec<SemanticChange>, FallbackReason> {
     let script = Script {
@@ -33,11 +51,12 @@ pub(crate) fn changes(
         new,
         m,
         profile,
+        apis,
         deadline,
     };
     let mut changes = Vec::new();
-    script.removals(Side::Old, &mut changes);
-    script.removals(Side::New, &mut changes);
+    script.removals(Side::Old, &mut changes)?;
+    script.removals(Side::New, &mut changes)?;
     script.updates(&mut changes)?;
     script.moves(&mut changes)?;
     changes.sort_by(|x, y| x.order_key().cmp(&y.order_key()));
@@ -77,7 +96,7 @@ impl<'s> Script<'_, 's> {
     }
 
     /// Topmost unmatched nodes: deletions on the old side, insertions on the new.
-    fn removals(&self, side: Side, out: &mut Vec<SemanticChange>) {
+    fn removals(&self, side: Side, out: &mut Vec<SemanticChange>) -> Result<(), FallbackReason> {
         let tree = self.tree(side);
         let mut id = 0;
         while id < tree.len() {
@@ -100,8 +119,16 @@ impl<'s> Script<'_, 's> {
                 {
                     let declares = subject(tree, next);
                     // After a declaration only its punctuation joins it;
-                    // comments and attributes go with the next one.
+                    // comments and attributes go with the next one, unless
+                    // a blank line separates them from it (a module's doc
+                    // comment is not its first item's).
                     if declared.is_some() && (declares.is_some() || tree.nodes[next].named) {
+                        break;
+                    }
+                    if declared.is_none()
+                        && declares.is_some()
+                        && tree.nodes[next].lines.start > span.end + 1
+                    {
                         break;
                     }
                     declared = declared.or(declares);
@@ -112,9 +139,10 @@ impl<'s> Script<'_, 's> {
                     Side::Old => Edit::Delete { old: span },
                     Side::New => Edit::Insert { new: span },
                 };
+                let facts = self.facts_on(side, id..next, Reach::Full)?;
                 out.push(match declared {
-                    Some(declaration) => self.declaring(edit, side, declaration),
-                    None => self.change(edit, side, id),
+                    Some(declaration) => self.declaring(edit, side, declaration, facts),
+                    None => self.change(edit, side, id, facts),
                 });
                 id = next;
                 continue;
@@ -122,6 +150,7 @@ impl<'s> Script<'_, 's> {
             // Matched descendants of an unmatched node are reported as moves.
             id += node.size;
         }
+        Ok(())
     }
 
     /// A trailing comma before a closing delimiter changes nothing.
@@ -164,6 +193,11 @@ impl<'s> Script<'_, 's> {
                     .push((a, b));
                 continue;
             }
+            let facts = self.facts(
+                Some(self.subtree(Side::Old, a)),
+                Some(self.subtree(Side::New, b)),
+                Reach::Full,
+            )?;
             out.push(self.change(
                 Edit::Update {
                     old: x.lines,
@@ -171,6 +205,7 @@ impl<'s> Script<'_, 's> {
                 },
                 Side::New,
                 b,
+                facts,
             ));
         }
         for ((from, to), sites) in renames {
@@ -186,7 +221,8 @@ impl<'s> Script<'_, 's> {
                         old: self.old.nodes[a].lines,
                         new: self.new.nodes[b].lines,
                     };
-                    out.push(self.change(edit, Side::New, b));
+                    let facts = self.facts(Some(a..a + 1), Some(b..b + 1), Reach::Full)?;
+                    out.push(self.change(edit, Side::New, b, facts));
                 }
                 continue;
             }
@@ -212,9 +248,10 @@ impl<'s> Script<'_, 's> {
                     .get(&parent)
                     .is_some_and(|d| d.name_node == b)
             });
+            let facts = self.facts(Some(a..a + 1), Some(b..b + 1), Reach::Context)?;
             out.push(match named {
-                Some(declaration) => self.declaring(edit, Side::New, declaration),
-                None => self.change(edit, Side::New, b),
+                Some(declaration) => self.declaring(edit, Side::New, declaration, facts),
+                None => self.change(edit, Side::New, b, facts),
             });
         }
         Ok(())
@@ -322,26 +359,35 @@ impl<'s> Script<'_, 's> {
             entry.2 = union(entry.2, new);
         }
         for (a, b) in loose {
+            let facts = self.facts_on(Side::Old, self.subtree(Side::Old, a), Reach::Alone)?;
             out.push(self.change(
                 Edit::Delete {
                     old: self.old.nodes[a].lines,
                 },
                 Side::Old,
                 a,
+                facts,
             ));
+            let facts = self.facts_on(Side::New, self.subtree(Side::New, b), Reach::Alone)?;
             out.push(self.change(
                 Edit::Insert {
                     new: self.new.nodes[b].lines,
                 },
                 Side::New,
                 b,
+                facts,
             ));
         }
-        for (_, (b, old, new)) in spans {
+        for (a, (b, old, new)) in spans {
             let edit = Edit::Move { old, new };
+            let facts = self.facts(
+                Some(self.subtree(Side::Old, a)),
+                Some(self.subtree(Side::New, b)),
+                Reach::Full,
+            )?;
             out.push(match subject(self.new, b) {
-                Some(declaration) => self.declaring(edit, Side::New, declaration),
-                None => self.change(edit, Side::New, b),
+                Some(declaration) => self.declaring(edit, Side::New, declaration, facts),
+                None => self.change(edit, Side::New, b, facts),
             });
         }
         Ok(())
@@ -405,7 +451,7 @@ impl<'s> Script<'_, 's> {
             .collect())
     }
 
-    fn change(&self, edit: Edit, side: Side, id: NodeId) -> SemanticChange {
+    fn change(&self, edit: Edit, side: Side, id: NodeId, facts: Facts) -> SemanticChange {
         let tree = self.tree(side);
         let signature = !matches!(edit, Edit::Rename { .. }) && self.in_signature(tree, id);
         SemanticChange {
@@ -413,20 +459,107 @@ impl<'s> Script<'_, 's> {
             scope: self.scope(side, id),
             signature,
             declares: false,
+            facts,
+            head: None,
             edit,
         }
     }
 
     /// A change to the declaration `id` itself: added, removed, moved or
     /// renamed as a whole.
-    fn declaring(&self, edit: Edit, side: Side, id: NodeId) -> SemanticChange {
+    fn declaring(&self, edit: Edit, side: Side, id: NodeId, facts: Facts) -> SemanticChange {
+        let tree = self.tree(side);
         SemanticChange {
-            node_kind: self.tree(side).nodes[id].kind.to_string(),
+            node_kind: tree.nodes[id].kind.to_string(),
             scope: self.scope(side, id),
             signature: false,
             declares: true,
+            facts,
+            head: Some(tree.nodes[id].lines.start),
             edit,
         }
+    }
+
+    /// A node and its descendants.
+    fn subtree(&self, side: Side, id: NodeId) -> Range<NodeId> {
+        id..id + self.tree(side).nodes[id].size
+    }
+
+    /// Facts of a change with nodes on one side only.
+    fn facts_on(
+        &self,
+        side: Side,
+        nodes: Range<NodeId>,
+        reach: Reach,
+    ) -> Result<Facts, FallbackReason> {
+        match side {
+            Side::Old => self.facts(Some(nodes), None, reach),
+            Side::New => self.facts(None, Some(nodes), reach),
+        }
+    }
+
+    /// The facts of a change to `old` and `new` (preorder ranges: nodes
+    /// with their descendants, or adjacent siblings with theirs).
+    fn facts(
+        &self,
+        old: Option<Range<NodeId>>,
+        new: Option<Range<NodeId>>,
+        reach: Reach,
+    ) -> Result<Facts, FallbackReason> {
+        let mut nodes: [Vec<NodeId>; 2] = [Vec::new(), Vec::new()];
+        let index = |side: Side| match side {
+            Side::Old => 0,
+            Side::New => 1,
+        };
+        if reach != Reach::Context {
+            for (side, range) in [(Side::Old, &old), (Side::New, &new)] {
+                let Some(range) = range.clone() else {
+                    continue;
+                };
+                let tree = self.tree(side);
+                let (here, there) = (index(side), index(other(side)));
+                self.deadline.tick(range.len())?;
+                if reach == Reach::Full {
+                    for id in range.clone() {
+                        nodes[there].extend(self.partner(side, id));
+                    }
+                    let mut cursor = tree.nodes[range.start].parent;
+                    while let Some(id) = cursor {
+                        nodes[here].push(id);
+                        nodes[there].extend(self.partner(side, id));
+                        cursor = tree.nodes[id].parent;
+                    }
+                }
+                nodes[here].extend(range);
+            }
+        }
+        let roots = |tree: &SyntaxTree, range: Option<Range<NodeId>>| {
+            let mut roots = Vec::new();
+            if let Some(range) = range {
+                let mut id = range.start;
+                while id < range.end {
+                    roots.push(id);
+                    id += tree.nodes[id].size;
+                }
+            }
+            roots
+        };
+        let [mut old_nodes, mut new_nodes] = nodes;
+        for nodes in [&mut old_nodes, &mut new_nodes] {
+            nodes.sort_unstable();
+            nodes.dedup();
+        }
+        let old = Touched {
+            tree: self.old,
+            nodes: old_nodes,
+            roots: roots(self.old, old),
+        };
+        let new = Touched {
+            tree: self.new,
+            nodes: new_nodes,
+            roots: roots(self.new, new),
+        };
+        Ok(facts::derive([&old, &new], self.apis))
     }
 
     /// Enclosing scopes, outermost first, including the node itself.
@@ -446,7 +579,7 @@ impl<'s> Script<'_, 's> {
                 };
                 segments.push(ScopeSegment {
                     kind: meta.kind,
-                    keyword: meta.keyword.into(),
+                    keyword: meta.keyword.clone(),
                     name: meta.name.clone(),
                     old_line,
                     new_line,

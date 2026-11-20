@@ -1,0 +1,8 @@
+# Tokio.
+**::tokio::spawn            spawn
+**::task::spawn             spawn
+**::task::spawn_blocking    spawn
+**::task::spawn_local       spawn
+**::tokio::fs::*            filesystem
+**::tokio::process::*       process
+**::tokio::net::*           network

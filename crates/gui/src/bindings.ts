@@ -1941,7 +1941,7 @@ export type DecisionModelSettings = { enabled: boolean; provider: string; model:
 /**
  * What happened to a declaration as a whole.
  */
-export type DeclarationChange = { kind: "added"; new: LineSpan } | { kind: "removed"; old: LineSpan } |
+export type DeclarationChange = { kind: "added"; new: LineSpan; head: number } | { kind: "removed"; old: LineSpan; head: number } |
 /**
  * It now sits elsewhere (and may be edited inside).
  */
@@ -1971,6 +1971,11 @@ scope: ScopeSegment[];
  */
 subject: ScopeSegment | null; change: DeclarationChange;
 /**
+ * Facts of `change` when it is one to all of the declaration (an
+ * added declaration's are those of everything in it); else empty.
+ */
+facts: Facts;
+/**
  * What changed inside it, in line order.
  */
 parts: Part[] }
@@ -1994,6 +1999,10 @@ path: string;
  */
 kind: EntryKind; symlink: boolean }
 export type DirectoryListing = { path: string; entries: DirectoryEntry[]; truncated: boolean }
+/**
+ * What a known API touches.
+ */
+export type EffectKind = "filesystem" | "network" | "process" | "database" | "ipc_command" | "event" | "env" | "ui"
 export type EntryKind = "file" | "directory" |
 /**
  * Special files, and symlinks that dangle or leave the worktree.
@@ -2009,6 +2018,93 @@ export type ExecuteStepConfig = { version: number; script: string; context: Json
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
+/**
+ * One fact about a change, e.g. "now calls `retry`".
+ */
+export type Fact = { kind: FactKind; change: FactChange }
+export type FactChange =
+/**
+ * Present on the new side only.
+ */
+{ kind: "added"; subject: string } |
+/**
+ * Present on the old side only.
+ */
+{ kind: "removed"; subject: string } |
+/**
+ * One subject replaced by another (`x > 1` → `x > 2`).
+ */
+{ kind: "changed"; from: string; to: string } |
+/**
+ * Context rather than a difference: the change sits inside it.
+ */
+{ kind: "inside" }
+/**
+ * What a fact is about. Declared in [`FactCategory`] order, so facts sort
+ * by category.
+ */
+export type FactKind =
+/**
+ * A use of a known API at a system boundary.
+ */
+{ type: "effect"; effect: EffectKind } | { type: "spawn" } | { type: "lock" } | { type: "async" } | { type: "await" } |
+/**
+ * Rust's `?`.
+ */
+{ type: "propagation" } |
+/**
+ * `unwrap`/`expect`, TypeScript's non-null `!`.
+ */
+{ type: "unwrap" } |
+/**
+ * A `catch` or `except` handler.
+ */
+{ type: "catch" } |
+/**
+ * `throw`, `raise` or a panicking macro.
+ */
+{ type: "throw" } |
+/**
+ * The error type of a `Result` or an `except` clause.
+ */
+{ type: "error_type" } |
+/**
+ * `pub`, `export` or an accessibility modifier.
+ */
+{ type: "visibility" } |
+/**
+ * The parameters or return type of a public callable.
+ */
+{ type: "signature" } |
+/**
+ * An `if`, `else`, ternary or `elif`; its subject is the condition.
+ */
+{ type: "branch" } |
+/**
+ * A `match` arm, `case` or `switch` case; its subject is the pattern.
+ */
+{ type: "match_arm" } | { type: "early_return" } |
+/**
+ * Its subject is the condition or iterable.
+ */
+{ type: "loop" } |
+/**
+ * A call to code no API table knows.
+ */
+{ type: "call" } | { type: "literal" } | { type: "field" } | { type: "type_annotation" } |
+/**
+ * The change is inside test code.
+ */
+{ type: "test_code" }
+/**
+ * The facts of one change, at most [`Facts::MAX`] of them (the most
+ * telling first); `omitted` counts the rest.
+ */
+export type Facts = {
+/**
+ * Sorted by category, then kind.
+ */
+items: Fact[]; omitted: number }
 /**
  * Why a file is shown as a line diff instead.
  */
@@ -2406,19 +2502,19 @@ export type Operation = { source: string; activities: string[]; relationships: s
 /**
  * One change inside a declaration.
  */
-export type Part = { kind: "added"; new: LineSpan } | { kind: "removed"; old: LineSpan } |
+export type Part = { kind: "added"; new: LineSpan; facts: Facts } | { kind: "removed"; old: LineSpan; facts: Facts } |
 /**
  * Code that stayed in place and changed.
  */
-{ kind: "changed"; old: LineSpan; new: LineSpan } |
+{ kind: "changed"; old: LineSpan; new: LineSpan; facts: Facts } |
 /**
  * A change to a callable's header (parameters, return type, ...).
  */
-{ kind: "signature"; old: LineSpan | null; new: LineSpan | null } | { kind: "moved"; old: LineSpan; new: LineSpan } |
+{ kind: "signature"; old: LineSpan | null; new: LineSpan | null; facts: Facts } | { kind: "moved"; old: LineSpan; new: LineSpan; facts: Facts } |
 /**
  * A local name changed consistently; `sites` are every changed use.
  */
-{ kind: "renamed"; old: LineSpan; new: LineSpan; from: string; to: string; sites: Occurrence[] }
+{ kind: "renamed"; old: LineSpan; new: LineSpan; from: string; to: string; sites: Occurrence[]; facts: Facts }
 export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode

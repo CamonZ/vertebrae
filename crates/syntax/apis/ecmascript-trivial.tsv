@@ -1,0 +1,20 @@
+# JavaScript calls too common to report (value plumbing, not behaviour).
+**.map                  ignore
+**.filter               ignore
+**.slice                ignore
+**.concat               ignore
+**.join                 ignore
+**.toString             ignore
+**.trim                 ignore
+**.includes             ignore
+**.some                 ignore
+**.every                ignore
+**.find                 ignore
+String                  ignore
+Number                  ignore
+Boolean                 ignore
+Object.keys             ignore
+Object.values           ignore
+Object.entries          ignore
+Array.from              ignore
+Array.isArray           ignore

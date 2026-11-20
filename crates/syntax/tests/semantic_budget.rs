@@ -1,10 +1,11 @@
-//! The semantic diff of a 2,000-line file fits the default 200 ms budget.
+//! The semantic diff of a 2,000-line file, facts included, fits the
+//! default 200 ms budget.
 //! That timing is only asserted in optimized builds
 //! (`cargo test --release -p vertebrae-syntax --test semantic_budget`);
 //! in every build, the deadline itself is checked to stop the work promptly.
 
 use std::time::{Duration, Instant};
-use vertebrae_syntax::semantic::{self, Budget, SemanticOutcome};
+use vertebrae_syntax::semantic::{self, Budget, FactChange, FactKind, SemanticOutcome};
 
 /// About 2,000 lines of Rust: 200 ten-line functions in one impl.
 fn rust_file(edit: bool) -> String {
@@ -16,8 +17,14 @@ fn rust_file(edit: bool) -> String {
         } else {
             format!("entry_{i}")
         };
+        // Edited entries also call `audit` (a call fact).
+        let audit = if edit && i % 50 == 7 {
+            "audit(scaled); "
+        } else {
+            ""
+        };
         out += &format!(
-            "    pub fn {name}(&mut self, amount: i64) -> i64 {{\n        let scaled = amount * {step};\n        if scaled > {i} {{\n            self.total += scaled;\n        }} else {{\n            self.total -= {i};\n        }}\n        let check = self.total % 7;\n        check + scaled\n    }}\n"
+            "    pub fn {name}(&mut self, amount: i64) -> i64 {{\n        let scaled = amount * {step};\n        if scaled > {i} {{\n            self.total += scaled;\n        }} else {{\n            self.total -= {i};\n        }}\n        {audit}let check = self.total % 7;\n        check + scaled\n    }}\n"
         );
     }
     out + "}\n"
@@ -27,8 +34,13 @@ fn typescript_file(edit: bool) -> String {
     let mut out = String::new();
     for i in 0..200 {
         let step = if edit && i % 40 == 3 { i + 500 } else { i };
+        let audit = if edit && i % 40 == 3 {
+            "audit(total); "
+        } else {
+            ""
+        };
         out += &format!(
-            "export function entry{i}(items: number[]): number {{\n  let total = 0;\n  for (const item of items) {{\n    if (item > {step}) {{\n      total += item;\n    }}\n  }}\n  const check = total % 7;\n  return check + total;\n}}\n"
+            "export function entry{i}(items: number[]): number {{\n  let total = 0;\n  for (const item of items) {{\n    if (item > {step}) {{\n      total += item;\n    }}\n  }}\n  {audit}const check = total % 7;\n  return check + total;\n}}\n"
         );
     }
     out
@@ -56,6 +68,23 @@ fn assert_within_budget(path: &str, old: &str, new: &str) {
         panic!("{path} fell back after {elapsed:?}: {outcome:?}");
     };
     assert!(!declarations.is_empty());
+    let audits = declarations
+        .iter()
+        .flat_map(|d| {
+            d.facts
+                .items
+                .iter()
+                .chain(d.parts.iter().flat_map(|p| &p.facts().items))
+        })
+        .filter(|fact| {
+            fact.kind == FactKind::Call
+                && fact.change
+                    == FactChange::Added {
+                        subject: "audit".into(),
+                    }
+        })
+        .count();
+    assert!(audits > 0, "{path}: no call facts");
     if optimized {
         assert!(elapsed < Duration::from_millis(200), "{path}: {elapsed:?}");
     }

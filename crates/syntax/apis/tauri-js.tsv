@@ -1,0 +1,15 @@
+# Tauri, webview side (@tauri-apps/api and plugins).
+invoke                  ipc_command
+**.invoke               ipc_command
+emit                    event
+emitTo                  event
+listen                  event
+once                    event
+**.emit                 event
+**.emitTo               event
+**.listen               event
+**.once                 event
+Command.create          process
+Command.sidecar         process
+readTextFile            filesystem
+writeTextFile           filesystem

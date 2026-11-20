@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { DeclarationDiff, Part, ScopeSegment } from "../../../bindings";
+import type {
+  DeclarationDiff,
+  Fact,
+  Facts,
+  LineSpan,
+  Part,
+  ScopeSegment,
+} from "../../../bindings";
 import { parsePatch } from "../../thread/toolChange/diffLineMapper";
 import {
   MAX_REVEAL,
@@ -35,6 +42,8 @@ const scope = (
 
 const at = (line: number) => ({ start: line, end: line });
 
+const NO_FACTS: Facts = { items: [], omitted: 0 };
+
 /** Code inside the innermost of `segments` changed. */
 const modified = (
   segments: ScopeSegment[],
@@ -43,6 +52,7 @@ const modified = (
   scope: segments.slice(0, -1),
   subject: segments.at(-1) ?? null,
   change: { kind: "modified" },
+  facts: NO_FACTS,
   parts,
 });
 
@@ -54,18 +64,31 @@ const update = (
   modified(
     segments,
     signature
-      ? { kind: "signature", old: at(line), new: at(line) }
-      : { kind: "changed", old: at(line), new: at(line) }
+      ? { kind: "signature", old: at(line), new: at(line), facts: NO_FACTS }
+      : { kind: "changed", old: at(line), new: at(line), facts: NO_FACTS }
   );
+
+/** A whole-declaration change; an addition or removal's head defaults to its first line. */
+type WholeChange =
+  | DeclarationDiff["change"]
+  | { kind: "added"; new: LineSpan }
+  | { kind: "removed"; old: LineSpan };
 
 /** The innermost of `segments` changed as a whole. */
 const declaring = (
-  change: DeclarationDiff["change"],
-  segments: ScopeSegment[]
+  change: WholeChange,
+  segments: ScopeSegment[],
+  facts: Facts = NO_FACTS
 ): DeclarationDiff => ({
   scope: segments.slice(0, -1),
   subject: segments.at(-1) ?? null,
-  change,
+  change:
+    change.kind === "added" && !("head" in change)
+      ? { ...change, head: change.new.start }
+      : change.kind === "removed" && !("head" in change)
+        ? { ...change, head: change.old.start }
+        : change,
+  facts,
   parts: [],
 });
 
@@ -84,6 +107,8 @@ describe("semanticHunks", () => {
         lineNumber: 15,
         scope: [scope("f", 10, 10)],
         chips: [{ kind: "changed" }],
+        facts: [],
+        test: false,
       },
     ]);
     expect(view.formattingOnly).toBe(false);
@@ -120,6 +145,7 @@ describe("semanticHunks", () => {
       from: "sum",
       to: "acc",
       sites: [2, 9, 16].map((line) => ({ old_line: line, new_line: line })),
+      facts: NO_FACTS,
     });
     const lines = (from: number, to: number) =>
       Array.from(
@@ -146,8 +172,8 @@ describe("semanticHunks", () => {
     );
     const big = modified(
       [scope("big", 1, 1)],
-      { kind: "changed", old: at(5), new: at(5) },
-      { kind: "changed", old: at(23), new: at(23) }
+      { kind: "changed", old: at(5), new: at(5), facts: NO_FACTS },
+      { kind: "changed", old: at(23), new: at(23), facts: NO_FACTS }
     );
     const view = semanticHunks(file, [big]);
     expect(view.reveals.get(0)).toEqual({ top: 0, bottom: 1 });
@@ -207,8 +233,8 @@ it("reads a removal and an addition in one block as a change", () => {
   const view = semanticHunks(file, [
     modified(
       [scope("f", 1, 1)],
-      { kind: "removed", old: at(1) },
-      { kind: "added", new: at(1) }
+      { kind: "removed", old: at(1), facts: NO_FACTS },
+      { kind: "added", new: at(1), facts: NO_FACTS }
     ),
   ]);
   expect(view.labels[0].chips.map(chipText)).toEqual(["changed"]);
@@ -260,6 +286,8 @@ describe("declarations", () => {
         chips: [
           { kind: "removed", declaration: { keyword: "fn", name: "gone" } },
         ],
+        facts: [],
+        test: false,
       },
     ]);
   });
@@ -344,4 +372,96 @@ it("names a block label's scope after the changes it describes", () => {
   expect(moved?.chips.map(chipText)).toEqual([
     "moved function describe to L30",
   ]);
+});
+
+const facts = (...items: Fact[]): Facts => ({ items, omitted: 0 });
+const added = (subject: string) => ({ kind: "added" as const, subject });
+const call = (subject: string): Fact => ({ kind: { type: "call" }, change: added(subject) });
+const literal: Fact = {
+  kind: { type: "literal" },
+  change: { kind: "changed", from: "1", to: "2" },
+};
+const write: Fact = {
+  kind: { type: "effect", effect: "filesystem" },
+  change: added("std::fs::write"),
+};
+const early: Fact = { kind: { type: "early_return" }, change: added("return") };
+const inTest: Fact = { kind: { type: "test_code" }, change: { kind: "inside" } };
+
+describe("label facts", () => {
+  it("puts a block's facts on its label in category order, once each", () => {
+    const file = patch(
+      "@@ -1,4 +1,5 @@\n fn f() {\n-    let x = 1;\n+    let x = 2;\n+    retry();\n     done();\n }\n"
+    );
+    const view = semanticHunks(file, [
+      modified(
+        [scope("f", 1, 1, "fn")],
+        { kind: "changed", old: at(2), new: at(2), facts: facts(literal) },
+        { kind: "added", new: at(3), facts: facts(early, call("retry"), write, literal) }
+      ),
+    ]);
+    expect(view.labels).toHaveLength(1);
+    expect(view.labels[0].facts).toEqual([
+      {
+        owner: { keyword: "fn", name: "f" },
+        whole: false,
+        facts: [write, early, call("retry"), literal],
+        omitted: 0,
+      },
+    ]);
+  });
+
+  it("labels an added declaration at its head, with its facts as a whole", () => {
+    // Lines 1–2 are the comment and attribute before `fn g`.
+    const file = patch(
+      "@@ -1,0 +1,5 @@\n+// Reads it.\n+#[inline]\n+fn g() {\n+    retry();\n+}\n"
+    );
+    const view = semanticHunks(file, [
+      declaring(
+        { kind: "added", new: { start: 1, end: 5 }, head: 3 },
+        [scope("g", null, 3, "fn")],
+        { items: [call("retry")], omitted: 2 }
+      ),
+    ]);
+    expect(view.labels.map((label) => [label.lineNumber, label.facts])).toEqual([
+      [
+        3,
+        [
+          {
+            owner: { keyword: "fn", name: "g" },
+            whole: true,
+            facts: [call("retry")],
+            omitted: 2,
+          },
+        ],
+      ],
+    ]);
+  });
+
+  it("keeps the facts of two declarations on one line apart", () => {
+    const file = patch("@@ -1,0 +1,1 @@\n+fn a() { load(); } fn b() { save(); }\n");
+    const view = semanticHunks(file, [
+      declaring({ kind: "added", new: at(1) }, [scope("a", null, 1, "fn")], facts(call("load"))),
+      declaring({ kind: "added", new: at(1) }, [scope("b", null, 1, "fn")], facts(call("save"))),
+    ]);
+    expect(view.labels).toHaveLength(1);
+    expect(
+      view.labels[0].facts.map((group) => [group.owner?.name, group.facts])
+    ).toEqual([
+      ["a", [call("load")]],
+      ["b", [call("save")]],
+    ]);
+  });
+
+  it("marks a label in test code instead of listing it as a fact", () => {
+    const file = patch("@@ -2,1 +2,1 @@\n-    go(1);\n+    go(2);\n");
+    const view = semanticHunks(file, [
+      modified(
+        [scope("t", 1, 1, "fn")],
+        { kind: "changed", old: at(2), new: at(2), facts: facts(literal, inTest) }
+      ),
+    ]);
+    expect(view.labels[0].test).toBe(true);
+    expect(view.labels[0].facts.flatMap((group) => group.facts)).toEqual([literal]);
+  });
 });

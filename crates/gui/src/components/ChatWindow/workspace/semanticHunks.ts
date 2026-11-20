@@ -10,14 +10,20 @@
  * whitespace), or left as is (a line-diff alignment with no syntax change).
  * Nothing changed is ever hidden.
  *
+ * Each label also carries the engine's facts about what kind of code its
+ * changes touch, grouped by declaration (`semanticFacts.ts` presents
+ * them); test code marks the label instead.
+ *
  * No React or Pierre runtime imports.
  */
 import type {
   DeclarationDiff,
+  Facts,
   LineSpan,
   Occurrence,
   ScopeSegment,
 } from "../../../bindings";
+import { factKey, orderFacts, type FactGroup } from "./semanticFacts";
 import type { GapReveal } from "../../thread/toolChange/diffGaps";
 import type {
   FilePatch,
@@ -71,6 +77,10 @@ export interface SemanticLabel {
   /** Enclosing declarations, outermost first. */
   scope: readonly ScopeSegment[];
   chips: readonly SemanticChip[];
+  /** What kind of code the changes touch, per declaration. */
+  facts: readonly FactGroup[];
+  /** The changes are in test code. */
+  test: boolean;
 }
 
 export interface SemanticHunks {
@@ -88,7 +98,7 @@ export interface SemanticHunks {
  * in: around the declaration for a change to all of it, else the
  * declaration itself.
  */
-interface Fact {
+interface Located {
   /** Null for an added or removed declaration, which is labelled alone. */
   chip: SemanticChip | null;
   old: LineSpan | null;
@@ -97,6 +107,9 @@ interface Fact {
   home: readonly ScopeSegment[];
   /** Blocks sharing a key describe one declaration. */
   key: string;
+  facts: Facts;
+  /** The declaration the facts are about. */
+  owner: Declared | null;
 }
 
 interface Block {
@@ -104,7 +117,7 @@ interface Block {
   rows: HunkRow[];
   oldLines: number[];
   newLines: number[];
-  facts: Fact[];
+  located: Located[];
 }
 
 const named = (segment: ScopeSegment): Declared => ({
@@ -112,19 +125,28 @@ const named = (segment: ScopeSegment): Declared => ({
   name: segment.name,
 });
 
-function facts(declarations: readonly DeclarationDiff[]): Fact[] {
-  return declarations.flatMap((declaration, index): Fact[] => {
+function locate(declarations: readonly DeclarationDiff[]): Located[] {
+  return declarations.flatMap((declaration, index): Located[] => {
     const { scope, subject, change } = declaration;
     const inside = subject ? [...scope, subject] : scope;
     const self = subject && named(subject);
-    const out: Fact[] = [];
+    const out: Located[] = [];
     const whole = (
       chip: SemanticChip | null,
       old: LineSpan | null,
       next: LineSpan | null,
       sites: readonly Occurrence[] = []
     ) =>
-      out.push({ chip, old, new: next, sites, home: scope, key: `${index}` });
+      out.push({
+        chip,
+        old,
+        new: next,
+        sites,
+        home: scope,
+        key: `${index}`,
+        facts: declaration.facts,
+        owner: self,
+      });
     switch (change.kind) {
       case "added":
         whole(null, null, change.new);
@@ -177,6 +199,8 @@ function facts(declarations: readonly DeclarationDiff[]): Fact[] {
           sites,
           home: inside,
           key: `${index}/`,
+          facts: part.facts,
+          owner: self,
         });
       switch (part.kind) {
         case "added":
@@ -246,7 +270,7 @@ function blocks(patch: FilePatch): Block[] {
           rows: [],
           oldLines: [],
           newLines: [],
-          facts: [],
+          located: [],
         };
         out.push(current);
       }
@@ -261,10 +285,10 @@ function blocks(patch: FilePatch): Block[] {
 const within = (span: LineSpan | null, line: number) =>
   span !== null && span.start <= line && line <= span.end;
 
-const touches = (block: Block, fact: Fact) =>
-  block.oldLines.some((line) => within(fact.old, line)) ||
-  block.newLines.some((line) => within(fact.new, line)) ||
-  fact.sites.some(
+const touches = (block: Block, entry: Located) =>
+  block.oldLines.some((line) => within(entry.old, line)) ||
+  block.newLines.some((line) => within(entry.new, line)) ||
+  entry.sites.some(
     (site) =>
       block.oldLines.includes(site.old_line) || block.newLines.includes(site.new_line)
   );
@@ -282,7 +306,7 @@ function addChips(target: SemanticChip[], chips: readonly SemanticChip[]) {
 
 function chipsFor(block: Block): SemanticChip[] {
   const chips: SemanticChip[] = [];
-  for (const { chip, old, new: next } of block.facts) {
+  for (const { chip, old, new: next } of block.located) {
     if (!chip) continue;
     if (chip.kind !== "moved") {
       addChips(chips, [chip]);
@@ -326,9 +350,9 @@ function labelPlace(
   const oldCopy =
     chips.length > 0 && chips.every((chip) => chip.kind === "moved" && chip.direction === "to");
   if (oldCopy && block.oldLines.length > 0) {
-    const moved = block.facts.filter((fact) => fact.chip?.kind === "moved");
+    const moved = block.located.filter((entry) => entry.chip?.kind === "moved");
     const line = block.oldLines.find((line) =>
-      moved.some((fact) => within(fact.old, line))
+      moved.some((entry) => within(entry.old, line))
     );
     return { side: "deletions", lineNumber: line ?? block.oldLines[0] };
   }
@@ -349,15 +373,15 @@ function openingLine(scope: readonly ScopeSegment[], patch: FilePatch, hunk: num
 }
 
 /**
- * The fact a block's label is about: the innermost of those it describes
+ * The entry a block's label is about: the innermost of those it describes
  * (added and removed declarations have labels of their own).
  */
-function primary(block: Block): Fact | null {
-  const described = block.facts.filter((fact) => fact.chip);
-  const candidates = described.length > 0 ? described : block.facts;
-  return candidates.reduce<Fact | null>(
-    (deepest, fact) =>
-      !deepest || fact.home.length > deepest.home.length ? fact : deepest,
+function primary(block: Block): Located | null {
+  const described = block.located.filter((entry) => entry.chip);
+  const candidates = described.length > 0 ? described : block.located;
+  return candidates.reduce<Located | null>(
+    (deepest, entry) =>
+      !deepest || entry.home.length > deepest.home.length ? entry : deepest,
     null
   );
 }
@@ -399,32 +423,51 @@ export function semanticHunks(
   patch: FilePatch,
   declarations: readonly DeclarationDiff[]
 ): SemanticHunks {
-  const all = facts(declarations);
+  const all = locate(declarations);
   const changed = blocks(patch);
   for (const block of changed)
-    block.facts = all.filter((fact) => touches(block, fact));
+    block.located = all.filter((entry) => touches(block, entry));
 
   const hunkHome = new Map<number, readonly ScopeSegment[]>();
   for (const block of changed) {
-    const fact = primary(block);
-    if (fact && !hunkHome.has(block.hunk)) hunkHome.set(block.hunk, fact.home);
+    const entry = primary(block);
+    if (entry && !hunkHome.has(block.hunk)) hunkHome.set(block.hunk, entry.home);
   }
   const { reveals, joined } = gapReveals(patch, hunkHome);
 
-  const labels: (SemanticLabel & { chips: SemanticChip[] })[] = [];
+  type Placed = SemanticLabel & { chips: SemanticChip[]; facts: FactGroup[] };
+  const labels: Placed[] = [];
   const place = (
     { side, lineNumber }: { side: DiffSide; lineNumber: number },
     scope: readonly ScopeSegment[],
-    chips: readonly SemanticChip[]
+    chips: readonly SemanticChip[],
+    groups: readonly FactGroup[]
   ) => {
     const existing = labels.find(
       (l) => l.side === side && l.lineNumber === lineNumber
     );
-    const label = existing ?? { side, lineNumber, scope, chips: [] };
+    const label: Placed =
+      existing ?? { side, lineNumber, scope, chips: [], facts: [], test: false };
     if (!existing) labels.push(label);
     addChips(label.chips, chips);
+    addGroups(label.facts, groups);
     return label;
   };
+  // The facts of the changes a block shows (an added or removed
+  // declaration's go on its own label).
+  const blockFacts = (block: Block): FactGroup[] =>
+    block.located.flatMap((entry) =>
+      entry.chip
+        ? [
+            {
+              owner: entry.owner,
+              whole: false,
+              facts: entry.facts.items,
+              omitted: entry.facts.omitted,
+            },
+          ]
+        : []
+    );
 
   // Consecutive blocks of one declaration, shown together, share a label.
   // Each copy of a moved declaration keeps its own: it links to the other.
@@ -436,10 +479,10 @@ export function semanticHunks(
     label: (typeof labels)[number];
   } | null = null;
   for (const block of changed) {
-    const fact = primary(block);
-    if (!fact) {
+    const entry = primary(block);
+    if (!entry) {
       if (squash(block.rows, "del") === squash(block.rows, "add"))
-        place(labelPlace(block, []), [], [{ kind: "formatting" }]);
+        place(labelPlace(block, []), [], [{ kind: "formatting" }], []);
       open = null;
       continue;
     }
@@ -450,42 +493,64 @@ export function semanticHunks(
     }
     const together =
       open !== null &&
-      open.key === fact.key &&
+      open.key === entry.key &&
       !moved(chips) &&
       !moved(open.label.chips) &&
       (open.hunk === block.hunk || joined.has(block.hunk));
     if (open && together) {
       addChips(open.label.chips, chips);
+      addGroups(open.label.facts, blockFacts(block));
       open.hunk = block.hunk;
       continue;
     }
     open = {
-      key: fact.key,
+      key: entry.key,
       hunk: block.hunk,
-      label: place(labelPlace(block, chips), fact.home, chips),
+      label: place(labelPlace(block, chips), entry.home, chips, blockFacts(block)),
     };
   }
 
-  // Each added or removed declaration is labelled where it starts.
+  // Each added or removed declaration is labelled at its own first line
+  // (past the comments and attributes before it), else where it starts.
   for (const declaration of declarations) {
     const { change, subject } = declaration;
     if ((change.kind !== "added" && change.kind !== "removed") || !subject)
       continue;
     const added = change.kind === "added";
     const span = added ? change.new : change.old;
-    const lineNumber = changed
-      .flatMap((block) => (added ? block.newLines : block.oldLines))
-      .find((line) => within(span, line));
+    const lines = changed.flatMap((block) => (added ? block.newLines : block.oldLines));
+    const lineNumber = lines.includes(change.head)
+      ? change.head
+      : lines.find((line) => within(span, line));
     if (lineNumber === undefined) continue;
     place(
       { side: added ? "additions" : "deletions", lineNumber },
       declaration.scope,
-      [{ kind: change.kind, declaration: named(subject) }]
+      [{ kind: change.kind, declaration: named(subject) }],
+      [
+        {
+          owner: named(subject),
+          whole: true,
+          facts: declaration.facts.items,
+          omitted: declaration.facts.omitted,
+        },
+      ]
     );
   }
   labels.sort(
     (a, b) => a.lineNumber - b.lineNumber || b.side.localeCompare(a.side)
   );
+  for (const label of labels) {
+    label.test = label.facts.some((group) =>
+      group.facts.some((fact) => fact.kind.type === "test_code")
+    );
+    label.facts = label.facts
+      .map((group) => ({
+        ...group,
+        facts: orderFacts(group.facts.filter((fact) => fact.kind.type !== "test_code")),
+      }))
+      .filter((group) => group.facts.length > 0 || group.omitted > 0);
+  }
 
   return {
     reveals,
@@ -580,5 +645,31 @@ export function chipText(chip: SemanticChip): string {
       return chip.declaration
         ? `moved ${label(chip.declaration)} ${chip.direction} L${chip.line}`
         : `moved ${chip.direction} L${chip.line}`;
+  }
+}
+
+/**
+ * Adds fact groups to a label's: one group per declaration (and whether it
+ * is labelled whole), so two declarations on one line keep their own
+ * facts; facts already in a group are not repeated.
+ */
+function addGroups(target: FactGroup[], groups: readonly FactGroup[]) {
+  const same = (a: FactGroup["owner"], b: FactGroup["owner"]) =>
+    a === b || (a !== null && b !== null && a.keyword === b.keyword && a.name === b.name);
+  for (const group of groups) {
+    const index = target.findIndex(
+      (existing) => existing.whole === group.whole && same(existing.owner, group.owner)
+    );
+    if (index < 0) {
+      target.push({ ...group, facts: [...group.facts] });
+      continue;
+    }
+    const existing = target[index];
+    const keys = new Set(existing.facts.map(factKey));
+    target[index] = {
+      ...existing,
+      facts: [...existing.facts, ...group.facts.filter((fact) => !keys.has(factKey(fact)))],
+      omitted: existing.omitted + group.omitted,
+    };
   }
 }

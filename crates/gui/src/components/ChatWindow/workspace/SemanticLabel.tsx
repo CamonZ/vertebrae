@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import type { SemanticFile } from "./useChangeFiles";
 import {
   FALLBACK_TEXT,
@@ -9,10 +9,21 @@ import {
   type DiffSide,
   type SemanticLabel,
 } from "./semanticHunks";
+import {
+  categoryOf,
+  countText,
+  factChips,
+  factSections,
+  factText,
+  type FactGroup,
+} from "./semanticFacts";
 
 /**
- * A structural change label under a changed line: the enclosing
- * declarations, then what happened. A moved copy links to the other copy.
+ * A structural change label under a changed line, on one row: the
+ * enclosing declarations (tagged when they are test code), what happened,
+ * then what kind of code it touches. A moved copy links to the other copy.
+ * Facts that do not fit fold into a `+N more` button whose panel lists
+ * every fact by declaration and category.
  */
 export function SemanticLabelRow({
   label,
@@ -21,35 +32,144 @@ export function SemanticLabelRow({
   label: SemanticLabel;
   onJump(line: number, side: DiffSide): void;
 }): ReactNode {
+  const { chips: facts, hidden } = factChips(label.facts);
+  const summarized = facts.some((chip) => chip.kind === "count");
+  const [open, setOpen] = useState(false);
+  const button = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
   return (
-    <div className="semantic-label" data-semantic-label="">
-      {label.scope.length > 0 && (
-        <span className="semantic-scope">
-          {label.scope.map((segment, index) => (
-            <span key={index} className="semantic-scope-segment">
-              <span className="semantic-scope-keyword">{segment.keyword}</span>{" "}
-              {segment.name}
-            </span>
-          ))}
-        </span>
-      )}
-      {label.chips.map((chip, index) =>
-        chip.kind === "moved" ? (
-          <button
-            key={index}
-            type="button"
-            className="semantic-chip semantic-chip--moved"
-            title={`Go to the ${chip.direction === "from" ? "old" : "new"} location`}
-            onClick={() => onJump(chip.line, chip.side)}
-          >
-            {chipText(chip)} ↗
-          </button>
-        ) : (
-          <span key={index} className={`semantic-chip semantic-chip--${chip.kind}`}>
-            {chipText(chip)}
+    <div className="semantic-label-block">
+      <div className="semantic-label" data-semantic-label="">
+        {(label.scope.length > 0 || label.test) && (
+          <span className="semantic-scope">
+            {label.scope.map((segment, index) => (
+              <span key={index} className="semantic-scope-segment">
+                <span className="semantic-scope-keyword">{segment.keyword}</span>{" "}
+                {segment.name}
+              </span>
+            ))}
+            {label.test && <span className="semantic-test-tag">test</span>}
           </span>
-        )
+        )}
+        {label.chips.map((chip, index) =>
+          chip.kind === "moved" ? (
+            <button
+              key={index}
+              type="button"
+              className="semantic-chip semantic-chip--moved"
+              title={`Go to the ${chip.direction === "from" ? "old" : "new"} location`}
+              onClick={() => onJump(chip.line, chip.side)}
+            >
+              {chipText(chip)} ↗
+            </button>
+          ) : (
+            <span key={index} className={`semantic-chip semantic-chip--${chip.kind}`}>
+              {chipText(chip)}
+            </span>
+          )
+        )}
+        {facts.length > 0 && (
+          <span className="semantic-facts">
+            {facts.map((chip, index) =>
+              chip.kind === "fact" ? (
+                <span
+                  key={index}
+                  className={`semantic-fact semantic-fact--${categoryOf(chip.fact.kind)}`}
+                  data-semantic-fact={chip.fact.kind.type}
+                >
+                  {factText(chip.fact)}
+                </span>
+              ) : (
+                <span
+                  key={index}
+                  className="semantic-fact semantic-fact--count"
+                  data-semantic-fact-count={chip.category}
+                >
+                  {countText(chip.category, chip.count)}
+                </span>
+              )
+            )}
+          </span>
+        )}
+        {(hidden > 0 || summarized) && (
+          <button
+            ref={button}
+            type="button"
+            className="semantic-fact semantic-fact--more"
+            aria-expanded={open}
+            aria-controls={panelId}
+            onClick={() => setOpen((was) => !was)}
+          >
+            {hidden > 0 ? `+${hidden} more` : "all facts"}
+          </button>
+        )}
+      </div>
+      {open && (
+        <FactPanel
+          id={panelId}
+          groups={label.facts}
+          onClose={() => {
+            setOpen(false);
+            button.current?.focus();
+          }}
+        />
       )}
+    </div>
+  );
+}
+
+/** Every fact of a label, by declaration and category; Escape closes it. */
+function FactPanel({
+  id,
+  groups,
+  onClose,
+}: {
+  id: string;
+  groups: readonly FactGroup[];
+  onClose(): void;
+}): ReactNode {
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => panel.current?.focus(), []);
+  const sections = factSections(groups);
+  return (
+    <div
+      ref={panel}
+      id={id}
+      role="region"
+      aria-label="Facts"
+      tabIndex={-1}
+      className="semantic-facts-panel"
+      onKeyDown={(event) => {
+        if (event.key !== "Escape") return;
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      {sections.map((section, index) => (
+        <section key={index} className="semantic-facts-section">
+          {sections.length > 1 && section.owner && (
+            <h4 className="semantic-facts-owner">
+              <span className="semantic-scope-keyword">{section.owner.keyword}</span>{" "}
+              {section.owner.name}
+            </h4>
+          )}
+          {section.categories.map((category) => (
+            <div key={category.name} className="semantic-facts-category">
+              <h5>{category.name}</h5>
+              <ul>
+                {category.facts.map((fact, i) => (
+                  <li key={i}>{fact}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+          {section.omitted > 0 && (
+            <p className="semantic-facts-omitted">
+              {section.omitted} more not listed
+            </p>
+          )}
+        </section>
+      ))}
     </div>
   );
 }
