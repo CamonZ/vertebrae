@@ -212,13 +212,10 @@ export function WorktreeChanges({
   onChangesLoaded,
   sourceJump,
   onExit,
-  onEdge,
 }: {
   ref?: Ref<HTMLElement>;
   /** Hand focus back to the chat input (Esc from the line cursor). */
   onExit?(): void;
-  /** ← / → past the diff's outer column: the chat, or the next area. */
-  onEdge?(direction: -1 | 1): void;
   worktreePath: string;
   sourceJump?: JumpTarget | null;
   /** Called with the parsed All Changes patch after every successful load. */
@@ -670,7 +667,21 @@ export function WorktreeChanges({
     const commands: PaletteItem[] = [
       { id: "changes-base", scope: "changes", label: CHANGES_COMMANDS.base, keywords: "comparison branch", run: pick(baseButton.current) },
       { id: "changes-target", scope: "changes", label: CHANGES_COMMANDS.target, keywords: "comparison head branch worktree", run: pick(targetButton.current) },
-      { id: "changes-files", scope: "changes", label: CHANGES_COMMANDS.files, keywords: "sidebar list", run: () => void requestAnimationFrame(focusFileList) },
+      { id: "changes-files", scope: "changes", label: CHANGES_COMMANDS.files, keywords: "sidebar list explorer open", run: () => void requestAnimationFrame(focusFileList) },
+      ...(filesOpen
+        ? [
+            {
+              id: "changes-hide-files",
+              scope: "changes",
+              label: CHANGES_COMMANDS.hideFiles,
+              keywords: "sidebar list explorer collapse close toggle",
+              run: () => {
+                setFilesOpen(false);
+                refocus();
+              },
+            } satisfies PaletteItem,
+          ]
+        : []),
       ...(selectedFile
         ? ([
             { id: "changes-diff", scope: "changes", label: CHANGES_COMMANDS.diff, hint: selectedFile.path, run: () => openSelected("diff") },
@@ -859,7 +870,6 @@ export function WorktreeChanges({
             diffStyle={diffStyle}
             onCursorFile={setActivePath}
             onExit={onExit}
-            onEdge={onEdge}
             viewedPaths={viewedPaths}
             onViewedChange={setViewed}
             loadContents={loadContents}

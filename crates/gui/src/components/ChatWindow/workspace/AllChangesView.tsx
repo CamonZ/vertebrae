@@ -16,7 +16,10 @@ import {
   type CodeViewDiffItem,
   type CodeViewHandle,
 } from "@pierre/diffs/react";
-import type { FileDiffLoadedChangedFiles } from "@pierre/diffs";
+import type {
+  FileDiffLoadedChangedFiles,
+  SelectedLineRange,
+} from "@pierre/diffs";
 import type { WorktreeChange } from "../../../bindings";
 import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import { useDiffComments } from "../../../hooks/useDiffComments";
@@ -28,7 +31,17 @@ import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread
 import { DiffReviewContext } from "../../thread/toolChange/DiffReviewContext";
 import type { BackgroundOutputs } from "../../../background/types";
 import { MARKER_TEXT } from "../../thread/toolChange/worktreeDelta";
+import {
+  CHANGES_CURSOR_CSS,
+  changesCursorScrollBehavior,
+  useChangesCursorOverlay,
+} from "./useChangesCursorOverlay";
 import { diffWorkerPool } from "../../thread/toolChange/diffWorkerPool";
+import {
+  clickedCodeLine,
+  pageChanges,
+  type DiffLine,
+} from "./changesCursorPointer";
 
 export interface JumpTarget extends SourceLocation {
   /** Distinguishes repeated jumps to the same file. */
@@ -48,8 +61,6 @@ export interface AllChangesViewProps {
   onCursorFile?(path: string): void;
   /** Leave the diff for the main chat input. */
   onExit?(): void;
-  /** ← / → past the diff's outer column. */
-  onEdge?(direction: -1 | 1): void;
   /** Files marked viewed: shown folded and skipped by the line cursor. */
   viewedPaths?: ReadonlySet<string>;
   onViewedChange?(path: string, viewed: boolean): void;
@@ -91,9 +102,6 @@ const GAP_CSS = `
   line-height: 1.4;
   opacity: 0.75;
 }
-[data-separator][${GAP_CURSOR_ATTRIBUTE}] {
-  box-shadow: inset 2px 0 0 var(--diff-line-cursor, transparent);
-}
 [data-separator][${GAP_CURSOR_ATTRIBUTE}] [data-unmodified-lines]::after {
   opacity: 1;
 }
@@ -126,7 +134,6 @@ export default function AllChangesView({
   diffStyle,
   onCursorFile,
   onExit,
-  onEdge,
   viewedPaths = NO_PATHS,
   onViewedChange,
   loadContents,
@@ -222,15 +229,22 @@ export default function AllChangesView({
     enabled: !!loadContents && LINE_INFO_SEPARATORS.has(options.hunkSeparators),
     viewRef,
   });
-  const { fileDiffFor } = gaps;
+  const { fileDiffFor, onPostRender: onGapsPostRender } = gaps;
+  const lastCursorMove = useRef(-Infinity);
   const review = useDiffComments({ kind: "worktree" }, patchFiles, undefined, {
     layout,
     onExit,
-    onEdge,
     onToggleViewed,
+    page: (direction, extend) =>
+      pageChanges(viewRef.current, containerRef.current, direction, (line) =>
+        placeCursor(line, extend)
+      ),
     context: gaps.context,
     onRevealGap: gaps.reveal,
     onCursorMove: (path, lineNumber, side) => {
+      const now = performance.now();
+      const behavior = changesCursorScrollBehavior(now - lastCursorMove.current);
+      lastCursorMove.current = now;
       onCursorFile?.(path);
       gaps.request(path);
       viewRef.current?.scrollTo({
@@ -240,6 +254,7 @@ export default function AllChangesView({
         side,
         align: "nearest",
         offset: CURSOR_SCROLL_MARGIN,
+        behavior,
       });
     },
   });
@@ -305,6 +320,24 @@ export default function AllChangesView({
   const [dismissedEvidence, setDismissedEvidence] = useState<number | null>(
     null
   );
+  /** Click and PgUp/PgDn land the line cursor on a line (⇧ extends). */
+  const placeCursor = (to: DiffLine, extend: boolean) => {
+    const path = itemPaths.get(to.id) ?? to.id;
+    const current = viewRef.current?.getInstance()?.getSelectedLines();
+    const range: SelectedLineRange =
+      extend && current?.id === to.id
+        ? {
+            start: current.range.start,
+            side: current.range.side,
+            end: to.line,
+            endSide: to.side,
+          }
+        : { start: to.line, end: to.line, side: to.side };
+    setDismissedEvidence(jumpTarget?.nonce ?? null);
+    onSelectionChange(path, range);
+    onCursorFile?.(path);
+    gaps.request(path);
+  };
   const evidenceSelection =
     jumpTarget?.line !== undefined &&
     dismissedEvidence !== jumpTarget.nonce &&
@@ -321,6 +354,12 @@ export default function AllChangesView({
           },
         }
       : null;
+  const { overlayRef, schedule: scheduleCursorPaint } = useChangesCursorOverlay(
+    viewRef,
+    containerRef,
+    selectedLines,
+    gapCursor
+  );
   const codeViewOptions = useMemo(
     () => ({
       ...options,
@@ -329,8 +368,11 @@ export default function AllChangesView({
       // No top padding: the focus halo sits flush on the first file.
       layout: CODE_VIEW_LAYOUT,
       expansionLineCount: GAP_BATCH,
-      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}`,
-      onPostRender: gaps.onPostRender,
+      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}`,
+      onPostRender: (...args: Parameters<typeof onGapsPostRender>) => {
+        onGapsPostRender(...args);
+        scheduleCursorPaint();
+      },
       ...(review.enabled
         ? {
             enableGutterUtility: true,
@@ -348,7 +390,15 @@ export default function AllChangesView({
           }
         : {}),
     }),
-    [options, diffStyle, review.enabled, openComposer, itemPaths, gaps.onPostRender]
+    [
+      options,
+      diffStyle,
+      review.enabled,
+      openComposer,
+      itemPaths,
+      onGapsPostRender,
+      scheduleCursorPaint,
+    ]
   );
 
   // Bring a requested comment into view once per request.
@@ -449,8 +499,27 @@ export default function AllChangesView({
       <div
         {...review.keyboardProps}
         onClickCapture={gaps.onClickCapture}
-        className="diff-line-cursor-host flex min-h-0 flex-1 flex-col"
+        // Pierre's scroller is click-focusable; a click anywhere in the diff
+        // lands in the line cursor instead, so arrows and PgUp/PgDn drive it.
+        onFocus={(event) => {
+          if (review.enabled && event.target === containerRef.current)
+            event.currentTarget.focus({ preventScroll: true });
+        }}
+        onClick={(event) => {
+          if (!review.enabled) return;
+          const clicked = clickedCodeLine(event.nativeEvent, viewRef.current);
+          if (clicked) placeCursor(clicked, false);
+        }}
+        className="diff-line-cursor-host diff-line-cursor-host--changes flex min-h-0 flex-1 flex-col"
       >
+        <div
+          ref={overlayRef}
+          className="changes-cursor-overlay"
+          aria-hidden="true"
+        >
+          <span className="changes-cursor-bar" hidden />
+          <span className="changes-cursor-caret" hidden />
+        </div>
         <CodeView
           ref={viewRef}
           containerRef={containerRef}

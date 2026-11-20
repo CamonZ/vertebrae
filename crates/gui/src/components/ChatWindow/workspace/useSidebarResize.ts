@@ -1,7 +1,15 @@
-import { useCallback, useRef, useState, type HTMLAttributes } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type HTMLAttributes,
+} from "react";
 
 const CHANGES_SPLITTER_WIDTH = 2;
 const WIDTH_PRESETS = [1 / 3, 1 / 2, 2 / 3];
+/** How long a keyboard jump eases (keep in step with `.is-easing` in CSS). */
+export const SIDEBAR_EASE_MS = 180;
 
 export function sidebarBounds(container: number) {
   const max = Math.max(36, Math.min(560, container - 180));
@@ -20,6 +28,24 @@ export function useSidebarResize(
   const drag = useRef<{ id: number; x: number; width: number } | null>(null);
   const [available, setAvailable] = useState(800);
   const [preferred, setPreferred] = useState(options.initial ?? 240);
+  // Keyboard jumps ease to their width; drags and window resizes follow
+  // the pointer and layout immediately.
+  const [easing, setEasing] = useState(false);
+  const easeTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(easeTimer.current), []);
+  const stopEasing = () => {
+    window.clearTimeout(easeTimer.current);
+    setEasing(false);
+  };
+  const easeTo = (value: number) => {
+    window.clearTimeout(easeTimer.current);
+    setEasing(true);
+    setPreferred(value);
+    easeTimer.current = window.setTimeout(
+      () => setEasing(false),
+      SIDEBAR_EASE_MS + 40
+    );
+  };
 
   // The keyed discussion provider can replace the container without remounting
   // this hook. Own observation through the DOM ref, rather than a mount effect.
@@ -69,6 +95,7 @@ export function useSidebarResize(
       if (event.button !== 0) return;
 
       event.preventDefault();
+      stopEasing();
       event.currentTarget.focus();
       event.currentTarget.setPointerCapture(event.pointerId);
       drag.current = { id: event.pointerId, x: event.clientX, width };
@@ -112,21 +139,23 @@ export function useSidebarResize(
       event.preventDefault();
 
       const nextWidth = clamp(next);
-      setPreferred(nextWidth);
+      // Home/End jump; the 10px arrow steps are already small.
+      if (event.key === "Home" || event.key === "End") easeTo(nextWidth);
+      else setPreferred(nextWidth);
     },
   };
 
   /** Grow (1) or shrink (-1) by a tenth of the available width. */
   const resizeBy = (direction: -1 | 1) =>
-    setPreferred(clamp(width + direction * Math.round(available * 0.1)));
+    easeTo(clamp(width + direction * Math.round(available * 0.1)));
 
   /** Step through ⅓, ½ and ⅔ of the available width, then wrap. */
   const cycleWidth = () => {
     const presets = WIDTH_PRESETS.map((fraction) =>
       clamp(Math.round(available * fraction))
     );
-    setPreferred(presets.find((preset) => preset > width + 1) ?? presets[0]);
+    easeTo(presets.find((preset) => preset > width + 1) ?? presets[0]);
   };
 
-  return { containerRef, width, handleProps, resizeBy, cycleWidth };
+  return { containerRef, width, easing, handleProps, resizeBy, cycleWidth };
 }

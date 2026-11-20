@@ -726,3 +726,52 @@
   --focus-overlay-glow: color-mix(in oklch, var(--color-fg-mute) 30%, transparent);
 }
 
+
+/* The Changes glow spans the whole panel, scrollbar included, so the track
+   doesn't read as a strip outside the focused area. */
+.diff-line-cursor-host--changes {
+  position: relative;
+  --focus-overlay-inset: 0;
+  --changes-range-tint: color-mix(in oklab, var(--color-accent) 17%, transparent);
+  --changes-row-strength: 8%;
+  --changes-number-strength: 28%;
+}
+
+.diff-line-cursor-host--changes:focus {
+  --changes-range-tint: color-mix(in oklab, var(--color-accent) 30%, transparent);
+  --changes-row-strength: 17%;
+  --changes-number-strength: 100%;
+}
+
+.changes-cursor-overlay {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  pointer-events: none;
+  z-index: 2;
+  opacity: 0.38;
+}
+
+.diff-line-cursor-host--changes:focus .changes-cursor-overlay {
+  opacity: 1;
+}
+
+.changes-cursor-bar,
+.changes-cursor-caret {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 1px;
+  translate: 0 var(--changes-scroll-y, 0px);
+  transform-origin: top left;
+  background-color: var(--color-accent);
+}
+
+.changes-cursor-bar {
+  width: 3px;
+}
+
+.changes-cursor-caret {
+  font-family: var(--font-mono);
+  background-color: color-mix(in oklab, var(--color-accent) 54%, transparent);
+}

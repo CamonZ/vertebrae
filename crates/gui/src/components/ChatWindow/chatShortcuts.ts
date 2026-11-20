@@ -102,6 +102,7 @@ export const CHANGES_COMMANDS = {
   base: "Choose base",
   target: "Choose compare target",
   files: "Show file list",
+  hideFiles: "Hide file list",
   diff: "Open full diff",
   file: "Open full file",
   external: "Open in external editor",

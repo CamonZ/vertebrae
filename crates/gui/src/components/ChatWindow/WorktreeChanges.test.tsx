@@ -318,6 +318,33 @@ it("opens the changed-file list and wraps keyboard jumps without capturing edito
   expect(jump).toHaveTextContent("gone.txt");
 });
 
+it("hides and shows the file list from the Changes palette", async () => {
+  load.mockResolvedValue({ status: "ok", data: modified });
+  render(<WorktreeChanges worktreePath="/worktree" />);
+  await screen.findByRole("button", { name: "Jump to src/app.ts" });
+  const changes = screen.getByRole("region", { name: "Worktree changes" });
+  changes.focus();
+
+  await runChangesCommand(changes, "Hide file list");
+  expect(screen.getByRole("button", { name: "Show files" })).toHaveAttribute(
+    "aria-expanded",
+    "false"
+  );
+  expect(screen.queryByRole("button", { name: "Jump to src/app.ts" })).toBeNull();
+  expect(changes).toHaveFocus();
+
+  // Hidden, the palette offers only the way back.
+  fireEvent.keyDown(changes, { key: "k", metaKey: true });
+  const labels = useCommandPaletteStore
+    .getState()
+    .contextItems.map((item) => item.label);
+  act(() => useCommandPaletteStore.getState().closePalette());
+  expect(labels).not.toContain("Hide file list");
+
+  await runChangesCommand(changes, "Show file list");
+  expect(screen.getByRole("button", { name: "Jump to src/app.ts" })).toHaveFocus();
+});
+
 it("moves focus with the arrow keys inside the changed-file list", async () => {
   load.mockResolvedValue({ status: "ok", data: modified });
   render(<WorktreeChanges worktreePath="/worktree" />);

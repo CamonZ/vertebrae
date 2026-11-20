@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useSidebarResize } from "./useSidebarResize";
+import { SIDEBAR_EASE_MS, useSidebarResize } from "./useSidebarResize";
 
 beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
@@ -278,4 +278,46 @@ it("resizes the Changes panel by tenths and cycles preset widths", () => {
   expect(handle).toHaveAttribute("aria-valuenow", "533");
   press("cycle");
   expect(handle).toHaveAttribute("aria-valuenow", "267");
+});
+
+it("eases keyboard jumps but follows drags immediately", () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("PointerEvent", MouseEvent);
+  function Fixture() {
+    const { containerRef, handleProps, resizeBy, cycleWidth, easing } =
+      useSidebarResize({ initial: 400, side: "right" });
+    return (
+      <div ref={containerRef} data-easing={easing}>
+        <div {...handleProps} />
+        <button onClick={() => resizeBy(1)}>grow</button>
+        <button onClick={cycleWidth}>cycle</button>
+      </div>
+    );
+  }
+  const { container } = render(<Fixture />);
+  const root = container.firstElementChild!;
+  const handle = screen.getByRole("separator");
+  handle.setPointerCapture = vi.fn();
+
+  try {
+    expect(root).toHaveAttribute("data-easing", "false");
+    fireEvent.click(screen.getByRole("button", { name: "grow" }));
+    expect(root).toHaveAttribute("data-easing", "true");
+    act(() => vi.advanceTimersByTime(SIDEBAR_EASE_MS + 40));
+    expect(root).toHaveAttribute("data-easing", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: "cycle" }));
+    expect(root).toHaveAttribute("data-easing", "true");
+    // Grabbing the splitter mid-ease hands control straight to the pointer.
+    fireEvent.pointerDown(handle, { button: 0, clientX: 300 });
+    expect(root).toHaveAttribute("data-easing", "false");
+
+    fireEvent.keyDown(handle, { key: "End" });
+    expect(root).toHaveAttribute("data-easing", "true");
+    act(() => vi.advanceTimersByTime(SIDEBAR_EASE_MS + 40));
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(root).toHaveAttribute("data-easing", "false");
+  } finally {
+    vi.useRealTimers();
+  }
 });

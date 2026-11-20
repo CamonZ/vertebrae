@@ -59,6 +59,15 @@
   min-width: 180px;
   overflow: auto;
 }
+/* Keyboard resizes (⌥←/⌥→/⌥=) ease to the new width; SIDEBAR_EASE_MS. */
+.changes-side-panel.is-easing {
+  transition: flex-basis 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .changes-side-panel.is-easing {
+    transition: none;
+  }
+}
 .changes-side-panel > section:first-child {
   flex: 1;
   min-height: 180px;
