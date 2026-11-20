@@ -120,25 +120,33 @@ describe("ChatMessages", () => {
     "enables copy-ID controls on rendered %s chat references without opening their panels",
     async (type) => {
       const user = userEvent.setup();
-      const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+      const writeText = vi
+        .spyOn(navigator.clipboard, "writeText")
+        .mockResolvedValue();
       const id = "860cde1b-9093-42ff-a19d-7453f3b7891b";
-      const messages: ChatMessage[] = [{
-        kind: "assistant",
-        text: `[Review this ${type}](vtb://${type}/${id})`,
-        timestamp: "2024-01-01T12:00:00Z",
-      }];
+      const messages: ChatMessage[] = [
+        {
+          kind: "assistant",
+          text: `[Review this ${type}](vtb://${type}/${id})`,
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ];
       render(<ChatMessages {...defaultProps({ messages, isEmpty: false })} />);
       const link = screen.getByRole("link", { name: `Open ${type} ${id}` });
       expect(link).toHaveTextContent(`Review this ${type}`);
       expect(screen.getByTestId("vtb-entity-level-mark")).toHaveAttribute(
-        "data-level", type
+        "data-level",
+        type
       );
-      await user.click(screen.getByRole("button", { name: `Copy full ${type} ID` }));
+      await user.click(
+        screen.getByRole("button", { name: `Copy full ${type} ID` })
+      );
       expect(writeText).toHaveBeenCalledExactlyOnceWith(id);
       expect(useEntityPanelStore.getState().selection).toBeNull();
       await user.click(link);
       expect(useEntityPanelStore.getState().selection).toEqual({
-        type: "task", taskId: id,
+        type: "task",
+        taskId: id,
       });
     }
   );
@@ -259,6 +267,149 @@ describe("ChatMessages", () => {
       "Please explain this wording."
     );
     selection?.removeAllRanges();
+  });
+
+  /*
+   * Ticket 0de6bdc7: the card is placed from its measured height, so a
+   * draft that grows the textarea and a shrinking window both re-place it
+   * inside the window. jsdom has no layout, so the selection, the card and
+   * its textarea get geometry: the card is 150px of chrome plus the
+   * textarea, whose content is 64px plus 20px per extra line.
+   */
+  it("keeps the comment card inside the window as its draft grows and the window shrinks", async () => {
+    const lineRect = new DOMRect(100, 540, 120, 20);
+    const rangeProto = Range.prototype as Partial<Range>;
+    const { getClientRects, getBoundingClientRect } = rangeProto;
+    rangeProto.getClientRects = () => [lineRect] as unknown as DOMRectList;
+    rangeProto.getBoundingClientRect = () => lineRect;
+    const observers: ResizeObserverCallback[] = [];
+    const OriginalResizeObserver = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(callback: ResizeObserverCallback) {
+        observers.push(callback);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    const setViewport = (width: number, height: number) => {
+      Object.defineProperty(window, "innerWidth", {
+        value: width,
+        configurable: true,
+      });
+      Object.defineProperty(window, "innerHeight", {
+        value: height,
+        configurable: true,
+      });
+    };
+    const originalViewport = [window.innerWidth, window.innerHeight] as const;
+    setViewport(1000, 600);
+
+    const isCard = (el: Element) => el.classList.contains("chat-comment-card");
+    const textareaContent = (el: Element) =>
+      64 + 20 * ((el as HTMLTextAreaElement).value.split("\n").length - 1);
+    const naturalCardHeight = (card: Element) => {
+      const textarea = card.querySelector("textarea")!;
+      return 150 + (parseFloat(textarea.style.height) || 64);
+    };
+    const shownHeight = (el: Element) => {
+      if (el instanceof HTMLTextAreaElement)
+        return parseFloat(el.style.height) || 64;
+      if (!isCard(el)) return 0;
+      const max = parseFloat((el as HTMLElement).style.maxHeight);
+      return Math.min(naturalCardHeight(el), max || Infinity);
+    };
+    const spies = [
+      vi
+        .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+        .mockImplementation(function (this: HTMLElement) {
+          return shownHeight(this);
+        }),
+      vi
+        .spyOn(Element.prototype, "clientHeight", "get")
+        .mockImplementation(function (this: Element) {
+          return shownHeight(this);
+        }),
+      vi
+        .spyOn(Element.prototype, "scrollHeight", "get")
+        .mockImplementation(function (this: Element) {
+          if (this instanceof HTMLTextAreaElement) return textareaContent(this);
+          return isCard(this) ? naturalCardHeight(this) : 0;
+        }),
+      vi
+        .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+        .mockImplementation(function (this: HTMLElement) {
+          return isCard(this) ? 384 : 0;
+        }),
+    ];
+
+    try {
+      const messages: ChatMessage[] = [
+        {
+          kind: "assistant",
+          itemId: "assistant-item-9",
+          text: "The last line of a long transcript.",
+          timestamp: "2024-01-01T12:00:01Z",
+        },
+      ];
+      const { container } = render(
+        <ChatMessages {...defaultProps({ messages, isEmpty: false })} />
+      );
+      const textNode = container.querySelector(
+        '[data-local-chat-assistant-item-id="assistant-item-9"] p'
+      )?.firstChild as Text;
+      const range = document.createRange();
+      range.setStart(textNode, 4);
+      range.setEnd(textNode, 8);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      fireEvent(document, new Event("selectionchange"));
+      fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+
+      const draft = screen.getByRole("textbox", {
+        name: "Comment on selected text",
+      });
+      expect(draft).toHaveFocus();
+      const card = draft.closest(".chat-comment-card") as HTMLElement;
+      const expectInsideWindow = () => {
+        const top = parseFloat(card.style.top);
+        expect(top).toBeGreaterThanOrEqual(8);
+        expect(top + card.offsetHeight).toBeLessThanOrEqual(
+          window.innerHeight - 8
+        );
+      };
+
+      // 214px does not fit in the 26px below the selection: it opens above.
+      expect(card).toHaveAttribute("data-placement", "above");
+      expect(card.style.top).toBe(`${534 - 214}px`);
+      expectInsideWindow();
+
+      // Five more lines grow the card to 314px; it moves up to stay clear.
+      fireEvent.change(draft, { target: { value: "a\nb\nc\nd\ne\nf" } });
+      expect(draft.style.height).toBe("164px");
+      act(() =>
+        observers.forEach((notify) => notify([], {} as ResizeObserver))
+      );
+      expect(card.style.top).toBe(`${534 - 314}px`);
+      expectInsideWindow();
+
+      // A window shorter than the card caps it at the inset window.
+      setViewport(1000, 250);
+      await act(async () => {
+        window.dispatchEvent(new Event("resize"));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      });
+      expect(card.style.maxHeight).toBe("234px");
+      expect(card.style.top).toBe("8px");
+      expectInsideWindow();
+    } finally {
+      spies.forEach((spy) => spy.mockRestore());
+      rangeProto.getClientRects = getClientRects;
+      rangeProto.getBoundingClientRect = getBoundingClientRect;
+      globalThis.ResizeObserver = OriginalResizeObserver;
+      setViewport(...originalViewport);
+      window.getSelection()?.removeAllRanges();
+    }
   });
 
   it("offers the comment pill only once a pointer selection is finished, and adds with Cmd+Return", async () => {

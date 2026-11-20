@@ -60,6 +60,8 @@
 .chat-comment-card-fixed {
   position: fixed;
   z-index: 80;
+  /* Scrolls only when taller than the window (placeCommentCard caps it). */
+  overflow-y: auto;
 }
 .chat-comment-card-chip {
   z-index: 90;
@@ -152,6 +154,11 @@
   background: var(--color-bg-1);
   padding: 8px;
   color: var(--color-fg);
+}
+
+/* The selection card's draft grows with its text (TranscriptCommentCard). */
+.chat-comment-card-fixed .chat-comment-textarea {
+  max-height: 12rem;
 }
 
 .chat-comment-textarea::placeholder {
