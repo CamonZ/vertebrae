@@ -689,7 +689,8 @@
     min-height: 20px;
   }
 
-  .changes-diff-heading .changes-diff-totals {
+  .changes-diff-heading .changes-diff-totals,
+  .changes-diff-heading .changes-declarations {
     display: none;
   }
 
@@ -774,4 +775,85 @@
 .changes-cursor-caret {
   font-family: var(--font-mono);
   background-color: color-mix(in oklab, var(--color-accent) 54%, transparent);
+}
+
+/* Semantic diff: a quiet label under the first changed line of a
+   declaration's changes; the scope in mono (code names), facts as small
+   tinted pills. */
+.semantic-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  padding: 3px 12px;
+  background: var(--color-bg-1);
+  border-block-end: 1px solid var(--color-line-soft);
+  color: var(--color-fg-mute);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.semantic-scope {
+  display: inline-flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  color: var(--color-fg-soft);
+  font-family: var(--font-mono);
+}
+
+.semantic-scope-segment + .semantic-scope-segment::before {
+  content: "›";
+  margin-inline: 4px;
+  color: var(--color-fg-faint);
+}
+
+.semantic-scope-keyword {
+  color: var(--color-fg-faint);
+}
+
+.semantic-chip {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--color-fg) 6%, transparent);
+  white-space: nowrap;
+}
+
+.semantic-chip--renamed,
+.semantic-chip--moved,
+.semantic-chip--signature {
+  background: var(--color-info-wash);
+  color: var(--color-info);
+}
+
+.semantic-chip--formatting {
+  background: transparent;
+  color: var(--color-fg-faint);
+  font-style: italic;
+}
+
+button.semantic-chip--moved {
+  cursor: pointer;
+}
+
+button.semantic-chip--moved:hover {
+  color: var(--color-fg);
+}
+
+/* Header marker: this file is shown as a line diff (or is only whitespace). */
+/* Declarations added, removed, renamed and moved: counts, names on hover. */
+.changes-declarations {
+  color: var(--color-fg-mute);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.changes-diff-mode {
+  padding: 0 6px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  color: var(--color-fg-mute);
+  font-size: 11px;
+  white-space: nowrap;
 }

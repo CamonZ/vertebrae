@@ -7,22 +7,24 @@ import {
 import type { CodeViewHandle } from "@pierre/diffs/react";
 import {
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type MouseEvent,
   type RefObject,
 } from "react";
-import type { WorktreeChange } from "../../../bindings";
 import type { GapCursor } from "../../thread/toolChange/diffCursor";
 import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
 import {
   GAP_BATCH,
   gapEnds,
   growGap,
+  mergeRevealsByPath,
   type FileContext,
   type GapEnd,
   type GapReveal,
+  type Reveals,
 } from "../../thread/toolChange/diffGaps";
 import type { FilePatch } from "../../thread/toolChange/diffLineMapper";
 import { contentsMatchPatch } from "./changeContents";
@@ -32,33 +34,29 @@ export const GAP_CURSOR_ATTRIBUTE = "data-cursor-gap";
 
 type Contents = FileDiffLoadedChangedFiles | null;
 
-interface Loaded {
-  /** The patch the contents were read for; a refreshed patch reloads. */
-  patch: string;
-  contents: Contents;
-}
-
 interface Hydration {
   contents: Contents;
   /** Null when the contents do not match the patch. */
   diff: FileDiffMetadata | null;
 }
 
-type Reveals = ReadonlyMap<string, ReadonlyMap<number, GapReveal>>;
-
 const NO_REVEALS: ReadonlyMap<number, GapReveal> = new Map();
 
 type RenderedItem = CodeViewRenderedItem<ReviewAnnotation, undefined>;
 
 export interface ChangeGapsInput {
-  /** Changed files by path. */
-  changes: ReadonlyMap<string, WorktreeChange>;
   /** Each path's parsed patch, which the cursor walks. */
   patches: ReadonlyMap<string, FilePatch>;
-  /** Reads both sides of a change; absent where lines cannot be revealed. */
-  loadContents?(change: WorktreeChange): Promise<Contents>;
+  /** Both sides of a file once loaded for its current patch, else null. */
+  contentsFor(path: string): Contents;
   /** Gaps are rows only with Pierre's line-count separators. */
   enabled: boolean;
+  /**
+   * Lines revealed without being asked for (semantic mode's declaration
+   * lines), per path and gap; each gap end shows the larger of these and
+   * what was revealed by hand.
+   */
+  autoReveals?: Reveals;
   viewRef: RefObject<CodeViewHandle<ReviewAnnotation, undefined> | null>;
 }
 
@@ -69,9 +67,7 @@ export interface ChangeGaps {
   context(path: string): FileContext | undefined;
   /** Show these lines of a gap. */
   reveal(path: string, gap: number, reveal: GapReveal): void;
-  /** Load a file's contents (once per patch) so its gaps can be revealed. */
-  request(path: string): void;
-  /** Pierre `onPostRender`: load, apply reveals and mark the cursor gap. */
+  /** Pierre `onPostRender`: apply reveals and mark the cursor gap. */
   onPostRender(node: HTMLElement, instance: unknown): void;
   /** Routes Pierre's expand buttons through {@link ChangeGaps.reveal}. */
   onClickCapture(event: MouseEvent<HTMLElement>): void;
@@ -82,45 +78,48 @@ export interface ChangeGaps {
 /**
  * Revealing collapsed unchanged lines in the Changes view. This hook owns
  * which lines are revealed (per path and gap); Pierre renders them. Each
- * diff becomes expandable once both sides of its file are loaded (lazily,
- * as it renders); every expansion, keyboard or mouse, goes through
+ * diff becomes expandable once both sides of its file are loaded (see
+ * `useChangeFiles`); every expansion, keyboard or mouse, goes through
  * `reveal`, and each Pierre instance is brought up to date when it renders.
  * State resets with the view (keyed by comparison).
  */
+const NO_AUTO_REVEALS: Reveals = new Map();
+
+/** Revealed lines: asked for by hand, automatic, and the two merged. */
+interface RevealState {
+  user: Reveals;
+  auto: Reveals;
+  merged: Reveals;
+}
+
 export function useChangeGaps({
-  changes,
   patches,
-  loadContents,
+  contentsFor,
   enabled,
   viewRef,
+  autoReveals = NO_AUTO_REVEALS,
 }: ChangeGapsInput): ChangeGaps {
-  const [loaded, setLoaded] = useState<ReadonlyMap<string, Loaded>>(new Map());
-  const [reveals, setReveals] = useState<Reveals>(new Map());
-  // The authoritative reveals for event handlers and Pierre callbacks; the
-  // state copy re-renders the cursor context. Written only by `reveal`.
-  const revealsRef = useRef<Reveals>(reveals);
-  const requested = useRef(new Map<string, string>());
+  // The authoritative reveals, for event handlers and Pierre callbacks,
+  // written only by `updateReveals`; the state copy of the merged reveals
+  // re-renders the cursor context.
+  const revealState = useRef<RevealState>({
+    user: NO_AUTO_REVEALS,
+    auto: autoReveals,
+    merged: autoReveals,
+  });
+  const [reveals, setReveals] = useState<Reveals>(autoReveals);
   const pushed = useRef(new WeakMap<object, Map<number, GapReveal>>());
   // Hydration is memoized per patch diff, and the latest per path is what
   // the cursor walks (both written only by `fileDiffFor`).
   const hydrated = useRef(new WeakMap<FileDiffMetadata, Hydration>());
   const hydratedByPath = useRef(new Map<string, Hydration>());
   const cursorRef = useRef<GapCursor | null>(null);
-  const inputs = useRef({ changes, patches, loadContents, enabled });
-  inputs.current = { changes, patches, loadContents, enabled };
-
-  const loadedFor = useCallback(
-    (path: string): Contents => {
-      const entry = loaded.get(path);
-      const change = changes.get(path);
-      return entry && change && entry.patch === change.patch ? entry.contents : null;
-    },
-    [loaded, changes]
-  );
+  const inputs = useRef({ patches });
+  inputs.current = { patches };
 
   const fileDiffFor = useCallback(
     (path: string, fileDiff: FileDiffMetadata): FileDiffMetadata => {
-      const contents = loadedFor(path);
+      const contents = contentsFor(path);
       const patch = patches.get(path);
       if (
         !enabled ||
@@ -148,13 +147,13 @@ export function useChangeGaps({
       hydratedByPath.current.set(path, entry);
       return diff ?? fileDiff;
     },
-    [loadedFor, patches, enabled]
+    [contentsFor, patches, enabled]
   );
 
   const context = useCallback(
     (path: string): FileContext | undefined => {
       if (!enabled) return undefined;
-      const contents = loadedFor(path);
+      const contents = contentsFor(path);
       const entry = hydratedByPath.current.get(path);
       const diff = contents && entry?.contents === contents ? entry.diff : null;
       return {
@@ -162,7 +161,7 @@ export function useChangeGaps({
         lines: diff ? diff.additionLines : null,
       };
     },
-    [enabled, loadedFor, reveals]
+    [enabled, contentsFor, reveals]
   );
 
   const renderedItems = useCallback(
@@ -174,7 +173,7 @@ export function useChangeGaps({
   /** Bring one rendered (hydrated) diff's expansions up to `reveals`. */
   const sync = useCallback((item: RenderedItem) => {
     if (item.type !== "diff" || item.item.fileDiff.isPartial) return;
-    const target = revealsRef.current.get(item.id);
+    const target = revealState.current.merged.get(item.id);
     if (!target) return;
     const done = pushed.current.get(item.instance) ?? new Map<number, GapReveal>();
     pushed.current.set(item.instance, done);
@@ -208,49 +207,47 @@ export function useChangeGaps({
       element.setAttribute(GAP_CURSOR_ATTRIBUTE, primary === "top" ? "up" : "down");
   }, []);
 
-  const request = useCallback((path: string) => {
-    const { changes, loadContents, enabled } = inputs.current;
-    const change = changes.get(path);
-    if (!enabled || !loadContents || !change) return;
-    if (requested.current.get(path) === change.patch) return;
-    requested.current.set(path, change.patch);
-    const store = (contents: Contents) => {
-      // A newer patch for this path supersedes this read.
-      if (requested.current.get(path) !== change.patch) return;
-      setLoaded((current) =>
-        new Map(current).set(path, { patch: change.patch, contents })
-      );
-    };
-    loadContents(change).then(store, (error: unknown) => {
-      console.error("Could not load", path, "to expand unchanged lines", error);
-      store(null);
-    });
-  }, []);
-
-  const reveal = useCallback(
-    (path: string, gap: number, next: GapReveal) => {
-      const current = revealsRef.current;
-      const updated = new Map(current).set(
-        path,
-        new Map(current.get(path) ?? NO_REVEALS).set(gap, next)
-      );
-      revealsRef.current = updated;
-      setReveals(updated);
-      const item = renderedItems().find((candidate) => candidate.id === path);
-      if (item) sync(item);
+  /** Replace either source of reveals and bring the rendered diffs up to date. */
+  const updateReveals = useCallback(
+    (sources: Partial<Omit<RevealState, "merged">>) => {
+      const { user, auto } = { ...revealState.current, ...sources };
+      const merged = mergeRevealsByPath(user, auto);
+      revealState.current = { user, auto, merged };
+      setReveals(merged);
+      for (const item of renderedItems()) sync(item);
     },
     [renderedItems, sync]
   );
 
+  const reveal = useCallback(
+    (path: string, gap: number, next: GapReveal) => {
+      const { user } = revealState.current;
+      updateReveals({
+        user: new Map(user).set(
+          path,
+          new Map(user.get(path) ?? NO_REVEALS).set(gap, next)
+        ),
+      });
+    },
+    [updateReveals]
+  );
+
+  // Automatic reveals arrive after the diffs render (and change with them).
+  useEffect(
+    () => updateReveals({ auto: autoReveals }),
+    [autoReveals, updateReveals]
+  );
+
   const onPostRender = useCallback(
     (_node: HTMLElement, instance: unknown) => {
-      const item = renderedItems().find((candidate) => candidate.instance === instance);
-      if (!item || !inputs.current.changes.has(item.id)) return;
-      request(item.id);
+      const item = renderedItems().find(
+        (candidate) => candidate.instance === instance
+      );
+      if (!item || !inputs.current.patches.has(item.id)) return;
       sync(item);
       mark(item);
     },
-    [renderedItems, request, sync, mark]
+    [renderedItems, sync, mark]
   );
 
   const onClickCapture = useCallback(
@@ -298,11 +295,10 @@ export function useChangeGaps({
       fileDiffFor,
       context,
       reveal,
-      request,
       onPostRender,
       onClickCapture,
       markCursor,
     }),
-    [fileDiffFor, context, reveal, request, onPostRender, onClickCapture, markCursor]
+    [fileDiffFor, context, reveal, onPostRender, onClickCapture, markCursor]
   );
 }

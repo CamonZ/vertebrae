@@ -141,7 +141,9 @@ export function useChangesCursorOverlay(
   viewRef: ViewRef,
   containerRef: RefObject<HTMLDivElement | null>,
   selected: Selection,
-  gap: GapCursor | null
+  gap: GapCursor | null,
+  /** Changes when the view's scroller is replaced, to listen on the new one. */
+  generation: unknown = null
 ) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const paint = useRef<(repaintRange: boolean) => void>(() => undefined);
@@ -365,7 +367,8 @@ export function useChangesCursorOverlay(
         positionMarker(marker, null, false, false);
       }
     };
-  }, [containerRef, schedule, viewRef]);
+    // `generation` re-binds to a remounted scroller.
+  }, [containerRef, schedule, viewRef, generation]);
 
   return { overlayRef, schedule };
 }

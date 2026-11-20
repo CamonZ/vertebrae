@@ -4,6 +4,7 @@ import {
   gapEnds,
   growGap,
   hiddenLines,
+  mergeRevealsByPath,
   revealGap,
   type FileContext,
   type GapReveal,
@@ -139,5 +140,20 @@ describe("growGap", () => {
     expect(growGap(FILE, context(), 1, ["top", "bottom"], 21)).toEqual({ top: 11, bottom: 10 });
     // Above the first hunk only the bottom end exists.
     expect(growGap(FILE, context(), 0, ["top", "bottom"], 4)).toEqual({ top: 0, bottom: 4 });
+  });
+});
+
+describe("mergeRevealsByPath", () => {
+  it("merges the gaps of paths revealed by both sources, keeping the larger reveal at each end", () => {
+    const merged = mergeRevealsByPath(
+      new Map([["a", new Map([[0, { top: 1, bottom: 0 }]])]]),
+      new Map([
+        ["a", new Map([[0, { top: 0, bottom: 4 }], [1, { top: 2, bottom: 0 }]])],
+        ["b", new Map([[2, { top: 3, bottom: 0 }]])],
+      ])
+    );
+    expect(merged.get("a")?.get(0)).toEqual({ top: 1, bottom: 4 });
+    expect(merged.get("a")?.get(1)).toEqual({ top: 2, bottom: 0 });
+    expect(merged.get("b")?.get(2)).toEqual({ top: 3, bottom: 0 });
   });
 });

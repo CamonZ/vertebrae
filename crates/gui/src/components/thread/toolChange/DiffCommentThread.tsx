@@ -25,6 +25,8 @@ export interface ReviewAnnotation {
   threadIds?: string[];
   /** A new comment is being written at this line. */
   draft: boolean;
+  /** No comments or draft: the line only carries a label row. */
+  labelOnly?: true;
 }
 
 function CommentCard({
