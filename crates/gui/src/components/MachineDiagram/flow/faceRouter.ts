@@ -283,9 +283,9 @@ export function routeByTopology(
     keep: ReadonlySet<string>,
     embedding: ReadonlyMap<string, readonly Dart[]>
   ): Map<string, RailRoute> | undefined => {
-    // Draw the rest: rails that join two components first, then the others.
-    // A rail that finds no room is ripped up with everything drawn after the
-    // kept rails and goes first next time (a few attempts at most).
+    // On retry, draw promoted rails first so they can claim space before
+    // other rails close off their paths. Then prioritize the remaining rails
+    // that join two components.
     const promoted: string[] = [];
     const attempt = (lenient: boolean): Map<string, RailRoute> | string => {
       const joined = new Components();
@@ -296,11 +296,12 @@ export function routeByTopology(
       const movable = o.preference.filter(
         (id) => !keep.has(id) && byId.get(id)?.r.movable
       );
-      const rest = [
-        ...promoted,
-        ...movable.filter((id) => !promoted.includes(id)),
-      ];
-      const order: string[] = [];
+      const rest = movable.filter((id) => !promoted.includes(id));
+      const order = [...promoted];
+      for (const id of promoted) {
+        const r = byId.get(id)!.r;
+        joined.join(r.from.part, r.to.part);
+      }
       for (let grew = true; grew; ) {
         grew = false;
         for (const id of rest) {
