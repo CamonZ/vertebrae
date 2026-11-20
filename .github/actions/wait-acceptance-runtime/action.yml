@@ -1,0 +1,30 @@
+name: Wait for acceptance runtime
+description: Wait for a suite build to upload its runtime artifact
+inputs:
+  suite:
+    description: Acceptance suite
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Wait for the runtime upload
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+        RUN_ID: ${{ github.run_id }}
+        SUITE: ${{ inputs.suite }}
+      shell: bash
+      run: |
+        # Jobs can keep running to save caches after their runtime upload.
+        while true; do
+          if state=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/jobs?per_page=100" \
+            --jq ".jobs[] | select(.name == \"$SUITE-build / Build acceptance $SUITE\") |
+              if any(.steps[]; .name == \"Upload immutable suite runtime\" and .conclusion == \"success\")
+              then \"ready\" elif .status == \"completed\" then \"failed\" else \"waiting\" end"); then
+            case "$state" in
+              ready) exit 0 ;;
+              failed) echo "::error::Acceptance build completed without uploading its runtime"; exit 1 ;;
+            esac
+          fi
+          sleep 10
+        done

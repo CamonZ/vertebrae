@@ -1,25 +1,25 @@
-name: Prepare acceptance images
+name: Prepare acceptance image
 
 on:
   workflow_call:
+    inputs:
+      suite:
+        required: true
+        type: string
 
 jobs:
   prepare:
-    name: Prepare ${{ matrix.suite }} runner
-    runs-on: ubuntu-24.04
+    name: Prepare ${{ inputs.suite }} runner
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: read
       packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [cli, daemon, gui]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Log in to GHCR with read access
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -28,12 +28,12 @@ jobs:
       - name: Resolve or build runner image
         env:
           VTB_ACCEPTANCE_OUTPUT: ${{ github.workspace }}/test-output/acceptance-images
-        run: python3 scripts/acceptance.py ${{ matrix.suite }} --prepare-image "${{ runner.temp }}/acceptance-image"
+        run: python3 scripts/acceptance.py ${{ inputs.suite }} --prepare-image "${{ runner.temp }}/acceptance-image"
 
       - name: Upload runner image handoff
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: acceptance-image-${{ matrix.suite }}-${{ github.sha }}
+          name: acceptance-image-${{ inputs.suite }}-${{ github.sha }}
           path: ${{ runner.temp }}/acceptance-image
           if-no-files-found: error
           overwrite: true
@@ -41,8 +41,8 @@ jobs:
 
       - name: Upload runner image diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
-          name: acceptance-image-diagnostics-${{ matrix.suite }}-${{ github.run_attempt }}
+          name: acceptance-image-diagnostics-${{ inputs.suite }}-${{ github.run_attempt }}
           path: test-output/acceptance-images
           if-no-files-found: warn
