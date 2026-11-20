@@ -491,7 +491,8 @@ builds locally only when neither exists. Published images are amd64, matching
 the CI runners, so other hosts build natively.
 
 In CI, the reusable `.github/workflows/acceptance-images.yml` workflow resolves
-one image per suite before the suite builds, shards, and Colima job use it. A
+one image per invocation. Each suite calls it independently before building its
+runtime. The shards use that image and runtime, as does Colima for GUI. A
 registry hit hands off a pinned digest. A miss builds once and uploads a
 Docker archive for that run. Consumers pull by digest or verify the archive
 checksum. The suite runtime manifest binds the build to that portable identity. On pushes to
@@ -503,8 +504,12 @@ For timing comparisons, sum `build_count` in each suite's handoff
 `runner.json`. On the previous workflow, count `image-<suite>-build` phases
 across the acceptance run and its independent publisher. Measure time to first
 shard from the run attempt's start to the earliest `Run acceptance suites`
-step start. Compare cold and warm runs on the same runner pool and record the
-run IDs and changed image inputs.
+step start. Measure total acceptance time from the same start to the completion
+of `Acceptance Tests`, and record workflow completion separately if another job
+finishes later. Compare cold and warm runs on the same runner pool and record the
+run IDs, changed image inputs, and build-cache hits or misses. Compare the
+GUI build job’s creation and start times with those of CLI and daemon shards on
+`homelab` to see whether they queue ahead of it.
 
 Set `VTB_ACCEPTANCE_REGISTRY` to use another registry locally. If a Dockerfile
 starts to `COPY` files, include them in `image_ref()` in `scripts/acceptance.py`.
@@ -565,11 +570,15 @@ once. The GUI bundle also carries its installed frontend dependencies. Each
 producer uploads a compressed runtime artifact; every shard in that suite downloads
 that same artifact and runs the compiled test executable directly. Shards do not
 invoke Cargo or npm install, and there is no compilation fallback for a missing or
-mismatched bundle. Colima retains its separate job and build path.
+mismatched bundle. Colima starts after GUI image preparation. It boots its VM
+and loads the runner image while the GUI runtime builds, then waits for the
+runtime upload before downloading the artifact and running the test. Colima
+uses GitHub-hosted Ubuntu 24.04 because its QEMU guest stalled loading images
+on Ubuntu 26.04.
 
 Acceptance execution uses both GitHub-hosted runners and the Linux x64 `homelab`
 scale set. CLI shard 2, daemon shards 2 and 4, and GUI shards 2, 4 and 8 target
-`homelab`; the other ten execution shards remain on `ubuntu-24.04`. GUI shard 6,
+`homelab`; the other ten execution shards remain on `ubuntu-latest`. GUI shard 6,
 which includes the rootless Podman backend scenarios, runs on GitHub-hosted runners. The GUI
 runtime producer also targets `homelab`; CLI/daemon producers, Colima, and the
 summary remain on GitHub-hosted runners. Fork pull requests use GitHub-hosted
@@ -593,9 +602,9 @@ runner checks that identity before starting a backend. A checkout changed during
 build is rejected. Producers create no database; shards own separate checkouts,
 Compose projects/databases, runtime homes, GUI/browser state, mocks and diagnostics.
 The required summary depends on both producers and shards, including build failures.
-Producer jobs must complete before the shard matrix starts, so total workflow time
-includes the build stage plus the longest shard; sharding cannot eliminate that
-critical path.
+Each suite’s runtime upload must succeed before its shard matrix starts. A
+GitHub-hosted job checks the upload status while the producer can finish saving
+its cache. The summary waits for all producers and shards.
 
 Build once and run an individual shard locally:
 
@@ -604,8 +613,8 @@ VTB_ACCEPTANCE_OUTPUT="$PWD/test-output/gui-runtime" python3 scripts/acceptance.
 python3 scripts/acceptance.py gui --prebuilt "$PWD/test-output/gui-runtime/runtime.tar.gz" --shard-index 1 --shard-count 8
 ```
 
-CI restores/saves job-private Cargo, target and npm build caches only in producer
-jobs using `actions/cache`. `VTB_ACCEPTANCE_BUILD_CACHE_DIR` enables bind mounts
+CI restores job-private Cargo, target and npm build caches in producer jobs and
+saves them on pushes to `master`. `VTB_ACCEPTANCE_BUILD_CACHE_DIR` enables bind mounts
 for those caches. Cache keys include runner platform, suite, dependency/toolchain/
 image inputs and commit, with a compatible restore prefix. Separate jobs never
 write a shared target directory. Ordinary local runs retain named-volume caches
@@ -615,7 +624,7 @@ node_modules volumes remain disposable; the producer's temporary dependency volu
 is removed after packaging.
 
 The target is roughly five minutes per shard, including artifact download, setup,
-tests and cleanup. The shared build stage and cold cache misses are additional
+tests and cleanup. The suite build and cold cache misses are additional
 workflow time. Confirm the target using subsequent hosted CI durations; local
 verification does not establish a five-minute hosted average.
 

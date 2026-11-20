@@ -1,0 +1,21 @@
+name: Wait for acceptance runtime
+
+on:
+  workflow_call:
+    inputs:
+      suite:
+        required: true
+        type: string
+
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/wait-acceptance-runtime
+        with:
+          suite: ${{ inputs.suite }}

@@ -47,51 +47,25 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(partitions, [runner.shard_features(suite, index, count) for index in range(1, count + 1)])
 
     def test_ci_matrix_matches_the_covered_shards(self):
-        workflow = runner.ROOT / ".github/workflows/acceptance.yml"
-        contents = workflow.read_text()
-        entry_pattern = r"\{suite: (\w+), shard: (\d+), count: (\d+), runner: ([\w.-]+)\}"
-        entries = re.findall(entry_pattern, contents)
-        actual = {(suite, int(index), int(count)) for suite, index, count, _ in entries}
-        expected = {(suite, index, count)
-                    for suite, count in [("cli", 2), ("daemon", 6), ("gui", 8)]
-                    for index in range(1, count + 1)}
-
-        self.assertEqual(actual, expected)
-        self.assertEqual(len(entries), len(expected))
-
-        homelab_shards = {
-            (suite, int(index))
-            for suite, index, _, host in entries
-            if host == "homelab"
-        }
-        expected_homelab_shards = {
-            ("cli", 2),
-            ("daemon", 2),
-            ("daemon", 4),
-            ("gui", 2),
-            ("gui", 4),
-            ("gui", 8),
-        }
-        hosts = {host for _, _, _, host in entries}
-
-        self.assertEqual(homelab_shards, expected_homelab_shards)
-        self.assertEqual(hosts, {"ubuntu-24.04", "homelab"})
-
-        acceptance_section = contents.split("  acceptance:\n", 1)[1]
-        shard_job = acceptance_section.split("  acceptance-summary:\n", 1)[0]
-        shard_lines = shard_job.splitlines()
-        routing_lines = [line.strip() for line in shard_lines if line.strip().startswith("runs-on:")]
-
-        self.assertEqual(len(routing_lines), 1)
-
-        routing = routing_lines[0]
-        expected_routing = (
-            "runs-on: ${{ github.event_name == 'pull_request' && "
-            "github.event.pull_request.head.repo.full_name != github.repository && "
-            "'ubuntu-24.04' || matrix.runner }}"
+        workflows = runner.ROOT / ".github/workflows"
+        caller = (workflows / "acceptance.yml").read_text()
+        shard_job = (workflows / "acceptance-shards.yml").read_text()
+        entries = re.findall(
+            r"^      suite: (\w+)\n      shards: '([^']+)'\n      homelab-shards: '([^']+)'$",
+            caller,
+            re.M,
         )
-
-        self.assertEqual(routing, expected_routing)
+        actual = [(suite, json.loads(shards), json.loads(homelab)) for suite, shards, homelab in entries]
+        self.assertEqual(actual, [
+            ("cli", [1, 2], [2]),
+            ("daemon", [1, 2, 3, 4, 5, 6], [2, 4]),
+            ("gui", [1, 2, 3, 4, 5, 6, 7, 8], [2, 4, 8]),
+        ])
+        self.assertIn("shard: ${{ fromJSON(inputs.shards) }}", shard_job)
+        self.assertIn("contains(fromJSON(inputs.homelab-shards), matrix.shard) && 'homelab' || 'ubuntu-latest'",
+                      shard_job)
+        self.assertIn("--shard-count ${{ strategy.job-total }}", shard_job)
+        self.assertIn("fail-fast: false", shard_job)
         self.assertNotIn("max-parallel:", shard_job)
 
     def test_weighted_partition_separates_large_features_and_is_deterministic(self):
@@ -200,37 +174,65 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.calls[1][1][-2:], ["gui", "/app/target/debug/deps/gui_acceptance-fixture"])
 
     def test_ci_builds_each_suite_before_shards_and_distributes_the_same_artifact(self):
-        workflow = (runner.ROOT / ".github/workflows/acceptance.yml").read_text()
-        build = workflow.split("  acceptance-build:", 1)[1].split("  acceptance:", 1)[0]
-        shards = workflow.split("  acceptance:", 1)[1].split("  acceptance-summary:", 1)[0]
-        artifact_name = "acceptance-runtime-${{ matrix.suite }}-${{ github.sha }}"
+        workflows = runner.ROOT / ".github/workflows"
+        workflow = (workflows / "acceptance.yml").read_text()
+        image = (workflows / "acceptance-images.yml").read_text()
+        build = (workflows / "acceptance-build.yml").read_text()
+        shards = (workflows / "acceptance-shards.yml").read_text()
+        jobs = dict(re.findall(r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow.split("jobs:\n")[1], re.M | re.S))
+        artifact_name = "acceptance-runtime-${{ inputs.suite }}-${{ github.sha }}"
 
-        build_entries = re.findall(r"\{suite: (\w+), runner: ([\w.-]+)\}", build)
-        expected_builds = {
-            ("cli", "ubuntu-24.04"),
-            ("daemon", "ubuntu-24.04"),
+        for suite, runner_label in [
+            ("cli", "ubuntu-latest"),
+            ("daemon", "ubuntu-latest"),
             ("gui", "homelab"),
-        }
+        ]:
+            with self.subTest(suite=suite):
+                for phase, reusable, dependency in [
+                    ("image", "images", None),
+                    ("build", "build", f"{suite}-image"),
+                    ("runtime", "runtime-ready", f"{suite}-image"),
+                    ("shards", "shards", f"{suite}-runtime"),
+                ]:
+                    job = jobs[f"{suite}-{phase}"]
+                    self.assertIn(f"uses: ./.github/workflows/acceptance-{reusable}.yml", job)
+                    self.assertIn(f"      suite: {suite}\n", job)
+                    self.assertEqual(re.findall(r"^    needs: (.+)$", job, re.M),
+                                     [f"[{dependency}]"] if dependency else [])
+                self.assertIn(f"      runner: {runner_label}\n", jobs[f"{suite}-build"])
 
-        self.assertEqual(set(build_entries), expected_builds)
-        self.assertEqual(len(build_entries), len(expected_builds))
-        self.assertIn("needs: [acceptance-images]", build)
+        colima = jobs["colima"]
+        self.assertIn("needs: [gui-image]", colima)
+        self.assertIn("actions: read", colima)
+        self.assertIn("runs-on: ubuntu-24.04", colima)
+        self.assertIn("DOCKER_CONTEXT: colima", colima)
+        self.assertLess(colima.index("Start real Colima Docker engine"),
+                        colima.index("Load prepared runner image into Colima"))
+        self.assertLess(colima.index("Load prepared runner image into Colima"),
+                        colima.index("uses: ./.github/actions/wait-acceptance-runtime"))
+        self.assertLess(colima.index("Capture Colima diagnostics on failure"),
+                        colima.index("Remove Colima VM and its test data"))
+        self.assertLess(colima.index("uses: ./.github/actions/wait-acceptance-runtime"),
+                        colima.index("Download GUI suite runtime"))
+        self.assertIn("name: acceptance-runtime-gui-${{ github.sha }}", jobs["colima"])
+        self.assertIn("needs: [cli-build, cli-shards, daemon-build, daemon-shards, gui-build, gui-shards]",
+                      jobs["acceptance-summary"])
+        self.assertIn("if: always()", jobs["acceptance-summary"])
+        for result in ("failure", "cancelled", "skipped"):
+            self.assertIn(f"!contains(needs.*.result, '{result}')", jobs["acceptance-summary"])
+        self.assertIn("github.event_name == 'push' && github.ref == 'refs/heads/master'", jobs["publish-images"])
+        self.assertIn("acceptance-image-${{ inputs.suite }}-${{ github.sha }}", image)
         for consumer in (build, shards):
             self.assertIn("uses: ./.github/actions/load-acceptance-image", consumer)
+            self.assertIn(artifact_name, consumer)
         self.assertIn("--build-only", build)
-        self.assertIn(artifact_name, build)
-        self.assertIn(artifact_name, shards)
-        self.assertIn("needs: [acceptance-build]", shards)
         self.assertIn("--prebuilt", shards)
-        self.assertNotIn("Restore and save acceptance build cache", shards)
+        self.assertNotIn("Restore acceptance build cache", shards)
 
     def test_ci_bootstraps_compose_before_building_or_running_suites(self):
-        workflow_path = runner.ROOT / ".github/workflows/acceptance.yml"
-        workflow = workflow_path.read_text()
-        build_section = workflow.split("  acceptance-build:\n", 1)[1]
-        build = build_section.split("  acceptance:\n", 1)[0]
-        shard_section = workflow.split("  acceptance:\n", 1)[1]
-        shards = shard_section.split("  acceptance-summary:\n", 1)[0]
+        workflows = runner.ROOT / ".github/workflows"
+        build = (workflows / "acceptance-build.yml").read_text()
+        shards = (workflows / "acceptance-shards.yml").read_text()
 
         operations = [(build, "Build suite runtime once"), (shards, "Run acceptance suites")]
 
@@ -244,7 +246,7 @@ class RunnerTests(unittest.TestCase):
             self.assertIn("docker/setup-compose-action@54042514f505b273907334ae2b9cdbb9a0213c1a", job)
             self.assertIn("version: v2.38.2", job)
             self.assertIn("github.event.pull_request.head.repo.full_name != github.repository", job)
-            self.assertIn("'ubuntu-24.04' || matrix.runner", job)
+            self.assertIn("'ubuntu-latest' ||", job)
 
     def test_nested_features_are_not_silently_omitted(self):
         with tempfile.TemporaryDirectory() as tmp:
