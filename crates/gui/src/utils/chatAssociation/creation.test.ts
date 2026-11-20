@@ -1,33 +1,11 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { readFile } from "node:fs/promises";
-import { Parser, Language } from "web-tree-sitter";
-import { analyzeActivity } from "../../components/thread/toolActivity/parser";
-import type { ActivityInput } from "../../components/thread/toolActivity/types";
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import type {
+  ActivityAnalysis,
+  ActivityInput,
+} from "../../components/thread/toolActivity/types";
 import type { ChatMessage } from "../../stores/chatStore";
 import { createdTicketId, creationEvidence, ticketCommand } from "./creation";
-
-let languages: Record<"javascript" | "bash" | "python", Language>;
-
-beforeAll(async () => {
-  const wasmBinary = await readFile(
-    "node_modules/web-tree-sitter/tree-sitter.wasm"
-  );
-  await Parser.init({ wasmBinary });
-
-  const load = async (name: string) => {
-    const path = `node_modules/tree-sitter-wasms/out/tree-sitter-${name}.wasm`;
-    const bytes = await readFile(path);
-    const grammar = new Uint8Array(bytes);
-
-    return Language.load(grammar);
-  };
-
-  const javascript = await load("javascript");
-  const bash = await load("bash");
-  const python = await load("python");
-
-  languages = { javascript, bash, python };
-});
 
 const ID = "29bd103a-84d4-4529-b70e-894173e46c1e";
 const output = JSON.stringify({
@@ -36,7 +14,21 @@ const output = JSON.stringify({
   task_id: ID,
 });
 
-const syntax = async (call: ActivityInput) => analyzeActivity(call, languages);
+// The native parser tests verify these same inputs against the recorded analyses.
+const fixtures: { call: ActivityInput; expected: ActivityAnalysis }[] =
+  readFileSync("../syntax/tests/fixtures/association-syntax.jsonl", "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+
+const syntax = async (call: ActivityInput): Promise<ActivityAnalysis> => {
+  const fixture = fixtures.find(
+    (fixture) => JSON.stringify(fixture.call) === JSON.stringify(call)
+  );
+  if (!fixture)
+    throw new Error(`Missing syntax fixture for ${JSON.stringify(call)}`);
+  return fixture.expected;
+};
 
 const call = (
   cmd: string,

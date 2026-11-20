@@ -1,3 +1,4 @@
+import type { JsonValue } from "../../bindings";
 import type { ChatMessage } from "../../stores/chatStore";
 import type {
   ActivityAnalysis,
@@ -9,14 +10,27 @@ const UUID = /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i;
 const object = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    typeof value === "number"
+  )
+    return true;
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  return object(value) && Object.values(value).every(isJsonValue);
+}
+
+function isActivityInputObject(
+  value: unknown
+): value is ActivityInput["input"] {
+  return object(value) && Object.values(value).every(isJsonValue);
+}
+
 /** Only one literal, unconditional invocation per tool call is supported. */
 export function ticketCommand(analysis: ActivityAnalysis): boolean {
-  if (
-    analysis.analysisState ||
-    analysis.failure ||
-    analysis.operations.length !== 1
-  )
-    return false;
+  if (analysis.analysisState || analysis.operations.length !== 1) return false;
 
   const op = analysis.operations[0];
   const command = op.literalCommand;
@@ -121,7 +135,7 @@ function callInput(
 
   try {
     const input: unknown = JSON.parse(m.input);
-    return object(input) ? { name: m.toolName, input } : null;
+    return isActivityInputObject(input) ? { name: m.toolName, input } : null;
   } catch {
     return ["exec", "functions.exec"].includes(m.toolName)
       ? { name: m.toolName, input: { code: m.input } }
@@ -161,7 +175,7 @@ export async function creationEvidence(
 
     const analysis = await syntax(input);
 
-    if (analysis.analysisState || analysis.failure)
+    if (analysis.analysisState)
       return fail("Ticket creation syntax could not be verified.");
     if (analysis.operations.length !== 1)
       return fail(

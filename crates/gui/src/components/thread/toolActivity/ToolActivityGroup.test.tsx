@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   fireEvent,
   render,
@@ -6,11 +7,33 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolActivityGroup } from "./ToolActivityGroup";
 import { activityLabel, groupToolMessages } from "./grouping";
 import { ChatSessionContext } from "../toolChange/ChatSessionContext";
 import type { ToolMessage } from "../types";
+import {
+  commands,
+  type ActivityAnalysis as ParsedActivity,
+} from "../../../bindings";
+
+vi.mock("../../../bindings", () => ({
+  commands: { analyzeToolActivities: vi.fn(), classifyToolOperations: vi.fn() },
+}));
+
+const analyze = vi.mocked(commands.analyzeToolActivities);
+const classify = vi.mocked(commands.classifyToolOperations);
+beforeEach(() => {
+  analyze.mockReset();
+  classify.mockReset();
+  analyze.mockImplementation(async (calls) => ({
+    status: "ok",
+    data: calls.map(({ name }) => ({
+      operations: [{ source: name, activities: [], relationships: [] }],
+    })),
+  }));
+});
+
 const call = (
   evt: string,
   status: ToolMessage["status"] = "pending"
@@ -127,32 +150,18 @@ it("labels raw input and result panels and connects their disclosure control", (
 });
 
 it("keeps overflow in its own visible badge beside the truncating activity label", async () => {
-  class WorkerStub {
-    onmessage: ((event: MessageEvent) => void) | null = null;
-    postMessage({ id }: { id: number }) {
-      queueMicrotask(() =>
-        this.onmessage?.(
-          new MessageEvent("message", {
-            data: {
-              kind: "result",
-              id,
-              analysis: {
-                operations: ["one", "two", "three", "four", "five"].map(
-                  (activity) => ({
-                    activities: [activity],
-                    source: activity,
-                    relationships: [],
-                  })
-                ),
-              },
-            },
-          })
-        )
-      );
-    }
-    terminate() {}
-  }
-  vi.stubGlobal("Worker", WorkerStub);
+  analyze.mockResolvedValue({
+    status: "ok",
+    data: [
+      {
+        operations: ["one", "two", "three", "four", "five"].map((activity) => ({
+          activities: [activity],
+          source: activity,
+          relationships: [],
+        })),
+      },
+    ],
+  });
   const ui = render(<ToolActivityGroup calls={[call("overflow", "done")]} />);
   try {
     await waitFor(() =>
@@ -165,7 +174,6 @@ it("keeps overflow in its own visible badge beside the truncating activity label
     ).toBeInTheDocument();
   } finally {
     ui.unmount();
-    vi.unstubAllGlobals();
   }
 });
 
@@ -190,63 +198,70 @@ it("keeps routine completion and operation diagnostics out of the first expansio
 });
 
 it("shows only one semantic disclosure row per Bash call before raw expansion", async () => {
-  class SemanticWorker {
-    onmessage: ((event: MessageEvent) => void) | null = null;
-    postMessage({
-      id,
-      call,
-    }: {
-      id: number;
-      call: { input: { command: string } };
-    }) {
-      queueMicrotask(() =>
-        this.onmessage?.(
-          new MessageEvent("message", {
-            data: {
-              kind: "result",
-              id,
-              analysis: {
-                operations: [
-                  {
-                    source: call.input.command,
-                    activities: [
-                      call.input.command.includes("build")
-                        ? "builds"
-                        : "checks",
-                    ],
-                    targets: ["/tmp/should-stay-in-details.log"],
-                    relationships: [],
-                  },
-                ],
-              },
-            },
-          })
-        )
-      );
-    }
-    terminate() {}
-  }
-  vi.stubGlobal("Worker", SemanticWorker);
-  const calls = ["npm run build", "scripts/validate.sh gui"].map(
-    (command, i) => ({
-      ...call(String(i), "done"),
-      name: "Bash",
-      activityInput: { name: "Bash", input: { command } },
+  const sources = [
+    "npm run build",
+    "scripts/validate.sh gui",
+    "python3 -c 'p.write_text(1); unknown()'",
+  ];
+  let finish!: (result: Awaited<ReturnType<typeof classify>>) => void;
+  classify.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
     })
   );
-  const ui = render(<ToolActivityGroup calls={calls} />);
+  // These rows were captured from the WASM parser and also asserted by the Rust parity test.
+  const recorded: {
+    call: { name: string; input: { command?: string } };
+    expected: ParsedActivity;
+  }[] = readFileSync(
+    "../syntax/tests/fixtures/review-compatibility.jsonl",
+    "utf8"
+  )
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  const baselineRows = sources.map((source) => {
+    const row = recorded.find(
+      ({ call }) => call.name === "Bash" && call.input.command === source
+    );
+    if (!row) throw new Error(`Missing reference row for ${source}`);
+    return row.expected;
+  });
+  analyze.mockResolvedValue({ status: "ok", data: baselineRows });
+  const calls = sources.map((command, i) => ({
+    ...call(String(i), "done"),
+    name: "Bash",
+    activityInput: { name: "Bash", input: { command } },
+  }));
+  const ui = render(
+    <ChatSessionContext.Provider value="fixture-session">
+      <ToolActivityGroup calls={calls} />
+    </ChatSessionContext.Provider>
+  );
   try {
-    fireEvent.click(screen.getByRole("button", { name: /2 calls for/ }));
+    fireEvent.click(screen.getByRole("button", { name: /3 calls for/ }));
     const build = await screen.findByRole("button", {
       name: /^Build — Raw arguments/,
     });
     expect(
       screen.getByRole("button", { name: /^Validation — Raw arguments/ })
     ).toBeInTheDocument();
-    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
     expect(
-      screen.queryByText("/tmp/should-stay-in-details.log")
-    ).not.toBeInTheDocument();
+      await screen.findByRole("button", { name: /^Edit files — Raw arguments/ })
+    ).toBeInTheDocument();
+    expect(classify).toHaveBeenCalledWith(
+      [sources[2]],
+      null,
+      "fixture-session"
+    );
+    await act(async () => finish({ status: "ok", data: [["checks"]] }));
+    expect(
+      await screen.findByRole("button", {
+        name: /^Edit files · Validation — Raw arguments/,
+      })
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Bash")).not.toBeInTheDocument();
+    expect(screen.queryByText("p.write_text")).not.toBeInTheDocument();
     for (const row of ui.container.querySelectorAll(".tool-activity-call")) {
       expect(row.children).toHaveLength(1);
       expect(row.firstElementChild?.tagName).toBe("BUTTON");
@@ -259,6 +274,25 @@ it("shows only one semantic disclosure row per Bash call before raw expansion", 
     expect(screen.getByLabelText("Raw recorded result")).toBeInTheDocument();
   } finally {
     ui.unmount();
-    vi.unstubAllGlobals();
   }
+});
+
+it("shows the unavailable state and retries the group after a command error", async () => {
+  analyze.mockResolvedValueOnce({
+    status: "error",
+    error: { message: "Activity analysis failed." },
+  });
+  render(<ToolActivityGroup calls={[call("retry", "done")]} />);
+  fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+  const retry = await screen.findByRole("button", { name: "Retry analysis" });
+  expect(
+    screen.getByRole("button", { name: /Analysis unavailable.*Raw arguments/ })
+  ).toBeInTheDocument();
+  fireEvent.click(retry);
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("button", { name: "Retry analysis" })
+    ).not.toBeInTheDocument()
+  );
+  expect(analyze).toHaveBeenCalledTimes(2);
 });

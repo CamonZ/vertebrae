@@ -161,6 +161,7 @@ fn create_builder() -> Builder {
             commands::resolve_chat_association,
             commands::resolve_chat_association_entity,
             commands::get_main_chat_worktree,
+            commands::analyze_tool_activities,
             commands::classify_tool_operations,
             commands::open_local_file,
             commands::create_local_chat_session,

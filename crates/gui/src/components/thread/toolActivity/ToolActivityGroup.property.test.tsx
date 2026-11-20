@@ -7,6 +7,10 @@ import { ToolActivityGroup } from "./ToolActivityGroup";
 import { ChatSessionContext } from "../toolChange/ChatSessionContext";
 import type { ToolMessage } from "../types";
 
+vi.mock("../../../bindings", () => ({
+  commands: { analyzeToolActivities: () => new Promise(() => {}) },
+}));
+
 function ExpensiveRaw({ id, mounted }: { id: string; mounted: Set<string> }) {
   useEffect(() => {
     mounted.add(id);
@@ -42,7 +46,6 @@ test(
             { minSize: 1, maxSize: 25 }
           )
         );
-        vi.stubGlobal("Worker", undefined);
         const mounted = new Set<string>();
         let nextId = 0,
           session = 0;
@@ -174,7 +177,6 @@ test(
         } finally {
           ui.unmount();
           expect(mounted.size).toBe(0);
-          vi.unstubAllGlobals();
         }
       },
       { testCases: 60 }

@@ -1,4 +1,4 @@
-//! Optional semantic labels for already separated invocations. Never executes source.
+//! Native tool activity projection and optional decision labels. Never executes source.
 use super::{AppState, CommandError};
 use async_trait::async_trait;
 use futures::{stream, StreamExt};
@@ -17,9 +17,11 @@ use vertebrae_harness_core::{
     CompletionStatus, EventSink, HarnessError, HarnessEventV1, RequestConfig, RunId, StreamId,
     StructuredInferenceRequest,
 };
+use vertebrae_syntax::{analyze_activity_until, ActivityAnalysis, ActivityInput, ActivityValue};
 
 static IN_FLIGHT: Semaphore = Semaphore::const_new(2);
 static ADMISSION: Semaphore = Semaphore::const_new(32);
+static PARSE_IN_FLIGHT: Semaphore = Semaphore::const_new(4);
 struct CachedDecision {
     settings: u64,
     source: String,
@@ -278,13 +280,124 @@ impl EventSink for DiscardEvents {
     }
 }
 
-/// Uses the configured decision role only. Disabled/unavailable models leave
-/// commands unclassified. No transcript, result, or worktree delta is supplied.
+/// Publish syntax independently of optional decision inference.
+#[tauri::command]
+#[specta::specta]
+pub async fn analyze_tool_activities(
+    calls: Vec<ActivityInput>,
+) -> Result<Vec<Option<ActivityAnalysis>>, CommandError> {
+    let permit = tokio::time::timeout(Duration::from_secs(2), PARSE_IN_FLIGHT.acquire())
+        .await
+        .ok()
+        .and_then(Result::ok);
+    let Some(permit) = permit else {
+        tracing::debug!("Tool activity parser queue wait expired");
+        return Ok((0..calls.len()).map(|_| None).collect());
+    };
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        parse_group(&calls)
+    })
+    .await
+    .map_err(|_| invalid("Activity analysis failed."))
+}
+
+// Charge a conservative wire-size estimate and stop traversing oversized inputs early.
+fn charge(budget: &mut usize, bytes: usize) -> Option<()> {
+    *budget = budget.checked_sub(bytes)?;
+    Some(())
+}
+
+fn charge_string(budget: &mut usize, value: &str) -> Option<()> {
+    charge(budget, 2 + value.len())?;
+    for byte in value.bytes() {
+        charge(
+            budget,
+            match byte {
+                b'"' | b'\\' | b'\n' | b'\r' | b'\t' | 8 | 12 => 1,
+                0..=31 => 5,
+                _ => 0,
+            },
+        )?;
+    }
+    Some(())
+}
+
+fn charge_object<'a>(
+    budget: &mut usize,
+    entries: impl IntoIterator<Item = (&'a String, &'a ActivityValue)>,
+) -> Option<()> {
+    charge(budget, 2)?;
+    for (key, value) in entries {
+        charge(budget, 2)?;
+        charge_string(budget, key)?;
+        charge_value(budget, value)?;
+    }
+    Some(())
+}
+
+fn charge_value(budget: &mut usize, value: &ActivityValue) -> Option<()> {
+    match value {
+        ActivityValue::Null => charge(budget, 4),
+        ActivityValue::Bool(_) => charge(budget, 5),
+        ActivityValue::Number(_) => charge(budget, 32),
+        ActivityValue::String(value) => charge_string(budget, value),
+        ActivityValue::Array(values) => {
+            charge(budget, 2)?;
+            for value in values {
+                charge(budget, 1)?;
+                charge_value(budget, value)?;
+            }
+            Some(())
+        }
+        ActivityValue::Object(values) => charge_object(budget, values),
+    }
+}
+
+fn parse_group(calls: &[ActivityInput]) -> Vec<Option<ActivityAnalysis>> {
+    let mut remaining: usize = 4_194_304;
+    let deadline = Instant::now() + Duration::from_secs(1);
+    calls
+        .iter()
+        .enumerate()
+        .map(|(index, call)| {
+            if index >= 1024 || Instant::now() >= deadline {
+                return None;
+            }
+            let available = remaining.min(131_072);
+            let mut budget = available;
+            charge(&mut budget, 18)?;
+            charge_string(&mut budget, &call.name)?;
+            charge_object(&mut budget, &call.input)?;
+            remaining -= available - budget;
+            Some(analyze_activity_until(
+                call,
+                deadline.min(Instant::now() + Duration::from_millis(100)),
+            ))
+        })
+        .collect()
+}
+
+/// Classify syntax-separated invocations using the configured decision role.
 #[tauri::command]
 #[specta::specta]
 pub async fn classify_tool_operations(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
+    commands: Vec<String>,
+    project_path: Option<String>,
+    session_id: Option<String>,
+) -> Result<Vec<Vec<String>>, CommandError> {
+    let result = classify_scoped(&app, &state, commands, project_path, session_id).await;
+    if let Err(error) = &result {
+        tracing::debug!(reason = %error.message, "Tool activity classification unavailable");
+    }
+    result
+}
+
+async fn classify_scoped(
+    app: &tauri::AppHandle,
+    state: &AppState,
     commands: Vec<String>,
     project_path: Option<String>,
     session_id: Option<String>,
@@ -308,12 +421,12 @@ pub async fn classify_tool_operations(
         .map(|client| client.connection_identity().to_string())
         .ok_or_else(|| invalid("No catalog connection."))?;
     let persisted =
-        super::chat_catalog::load_classifications(&state, &project_path, &session_id).await?;
+        super::chat_catalog::load_classifications(state, &project_path, &session_id).await?;
     let (output, additions) = classify_durable(config, commands, persisted).await?;
     if !additions.is_empty() {
         super::chat_catalog::store_classifications(
-            &state,
-            &app,
+            state,
+            app,
             &project_path,
             &session_id,
             additions,
@@ -393,6 +506,65 @@ mod tests {
     use super::*;
     use vertebrae_sacrum_client::VertebraeConfigFile;
     use wiremock::{matchers, Mock, MockServer, ResponseTemplate};
+
+    fn shell_input(cmd: &str) -> ActivityInput {
+        serde_json::from_value(json!({"name": "exec_command", "input": {"cmd": cmd}})).unwrap()
+    }
+
+    #[test]
+    fn batch_falls_back_per_call_for_oversized_inputs_and_count_overflow() {
+        let mut calls = vec![shell_input(&"x".repeat(131_072)), shell_input("cargo test")];
+        calls.extend((2..1025).map(|_| shell_input("true")));
+        let rows = parse_group(&calls);
+        assert_eq!(rows.len(), calls.len());
+        assert!(rows[0].is_none());
+        assert_eq!(
+            rows[1].as_ref().unwrap().operations[0].activities,
+            ["checks"]
+        );
+        assert!(rows[1023].is_some());
+        assert!(rows[1024].is_none());
+    }
+
+    #[tokio::test]
+    async fn bursts_beyond_the_old_queue_limit_are_served() {
+        let groups = (0..80).map(|_| analyze_tool_activities(vec![shell_input("cargo test")]));
+        for response in futures::future::join_all(groups).await {
+            let rows = response.unwrap();
+            assert_eq!(
+                rows[0].as_ref().unwrap().operations[0].activities,
+                ["checks"]
+            );
+        }
+    }
+
+    #[test]
+    fn slow_shell_falls_back_without_preventing_the_next_call() {
+        let rows = parse_group(&[
+            shell_input(&"true;".repeat(20_000)),
+            shell_input("cargo test"),
+        ]);
+        let first = &rows[0].as_ref().unwrap().operations[0];
+        assert!(first
+            .unresolved
+            .as_deref()
+            .is_some_and(|reason| reason.contains("time budget")));
+        assert_eq!(
+            rows[1].as_ref().unwrap().operations[0].activities,
+            ["checks"]
+        );
+    }
+
+    #[test]
+    fn aggregate_overflow_keeps_small_siblings() {
+        let mut calls: Vec<_> = (0..32).map(|_| shell_input(&" ".repeat(131_000))).collect();
+        calls.push(shell_input(&" ".repeat(131_000)));
+        calls.push(shell_input("cargo test"));
+        let rows = parse_group(&calls);
+        assert!(rows[31].is_some());
+        assert!(rows[32].is_none());
+        assert!(rows[33].is_some());
+    }
 
     #[tokio::test]
     async fn disabled_role_leaves_commands_unclassified_without_a_provider() {
