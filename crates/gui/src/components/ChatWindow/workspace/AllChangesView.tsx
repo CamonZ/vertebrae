@@ -2,6 +2,7 @@ import { CHANGES_COMMANDS } from "../chatShortcuts";
 import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
 import type { DiffPreferences } from "../../../utils/codeAppearance";
 import {
+  useCallback,
   useContext,
   useEffect,
   useMemo,
@@ -16,10 +17,7 @@ import {
   type CodeViewDiffItem,
   type CodeViewHandle,
 } from "@pierre/diffs/react";
-import type {
-  FileDiffLoadedChangedFiles,
-  SelectedLineRange,
-} from "@pierre/diffs";
+import type { SelectedLineRange } from "@pierre/diffs";
 import type { WorktreeChange } from "../../../bindings";
 import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import { useDiffComments } from "../../../hooks/useDiffComments";
@@ -42,6 +40,17 @@ import {
   pageChanges,
   type DiffLine,
 } from "./changesCursorPointer";
+import {
+  DeclarationCounts,
+  DiffModeBadge,
+  SemanticLabelRow,
+} from "./SemanticLabel";
+import {
+  useChangeFiles,
+  type LoadSides,
+  type SemanticFile,
+} from "./useChangeFiles";
+import { useSemanticMode } from "./useSemanticMode";
 
 export interface JumpTarget extends SourceLocation {
   /** Distinguishes repeated jumps to the same file. */
@@ -65,13 +74,25 @@ export interface AllChangesViewProps {
   viewedPaths?: ReadonlySet<string>;
   onViewedChange?(path: string, viewed: boolean): void;
   /**
-   * Both sides of a changed file, so its collapsed unchanged lines can be
-   * revealed; null when they cannot be shown.
+   * Both sides of a changed file (so its collapsed unchanged lines can be
+   * revealed), and in semantic mode its semantic diff.
    */
-  loadContents?(change: WorktreeChange): Promise<FileDiffLoadedChangedFiles | null>;
+  loadSides?: LoadSides;
+  /**
+   * Semantic mode: each hunk opens at its declaration, hunks of one
+   * declaration join, and structural changes are labelled. Line numbers,
+   * selections and comments are the line diff's.
+   */
+  semantic?: boolean;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
+
+/**
+ * Why a file is folded: marked viewed, folded by hand, or (in semantic
+ * mode) every change is whitespace. Opening it clears whichever applies.
+ */
+type FoldReason = "viewed" | "hand" | "formatting";
 
 /** Context kept visible around the keyboard cursor, in pixels (~4 lines). */
 const CURSOR_SCROLL_MARGIN = 80;
@@ -136,20 +157,65 @@ export default function AllChangesView({
   onExit,
   viewedPaths = NO_PATHS,
   onViewedChange,
-  loadContents,
+  loadSides,
+  semantic: semanticOn = false,
 }: AllChangesViewProps): ReactNode {
   const onToggleViewed = onViewedChange
     ? (path: string) => onViewedChange(path, !viewedPaths.has(path))
     : undefined;
   const options = usePierreDiffOptions();
-  const [foldedPaths, setCollapsedPaths] = useState<ReadonlySet<string>>(
-    new Set()
+  // Folded or opened by hand; overrides the formatting-only fold.
+  const [handFolds, setHandFolds] = useState<
+    ReadonlyMap<string, "folded" | "open">
+  >(new Map());
+  const changes = useMemo(
+    () => new Map(files.map((file) => [file.path, file])),
+    [files]
   );
-  // A viewed file stays folded until it is unmarked.
+  const patchesByPath = useMemo(() => {
+    const byPath = new Map<string, FilePatch>();
+    for (const result of parsedPatches)
+      for (const file of result.reviewFiles) byPath.set(canonicalPath(file), file);
+    return byPath;
+  }, [parsedPatches]);
+  // Line mode reads a file's sides only to reveal its unchanged lines.
+  const gapsEnabled =
+    !!loadSides && LINE_INFO_SEPARATORS.has(options.hunkSeparators);
+  const changeFiles = useChangeFiles(
+    changes,
+    patchesByPath,
+    semanticOn || gapsEnabled ? loadSides : undefined,
+    semanticOn
+  );
+  const { request: requestFile, fileFor } = changeFiles;
+  const semantic = useSemanticMode(changeFiles, patchesByPath, semanticOn);
+  const foldReason = useCallback(
+    (path: string): FoldReason | null => {
+      if (viewedPaths.has(path)) return "viewed";
+      const hand = handFolds.get(path);
+      if (hand) return hand === "folded" ? "hand" : null;
+      return semantic.viewFor(path)?.formattingOnly ? "formatting" : null;
+    },
+    [viewedPaths, handFolds, semantic]
+  );
   const collapsedPaths = useMemo<ReadonlySet<string>>(
     () =>
-      viewedPaths.size ? new Set([...foldedPaths, ...viewedPaths]) : foldedPaths,
-    [foldedPaths, viewedPaths]
+      new Set(
+        files.map((file) => file.path).filter((path) => foldReason(path))
+      ),
+    [files, foldReason]
+  );
+  /** Unfold a file however it was folded. */
+  const expandPath = useCallback(
+    (path: string) => {
+      if (viewedPaths.has(path)) onViewedChange?.(path, false);
+      setHandFolds((current) =>
+        current.get(path) === "open"
+          ? current
+          : new Map(current).set(path, "open")
+      );
+    },
+    [viewedPaths, onViewedChange]
   );
   const viewRef = useRef<CodeViewHandle<ReviewAnnotation, undefined>>(null);
   const jumpHeader = useRef<HTMLButtonElement>(null);
@@ -193,8 +259,10 @@ export default function AllChangesView({
   // files must start expanded if they appear again later.
   useEffect(() => {
     const paths = new Set(files.map((file) => file.path));
-    setCollapsedPaths((current) => {
-      const retained = new Set([...current].filter((path) => paths.has(path)));
+    setHandFolds((current) => {
+      const retained = new Map(
+        [...current].filter(([path]) => paths.has(path))
+      );
       return retained.size === current.size ? current : retained;
     });
     for (const id of itemVersions.current.keys()) {
@@ -212,25 +280,21 @@ export default function AllChangesView({
     [parsedPatches, files, collapsedPaths]
   );
   const layout = diffStyle ?? options.diffStyle;
-  const changes = useMemo(
-    () => new Map(files.map((file) => [file.path, file])),
-    [files]
+  const contentsFor = useCallback(
+    (path: string) => fileFor(path)?.contents ?? null,
+    [fileFor]
   );
-  const patchesByPath = useMemo(() => {
-    const byPath = new Map<string, FilePatch>();
-    for (const result of parsedPatches)
-      for (const file of result.reviewFiles) byPath.set(canonicalPath(file), file);
-    return byPath;
-  }, [parsedPatches]);
   const gaps = useChangeGaps({
-    changes,
     patches: patchesByPath,
-    loadContents,
-    enabled: !!loadContents && LINE_INFO_SEPARATORS.has(options.hunkSeparators),
+    contentsFor,
+    enabled: gapsEnabled,
     viewRef,
+    autoReveals: semantic.autoReveals,
   });
   const { fileDiffFor, onPostRender: onGapsPostRender } = gaps;
   const lastCursorMove = useRef(-Infinity);
+  /** The file the line cursor was last in, to return to after a mode switch. */
+  const lastCursorPath = useRef<string | null>(null);
   const review = useDiffComments({ kind: "worktree" }, patchFiles, undefined, {
     layout,
     onExit,
@@ -245,8 +309,9 @@ export default function AllChangesView({
       const now = performance.now();
       const behavior = changesCursorScrollBehavior(now - lastCursorMove.current);
       lastCursorMove.current = now;
+      lastCursorPath.current = path;
       onCursorFile?.(path);
-      gaps.request(path);
+      requestFile(path);
       viewRef.current?.scrollTo({
         type: "line",
         id: path,
@@ -266,43 +331,50 @@ export default function AllChangesView({
       {
         fileDiff: unknown;
         signature: string;
+        /** Labels come from the file's semantic result, built once on arrival. */
+        semantic: SemanticFile | null;
         collapsed: boolean;
         version: number;
       }
     >()
   );
   // CodeView keeps an item until its `version` changes. Publish annotation,
-  // diff and folding changes through that same reconciliation contract.
+  // diff, label and folding changes through that same reconciliation contract.
   const reviewItems = useMemo(
     () =>
       items.map((patchItem): CodeViewDiffItem<ReviewAnnotation> => {
+        const own = patchItem.id === itemPaths.get(patchItem.id);
         // Expandable once the file's contents are loaded.
-        const item =
-          patchItem.id === itemPaths.get(patchItem.id)
-            ? { ...patchItem, fileDiff: fileDiffFor(patchItem.id, patchItem.fileDiff) }
-            : patchItem;
-        const annotations =
-          item.id === itemPaths.get(item.id)
-            ? annotationsFor(item.id)
-            : undefined;
-        const signature = JSON.stringify(annotations ?? []);
-        const collapsed = collapsedPaths.has(itemPaths.get(item.id) ?? item.id);
+        const item = own
+          ? {
+              ...patchItem,
+              fileDiff: fileDiffFor(patchItem.id, patchItem.fileDiff),
+            }
+          : patchItem;
+        const review = own ? annotationsFor(item.id) : undefined;
+        const annotations = review && semantic.annotate(item.id, review);
+        const signature = JSON.stringify(review ?? []);
+        const path = itemPaths.get(item.id) ?? item.id;
+        const file = semantic.fileFor(path);
+        const collapsed = collapsedPaths.has(path);
         const previous = itemVersions.current.get(item.id);
         const changed =
           previous !== undefined &&
           (previous.fileDiff !== item.fileDiff ||
             previous.signature !== signature ||
+            previous.semantic !== file ||
             previous.collapsed !== collapsed);
         const version = (previous?.version ?? 0) + (changed ? 1 : 0);
         itemVersions.current.set(item.id, {
           fileDiff: item.fileDiff,
           signature,
+          semantic: file,
           collapsed,
           version,
         });
         return { ...item, annotations, collapsed, version };
       }),
-    [items, itemPaths, annotationsFor, collapsedPaths, fileDiffFor]
+    [items, itemPaths, annotationsFor, collapsedPaths, fileDiffFor, semantic]
   );
   const { gapCursor } = review;
   const { markCursor } = gaps;
@@ -317,6 +389,8 @@ export default function AllChangesView({
       ? { id: selectedPath, range: selectedLinesFor(selectedPath)! }
       : null
     : undefined;
+  const latestSelection = useRef(selectedLines);
+  latestSelection.current = selectedLines;
   const [dismissedEvidence, setDismissedEvidence] = useState<number | null>(
     null
   );
@@ -335,8 +409,9 @@ export default function AllChangesView({
         : { start: to.line, end: to.line, side: to.side };
     setDismissedEvidence(jumpTarget?.nonce ?? null);
     onSelectionChange(path, range);
+    lastCursorPath.current = path;
     onCursorFile?.(path);
-    gaps.request(path);
+    requestFile(path);
   };
   const evidenceSelection =
     jumpTarget?.line !== undefined &&
@@ -358,8 +433,32 @@ export default function AllChangesView({
     viewRef,
     containerRef,
     selectedLines,
-    gapCursor
+    gapCursor,
+    semanticOn
   );
+
+  // Switching modes remounts the diffs (revealed lines cannot be hidden
+  // again in place); return to the selection, or the file being read.
+  const renderedMode = useRef(semanticOn);
+  useEffect(() => {
+    if (renderedMode.current === semanticOn) return;
+    renderedMode.current = semanticOn;
+    const frame = requestAnimationFrame(() => {
+      const selection = latestSelection.current;
+      if (selection) {
+        viewRef.current?.scrollTo({
+          type: "line",
+          id: selection.id,
+          lineNumber: selection.range.end,
+          side: selection.range.endSide ?? selection.range.side ?? "additions",
+          align: "center",
+        });
+      } else if (lastCursorPath.current) {
+        viewRef.current?.scrollTo({ type: "item", id: lastCursorPath.current, align: "start" });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [semanticOn]);
   const codeViewOptions = useMemo(
     () => ({
       ...options,
@@ -371,6 +470,16 @@ export default function AllChangesView({
       unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}`,
       onPostRender: (...args: Parameters<typeof onGapsPostRender>) => {
         onGapsPostRender(...args);
+        // Pierre renders an item before adding it to its rendered range, so
+        // a file's first render is only listed once this pass finishes.
+        const instance = args[1];
+        queueMicrotask(() => {
+          const rendered = viewRef.current
+            ?.getInstance()
+            ?.getRenderedItems()
+            .find((item) => item.instance === instance);
+          if (rendered) requestFile(itemPaths.get(rendered.id) ?? rendered.id);
+        });
         scheduleCursorPaint();
       },
       ...(review.enabled
@@ -398,6 +507,7 @@ export default function AllChangesView({
       itemPaths,
       onGapsPostRender,
       scheduleCursorPaint,
+      requestFile,
     ]
   );
 
@@ -416,11 +526,7 @@ export default function AllChangesView({
     const target = matches.find((placement) => placement.home) ?? matches[0];
     if (!target || !itemPaths.has(target.path)) return;
     if (collapsedPaths.has(target.path)) {
-      onViewedChange?.(target.path, false);
-      setCollapsedPaths(
-        (current) =>
-          new Set([...current].filter((path) => path !== target.path))
-      );
+      expandPath(target.path);
       return; // Scroll after CodeView has received the expanded item version.
     }
     handledFocus.current = focus.nonce;
@@ -435,7 +541,7 @@ export default function AllChangesView({
           }
         : { type: "item", id: target.path, align: "start" }
     );
-  }, [focus, placements, itemPaths, collapsedPaths, onViewedChange]);
+  }, [focus, placements, itemPaths, collapsedPaths, expandPath]);
 
   // Jump once per request; background refreshes must not move the viewport.
   const handledJump = useRef<number | null>(null);
@@ -443,10 +549,7 @@ export default function AllChangesView({
     if (!jumpTarget || handledJump.current === jumpTarget.nonce) return;
     const { path } = jumpTarget;
     if (!jumpTarget.focusHeader && collapsedPaths.has(path)) {
-      onViewedChange?.(path, false);
-      setCollapsedPaths(
-        (current) => new Set([...current].filter((value) => value !== path))
-      );
+      expandPath(path);
       return;
     }
     if (itemPaths.has(path)) {
@@ -492,7 +595,7 @@ export default function AllChangesView({
       container.scrollTo({ top, behavior: "auto" });
       if (jumpTarget.focusHeader) target.focus({ preventScroll: true });
     }
-  }, [jumpTarget, itemPaths, collapsedPaths, onViewedChange]);
+  }, [jumpTarget, itemPaths, collapsedPaths, expandPath]);
 
   return (
     <WorkerPoolContext.Provider value={diffWorkerPool}>
@@ -521,6 +624,9 @@ export default function AllChangesView({
           <span className="changes-cursor-caret" hidden />
         </div>
         <CodeView
+          // Revealed lines stay revealed in a Pierre instance; a mode
+          // switch starts the diffs afresh.
+          key={semanticOn ? "semantic" : "line"}
           ref={viewRef}
           containerRef={containerRef}
           className="changes-code-view"
@@ -539,9 +645,42 @@ export default function AllChangesView({
               : undefined
           }
           renderAnnotation={
-            review.enabled
-              ? (...args: CodeViewAnnotationArgs<ReviewAnnotation>) =>
-                  review.renderAnnotation(args[0])
+            review.enabled || semanticOn
+              ? (...args: CodeViewAnnotationArgs<ReviewAnnotation>) => {
+                  const [annotation, , item] = args;
+                  const path = itemPaths.get(item.id) ?? item.id;
+                  const label =
+                    "side" in annotation
+                      ? semantic.labelAt(
+                          path,
+                          annotation.side,
+                          annotation.lineNumber
+                        )
+                      : undefined;
+                  const thread =
+                    review.enabled && !annotation.metadata.labelOnly
+                      ? review.renderAnnotation(annotation)
+                      : null;
+                  return (
+                    <>
+                      {label && (
+                        <SemanticLabelRow
+                          label={label}
+                          onJump={(lineNumber, side) =>
+                            viewRef.current?.scrollTo({
+                              type: "line",
+                              id: path,
+                              lineNumber,
+                              side,
+                              align: "center",
+                            })
+                          }
+                        />
+                      )}
+                      {thread}
+                    </>
+                  );
+                }
               : undefined
           }
           renderCustomHeader={(item) => {
@@ -549,10 +688,14 @@ export default function AllChangesView({
             const collapsed = collapsedPaths.has(path);
             const viewed = viewedPaths.has(path);
             const fileDiff = item.type === "diff" ? item.fileDiff : undefined;
+            const semanticView = semantic.viewFor(path);
             return (
               <div
                 className="changes-diff-heading"
                 data-changes-path={path}
+                // pending until this file's semantic result (and its label
+                // rows) arrive; lets tests wait for the layout to settle.
+                data-semantic={semantic.status(path)}
                 {...{ [DIFF_CURSOR_ENTRY_ATTRIBUTE]: path }}
               >
                 <button
@@ -567,17 +710,14 @@ export default function AllChangesView({
                   title={path}
                   aria-expanded={!collapsed}
                   onClick={() => {
-                    if (!collapsed) review.clearInteraction(path);
-                    if (viewed) {
-                      onViewedChange?.(path, false);
+                    if (collapsed) {
+                      expandPath(path);
                       return;
                     }
-                    setCollapsedPaths((current) => {
-                      const next = new Set(current);
-                      if (collapsed) next.delete(path);
-                      else next.add(path);
-                      return next;
-                    });
+                    review.clearInteraction(path);
+                    setHandFolds((current) =>
+                      new Map(current).set(path, "folded")
+                    );
                   }}
                 >
                   <span aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
@@ -586,6 +726,10 @@ export default function AllChangesView({
                     {fileDiff?.name ?? path}
                   </span>
                 </button>
+                <DiffModeBadge file={semantic.fileFor(path)} />
+                {semanticView && (
+                  <DeclarationCounts summary={semanticView.summary} />
+                )}
                 {fileDiff && (
                   <span className="changes-diff-totals">
                     <span className="changes-diff-deletions">

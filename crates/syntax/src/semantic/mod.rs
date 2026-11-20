@@ -1,0 +1,310 @@
+//! Semantic (syntax-aware) diffs: parse both versions of a file, match
+//! their syntax nodes, and report what happened to each changed
+//! declaration ([`DeclarationDiff`]): added, removed, moved, renamed, or
+//! changed inside, with the scopes that enclose it.
+//!
+//! The output is a pure function of the grammar and both texts (no clocks or
+//! hash-map order feed into it), so it can be cached by content. Every file
+//! gets either a change list or a [`FallbackReason`]; nothing here errors.
+//!
+//! Invariants, checked by the property tests:
+//! - `diff(a, a)` has no changes;
+//! - `diff(b, a)` mirrors `diff(a, b)`: insertions become deletions, moves
+//!   and renames swap sides;
+//! - whitespace-only edits produce no changes (except where the grammar
+//!   makes layout significant, such as Python blocks); whitespace inside a
+//!   string or character literal is content, not layout.
+
+mod declarations;
+mod matching;
+mod profile;
+mod script;
+mod tree;
+
+use crate::Grammar;
+pub use declarations::{DeclarationChange, DeclarationDiff, Part};
+use serde::Serialize;
+use std::cell::Cell;
+use std::time::{Duration, Instant};
+
+/// 1-based inclusive line range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct LineSpan {
+    pub start: u32,
+    pub end: u32,
+}
+
+impl LineSpan {
+    fn new(start: u32, end: u32) -> Self {
+        Self {
+            start,
+            end: end.max(start),
+        }
+    }
+
+    pub fn contains(&self, line: u32) -> bool {
+        (self.start..=self.end).contains(&line)
+    }
+
+    pub fn overlaps(&self, start: u32, end: u32) -> bool {
+        self.start <= end && start <= self.end
+    }
+}
+
+/// One use of a renamed name, on both sides.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct Occurrence {
+    pub old_line: u32,
+    pub new_line: u32,
+}
+
+/// What happened to a node, with its location on the side(s) it exists on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Edit {
+    Insert {
+        new: LineSpan,
+    },
+    Delete {
+        old: LineSpan,
+    },
+    /// The node stayed in place and its own text changed.
+    Update {
+        old: LineSpan,
+        new: LineSpan,
+    },
+    /// The node (possibly edited inside) now sits elsewhere.
+    Move {
+        old: LineSpan,
+        new: LineSpan,
+    },
+    /// A name changed consistently; the spans locate its binding and
+    /// `occurrences` every changed use, the binding included.
+    Rename {
+        old: LineSpan,
+        new: LineSpan,
+        from: String,
+        to: String,
+        occurrences: Vec<Occurrence>,
+    },
+}
+
+impl Edit {
+    /// The edited node's lines on the old and new side, where it exists.
+    pub(crate) fn spans(&self) -> (Option<LineSpan>, Option<LineSpan>) {
+        match self {
+            Self::Insert { new } => (None, Some(*new)),
+            Self::Delete { old } => (Some(*old), None),
+            Self::Update { old, new } | Self::Move { old, new } | Self::Rename { old, new, .. } => {
+                (Some(*old), Some(*new))
+            }
+        }
+    }
+}
+
+/// What a declaration declares, from the grammar's tags query
+/// (`@definition.<kind>`) or this crate's supplement to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum DeclarationKind {
+    Function,
+    Method,
+    /// Classes, structs, enums and unions.
+    Class,
+    Interface,
+    Module,
+    Macro,
+    Constant,
+    Impl,
+    Type,
+    Field,
+    Variant,
+    Import,
+}
+
+/// A named declaration such as `impl Foo` or `fn bar`, with its opening
+/// line on each side it exists on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+pub struct ScopeSegment {
+    pub kind: DeclarationKind,
+    /// The source's keyword before the name (`fn`, `struct`, `def`), or
+    /// a word for the kind where there is none.
+    pub keyword: String,
+    pub name: String,
+    pub old_line: Option<u32>,
+    pub new_line: Option<u32>,
+}
+
+/// One node-level edit, before grouping by declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SemanticChange {
+    pub(crate) edit: Edit,
+    /// Grammar node kind, e.g. `function_item`.
+    pub(crate) node_kind: String,
+    /// Enclosing scopes, outermost first; includes the node when it is one.
+    pub(crate) scope: Vec<ScopeSegment>,
+    /// The change sits in a callable's header (parameters, return type, ...).
+    pub(crate) signature: bool,
+    /// The edit inserts, deletes, moves or renames the innermost scope
+    /// segment's declaration itself, not something inside it.
+    pub(crate) declares: bool,
+}
+
+/// Why a file is shown as a line diff instead.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(rename_all = "snake_case")]
+pub enum FallbackReason {
+    UnsupportedLanguage,
+    SyntaxError,
+    TooLarge,
+    TimedOut,
+    /// A side is binary, unreadable or not UTF-8. The engine takes text, so
+    /// only callers that read the sides report this.
+    NotText,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "specta", derive(specta::Type))]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum SemanticOutcome {
+    Semantic {
+        language: String,
+        /// Changed declarations, in line order.
+        declarations: Vec<DeclarationDiff>,
+    },
+    Fallback {
+        reason: FallbackReason,
+    },
+}
+
+/// Limits past which a file falls back to the line diff.
+#[derive(Debug, Clone, Copy)]
+pub struct Budget {
+    /// Per side.
+    pub max_bytes: usize,
+    /// Syntax nodes per side.
+    pub max_nodes: usize,
+    /// Wall time for parsing and matching both sides.
+    pub time: Duration,
+}
+
+impl Default for Budget {
+    fn default() -> Self {
+        Self {
+            max_bytes: 512 * 1024,
+            max_nodes: 250_000,
+            time: Duration::from_millis(200),
+        }
+    }
+}
+
+/// The time budget's end. Loops report work with [`Deadline::tick`], which
+/// reads the clock once per [`Deadline::STEP`] units, so they can count as
+/// they go without reading the clock each time.
+pub(crate) struct Deadline {
+    at: Instant,
+    work: Cell<usize>,
+}
+
+impl Deadline {
+    const STEP: usize = 4096;
+
+    fn new(at: Instant) -> Self {
+        Self {
+            at,
+            work: Cell::new(0),
+        }
+    }
+
+    pub(crate) fn check(&self) -> Result<(), FallbackReason> {
+        if Instant::now() >= self.at {
+            Err(FallbackReason::TimedOut)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Records `work` units (roughly, nodes visited).
+    pub(crate) fn tick(&self, work: usize) -> Result<(), FallbackReason> {
+        let total = self.work.get() + work.max(1);
+        if total < Self::STEP {
+            self.work.set(total);
+            return Ok(());
+        }
+        self.work.set(0);
+        self.check()
+    }
+}
+
+/// Semantic diff of two versions of `path`. The grammar comes from the
+/// path's extension.
+pub fn diff(path: &str, old: &str, new: &str, budget: &Budget) -> SemanticOutcome {
+    match Grammar::for_path(path) {
+        Some(grammar) => diff_with(grammar, old, new, budget),
+        None => SemanticOutcome::Fallback {
+            reason: FallbackReason::UnsupportedLanguage,
+        },
+    }
+}
+
+pub fn diff_with(grammar: Grammar, old: &str, new: &str, budget: &Budget) -> SemanticOutcome {
+    match node_changes(grammar, old, new, budget) {
+        Ok(changes) => SemanticOutcome::Semantic {
+            language: grammar.name().into(),
+            declarations: declarations::group(changes),
+        },
+        Err(reason) => SemanticOutcome::Fallback { reason },
+    }
+}
+
+/// The node-level edits, in line order.
+pub(crate) fn node_changes(
+    grammar: Grammar,
+    old: &str,
+    new: &str,
+    budget: &Budget,
+) -> Result<Vec<SemanticChange>, FallbackReason> {
+    let (Some(profile), Some(declarations)) = (grammar.profile(), grammar.declarations()) else {
+        return Err(FallbackReason::UnsupportedLanguage);
+    };
+    if old.len() > budget.max_bytes || new.len() > budget.max_bytes {
+        return Err(FallbackReason::TooLarge);
+    }
+    if old == new {
+        return Ok(Vec::new());
+    }
+    let deadline = Deadline::new(Instant::now() + budget.time);
+    let parse = |source: &str| {
+        let tree = grammar
+            .parse_with_deadline(source, Some(deadline.at))
+            .ok_or(FallbackReason::TimedOut)?;
+        if tree.root_node().has_error() {
+            return Err(FallbackReason::SyntaxError);
+        }
+        Ok(tree)
+    };
+    let (old_tree, new_tree) = (parse(old)?, parse(new)?);
+    let build = |source, tree| {
+        tree::SyntaxTree::build(
+            source,
+            tree,
+            declarations,
+            profile.literals,
+            budget.max_nodes,
+            &deadline,
+        )
+    };
+    let (old_tree, new_tree) = (build(old, &old_tree)?, build(new, &new_tree)?);
+    let mapping = matching::match_trees(&old_tree, &new_tree, &deadline)?;
+    deadline.check()?;
+    let changes = script::changes(&old_tree, &new_tree, &mapping, profile, &deadline)?;
+    deadline.check()?;
+    Ok(changes)
+}
+
+#[cfg(test)]
+mod tests;

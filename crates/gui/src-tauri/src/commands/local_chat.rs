@@ -1643,6 +1643,39 @@ pub async fn load_worktree_changes(
     })
 }
 
+/// Change sides (and their semantic diffs) load on blocking workers; a
+/// scroll through many files must not occupy them all.
+static SEMANTIC_IN_FLIGHT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+
+/// Both sides of one changed file, and in semantic mode its semantic diff
+/// (computed off the UI thread from those same texts, and cached in Rust).
+#[tauri::command]
+#[specta::specta]
+pub async fn load_change_sides(
+    worktree_path: String,
+    comparison: crate::local_chat::changes::ComparisonSnapshot,
+    path: String,
+    old_path: Option<String>,
+    semantic: bool,
+) -> Result<crate::local_chat::change_sides::ChangeSides, CommandError> {
+    let _permit = SEMANTIC_IN_FLIGHT
+        .acquire()
+        .await
+        .map_err(|error| CommandError {
+            message: error.to_string(),
+        })?;
+    worktree_files_task(move || {
+        crate::local_chat::change_sides::load(
+            Path::new(&worktree_path),
+            &comparison,
+            &path,
+            old_path.as_deref(),
+            semantic,
+        )
+    })
+    .await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_comparison_choices(

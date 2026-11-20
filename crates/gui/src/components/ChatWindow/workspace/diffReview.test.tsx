@@ -918,17 +918,16 @@ describe("Changes collapsed unchanged lines", () => {
     patch: filePatch({ path: "m.ts", before: LONG_BEFORE, after: LONG_AFTER }),
   };
   const text = (lines: string[]) => `${lines.join("\n")}\n`;
+  const side = (lines: string[]) => ({
+    kind: "text" as const,
+    contents: text(lines),
+    revision: "r",
+  });
   const load = vi.fn((change: WorktreeChange) =>
     Promise.resolve(
       change.path === "m.ts"
-        ? {
-            oldFile: { name: "m.ts", contents: text(LONG_BEFORE) },
-            newFile: { name: "m.ts", contents: text(LONG_AFTER) },
-          }
-        : {
-            oldFile: { name: "f.ts", contents: text(BASE) },
-            newFile: { name: "f.ts", contents: text(WITHOUT_L12) },
-          }
+        ? { old: side(LONG_BEFORE), new: side(LONG_AFTER), semantic: null }
+        : { old: side(BASE), new: side(WITHOUT_L12), semantic: null }
     )
   );
 
@@ -945,7 +944,7 @@ describe("Changes collapsed unchanged lines", () => {
           jumpTarget={null}
           onOpen={vi.fn()}
           onExit={vi.fn()}
-          loadContents={load}
+          loadSides={load}
         />
       </Harness>
     );

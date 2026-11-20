@@ -1,7 +1,8 @@
-//! Native syntax parsing and tool activity projection.
+//! Native syntax parsing, tool activity projection and semantic diffs.
 
 mod activity;
 mod classification;
+pub mod semantic;
 
 pub use activity::{
     analyze_activity, analyze_activity_until, ActivityAnalysis, ActivityInput, ActivityValue,
@@ -16,6 +17,9 @@ pub enum Grammar {
     Bash,
     JavaScript,
     Python,
+    Rust,
+    TypeScript,
+    Tsx,
 }
 
 impl Grammar {
@@ -32,6 +36,9 @@ impl Grammar {
             Self::Bash => ("bash", tree_sitter_bash::LANGUAGE),
             Self::JavaScript => ("javascript", tree_sitter_javascript::LANGUAGE),
             Self::Python => ("python", tree_sitter_python::LANGUAGE),
+            Self::Rust => ("rust", tree_sitter_rust::LANGUAGE),
+            Self::TypeScript => ("typescript", tree_sitter_typescript::LANGUAGE_TYPESCRIPT),
+            Self::Tsx => ("tsx", tree_sitter_typescript::LANGUAGE_TSX),
         }
     }
 
@@ -39,7 +46,11 @@ impl Grammar {
         self.parse_with_deadline(source, None)
     }
 
-    fn parse_with_deadline(self, source: &str, deadline: Option<Instant>) -> Option<Tree> {
+    pub(crate) fn parse_with_deadline(
+        self,
+        source: &str,
+        deadline: Option<Instant>,
+    ) -> Option<Tree> {
         let mut parser = Parser::new();
         parser.set_language(&self.language()).ok()?;
         match deadline {

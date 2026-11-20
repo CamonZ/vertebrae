@@ -279,3 +279,35 @@ export function growGap(
   });
   return reveal;
 }
+
+/** One gap's reveals from two sources, each gap end showing the larger. */
+function mergeReveals(
+  a: ReadonlyMap<number, GapReveal> | undefined,
+  b: ReadonlyMap<number, GapReveal> | undefined
+): ReadonlyMap<number, GapReveal> {
+  if (!a?.size) return b ?? new Map();
+  if (!b?.size) return a;
+  const merged = new Map(a);
+  for (const [gap, reveal] of b) {
+    const current = merged.get(gap);
+    merged.set(
+      gap,
+      current
+        ? { top: Math.max(current.top, reveal.top), bottom: Math.max(current.bottom, reveal.bottom) }
+        : reveal
+    );
+  }
+  return merged;
+}
+
+/** Reveals per path and gap. */
+export type Reveals = ReadonlyMap<string, ReadonlyMap<number, GapReveal>>;
+
+/** Every path's reveals from two sources (see {@link mergeReveals}). */
+export function mergeRevealsByPath(a: Reveals, b: Reveals): Reveals {
+  if (b.size === 0) return a;
+  if (a.size === 0) return b;
+  const merged = new Map(a);
+  for (const [path, gaps] of b) merged.set(path, mergeReveals(a.get(path), gaps));
+  return merged;
+}

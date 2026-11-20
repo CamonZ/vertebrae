@@ -37,6 +37,7 @@ vi.mock("./workspace/useWorktreeWatch", () => ({
 vi.mock("../../bindings", () => ({
   commands: {
     loadWorktreeChanges: vi.fn(),
+    loadChangeSides: vi.fn(),
     openLocalFile: vi.fn().mockResolvedValue({ status: "ok", data: null }),
     listComparisonChoices: vi
       .fn()
@@ -56,14 +57,22 @@ vi.mock("./workspace/AllChangesView", () => ({
     onOpen,
     diffStyle,
     onExit,
-    loadContents,
+    loadSides,
+    semantic,
   }: AllChangesViewProps) {
     const [folded, setFolded] = useState(false);
     // Stand-in for the cursor resting on collapsed lines.
     const [onGap, setOnGap] = useState(false);
     const [contents, setContents] = useState("");
     return (
-      <div data-testid="all-diffs" data-layout={diffStyle}>
+      <div
+        data-testid="all-diffs"
+        data-layout={diffStyle}
+        data-semantic={String(!!semantic)}
+      >
+        <button type="button" onClick={() => void loadSides?.(files[0], true)}>
+          Load semantic
+        </button>
         <div
           role="group"
           aria-label="Code diff selection"
@@ -78,8 +87,10 @@ vi.mock("./workspace/AllChangesView", () => ({
         <button
           type="button"
           onClick={() =>
-            void loadContents?.(files[0]).then((loaded) =>
-              setContents(loaded ? loaded.newFile.contents : "none")
+            void loadSides?.(files[0], false).then((sides) =>
+              setContents(
+                sides.new.kind === "text" ? sides.new.contents : "none"
+              )
             )
           }
         >
@@ -1272,22 +1283,36 @@ describe("Changes keyboard focus", () => {
   it("reads both sides of a change for revealing unchanged lines", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     const text = (contents: string) => ({
-      status: "ok" as const,
-      data: { kind: "text" as const, contents, revision: "r" },
+      kind: "text" as const,
+      contents,
+      revision: "r",
     });
-    readBaseline.mockResolvedValue(text("old\n"));
-    read.mockResolvedValue(text("new\n"));
+    vi.mocked(commands.loadChangeSides).mockResolvedValue({
+      status: "ok",
+      data: { old: text("old\n"), new: text("new\n"), semantic: null },
+    });
     render(<WorktreeChanges worktreePath="/worktree" />);
     fireEvent.click(await screen.findByRole("button", { name: "Load contents" }));
     expect(
       await screen.findByRole("status", { name: "Loaded contents" })
     ).toHaveTextContent("new");
-    expect(readBaseline).toHaveBeenCalledWith(
+    // Both sides of the loaded comparison, without a semantic diff.
+    expect(commands.loadChangeSides).toHaveBeenCalledWith(
       "/worktree",
+      modified.comparison,
       "src/app.ts",
-      modified.comparison.base_commit
+      null,
+      false
     );
-    expect(read).toHaveBeenCalledWith("/worktree", "src/app.ts");
+    // And with one, in semantic mode.
+    fireEvent.click(screen.getByRole("button", { name: "Load semantic" }));
+    expect(commands.loadChangeSides).toHaveBeenLastCalledWith(
+      "/worktree",
+      modified.comparison,
+      "src/app.ts",
+      null,
+      true
+    );
   });
 });
 
@@ -1438,4 +1463,22 @@ describe("Changes palette and viewed files", () => {
       "viewed"
     );
   });
+});
+
+it("switches the pane between semantic and line diff with m, without reloading Git", async () => {
+  load.mockResolvedValue({ status: "ok", data: modified });
+  render(<WorktreeChanges worktreePath="/worktree" />);
+  await screen.findByLabelText("Diff for src/app.ts");
+  const semantic = screen.getByRole("button", { name: "Semantic" });
+  expect(semantic).toHaveAttribute("aria-pressed", "true");
+  expect(semantic).toHaveAttribute("aria-keyshortcuts", "M");
+  expect(screen.getByTestId("all-diffs")).toHaveAttribute("data-semantic", "true");
+
+  fireEvent.keyDown(screen.getByRole("region", { name: "Worktree changes" }), { key: "m" });
+  expect(screen.getByRole("button", { name: "Line" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByTestId("all-diffs")).toHaveAttribute("data-semantic", "false");
+
+  fireEvent.click(screen.getByRole("button", { name: "Semantic" }));
+  expect(screen.getByTestId("all-diffs")).toHaveAttribute("data-semantic", "true");
+  expect(load).toHaveBeenCalledTimes(1);
 });

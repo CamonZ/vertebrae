@@ -335,19 +335,33 @@ async fn selection_fixture(world: &mut GuiWorld, unborn: bool) {
     if unborn {
         return;
     }
-    let diff_mounted_script = format!(
+    wait_for_changes_diff(&client, "real diff mounted").await;
+}
+
+/// Wait until Changes shows the fixture's added line and its layout has
+/// settled: semantic results arrive after the diff mounts and insert label
+/// rows that shift lines, so a gesture measured earlier can miss its target.
+async fn wait_for_changes_diff(client: &fantoccini::Client, description: &str) {
+    let script = format!(
         r#"{DEEP}
-            return !!deep(
-              document.querySelector('[aria-label="Changes panel"]'),
+            const changes = document.querySelector('[aria-label="Changes panel"]');
+            const line = changes && deep(
+              changes,
               '[data-column-number="2"][data-line-type="change-addition"]',
             );
+            const settled = !!line &&
+              !!deep(changes, '[data-semantic]') &&
+              !deep(changes, '[data-semantic="pending"]');
+            const top = settled ? line.getBoundingClientRect().top : null;
+            const steady = top !== null && window.__vtbChangesLineTop === top;
+            window.__vtbChangesLineTop = top;
+            return steady;
         "#
     );
-
     gui_acceptance::wait_for_js(
-        &client,
-        "real diff mounted",
-        &diff_mounted_script,
+        client,
+        description,
+        &script,
         vec![],
         Duration::from_secs(15),
     )
@@ -483,34 +497,63 @@ async fn gesture_on(world: &mut GuiWorld, surface: &str, drag: bool, shift: bool
     let wd = world.webdriver.as_ref().unwrap().clone();
     let client = wd.lock().await;
 
+    // Scrolling re-renders the diff's rows, and semantic label rows mount a
+    // moment later and push lines down; a point measured straight after the
+    // scroll can land on a label instead of the line. Measure only once the
+    // line has held still for a few frames and the point hits it.
     let selection_point_script = format!(
         r#"{DEEP}
+            const done = arguments[arguments.length - 1];
             const panel = document.querySelector(arguments[0]);
-            const node = deep(
+            const find = () => deep(
               panel,
               '[data-column-number="2"][data-line-type="change-addition"]',
             );
+            find().scrollIntoView({{ block: "center", inline: "center", behavior: "instant" }});
 
-            node.scrollIntoView({{ block: "center", inline: "center", behavior: "instant" }});
-
-            const rect = node.getBoundingClientRect();
-            const left = Math.max(0, rect.left);
-            const right = Math.min(window.innerWidth - 1, rect.right);
-            const top = Math.max(0, rect.top);
-            const bottom = Math.min(window.innerHeight - 21, rect.bottom);
-            const x = Math.round((left + right) / 2);
-            const y = Math.round((top + bottom) / 2);
-
-            return [x, y];
+            const hit = (x, y) => {{
+              let element = document.elementFromPoint(x, y);
+              while (element?.shadowRoot) {{
+                const inner = element.shadowRoot.elementFromPoint(x, y);
+                if (!inner || inner === element) break;
+                element = inner;
+              }}
+              return element;
+            }};
+            const deadline = performance.now() + 3000;
+            let previous = null;
+            let steady = 0;
+            const sample = () => {{
+              const node = find();
+              const rect = node.getBoundingClientRect();
+              const left = Math.max(0, rect.left);
+              const right = Math.min(window.innerWidth - 1, rect.right);
+              const top = Math.max(0, rect.top);
+              const bottom = Math.min(window.innerHeight - 21, rect.bottom);
+              const x = Math.round((left + right) / 2);
+              const y = Math.round((top + bottom) / 2);
+              const on = node.contains(hit(x, y));
+              steady = on && previous?.x === x && previous?.y === y ? steady + 1 : 0;
+              previous = {{ x, y, on }};
+              if (steady >= 5) done({{ settled: true, x, y }});
+              else if (performance.now() >= deadline) done({{ settled: false, ...previous }});
+              else requestAnimationFrame(sample);
+            }};
+            requestAnimationFrame(sample);
         "#
     );
 
-    let point = client
-        .execute(&selection_point_script, vec![json!(surface)])
+    let measured = client
+        .execute_async(&selection_point_script, vec![json!(surface)])
         .await
         .unwrap();
-    let x = point[0].as_i64().unwrap();
-    let y = point[1].as_i64().unwrap();
+    assert_eq!(
+        measured["settled"],
+        json!(true),
+        "the changed line on {surface} should hold still under the pointer: {measured}"
+    );
+    let x = measured["x"].as_i64().unwrap();
+    let y = measured["y"].as_i64().unwrap();
 
     if shift {
         let shift_actions =
@@ -2341,20 +2384,7 @@ async fn first_commit_enables_inline_ask(world: &mut GuiWorld) {
             )
             .await;
         }
-        let ready = format!(
-            r#"{DEEP}
-            const changes = document.querySelector(arguments[0]);
-            return !!changes && !!deep(changes, '[data-column-number="2"][data-line-type="change-addition"]');
-        "#
-        );
-        gui_acceptance::wait_for_js(
-            &client,
-            "first-commit Changes diff",
-            &ready,
-            vec![json!(CHANGES)],
-            Duration::from_secs(15),
-        )
-        .await;
+        wait_for_changes_diff(&client, "first-commit Changes diff").await;
     }
     for surface in [CHANGES, TOOL] {
         gesture_on(world, surface, false, false).await;

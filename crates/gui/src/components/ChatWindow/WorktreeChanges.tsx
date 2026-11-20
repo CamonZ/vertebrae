@@ -4,6 +4,7 @@ import { isEditableShortcutTarget } from "../../utils/keyboard";
 import {
   CHANGED_FILE_LIST_KEYS,
   CHANGES_COMMANDS,
+  CHANGES_DIFF_MODE_KEY,
   CHANGES_UNVIEW_HINT,
   CHANGES_VIEWED_KEY,
   DISCUSSION_ASK_SHORTCUT,
@@ -76,7 +77,7 @@ import { FilesTree } from "./workspace/FilesTree";
 import { STATUS_LETTER } from "./workspace/status";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import type { JumpTarget } from "./workspace/AllChangesView";
-import { loadChangeContents } from "./workspace/changeContents";
+import { loadChangeSides } from "./workspace/changeContents";
 import { routeSource, type FileReveal } from "./workspace/sourceRoute";
 import "./workspaceTabs.css";
 import "./worktreeChanges.css";
@@ -233,6 +234,10 @@ export function WorktreeChanges({
   });
   const preferredDiffOptions = usePierreDiffOptions();
   const [diffStyle, setDiffStyle] = useState(preferredDiffOptions.diffStyle);
+  // Per pane; semantic where the file's language allows it.
+  const [diffMode, setDiffMode] = useState<"semantic" | "line">("semantic");
+  const toggleDiffMode = () =>
+    setDiffMode((mode) => (mode === "semantic" ? "line" : "semantic"));
   const wholeBranch = base?.kind !== "head";
 
   const [choices, setChoices] = useState<ComparisonChoice[]>([]);
@@ -473,12 +478,13 @@ export function WorktreeChanges({
   }, [state]);
 
   const comparison = state.status === "ready" ? state.data.comparison : null;
-  // Both sides of a change, so Changes can reveal its unchanged lines.
-  const loadContents = useMemo(
+  // Both sides of a change, so Changes can reveal its unchanged lines, and
+  // in semantic mode its semantic diff.
+  const loadSides = useMemo(
     () =>
       comparison
-        ? (change: WorktreeChange) =>
-            loadChangeContents(worktreePath, comparison, change)
+        ? (change: WorktreeChange, semantic: boolean) =>
+            loadChangeSides(worktreePath, comparison, change, semantic)
         : undefined,
     [worktreePath, comparison]
   );
@@ -719,6 +725,17 @@ export function WorktreeChanges({
         },
       },
       {
+        id: "changes-diff-mode",
+        scope: "changes",
+        label: diffMode === "semantic" ? CHANGES_COMMANDS.line : CHANGES_COMMANDS.semantic,
+        detail: CHANGES_DIFF_MODE_KEY,
+        keywords: "diff mode syntax structural ast toggle",
+        run: () => {
+          toggleDiffMode();
+          refocus();
+        },
+      },
+      {
         id: "changes-refresh",
         scope: "changes",
         label: CHANGES_COMMANDS.refresh,
@@ -820,6 +837,14 @@ export function WorktreeChanges({
       return;
     }
 
+    // m anywhere in Changes, the diff included: semantic / line diff.
+    if (event.key === CHANGES_DIFF_MODE_KEY) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!event.repeat) toggleDiffMode();
+      return;
+    }
+
     // v outside the diff marks the active file; the diff handles its own.
     if (event.key === CHANGES_VIEWED_KEY && !inCursor && selectedFile) {
       event.preventDefault();
@@ -872,7 +897,8 @@ export function WorktreeChanges({
             onExit={onExit}
             viewedPaths={viewedPaths}
             onViewedChange={setViewed}
-            loadContents={loadContents}
+            loadSides={loadSides}
+            semantic={diffMode === "semantic"}
           />
         </Suspense>
       </div>
@@ -977,6 +1003,20 @@ export function WorktreeChanges({
               ]}
             />
           </label>
+        </div>
+        <div role="group" aria-label="Diff mode" className="document-views">
+          {(["semantic", "line"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={diffMode === mode}
+              aria-keyshortcuts={CHANGES_DIFF_MODE_KEY.toUpperCase()}
+              title={`${mode === "semantic" ? CHANGES_COMMANDS.semantic : CHANGES_COMMANDS.line} (${CHANGES_DIFF_MODE_KEY})`}
+              onClick={() => setDiffMode(mode)}
+            >
+              {mode === "semantic" ? "Semantic" : "Line"}
+            </button>
+          ))}
         </div>
         <div role="group" aria-label="Diff layout" className="document-views">
           {(["unified", "split"] as const).map((style) => (

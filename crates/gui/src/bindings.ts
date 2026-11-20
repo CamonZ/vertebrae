@@ -1258,6 +1258,18 @@ async loadWorktreeChanges(worktreePath: string, request: ComparisonRequest) : Pr
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Both sides of one changed file, and in semantic mode its semantic diff
+ * (computed off the UI thread from those same texts, and cached in Rust).
+ */
+async loadChangeSides(worktreePath: string, comparison: ComparisonSnapshot, path: string, oldPath: string | null, semantic: boolean) : Promise<Result<ChangeSides, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_change_sides", { worktreePath, comparison, path, oldPath, semantic }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listComparisonChoices(worktreePath: string) : Promise<Result<ComparisonChoice[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_comparison_choices", { worktreePath }) };
@@ -1775,6 +1787,11 @@ diagnostic: string | null }
 export type AssociationSelection = { kind: "keep" } | { kind: "unknown" } | { kind: "entity"; id: string; title: string; level: TaskLevel }
 export type AssociationWorktree = { path: string; branch: string | null }
 export type CapturedReviewAnchor = { originalCommitId: string; originalBlobId: string }
+export type ChangeSides = { old: FileBody; new: FileBody;
+/**
+ * In semantic mode only.
+ */
+semantic: SemanticOutcome | null }
 /**
  * Code reference - file location reference
  */
@@ -1921,6 +1938,51 @@ export type DaemonMetricsEvent = { connection_id: string; daemon_id: string; sch
 export type DaemonMutationResult = { connection_id: string; daemon: Daemon }
 export type DaemonNameUpdate = { kind: "unchanged" } | { kind: "clear" } | { kind: "set"; value: string }
 export type DecisionModelSettings = { enabled: boolean; provider: string; model: string; harness: string | null; validation_error: string | null }
+/**
+ * What happened to a declaration as a whole.
+ */
+export type DeclarationChange = { kind: "added"; new: LineSpan } | { kind: "removed"; old: LineSpan } |
+/**
+ * It now sits elsewhere (and may be edited inside).
+ */
+{ kind: "moved"; old: LineSpan; new: LineSpan } |
+/**
+ * Its name changed; the spans locate the name and `sites` every
+ * changed use, the name included.
+ */
+{ kind: "renamed"; old: LineSpan; new: LineSpan; from: string; to: string; sites: Occurrence[] } |
+/**
+ * Only code inside it changed.
+ */
+{ kind: "modified" }
+/**
+ * One changed declaration (or the code outside every declaration).
+ */
+export type DeclarationDiff = {
+/**
+ * Enclosing declarations, outermost first. Never a field, variant or
+ * import: changes inside one belong to its container.
+ */
+scope: ScopeSegment[];
+/**
+ * The declaration; `None` for code outside every declaration. A field,
+ * variant or import is a subject only when it is itself added,
+ * removed, moved or renamed.
+ */
+subject: ScopeSegment | null; change: DeclarationChange;
+/**
+ * What changed inside it, in line order.
+ */
+parts: Part[] }
+/**
+ * What a declaration declares, from the grammar's tags query
+ * (`@definition.<kind>`) or this crate's supplement to it.
+ */
+export type DeclarationKind = "function" | "method" |
+/**
+ * Classes, structs, enums and unions.
+ */
+"class" | "interface" | "module" | "macro" | "constant" | "impl" | "type" | "field" | "variant" | "import"
 export type DiffTotals = { additions: number; deletions: number; binary_files: number }
 export type DirectoryEntry = { name: string;
 /**
@@ -1947,6 +2009,15 @@ export type ExecuteStepConfig = { version: number; script: string; context: Json
  * Execution status - mirrors db::ExecutionStatus
  */
 export type ExecutionStatus = "in_progress" | "completed" | "failed"
+/**
+ * Why a file is shown as a line diff instead.
+ */
+export type FallbackReason = "unsupported_language" | "syntax_error" | "too_large" | "timed_out" |
+/**
+ * A side is binary, unreadable or not UTF-8. The engine takes text, so
+ * only callers that read the sides report this.
+ */
+"not_text"
 /**
  * One side of a document. `revision` is the SHA-256 of the bytes read.
  */
@@ -2077,6 +2148,10 @@ project_created: boolean }
  */
 export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
+/**
+ * 1-based inclusive line range.
+ */
+export type LineSpan = { start: number; end: number }
 export type LiteralCommand = { name: string; args: string[] }
 /**
  * Config of an `llm_inference` step.
@@ -2323,7 +2398,27 @@ export type NotificationPage = { notifications: Notification[]; has_more: boolea
  */
 export type NotificationSeverity = "info" | "success" | "warning" | "error"
 export type ObservabilitySettings = { enabled: boolean; endpoint: string; protocol: string; signals: string[]; subsystems: string[]; level: string; capture_message_content: boolean }
+/**
+ * One use of a renamed name, on both sides.
+ */
+export type Occurrence = { old_line: number; new_line: number }
 export type Operation = { source: string; activities: string[]; relationships: string[]; targets?: string[] | null; literalCommand?: LiteralCommand | null; unresolved?: string | null; decisionEligible?: boolean | null; inferredActivities?: string[] | null }
+/**
+ * One change inside a declaration.
+ */
+export type Part = { kind: "added"; new: LineSpan } | { kind: "removed"; old: LineSpan } |
+/**
+ * Code that stayed in place and changed.
+ */
+{ kind: "changed"; old: LineSpan; new: LineSpan } |
+/**
+ * A change to a callable's header (parameters, return type, ...).
+ */
+{ kind: "signature"; old: LineSpan | null; new: LineSpan | null } | { kind: "moved"; old: LineSpan; new: LineSpan } |
+/**
+ * A local name changed consistently; `sites` are every changed use.
+ */
+{ kind: "renamed"; old: LineSpan; new: LineSpan; from: string; to: string; sites: Occurrence[] }
 export type PermissionDecisionBehavior = "allow" | "deny"
 /**
  * Permission mode for agent sessions - mirrors db::PermissionMode
@@ -2462,6 +2557,16 @@ project_id: string;
  * Git root path for the project
  */
 path: string }
+/**
+ * A named declaration such as `impl Foo` or `fn bar`, with its opening
+ * line on each side it exists on.
+ */
+export type ScopeSegment = { kind: DeclarationKind;
+/**
+ * The source's keyword before the name (`fn`, `struct`, `def`), or
+ * a word for the kind where there is none.
+ */
+keyword: string; name: string; old_line: number | null; new_line: number | null }
 export type SecretEdit = { action: "keep" } | { action: "replace"; value: string } | { action: "clear" } | { action: "migrate" }
 /**
  * Section content within a task
@@ -2505,6 +2610,7 @@ export type SectionChangedEvent = { section_id: string; task_id: string; change_
  * Section type - mirrors db::SectionType
  */
 export type SectionType = "goal" | "context" | "current_behavior" | "desired_behavior" | "checklist_item" | "testing_criterion" | "anti_pattern" | "failure_test" | "constraint"
+export type SemanticOutcome = { status: "semantic"; language: string; declarations: DeclarationDiff[] } | { status: "fallback"; reason: FallbackReason }
 /**
  * State of the daemon's OS service registration (launchd on macOS, systemd
  * `--user` on Linux). Mirrors [`vertebrae_installer::ServiceStatus`] in a

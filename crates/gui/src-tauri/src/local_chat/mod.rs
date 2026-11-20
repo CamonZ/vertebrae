@@ -1,4 +1,5 @@
 pub(crate) mod annotations;
+pub(crate) mod change_sides;
 pub(crate) mod changes;
 pub(crate) mod events;
 pub(crate) mod file_history;

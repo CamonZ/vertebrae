@@ -108,8 +108,13 @@ export const CHANGES_COMMANDS = {
   external: "Open in external editor",
   unified: "Unified diff",
   split: "Split diff",
+  semantic: "Semantic diff",
+  line: "Line diff",
   refresh: "Refresh changes",
 } as const;
+
+/** Switch this pane's Changes between the semantic and the line diff. */
+export const CHANGES_DIFF_MODE_KEY = "m";
 
 /** Toggle a file's viewed mark (folds it; the cursor skips it). */
 export const CHANGES_VIEWED_KEY = "v";
@@ -215,6 +220,10 @@ const PALETTE_HINTS: KeyHint[] = [
   { keys: ["/"], label: "Find file" },
   { keys: ["⌘", "K"], label: "Changes commands" },
 ];
+const DIFF_MODE_HINT: KeyHint = {
+  keys: [CHANGES_DIFF_MODE_KEY],
+  label: "Semantic / line diff",
+};
 const RESIZE_HINTS: KeyHint[] = [
   { keys: ["⌥", "← / →"], label: "Resize panel" },
   { keys: ["⌥", "="], label: "Cycle panel width" },
@@ -237,6 +246,7 @@ export const CHANGES_HINT_GROUPS: readonly {
       { keys: ["↓"], label: "Line cursor (from a file heading)" },
       { keys: [CHANGES_VIEWED_KEY], label: "Mark file viewed" },
       CHANGES_UNVIEW_HINT,
+      DIFF_MODE_HINT,
       ...RESIZE_HINTS,
     ],
   },
@@ -271,6 +281,7 @@ export const CHANGES_HINT_GROUPS: readonly {
       },
       { keys: [CHANGES_VIEWED_KEY], label: "Mark file viewed, go to next" },
       CHANGES_UNVIEW_HINT,
+      DIFF_MODE_HINT,
       ...PALETTE_HINTS,
       { keys: ["Esc"], label: "Single line / back to chat" },
     ],

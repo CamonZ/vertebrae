@@ -35,7 +35,7 @@ pub struct ComparisonChoice {
     pub endpoint: ComparisonEndpoint,
 }
 
-#[derive(serde::Serialize, specta::Type)]
+#[derive(serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct ComparisonSnapshot {
     pub base_commit: String,
     pub selected_base_commit: String,
