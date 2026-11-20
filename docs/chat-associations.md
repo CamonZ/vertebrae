@@ -21,6 +21,17 @@ in headers only when more than one chat pane is visible.
   worktree. New **user** messages ask the configured decision model about missing
   associations. Selection intent includes discussing, implementing and explicitly
   tying a conversation to any of the three levels; above 0.5 is yes.
+- When a message names exactly one resolvable entity by ID, the model is asked
+  instead whether that entity is the message's subject (`target_named_entity`):
+  what the user asks to look at, work on, create a worktree for, or tie the
+  conversation to. Comparison, dependency/blocking, background, example,
+  "see also", negation, quoted output and commit-hash mentions are explicit
+  "no" cases. A first binding needs an answer above 0.5; replacing a different
+  bound entity needs one above 0.8, so an ambiguous mention keeps the
+  association. Naming the entity that is already bound asks nothing about it.
+  A worktree creation request never binds an entity by itself: "create a
+  worktree for it" after naming an entity binds through the subject judgement,
+  "create a worktree for the login fix, see also X" does not.
 - Explicit full UUIDs and unique 8+ character prefixes resolve against the
   conversation's registered project, including entities absent from the UI cache.
   Full UUIDs use a direct read with a project-ownership check and can disambiguate
@@ -32,8 +43,10 @@ in headers only when more than one chat pane is visible.
   include each entity's level and title. Judgment state includes the current and
   explicitly named entities' IDs, titles and levels. Assistant text never selects entities. Tool output can select a newly created
   ticket only through the confirmed creation path described below.
-- Known associations change on explicit ID references with selection intent or
-  a confirmed ticket creation request.
+- Known associations change on an explicit ID reference judged to be the
+  message's subject above the replacement bar, or a confirmed ticket creation
+  request. A passing mention keeps the entity, worktree, branch and pending
+  worktree creation unchanged.
   Manual correction resolves an exact full/short ID in the conversation project
   without a model call; blank clears it. A correction retires older pending
   decisions. Rebinding across levels clears the previous worktree and pending
