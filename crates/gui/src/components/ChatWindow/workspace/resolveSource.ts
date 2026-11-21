@@ -5,15 +5,17 @@ import {
   type FileStatus,
   type Result,
 } from "../../../bindings";
-import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
 
-/** What a flow's code evidence shows once read from the checkout. */
+export type SourceRevision =
+  | { kind: "commit"; commit: string }
+  | { kind: "range"; base: string; head?: string };
+
+/** What source evidence shows once read from the checkout. */
 export type ResolvedSource =
   | { kind: "file"; path: string; contents: string; note?: string }
   | {
       kind: "diff";
       path: string;
-      oldPath: string;
       status: FileStatus;
       /** `null` when the file does not exist on that side. */
       before: string | null;
@@ -28,8 +30,6 @@ const WORKING_TREE = "the working tree";
 /** Abbreviates object ids; branch and tag names stay readable. */
 export const shortRevision = (revision: string) =>
   /^[0-9a-f]{12,40}$/i.test(revision) ? revision.slice(0, 8) : revision;
-
-const branchName = (ref: string) => ref.replace(/^refs\/(heads|remotes)\//, "");
 
 function body(result: Result<FileBody, CommandError>): FileBody {
   if (result.status === "error") throw new Error(result.error.message);
@@ -61,15 +61,13 @@ const text = (file: FileBody) => (file.kind === "text" ? file.contents : null);
 /** Two revisions of one file as a diff, or why they cannot be compared. */
 function compare(
   path: string,
-  oldPath: string,
   before: FileBody,
   after: FileBody,
   from: string,
-  to: string,
-  status?: FileStatus
+  to: string
 ): ResolvedSource {
   const reason =
-    problem(before, oldPath, from) ?? problem(after, path, to) ?? null;
+    problem(before, path, from) ?? problem(after, path, to) ?? null;
   if (reason) return { kind: "unavailable", message: reason };
   const old = text(before);
   const next = text(after);
@@ -78,7 +76,7 @@ function compare(
       kind: "unavailable",
       message: `${path} does not exist at ${from} or ${to}.`,
     };
-  if (old != null && old === next && oldPath === path)
+  if (old != null && old === next)
     return {
       kind: "file",
       path,
@@ -88,102 +86,43 @@ function compare(
   return {
     kind: "diff",
     path,
-    oldPath,
-    status:
-      status ?? (old == null ? "added" : next == null ? "deleted" : "modified"),
+    status: old == null ? "added" : next == null ? "deleted" : "modified",
     before: old,
     after: next,
     label: `${from} → ${to}`,
   };
 }
 
-/**
- * Reads the evidence a location points at. A `base` compares that revision
- * with `head` (or the working copy); otherwise the working copy is shown,
- * as a diff when the file has changes against the Changes view's default
- * comparison.
- */
+/** Read an exact path at an explicit commit or compare its two revisions. */
 export async function resolveSource(
   checkout: string,
-  location: SourceLocation,
-  options: { exactPath?: boolean } = {}
+  path: string,
+  revision: SourceRevision
 ): Promise<ResolvedSource> {
-  const { path, base, head, commit } = location;
-
-  if (commit !== undefined) {
-    const file = await readAt(checkout, path, commit);
-    if (file.kind === "text") return { kind: "file", path, contents: file.contents };
-    const revision = shortRevision(commit);
+  if (revision.kind === "commit") {
+    const file = await readAt(checkout, path, revision.commit);
+    if (file.kind === "text")
+      return { kind: "file", path, contents: file.contents };
+    const commit = shortRevision(revision.commit);
     return {
       kind: "unavailable",
-      message: problem(file, path, revision) ?? `${path} does not exist at ${revision}.`,
+      message:
+        problem(file, path, commit) ?? `${path} does not exist at ${commit}.`,
     };
   }
 
-  if (base !== undefined) {
-    const [before, after] = await Promise.all([
-      readAt(checkout, path, base),
-      head !== undefined
-        ? readAt(checkout, path, head)
-        : readWorking(checkout, path),
-    ]);
-    return compare(
-      path,
-      path,
-      before,
-      after,
-      shortRevision(base),
-      head !== undefined ? shortRevision(head) : WORKING_TREE
-    );
-  }
-
-  // Without a known change the file is still worth showing.
-  const changes = await commands
-    .loadWorktreeChanges(checkout, {
-      base: null,
-      target: { kind: "working_tree" },
-      merge_base: true,
-    })
-    .catch(() => null);
-  const data = changes?.status === "ok" ? changes.data : null;
-  const change = data?.files.find(
-    (file) =>
-      file.marker == null &&
-      (file.path === path || (!options.exactPath && file.old_path === path))
+  const { base, head } = revision;
+  const [before, after] = await Promise.all([
+    readAt(checkout, path, base),
+    head !== undefined
+      ? readAt(checkout, path, head)
+      : readWorking(checkout, path),
+  ]);
+  return compare(
+    path,
+    before,
+    after,
+    shortRevision(base),
+    head !== undefined ? shortRevision(head) : WORKING_TREE
   );
-
-  if (data && change) {
-    const oldPath = change.old_path ?? change.path;
-    const missing: FileBody = { kind: "missing" };
-    const [before, after] = await Promise.all([
-      change.status === "added"
-        ? missing
-        : readAt(checkout, oldPath, data.comparison.base_commit),
-      change.status === "deleted"
-        ? missing
-        : readWorking(checkout, change.path),
-    ]);
-    const from = data.base_branch
-      ? branchName(data.base_branch)
-      : shortRevision(data.comparison.base_commit);
-    return compare(
-      change.path,
-      oldPath,
-      before,
-      after,
-      from,
-      WORKING_TREE,
-      change.status
-    );
-  }
-
-  const working = await readWorking(checkout, path);
-  if (working.kind === "text")
-    return { kind: "file", path, contents: working.contents };
-  return {
-    kind: "unavailable",
-    message:
-      problem(working, path, WORKING_TREE) ??
-      `${path} does not exist in this checkout.`,
-  };
 }

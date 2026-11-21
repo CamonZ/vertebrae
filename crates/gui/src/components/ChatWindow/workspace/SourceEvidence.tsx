@@ -1,10 +1,12 @@
-import { annotationWorktree } from "../../../stores/toolAnnotations";
-import { useToolAnnotation } from "../../../hooks/useToolAnnotation";
-import { resolveTurnSource } from "./resolveTurnSource";
 import { OpenInExternalEditor } from "./OpenInExternalEditor";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
-import { resolveSource, shortRevision, type ResolvedSource } from "./resolveSource";
+import {
+  resolveSource,
+  shortRevision,
+  type ResolvedSource,
+  type SourceRevision,
+} from "./resolveSource";
 import "./evidencePanel.css";
 
 const SourceEvidenceCode = lazy(() => import("./SourceEvidenceCode"));
@@ -12,7 +14,7 @@ const SourceEvidenceCode = lazy(() => import("./SourceEvidenceCode"));
 export interface EvidenceTarget extends SourceLocation {
   /** Distinguishes repeated opens of the same location. */
   nonce: number;
-  history?: { sessionId: string; turnId: string | null };
+  revision: SourceRevision;
 }
 
 type LoadState =
@@ -24,59 +26,26 @@ const lineSuffix = ({ line, endLine }: SourceLocation) =>
 
 /**
  * Read-only Pierre view of flow code evidence that the Changes workspace
- * cannot show: a project checkout without a conversation worktree, or an
- * explicit revision range. The file at the referenced lines, or its diff
- * when it changed or the evidence names a revision range.
+ * cannot show directly: an explicit commit or revision range.
  */
 export function SourceEvidence({
   checkout,
   target,
   onClose,
-  exactPath = false,
 }: {
   checkout: string;
   target: EvidenceTarget;
   onClose(): void;
-  /** Chat references must not follow a renamed path implicitly. */
-  exactPath?: boolean;
 }) {
-  const { path, base, head, commit } = target;
+  const { path, revision } = target;
+  const commit = revision.kind === "commit" ? revision.commit : undefined;
   const [reload, setReload] = useState(0);
-  const [latestSelection, setLatestSelection] = useState<number | null>(null);
-  const latest = latestSelection === target.nonce;
-  const history = target.history;
-  const capture = useToolAnnotation(
-    history?.sessionId,
-    history?.turnId ? JSON.stringify(["turn", history.turnId]) : null,
-    "worktree_history"
-  );
-  const origin = useToolAnnotation(
-    history?.sessionId,
-    history?.turnId ? JSON.stringify(["turn", history.turnId]) : null,
-    "worktree_origin"
-  );
-  const effectiveCheckout = history?.turnId
-    ? (annotationWorktree(origin) ?? annotationWorktree(capture) ?? checkout)
-    : checkout;
-  const key = JSON.stringify([
-    effectiveCheckout,
-    path,
-    base,
-    head,
-    commit,
-    reload,
-    exactPath,
-    history,
-    latest,
-    target.nonce,
-  ]);
+  const key = JSON.stringify([checkout, path, revision, reload, target.nonce]);
   const [state, setState] = useState<LoadState | null>(null);
 
   useEffect(() => {
     let current = true;
-    const request = history
-      ? resolveTurnSource(effectiveCheckout, path, history, latest)
-      : resolveSource(checkout, { path, base, head, commit }, { exactPath });
+    const request = resolveSource(checkout, path, revision);
     request.then(
       (source) => current && setState({ key, source }),
       (error: unknown) =>
@@ -90,19 +59,7 @@ export function SourceEvidence({
     return () => {
       current = false;
     };
-  }, [
-    key,
-    checkout,
-    path,
-    base,
-    head,
-    commit,
-    exactPath,
-    history,
-    latest,
-    capture,
-    effectiveCheckout,
-  ]);
+  }, [key, checkout, path, revision]);
 
   const loaded = state?.key === key ? state : null;
   const source = loaded && "source" in loaded ? loaded.source : null;
@@ -151,28 +108,10 @@ export function SourceEvidence({
       className="flex min-h-0 flex-1 flex-col gap-2 p-3 text-sm"
     >
       <div className="document-toolbar">
-        {history && (
-          <div role="group" aria-label="File version">
-            <button
-              type="button"
-              aria-pressed={!latest}
-              onClick={() => setLatestSelection(null)}
-            >
-              At this turn
-            </button>
-            <button
-              type="button"
-              aria-pressed={latest}
-              onClick={() => setLatestSelection(target.nonce)}
-            >
-              Latest file
-            </button>
-          </div>
-        )}
-        {!commit && (!history || latest) && (
+        {!commit && (
           <OpenInExternalEditor
-            root={effectiveCheckout}
-            path={shown?.path ?? path}
+            root={checkout}
+            path={path}
             line={target.line}
             column={target.column}
             available={shown?.kind === "file"}
@@ -183,19 +122,18 @@ export function SourceEvidence({
             {shown.status}
           </span>
         )}
-        <span
-          className="document-path"
-          title={shown?.kind === "diff" ? shown.path : path}
-        >
-          {shown?.kind === "diff" && shown.oldPath !== shown.path
-            ? `${shown.oldPath} → ${shown.path}`
-            : path}
+        <span className="document-path" title={path}>
+          {path}
           {lineSuffix(target)}
         </span>
         {shown?.kind === "diff" && (
           <span className="evidence-revisions">{shown.label}</span>
         )}
-        {commit && <span className="evidence-revisions" title={commit}>{shortRevision(commit)}</span>}
+        {commit && (
+          <span className="evidence-revisions" title={commit}>
+            {shortRevision(commit)}
+          </span>
+        )}
         <button
           type="button"
           className="evidence-action"

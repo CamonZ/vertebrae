@@ -1,3 +1,9 @@
+import { annotationWorktree } from "../../stores/toolAnnotations";
+import { useToolAnnotation } from "../../hooks/useToolAnnotation";
+import type {
+  TurnDocumentTarget,
+  TurnDocumentVersion,
+} from "./workspace/TurnDocument";
 import { isEditableShortcutTarget } from "../../utils/keyboard";
 import { FileReferenceNavigationContext } from "../shared/FileReferenceNavigationContext";
 import type { FileTarget } from "../shared/FileReferenceNavigationContext";
@@ -347,68 +353,127 @@ export function ChatWindow({
       handleRemoveComment,
     ]
   );
-  const [evidenceJump, setEvidenceJump] = useState<{
-    sessionId: string;
-    worktreePath: string;
-    target: JumpTarget;
-  } | null>(null);
+  const [sourceRequest, setSourceRequest] = useState<(
+    | {
+        kind: "turn";
+        target: TurnDocumentTarget;
+        nonce: number;
+        version: TurnDocumentVersion;
+      }
+    | { kind: "working"; worktreePath: string; target: JumpTarget }
+    | { kind: "checkout"; worktreePath: string }
+  ) & { sessionId: string } | null>(null);
+  const nextSourceNonce = useRef(0);
   const ownWorktreePath = association.record?.worktreePath;
-  // Flow evidence reads the conversation's own worktree, else its project.
   const evidenceCheckout =
     ownWorktreePath ?? chat.session?.projectPath ?? undefined;
   const [evidence, setEvidence] = useState<{
     sessionId: string;
     checkout: string;
     target: EvidenceTarget;
-    exactPath?: boolean;
+    fileReference: boolean;
   } | null>(null);
 
-  const openFileReference = (target: FileTarget) => {
-    setBackgroundSession(null);
-    setChangesSession(null);
-    setEvidence((previous) => ({
-      sessionId,
-      checkout: target.root ?? "",
-      exactPath: true,
-      target: {
+  const openSource = useCallback(
+    (
+      location: SourceLocation,
+      reference?: Pick<FileTarget, "root" | "history">,
+      fileReference = false
+    ) => {
+      setBackgroundSession(null);
+      const nonce = ++nextSourceNonce.current;
+      const { path, line, endLine, column } = location;
+      const revision = location.commit !== undefined
+        ? { kind: "commit" as const, commit: location.commit }
+        : location.base !== undefined
+          ? { kind: "range" as const, base: location.base, head: location.head }
+          : null;
+      if (revision) {
+        const checkout = fileReference
+          ? reference?.root ?? evidenceCheckout
+          : evidenceCheckout;
+        if (!checkout) return;
+        setSourceRequest(null);
+        setChangesSession(null);
+        setEvidence({
+          sessionId,
+          checkout,
+          target: { ...location, nonce, revision },
+          fileReference,
+        });
+        return;
+      }
+
+      if (reference?.history || fileReference) {
+        setSourceRequest({
+          sessionId,
+          kind: "turn",
+          version: "turn",
+          nonce,
+          target: {
+            path,
+            root: reference?.root ?? null,
+            history: reference?.history ?? { sessionId, turnId: null },
+            column,
+            reveal:
+              line === undefined
+                ? null
+                : {
+                    path,
+                    line,
+                    endLine: Math.max(endLine ?? line, line),
+                    nonce,
+                  },
+          },
+        });
+      } else if (evidenceCheckout) {
+        setSourceRequest({
+          sessionId,
+          kind: "working",
+          worktreePath: evidenceCheckout,
+          target: { ...location, nonce },
+        });
+      } else {
+        return;
+      }
+
+      setEvidence(null);
+      setChangesSession(sessionId);
+    },
+    [evidenceCheckout, sessionId]
+  );
+
+  const openFileReference = (target: FileTarget) =>
+    openSource(
+      {
         path: target.path,
-        history: target.history,
         commit: target.commit,
         line: target.line ?? undefined,
         column: target.column ?? undefined,
-        nonce: (previous?.target.nonce ?? 0) + 1,
       },
-    }));
-  };
+      target,
+      true
+    );
 
-  const openEvidence = useCallback(
-    (location: SourceLocation) => {
-      setBackgroundSession(null);
-      // Working-copy evidence in the conversation's own worktree opens in
-      // Changes, which routes it to the diff or the full file. Open documents
-      // keep their drafts in the store.
-      if (ownWorktreePath && location.base === undefined) {
-        setEvidence(null);
-        setChangesSession(sessionId);
-        setEvidenceJump((previous) => ({
-          sessionId,
-          worktreePath: ownWorktreePath,
-          target: { ...location, nonce: (previous?.target.nonce ?? 0) + 1 },
-        }));
-        return;
-      }
-      // A project checkout or an explicit revision range has no Changes
-      // view of its own, so it is shown read-only in place.
-      if (!evidenceCheckout) return;
-      setEvidence((previous) => ({
-        sessionId,
-        checkout: evidenceCheckout,
-        target: { ...location, nonce: (previous?.target.nonce ?? 0) + 1 },
-      }));
-      setChangesSession(null);
-    },
-    [ownWorktreePath, evidenceCheckout, sessionId]
+  const source = sourceRequest?.sessionId === sessionId ? sourceRequest : null;
+  const turn = source?.kind === "turn" ? source.target : null;
+  const annotationKey = turn?.history.turnId
+    ? JSON.stringify(["turn", turn.history.turnId])
+    : null;
+  const origin = useToolAnnotation(
+    turn?.history.sessionId, annotationKey, "worktree_origin"
   );
+  const capture = useToolAnnotation(
+    turn?.history.sessionId, annotationKey, "worktree_history"
+  );
+  const turnRoot =
+    annotationWorktree(origin) ?? annotationWorktree(capture) ?? turn?.root ?? null;
+  const worktreePath = changesSession === sessionId
+    ? source?.kind === "checkout"
+      ? source.worktreePath
+      : turnRoot ?? evidenceCheckout
+    : ownWorktreePath;
+
   const attachSelection = (
     anchor: CodeSelection,
     outdated = false,
@@ -438,15 +503,19 @@ export function ChatWindow({
       });
       if (comment.home.kind === "worktree") {
         if (!ownWorktreePath) return;
+        setSourceRequest(null);
         activate(ownWorktreePath, null);
         setChangesSession(sessionId);
-      } else if (changesSession === sessionId && ownWorktreePath) {
-        const dirty = dirtyPaths(ownWorktreePath);
+      } else if (changesSession === sessionId && worktreePath) {
+        const dirty = dirtyPaths(worktreePath);
         if (dirty.length > 0) setLeaving(dirty);
-        else setChangesSession(null);
+        else {
+          setSourceRequest(null);
+          setChangesSession(null);
+        }
       }
     },
-    [pendingComments, sessionId, ownWorktreePath, changesSession]
+    [pendingComments, sessionId, ownWorktreePath, changesSession, worktreePath]
   );
 
   // A draftable gate's draft, read again whenever realtime updates report
@@ -474,12 +543,11 @@ export function ChatWindow({
     markComposerFocusHandled(composerFocusRevision);
   }, [composerFocusRevision, markComposerFocusHandled]);
 
-  const worktreePath = association.record?.worktreePath;
   const showChanges = !!worktreePath && changesSession === sessionId;
   const shownEvidence =
     !showChanges &&
     evidence?.sessionId === sessionId &&
-    (evidence.exactPath || evidence.checkout === evidenceCheckout)
+    (evidence.fileReference || evidence.checkout === evidenceCheckout)
       ? evidence
       : null;
   const toggleChanges = useCallback(() => {
@@ -492,7 +560,10 @@ export function ChatWindow({
     } else {
       const dirty = dirtyPaths(worktreePath);
       if (dirty.length) setLeaving(dirty);
-      else setChangesSession(null);
+      else {
+        setSourceRequest((current) => current?.kind === "working" ? current : null);
+        setChangesSession(null);
+      }
     }
   }, [worktreePath, showChanges, sessionId]);
 
@@ -507,6 +578,7 @@ export function ChatWindow({
     // Open documents keep their drafts in the store while hidden.
     setEvidence(null);
     setChangesSession(null);
+    setSourceRequest(null);
     setBackgroundSession(sessionId);
   }, [showBackground, sessionId]);
 
@@ -668,21 +740,44 @@ export function ChatWindow({
               key={`${sessionId}:${worktreePath}`}
               ref={changesRef}
               worktreePath={worktreePath}
-              onChangesLoaded={handleWorktreeLoaded}
+              onChangesLoaded={
+                worktreePath === evidenceCheckout
+                  ? handleWorktreeLoaded
+                  : undefined
+              }
               onExit={() => inputRef.current?.focus()}
               sourceJump={
-                evidenceJump?.sessionId === sessionId &&
-                evidenceJump.worktreePath === worktreePath
-                  ? evidenceJump.target
+                source?.kind === "working" && source.worktreePath === worktreePath
+                  ? source.target
                   : null
               }
+              turnDocument={
+                source?.kind === "turn"
+                  ? { ...source, target: { ...source.target, root: turnRoot } }
+                  : null
+              }
+              onTurnDismiss={(nonce) => {
+                // Keep browsing the same checkout after leaving the reference.
+                setSourceRequest((current) =>
+                  current?.kind === "turn" && current.nonce === nonce
+                    ? { kind: "checkout", sessionId, worktreePath }
+                    : current
+                );
+              }}
+              onTurnVersionChange={(nonce, version) => {
+                setSourceRequest((current) =>
+                  current?.kind === "turn" && current.nonce === nonce
+                    ? { ...current, version }
+                    : current
+                );
+              }}
             />
           </aside>
         )}
         {shownEvidence && (
           <aside
             aria-label={
-              shownEvidence.exactPath
+              shownEvidence.fileReference
                 ? "File reference panel"
                 : "Evidence panel"
             }
@@ -690,7 +785,6 @@ export function ChatWindow({
             style={{ flexBasis: panelResize.width }}
           >
             <SourceEvidence
-              exactPath={shownEvidence.exactPath}
               checkout={shownEvidence.checkout}
               target={shownEvidence.target}
               onClose={() => setEvidence(null)}
@@ -722,6 +816,7 @@ export function ChatWindow({
                 discardDraft(worktreePath, path);
               }
               setLeaving(null);
+              setSourceRequest(null);
               setChangesSession(null);
             }}
             onSave={() => {
@@ -731,7 +826,10 @@ export function ChatWindow({
                   // Stay in Changes on the first document that was not saved
                   // so its error or conflict is visible.
                   if (failed.length > 0) activate(worktreePath, failed[0]);
-                  else setChangesSession(null);
+                  else {
+                    setSourceRequest(null);
+                    setChangesSession(null);
+                  }
                 })
                 .finally(() => {
                   setLeaveBusy(false);
@@ -865,12 +963,12 @@ export function ChatWindow({
   );
   return (
     <EvidenceNavigationContext.Provider
-      value={evidenceCheckout ? openEvidence : undefined}
+      value={evidenceCheckout ? openSource : undefined}
     >
       <DiffReviewContext.Provider value={diffReview}>
         <SelectionDiscussionProvider
-          key={JSON.stringify([chat.session.projectPath, sessionId, worktreePath])}
-          worktreePath={worktreePath ?? ""}
+          key={JSON.stringify([chat.session.projectPath, sessionId, ownWorktreePath])}
+          worktreePath={ownWorktreePath ?? ""}
           parentChatId={sessionId}
           projectPath={chat.session.projectPath}
           harness={chat.session.harness}

@@ -211,6 +211,10 @@ vi.mock("../../bindings", async () => {
       worktreeFileExists: vi
         .fn()
         .mockResolvedValue({ status: "ok", data: true }),
+      readChatHistoryFile: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: { kind: "text", contents: "Captured flow source", revision: "turn" },
+      }),
       readWorktreeFile: vi
         .fn()
         .mockImplementation(async (_root: string, path: string) => ({
@@ -712,17 +716,8 @@ describe("ChatWindow diff review comments", () => {
       key: "Enter",
     });
     expect(screen.queryByText(/conversation with a worktree/)).toBeNull();
-    const open = async (location: string) => {
-      fireEvent.click(screen.getByRole("button", { name: location }));
-      return screen.findByRole("complementary", { name: "Evidence panel" });
-    };
-
-    // A changed file opens as its diff with the referenced lines selected.
-    let panel = await open("f.ts:6–8");
-    expect(await within(panel).findByText("modified")).toBeVisible();
-    expect(
-      within(panel).queryByRole("button", { name: "Open in Changes" })
-    ).toBeNull();
+    // Working-copy links use the main checkout's diff and file views.
+    let panel = await openReference("f.ts:6–8");
     await waitFor(() =>
       expect(seen.scroll).toHaveBeenLastCalledWith({
         type: "line",
@@ -732,35 +727,31 @@ describe("ChatWindow diff review comments", () => {
         align: "center",
       })
     );
-    expect(seen.evidence?.items[0].type).toBe("diff");
+    expect(within(panel).queryByText(/has no diff/)).toBeNull();
     expect(mockedCommands.loadWorktreeChanges).toHaveBeenCalledWith(
       "/project",
       { base: null, target: { kind: "working_tree" }, merge_base: true }
     );
-    expect(mockedCommands.readWorktreeFile).toHaveBeenCalledWith(
-      "/project",
-      "f.ts"
-    );
 
-    // Repeating the click scrolls again.
     const scrolled = seen.scroll.mock.calls.length;
-    fireEvent.click(screen.getByRole("button", { name: "f.ts:6–8" }));
-    await waitFor(() =>
-      expect(seen.scroll.mock.calls.length).toBe(scrolled + 1)
-    );
+    await openReference("f.ts:6–8");
+    await waitFor(() => expect(seen.scroll).toHaveBeenCalledTimes(scrolled + 1));
 
-    // An unchanged file opens as a file at its lines.
-    panel = await open("g.ts:2–3");
-    await waitFor(() => expect(seen.evidence?.items[0].id).toBe("g.ts"));
-    expect(seen.evidence?.items[0].type).toBe("file");
-    expect(seen.evidence?.selectedLines).toEqual({
-      id: "g.ts",
-      range: { start: 2, end: 3 },
+    panel = await openReference("g.ts:2–3");
+    expect(await within(panel).findByTestId("document-file")).toBeVisible();
+    expect(seen.file).toEqual({
+      name: "g.ts",
+      selectedLines: { start: 2, end: 3 },
     });
-    expect(within(panel).queryByText("modified")).toBeNull();
+    expect(mockedCommands.readWorktreeFile).toHaveBeenCalledWith("/project", "g.ts");
+
+    const openRevision = async (location: string) => {
+      fireEvent.click(screen.getByRole("button", { name: location }));
+      return screen.findByRole("complementary", { name: "Evidence panel" });
+    };
 
     // A revision range reads both sides; the lines number the old side.
-    panel = await open("f.ts:4–5");
+    panel = await openRevision("f.ts:4–5");
     expect(await within(panel).findByText("base-sha → head-sha")).toBeVisible();
     expect(mockedCommands.readWorktreeBaselineFile).toHaveBeenCalledWith(
       "/project",
@@ -782,27 +773,74 @@ describe("ChatWindow diff review comments", () => {
       })
     );
 
-    panel = await open("new.ts");
+    panel = await openRevision("new.ts");
     expect(await within(panel).findByText("added")).toBeVisible();
 
     // Missing paths are reported in place.
-    panel = await open("old.ts");
+    panel = await openRevision("old.ts");
     expect(
       await within(panel).findByText("old.ts does not exist at gone or gone.")
     ).toBeVisible();
-    panel = await open("missing.ts:1");
-    expect(
-      await within(panel).findByText(
-        "missing.ts does not exist in this checkout."
-      )
-    ).toBeVisible();
-
     fireEvent.click(
       within(panel).getByRole("button", { name: "Close evidence" })
     );
     expect(
       screen.queryByRole("complementary", { name: "Evidence panel" })
     ).toBeNull();
+
+    panel = await openReference("missing.ts:1");
+    expect(await within(panel).findByText("This file no longer exists.")).toBeVisible();
+  });
+
+  it("reveals a recorded flow range in a main-checkout conversation", async () => {
+    const flow = {
+      version: 1,
+      parts: [{
+        id: "client",
+        kind: "client",
+        attachments: [{ kind: "ref", path: "f.ts", line: 6, endLine: 8 }],
+      }],
+    };
+    flowSession([], {
+      projectPath: "/project",
+      association: { ...association, worktreePath: null },
+      messages: [{
+        kind: "assistant",
+        itemId: "reply",
+        turnId: "recorded",
+        text: "```flow\n" + JSON.stringify(flow) + "\n```",
+        timestamp: "2024-01-01T12:00:00Z",
+      }],
+      toolAnnotations: {
+        '["turn","recorded"]': {
+          worktree_origin: {
+            session_id: "test-session",
+            tool_id: "",
+            subject: { kind: "turn", id: "recorded" },
+            kind: "worktree_origin",
+            recorded_at: "2024-01-01T12:00:00Z",
+            payload: { worktree: "/project", epoch: "fixture" },
+          },
+        },
+      },
+    });
+    render(<ChatWindow sessionId="test-session" />);
+    await inspectClient();
+
+    const panel = await openReference("f.ts:6–8");
+    expect(await within(panel).findByText("Recorded turn contents · Read-only")).toBeVisible();
+    expect(mockedCommands.readChatHistoryFile).toHaveBeenCalledExactlyOnceWith(
+      "test-session", "recorded", "f.ts"
+    );
+    expect(mockedCommands.readWorktreeFile).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(seen.evidence?.selectedLines).toEqual({
+        id: "f.ts",
+        range: { start: 6, end: 8 },
+      })
+    );
+    expect(seen.evidence?.items[0].type).toBe("file");
+    expect(screen.getByRole("button", { name: "f.ts:6–8" })).toBeVisible();
   });
 
   it("matches the conversation navigation model through scope and document changes", async () => {
