@@ -921,7 +921,8 @@ fn run(cases: u64, test: impl Fn(&Case)) {
         reached.insert(mutation_class(case.mutation));
         reached.extend(case.mutated.classes.iter().cloned());
     })
-    .settings(Settings::new().test_cases(cases))
+    // Keep the generated class-coverage check reproducible.
+    .settings(Settings::new().test_cases(cases).seed(Some(20261121)))
     .run();
     let reached = reached.into_inner();
     let mut wanted: Vec<String> = LANGUAGES.iter().map(|l| format!("{l:?}")).collect();

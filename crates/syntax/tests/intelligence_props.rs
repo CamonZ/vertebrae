@@ -1395,7 +1395,8 @@ mod elixir {
             test(&modules, &rendered, &mut classes);
             reached.borrow_mut().extend(classes);
         })
-        .settings(Settings::new().test_cases(cases))
+        // Keep the generated class-coverage check reproducible.
+        .settings(Settings::new().test_cases(cases).seed(Some(20261121)))
         .run();
         let reached = reached.into_inner();
         let wanted = [
