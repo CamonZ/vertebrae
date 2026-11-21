@@ -76,7 +76,11 @@ import { FilesTree } from "./workspace/FilesTree";
 import { STATUS_LETTER } from "./workspace/status";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import type { JumpTarget } from "./workspace/AllChangesView";
-import { loadChangeSides, loadChangedSymbols } from "./workspace/changeContents";
+import {
+  loadChangeSides,
+  loadChangedSymbols,
+  sharedChangedSymbols,
+} from "./workspace/changeContents";
 import { routeSource, type FileReveal } from "./workspace/sourceRoute";
 import "./workspaceTabs.css";
 import "./worktreeChanges.css";
@@ -485,6 +489,7 @@ export function WorktreeChanges({
   );
 
   const comparisonFiles = state.status === "ready" ? state.data.files : null;
+  // The comparison's changed symbols, loaded once per comparison.
   const symbolGraphRequest = useMemo(() => {
     if (!comparison || !comparisonFiles) return undefined;
     // Background refreshes may return a fresh copy of the same comparison.
@@ -492,9 +497,13 @@ export function WorktreeChanges({
     const patches = comparison.working_tree
       ? comparisonFiles.map(({ path, old_path, patch, marker }) => [path, old_path, patch, marker])
       : null;
+    const key = JSON.stringify([worktreePath, comparison, patches]);
     return {
-      key: JSON.stringify([worktreePath, comparison, patches]),
-      load: () => loadChangedSymbols(worktreePath, comparison, comparisonFiles),
+      key,
+      load: () =>
+        sharedChangedSymbols(key, () =>
+          loadChangedSymbols(worktreePath, comparison, comparisonFiles)
+        ),
     };
   }, [worktreePath, comparison, comparisonFiles]);
 
