@@ -571,6 +571,7 @@ function MiniThread({
       }}
       onClick={(event) => {
         if (thread.status.kind !== "inline" ||
+          event.currentTarget.ownerDocument.getSelection()?.isCollapsed === false ||
           (event.target instanceof Element &&
             event.target.closest("button, a, input, textarea, select, pre"))
         ) return;

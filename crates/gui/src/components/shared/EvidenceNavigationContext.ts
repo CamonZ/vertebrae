@@ -9,6 +9,8 @@ export interface SourceLocation {
   line?: number;
   column?: number;
   endLine?: number;
+  /** A single pinned file snapshot. */
+  commit?: string;
   /** Which side of a diff the line numbers refer to. */
   side?: "old" | "new";
   /** Diff range: `base` against `head`, or the working copy without `head`. */

@@ -10,10 +10,12 @@ import {
 import userEvent from "@testing-library/user-event";
 import { VtbEntityCopyProvider } from "./VtbEntityLink";
 import { MarkdownContent } from "./MarkdownContent";
+import { FileReferenceNavigationContext } from "./FileReferenceNavigationContext";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import { NEAR_VIEWPORT_DWELL_MS } from "../../hooks/useNearViewport";
 
 const requestMermaidSvgMock = vi.hoisted(() => vi.fn());
+const loadWorktreeChangesMock = vi.hoisted(() => vi.fn());
 
 const graphvizMock = vi.hoisted(() => ({
   dot: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock("@tauri-apps/plugin-opener", () => openerMock);
 
 vi.mock("../../bindings", () => ({
   commands: {
+    loadWorktreeChanges: loadWorktreeChangesMock,
     listArtifactPresentations: vi
       .fn()
       .mockResolvedValue({ status: "ok", data: [] }),
@@ -63,6 +66,101 @@ function expectNoLengthControls() {
 }
 
 describe("MarkdownContent", () => {
+  describe("call diagrams", () => {
+    const base = "a".repeat(40);
+    const target = "b".repeat(40);
+    const call = (label: string, line: number) => ({ label, path: "src/calls.ts", line });
+    const fence = (language: string, payload: unknown) =>
+      "```" + language + "\n" + JSON.stringify(payload) + "\n```";
+
+    it("renders a current call tree with relationship labels and expandable branches", () => {
+      render(<MarkdownContent text={fence("calltree", {
+        snapshot: "working-tree",
+        direction: "incoming",
+        root: {
+          ...call("dispatch", 5),
+          children: [{
+            ...call("QueuePanel", 8),
+            relationship: "render",
+            certainty: "dynamic",
+            children: [call("subscribe", 9)],
+          }],
+        },
+        incomplete: "The listener is chosen at runtime.",
+      })} />);
+
+      expect(screen.getByText("Call tree")).toBeInTheDocument();
+      expect(screen.getByText("incoming · Working tree at time of answer")).toBeInTheDocument();
+      expect(screen.getByText("render")).toBeInTheDocument();
+      expect(screen.getByText("dynamic")).toBeInTheDocument();
+      expect(screen.getByRole("status")).toHaveTextContent("The listener is chosen at runtime.");
+      const disclosures = screen.getAllByText("1 branch");
+      expect(disclosures[0].closest("details")).toHaveAttribute("open");
+      expect(disclosures[1].closest("details")).not.toHaveAttribute("open");
+      fireEvent.click(disclosures[1]);
+      expect(disclosures[1].closest("details")).toHaveAttribute("open");
+    });
+
+    it("groups call changes by enclosing function and opens each side's source on demand", () => {
+      loadWorktreeChangesMock.mockClear();
+      const navigate = vi.fn();
+      render(
+        <FileReferenceNavigationContext.Provider value={navigate}>
+          <MarkdownContent projectPath="/repo" text={fence("calldiff", {
+            base,
+            target,
+            rows: [{
+              old: call("submitOrder", 1),
+              new: call("submitOrder", 2),
+              children: [{ old: call("oldCall", 2), new: call("newCall", 3) }],
+            }],
+          })} />
+        </FileReferenceNavigationContext.Provider>
+      );
+
+      const group = screen.getByRole("region", { name: "submitOrder" });
+      expect(group.querySelectorAll("[data-root]")).toHaveLength(2);
+      expect(screen.getByText("oldCall").closest("[data-change]")).toHaveAttribute("data-change", "removed");
+      expect(screen.getByText("newCall").closest("[data-change]")).toHaveAttribute("data-change", "added");
+      expect(loadWorktreeChangesMock).not.toHaveBeenCalled();
+      expect(navigate).not.toHaveBeenCalled();
+      const oldCall = screen.getByRole("button", { name: "oldCall" });
+      expect(oldCall).toHaveAttribute("title", "src/calls.ts:2");
+      expect(screen.queryByText("src/calls.ts:2")).not.toBeInTheDocument();
+      fireEvent.click(oldCall);
+      expect(navigate).toHaveBeenLastCalledWith({
+        root: "/repo", path: "src/calls.ts", line: 2, column: null, commit: base,
+      });
+      fireEvent.click(screen.getByRole("button", { name: "newCall" }));
+      expect(navigate).toHaveBeenLastCalledWith({
+        root: "/repo", path: "src/calls.ts", line: 3, column: null, commit: target,
+      });
+      expect(screen.queryByText("oldCall();")).not.toBeInTheDocument();
+    });
+
+    it("requires an enclosing function and never computes legacy call diffs", () => {
+      loadWorktreeChangesMock.mockClear();
+      const { rerender } = render(<MarkdownContent projectPath="/repo" text={fence("calldiff", {
+        base, target, rows: [{ old: call("oldCall", 2), new: call("newCall", 3) }],
+      })} />);
+      expect(screen.getByRole("alert")).toHaveTextContent("Each enclosing function needs its call changes");
+      rerender(<MarkdownContent projectPath="/repo" text={fence("calldiff", {
+        base, target, functions: ["submitOrder"],
+      })} />);
+      expect(screen.getByRole("alert")).toHaveTextContent("A call diff needs enclosing functions");
+      expect(loadWorktreeChangesMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects evidence paths outside the checkout and incomplete fences", () => {
+      const input = { snapshot: base, root: { ...call("root", 1), path: "../outside.ts" } };
+      const text = fence("calltree", input);
+      const { rerender } = render(<MarkdownContent text={text.slice(0, -3)} />);
+      expect(screen.queryByText("Call tree")).not.toBeInTheDocument();
+      rerender(<MarkdownContent text={text} />);
+      expect(screen.getByRole("alert")).toHaveTextContent("Source paths must be relative to the checkout.");
+    });
+  });
+
   beforeEach(() => {
     useEntityPanelStore.getState().reset();
     openerMock.openUrl.mockReset();

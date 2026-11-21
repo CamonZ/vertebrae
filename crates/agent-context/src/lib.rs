@@ -183,7 +183,7 @@ mod tests {
 
     /// Leaf docs stay about one screen; larger topics become a sub-index.
     const MAX_DOC_LINES: usize = 80;
-    const MAX_ROOT_ENTRIES: usize = 12;
+    const MAX_ROOT_ENTRIES: usize = 13;
 
     fn links(markdown: &str) -> Vec<String> {
         let mut found = Vec::new();

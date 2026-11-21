@@ -5,6 +5,7 @@ export interface FileTarget {
   path: string;
   line: number | null;
   column: number | null;
+  commit?: string;
   history?: { sessionId: string; turnId: string | null };
 }
 

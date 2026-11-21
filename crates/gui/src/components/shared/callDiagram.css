@@ -1,0 +1,148 @@
+.call-diagram {
+  --call-diagram-added: var(--diffs-addition-color-override, #68ad71);
+  --call-diagram-removed: var(--diffs-deletion-color-override, #e06c75);
+  margin: 0 0 8px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg);
+}
+
+.call-diagram-title,
+.call-diagram-columns {
+  color: var(--color-fg-mute);
+  font: 500 11px/16px var(--font-sans);
+}
+
+.call-diagram-title {
+  display: flex;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.call-diagram-range {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.call-diagram-body {
+  max-height: 24rem;
+  overflow: auto;
+  padding-block-end: 8px;
+  font: 12px/20px var(--font-mono);
+}
+
+.call-diagram-body > p {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--color-fg-mute);
+  font: 12px/1.4 var(--font-sans);
+}
+
+/* Keep Markdown prose list spacing out of diagrams. */
+.call-diagram .call-diagram-body ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.call-diagram .call-diagram-body li {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.call-diagram-branch {
+  margin-inline-start: 12px;
+  padding-inline-start: 8px;
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.call-diagram-branch summary {
+  cursor: pointer;
+  color: var(--color-fg-mute);
+  font: 11px/16px var(--font-mono);
+}
+
+.call-diagram-split {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.call-diagram-columns {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 0 2px;
+  background: var(--color-bg);
+}
+
+.call-diagram-columns > span,
+.call-diagram-cell {
+  padding-inline: 12px;
+}
+
+.call-diagram-split > :last-child {
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.call-diagram-cell {
+  min-width: 0;
+  padding-block: 2px;
+  color: var(--color-fg-soft);
+  overflow-wrap: anywhere;
+}
+
+.call-diagram-cell[data-root] {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+.call-diagram-calls .call-diagram-cell {
+  padding-inline-start: 24px;
+}
+
+.call-diagram-cell[data-change="added"] {
+  background: color-mix(in oklab, var(--call-diagram-added) 14%, transparent);
+  color: var(--color-fg);
+}
+
+.call-diagram-cell[data-change="removed"] {
+  background: color-mix(in oklab, var(--call-diagram-removed) 14%, transparent);
+  color: var(--color-fg);
+}
+
+.call-diagram-cell[data-empty] {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 4px,
+    color-mix(in oklab, var(--color-fg-mute) 8%, transparent) 4px 5px
+  );
+}
+
+.call-diagram-detail {
+  margin-inline-start: 6px;
+  color: var(--color-fg-mute);
+}
+
+.call-diagram-cell .call-diagram-source,
+.call-diagram-cell [data-actionable-reference="file"] {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.call-diagram-cell .call-diagram-source:hover,
+.call-diagram-cell [data-actionable-reference="file"]:hover {
+  color: var(--color-fg);
+}
+
+.call-diagram-function + .call-diagram-function {
+  margin-block-start: 8px;
+}

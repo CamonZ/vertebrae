@@ -33,6 +33,8 @@ sub-index. Links are relative to the file that contains them.
   Load when: explaining a development workflow as a statechart, authoring a statechart artifact, or embedding one in chat.
 - [Machine diagrams](machine-diagrams.md): authoring playable flow specs, choosing parts and verbs, evidence, Before/After and named options, drill-down, and saving flow artifacts.
   Load when: explaining a system flow or PR with a machine diagram, writing a `flow` fence, or authoring a flow artifact.
+- [Call trees and call diffs](call-diffs.md): render evidence-backed call trees for one snapshot or side-by-side call changes for two snapshots.
+  Load when: the user asks how a function or feature works, what calls it, or how a change rewired the call flow; or when showing call changes in a review.
 - [Running](running/index.md): TaskRuns, concurrency, retries and recovery.
   Load when: starting or stopping a run, `max_concurrency`, run status, `retry_exhausted`, resuming a stuck task.
 - [Debugging](debugging/index.md): failure strings mapped to causes and fixes, logs and outcomes.

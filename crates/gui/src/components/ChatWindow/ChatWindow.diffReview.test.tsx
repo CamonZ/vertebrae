@@ -1650,6 +1650,44 @@ describe("Changes panel shortcut registration", () => {
     expect(toggle).toBeNull();
   });
 
+  it("toggles the main checkout's Changes through the shortcut without changes of its own", async () => {
+    seedSession();
+    // A chat on the main checkout: its worktree is the project itself.
+    act(() => {
+      useChatStore.setState((state) => ({
+        sessions: {
+          ...state.sessions,
+          "test-session": {
+            ...state.sessions["test-session"],
+            projectPath: "/worktree",
+          },
+        },
+      }));
+    });
+
+    let toggle: (() => void) | null = null;
+    render(
+      <ChatWindow
+        sessionId="test-session"
+        registerChangesToggle={(next) => {
+          toggle = next;
+        }}
+      />
+    );
+    await waitFor(() => expect(toggle).not.toBeNull());
+    mockedCommands.loadWorktreeChanges.mockClear();
+
+    act(() => toggle?.());
+    // Opened at once: there Changes compares other refs too.
+    expect(
+      screen.getByRole("complementary", { name: "Changes panel" })
+    ).toBeVisible();
+    act(() => toggle?.());
+    expect(
+      screen.queryByRole("complementary", { name: "Changes panel" })
+    ).toBeNull();
+  });
+
   it("does not register the Changes shortcut for an inactive pane or unassociated conversation", async () => {
     seedSession();
 

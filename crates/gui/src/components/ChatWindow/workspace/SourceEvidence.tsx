@@ -4,7 +4,7 @@ import { resolveTurnSource } from "./resolveTurnSource";
 import { OpenInExternalEditor } from "./OpenInExternalEditor";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
-import { resolveSource, type ResolvedSource } from "./resolveSource";
+import { resolveSource, shortRevision, type ResolvedSource } from "./resolveSource";
 import "./evidencePanel.css";
 
 const SourceEvidenceCode = lazy(() => import("./SourceEvidenceCode"));
@@ -40,7 +40,7 @@ export function SourceEvidence({
   /** Chat references must not follow a renamed path implicitly. */
   exactPath?: boolean;
 }) {
-  const { path, base, head } = target;
+  const { path, base, head, commit } = target;
   const [reload, setReload] = useState(0);
   const [latestSelection, setLatestSelection] = useState<number | null>(null);
   const latest = latestSelection === target.nonce;
@@ -63,6 +63,7 @@ export function SourceEvidence({
     path,
     base,
     head,
+    commit,
     reload,
     exactPath,
     history,
@@ -75,7 +76,7 @@ export function SourceEvidence({
     let current = true;
     const request = history
       ? resolveTurnSource(effectiveCheckout, path, history, latest)
-      : resolveSource(checkout, { path, base, head }, { exactPath });
+      : resolveSource(checkout, { path, base, head, commit }, { exactPath });
     request.then(
       (source) => current && setState({ key, source }),
       (error: unknown) =>
@@ -95,6 +96,7 @@ export function SourceEvidence({
     path,
     base,
     head,
+    commit,
     exactPath,
     history,
     latest,
@@ -167,7 +169,7 @@ export function SourceEvidence({
             </button>
           </div>
         )}
-        {(!history || latest) && (
+        {!commit && (!history || latest) && (
           <OpenInExternalEditor
             root={effectiveCheckout}
             path={shown?.path ?? path}
@@ -193,6 +195,7 @@ export function SourceEvidence({
         {shown?.kind === "diff" && (
           <span className="evidence-revisions">{shown.label}</span>
         )}
+        {commit && <span className="evidence-revisions" title={commit}>{shortRevision(commit)}</span>}
         <button
           type="button"
           className="evidence-action"

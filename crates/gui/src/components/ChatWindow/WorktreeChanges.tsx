@@ -82,7 +82,6 @@ import {
   sharedChangedSymbols,
 } from "./workspace/changeContents";
 import { routeSource, type FileReveal } from "./workspace/sourceRoute";
-import { CallTreeView } from "./workspace/callTree/CallTreeView";
 import "./workspaceTabs.css";
 import "./worktreeChanges.css";
 
@@ -238,8 +237,6 @@ export function WorktreeChanges({
   });
   const preferredDiffOptions = usePierreDiffOptions();
   const [diffStyle, setDiffStyle] = useState(preferredDiffOptions.diffStyle);
-  // The comparison's call-tree diff in place of its file diffs.
-  const [callTree, setCallTree] = useState(false);
   const wholeBranch = base?.kind !== "head";
 
   const [choices, setChoices] = useState<ComparisonChoice[]>([]);
@@ -261,6 +258,21 @@ export function WorktreeChanges({
       : endpoint.kind === "working_tree"
         ? "working"
         : JSON.stringify(endpoint);
+
+  // Match a short ref such as "origin/master" to its full-name choice.
+  const selectedKey = (endpoint: ComparisonEndpoint) => {
+    const short = endpoint.kind === "ref" ? endpoint.value : null;
+    const named =
+      short &&
+      choices.find(
+        ({ endpoint: choice }) =>
+          choice.kind === "ref" &&
+          [short, `refs/heads/${short}`, `refs/remotes/${short}`].includes(
+            choice.value
+          )
+      );
+    return endpointKey(named ? named.endpoint : endpoint);
+  };
 
   const endpointFor = (value: string): ComparisonEndpoint | undefined =>
     value === "head"
@@ -590,7 +602,6 @@ export function WorktreeChanges({
     focusHeader = false,
     location?: Pick<JumpTarget, "line" | "side">
   ) => {
-    setCallTree(false);
     setReveal(null);
     setActivePath(path);
     activate(worktreePath, null);
@@ -865,14 +876,7 @@ export function WorktreeChanges({
   };
 
   const changesBody =
-    callTree && state.status === "ready" && symbolGraphRequest ? (
-      <CallTreeView
-        request={symbolGraphRequest}
-        files={state.data.files}
-        layout={diffStyle === "split" ? "split" : "unified"}
-        onJump={(site) => jumpToFile(site.path, false, site)}
-      />
-    ) : state.status === "loading" ? (
+    state.status === "loading" ? (
       <p role="status">Loading changes…</p>
     ) : state.status === "error" ? (
       <p role="alert">{state.message}</p>
@@ -965,7 +969,7 @@ export function WorktreeChanges({
             <ComparisonSelect
               label="Comparison base"
               buttonRef={baseButton}
-              value={base ? endpointKey(base) : "auto"}
+              value={base ? selectedKey(base) : "auto"}
               onChange={(value) => {
                 const endpoint = value === "auto" ? null : endpointFor(value);
 
@@ -997,7 +1001,7 @@ export function WorktreeChanges({
             <ComparisonSelect
               label="Comparison target"
               buttonRef={targetButton}
-              value={endpointKey(target)}
+              value={selectedKey(target)}
               onChange={(value) => {
                 const endpoint = endpointFor(value);
 
@@ -1270,9 +1274,8 @@ export function WorktreeChanges({
             <button
               type="button"
               className="changes-tab"
-              aria-current={showingChanges && !callTree ? "page" : undefined}
+              aria-current={showingChanges ? "page" : undefined}
               onClick={() => {
-                setCallTree(false);
                 setReveal(null);
                 activate(worktreePath, null);
                 setHistoricalDocument(null);
@@ -1280,21 +1283,6 @@ export function WorktreeChanges({
             >
               All changes
             </button>
-            {symbolGraphRequest && (
-              <button
-                type="button"
-                className="changes-tab"
-                aria-current={showingChanges && callTree ? "page" : undefined}
-                onClick={() => {
-                  setCallTree(true);
-                  setReveal(null);
-                  activate(worktreePath, null);
-                  setHistoricalDocument(null);
-                }}
-              >
-                Call tree
-              </button>
-            )}
             {!historical &&
               order.map((path) => (
                 <span key={path} className="changes-tab-group">
