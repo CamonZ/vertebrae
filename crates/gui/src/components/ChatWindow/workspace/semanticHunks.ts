@@ -1,9 +1,7 @@
 /**
- * Semantic mode for one file in Changes: which unchanged lines to reveal so
- * each hunk opens at its enclosing declaration, which hunks of one
- * declaration to join, and which labels to show. Built on the file's line
- * patch, so line numbers, selections and comment anchors are those of the
- * line diff; semantic mode only reveals lines and adds labels.
+ * Semantic data for one file in Changes: the labels to show on its line
+ * patch. Line numbers, selections and comment anchors are those of the line
+ * diff; semantic data only adds labels, it never reveals or hides lines.
  *
  * Coverage: every changed block of the patch is either labelled with the
  * changes that overlap it, marked formatting-only (its text differs only in
@@ -24,19 +22,10 @@ import type {
   ScopeSegment,
 } from "../../../bindings";
 import { factKey, orderFacts, type FactGroup } from "./semanticFacts";
-import type { GapReveal } from "../../thread/toolChange/diffGaps";
 import type {
   FilePatch,
   HunkRow,
 } from "../../thread/toolChange/diffLineMapper";
-import type { LineDiffReason } from "./useChangeFiles";
-
-/**
- * Lines revealed at most to reach a declaration's opening line, or to join
- * two hunks of one declaration. A farther declaration is named in the label
- * rather than shown.
- */
-export const MAX_REVEAL = 40;
 
 export type DiffSide = "deletions" | "additions";
 
@@ -105,8 +94,6 @@ export function labelChips(label: SemanticLabel): readonly SemanticChip[] {
 }
 
 export interface SemanticHunks {
-  /** Per gap index (gap `i` sits above hunk `i`): lines to reveal. */
-  reveals: ReadonlyMap<number, GapReveal>;
   labels: readonly SemanticLabel[];
   /** No syntax change: every changed line differs only in whitespace. */
   formattingOnly: boolean;
@@ -362,76 +349,35 @@ function labelPlace(block: Block): { side: DiffSide; lineNumber: number } {
     : { side: "deletions", lineNumber: block.oldLines[0] };
 }
 
-/**
- * Reveals per gap, and the hunks shown flush against the one before (no gap
- * left between them).
- */
-function gapReveals(
-  patch: FilePatch,
-  headersByHunk: ReadonlyMap<number, ReadonlySet<number>>
-): { reveals: Map<number, GapReveal>; joined: Set<number> } {
-  const reveals = new Map<number, GapReveal>();
+/** Hunks shown flush against the one before (no gap left between them). */
+function joinedHunks(patch: FilePatch): Set<number> {
   const joined = new Set<number>();
   let previousEnd = 0;
   patch.hunks.forEach((hunk, index) => {
     const first = linesBefore(hunk.newStart, hunk.newCount) + 1;
-    const gapSize = first - 1 - previousEnd;
-    if (index > 0 && gapSize <= 0) joined.add(index);
-    if (gapSize > 0) {
-      for (const line of headersByHunk.get(index) ?? []) {
-        if (line >= first) continue;
-        if (line <= previousEnd && gapSize <= MAX_REVEAL) {
-          reveals.set(index, { top: gapSize, bottom: 0 });
-          joined.add(index);
-          break;
-        }
-        const bottom = first - line;
-        if (line > previousEnd && bottom <= MAX_REVEAL) {
-          reveals.set(index, { top: 0, bottom: Math.max(bottom, reveals.get(index)?.bottom ?? 0) });
-        }
-      }
-    }
+    if (index > 0 && first - 1 - previousEnd <= 0) joined.add(index);
     previousEnd = linesBefore(hunk.newStart, hunk.newCount) + hunk.newCount;
   });
-  return { reveals, joined };
+  return joined;
 }
 
 export function semanticHunks(
   patch: FilePatch,
-  declarations: readonly DeclarationDiff[],
-  revealContext = true
+  declarations: readonly DeclarationDiff[]
 ): SemanticHunks {
   const all = locate(declarations);
   const changed = blocks(patch);
   for (const block of changed)
     block.located = all.filter((entry) => touches(block, entry));
-
-  const headersByHunk = new Map<number, Set<number>>();
-  if (revealContext) {
-    for (const block of changed) {
-      const headers = headersByHunk.get(block.hunk) ?? new Set<number>();
-      for (const { header, chip, home } of block.located) {
-        const owner = !chip && isMember(header) ? home.at(-1) : header;
-        const line = owner?.new_line;
-        if (chip?.kind !== "moved" && line != null) headers.add(line);
-      }
-      headersByHunk.set(block.hunk, headers);
-    }
-  }
-  const { reveals, joined } = gapReveals(patch, headersByHunk);
+  const joined = joinedHunks(patch);
 
   // Annotations use source line numbers. Only anchor to rows the diff
-  // renders, including the unchanged lines we will reveal above a hunk.
+  // renders.
   const visible = { additions: new Set<number>(), deletions: new Set<number>() };
-  for (const [index, hunk] of patch.hunks.entries()) {
+  for (const hunk of patch.hunks) {
     for (const row of hunk.rows) {
       if (row.oldLine !== null) visible.deletions.add(row.oldLine);
       if (row.newLine !== null) visible.additions.add(row.newLine);
-    }
-    const bottom = reveals.get(index)?.bottom ?? 0;
-    for (let offset = 1; offset <= bottom; offset++) {
-      visible.deletions.add(linesBefore(hunk.oldStart, hunk.oldCount) + 1 - offset);
-      visible.additions.add(linesBefore(hunk.newStart, hunk.newCount) + 1 - offset);
     }
   }
 
@@ -604,7 +550,6 @@ export function semanticHunks(
   }
 
   return {
-    reveals,
     labels,
     // The engine reports every change beyond whitespace (its coverage
     // invariant), so none means formatting only.
@@ -663,16 +608,6 @@ export function summaryDetail(summary: DeclarationSummary): string {
     ...summary.moved.map((d) => `moved ${label(d)}`),
   ].join("\n");
 }
-
-export const FALLBACK_TEXT: Record<LineDiffReason, string> = {
-  unsupported_language: "Language not supported for semantic diff",
-  syntax_error: "A side has a syntax error",
-  too_large: "File is over the semantic diff size budget",
-  timed_out: "Semantic diff exceeded its time budget",
-  not_text: "Binary, unreadable or non-UTF-8 file",
-  request_failed: "Semantic diff failed",
-  stale: "The file changed since this diff was loaded",
-};
 
 /** One chip as words, e.g. `renamed sum → acc`. */
 export function chipText(chip: SemanticChip): string {

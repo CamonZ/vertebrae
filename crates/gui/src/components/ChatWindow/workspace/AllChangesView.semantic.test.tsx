@@ -210,10 +210,8 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-async function renderSemantic(enabled = true) {
-  const view = render(
-    <AllChangesView files={files} loadSides={load} semantic={enabled} />
-  );
+async function renderSemantic() {
+  const view = render(<AllChangesView files={files} loadSides={load} />);
   await act(async () => {});
   return view;
 }
@@ -224,12 +222,12 @@ function indicator(path: string, side: "old" | "new", line: number) {
     ?.querySelector<HTMLButtonElement>(`button[aria-label^="Semantic details for ${side} line ${line}"]`);
 }
 
-describe("AllChangesView semantic mode", () => {
+describe("AllChangesView semantic data", () => {
   it("labels a change with its enclosing function", async () => {
     await renderSemantic();
     const diff = screen.getByRole("region", { name: "diff f.ts" });
     expect(diff).not.toHaveTextContent("function f");
-    const button = indicator("f.ts", "new", 10)!;
+    const button = indicator("f.ts", "new", 15)!;
     expect(button).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(button);
     expect(button).toHaveAttribute("aria-expanded", "true");
@@ -253,7 +251,6 @@ describe("AllChangesView semantic mode", () => {
       <AllChangesView
         files={[change("f.ts", tsPatch)]}
         loadSides={slow}
-        semantic
       />
     );
     const heading = () => container.querySelector('[data-changes-path="f.ts"]');
@@ -265,14 +262,14 @@ describe("AllChangesView semantic mode", () => {
     expect(heading()).toHaveAttribute("data-semantic", "ready");
   });
 
-  it("marks files kept as a line diff, with the reason", async () => {
+  it("shows a file without semantic data as its plain line diff", async () => {
     await renderSemantic();
-    const marker = screen.getByText("line diff");
-    expect(marker).toHaveAttribute("title", "Language not supported for semantic diff");
-    expect(screen.getByRole("region", { name: "diff notes.md" })).toContainElement(marker);
+    const notes = screen.getByRole("region", { name: "diff notes.md" });
+    expect(notes).not.toHaveTextContent("line diff");
+    expect(notes.querySelector("[data-test-gutter]")?.shadowRoot?.querySelector("button")).toBeFalsy();
   });
 
-  it("keeps the line diff when the file changed since its patch, or the request failed", async () => {
+  it("labels nothing when the file changed since its patch, or the request failed", async () => {
     const edited = async (
       file: WorktreeChange,
       semantic: boolean
@@ -285,35 +282,21 @@ describe("AllChangesView semantic mode", () => {
       };
     };
     render(
-      <AllChangesView files={files.slice(0, 2)} loadSides={edited} semantic />
+      <AllChangesView files={files.slice(0, 2)} loadSides={edited} />
     );
     await act(async () => {});
-    const marker = (path: string) =>
-      within(screen.getByRole("region", { name: `diff ${path}` })).getByText(
-        "line diff"
-      );
-    expect(marker("f.ts")).toHaveAttribute(
-      "title",
-      "The file changed since this diff was loaded"
-    );
-    expect(marker("notes.md")).toHaveAttribute(
-      "title",
-      "Semantic diff failed: Error: boom"
-    );
+    expect(indicator("f.ts", "new", 15)).toBeFalsy();
+    expect(screen.queryByText("line diff")).toBeNull();
     expect(screen.queryByText("function")).toBeNull();
   });
 
-  it("folds a whitespace-only file behind a formatting marker, which the toggle opens and folds by hand", async () => {
+  it("marks a whitespace-only file as formatting only, without folding it", async () => {
     await renderSemantic();
     const toggle = screen.getByRole("button", { name: "Toggle diff for fmt.rs" });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("region", { name: "diff fmt.rs" })).toHaveTextContent("formatting only");
     fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
-    fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 
   it("opens a viewed file by unmarking it", async () => {
@@ -322,7 +305,6 @@ describe("AllChangesView semantic mode", () => {
       <AllChangesView
         files={files}
         loadSides={load}
-        semantic
         viewedPaths={new Set(["f.ts"])}
         onViewedChange={onViewedChange}
       />
@@ -340,7 +322,7 @@ describe("AllChangesView semantic mode", () => {
       (file) =>
         new Promise<SemanticOutcome>((done) => pending.set(file.path, done))
     );
-    render(<AllChangesView files={files} loadSides={deferred} semantic />);
+    render(<AllChangesView files={files} loadSides={deferred} />);
     await act(async () => {});
     const version = (path: string) =>
       screen
@@ -353,39 +335,13 @@ describe("AllChangesView semantic mode", () => {
     expect(version("notes.md")).not.toBe("0");
   });
 
-  it("asks for no semantic diff and labels nothing in line mode", async () => {
-    await renderSemantic(false);
-    expect(load.mock.calls.every(([, semantic]) => !semantic)).toBe(true);
+  it("labels nothing without a way to read the sides", async () => {
+    render(<AllChangesView files={files} />);
+    await act(async () => {});
     expect(
       document.querySelector('[data-changes-path="f.ts"]')
     ).toHaveAttribute("data-semantic", "off");
     expect(screen.queryByText("function")).toBeNull();
-    expect(screen.queryByText("line diff")).toBeNull();
-    expect(screen.getByRole("button", { name: "Toggle diff for fmt.rs" })).toHaveAttribute(
-      "aria-expanded",
-      "true"
-    );
-  });
-
-  it("drops and restores the semantic view when switching modes", async () => {
-    const view = await renderSemantic();
-    const fmt = () =>
-      screen.getByRole("button", { name: "Toggle diff for fmt.rs" });
-    const labelled = () => indicator("f.ts", "new", 10);
-    expect(labelled()).toBeTruthy();
-    expect(fmt()).toHaveAttribute("aria-expanded", "false");
-
-    view.rerender(
-      <AllChangesView files={files} loadSides={load} semantic={false} />
-    );
-    await act(async () => {});
-    expect(labelled()).toBeFalsy();
-    expect(fmt()).toHaveAttribute("aria-expanded", "true");
-
-    view.rerender(<AllChangesView files={files} loadSides={load} semantic />);
-    await act(async () => {});
-    expect(labelled()).toBeTruthy();
-    expect(fmt()).toHaveAttribute("aria-expanded", "false");
   });
 
   it("links a moved copy to the other location", async () => {
@@ -418,7 +374,6 @@ describe("AllChangesView semantic mode", () => {
       <AllChangesView
         files={[change("m.rs", movePatch)]}
         loadSides={loader(() => Promise.resolve(moved))}
-        semantic
       />
     );
     await act(async () => {});
@@ -499,7 +454,6 @@ it("links the current hunk to an ambiguous changed-symbol candidate", async () =
       loadSides={loadSides}
       symbolGraphRequest={{ key: "current-comparison", load }}
       onRelatedJump={jump}
-      semantic
     />
   );
   const initialLoad = vi.fn(() => graph);
@@ -507,7 +461,7 @@ it("links the current hunk to an ambiguous changed-symbol candidate", async () =
   const { rerender } = render(view(initialLoad));
   const originDiff = screen.getByRole("region", { name: "diff f.ts" });
   await act(async () => {});
-  fireEvent.click(indicator("f.ts", "new", 10)!);
+  fireEvent.click(indicator("f.ts", "new", 15)!);
   expect(within(originDiff).getByText("f")).toBeVisible();
   const initialVersion = originDiff.getAttribute("data-version");
   rerender(view(refreshLoad));

@@ -4,7 +4,6 @@ import { isEditableShortcutTarget } from "../../utils/keyboard";
 import {
   CHANGED_FILE_LIST_KEYS,
   CHANGES_COMMANDS,
-  CHANGES_DIFF_MODE_KEY,
   CHANGES_UNVIEW_HINT,
   CHANGES_VIEWED_KEY,
   DISCUSSION_ASK_SHORTCUT,
@@ -234,10 +233,6 @@ export function WorktreeChanges({
   });
   const preferredDiffOptions = usePierreDiffOptions();
   const [diffStyle, setDiffStyle] = useState(preferredDiffOptions.diffStyle);
-  // Per pane; semantic where the file's language allows it.
-  const [diffMode, setDiffMode] = useState<"semantic" | "line">("semantic");
-  const toggleDiffMode = () =>
-    setDiffMode((mode) => (mode === "semantic" ? "line" : "semantic"));
   const wholeBranch = base?.kind !== "head";
 
   const [choices, setChoices] = useState<ComparisonChoice[]>([]);
@@ -491,7 +486,7 @@ export function WorktreeChanges({
 
   const comparisonFiles = state.status === "ready" ? state.data.files : null;
   const symbolGraphRequest = useMemo(() => {
-    if (!comparison || !comparisonFiles || diffMode !== "semantic") return undefined;
+    if (!comparison || !comparisonFiles) return undefined;
     // Background refreshes may return a fresh copy of the same comparison.
     // Reuse graph results until an endpoint or its working-tree patch changes.
     const patches = comparison.working_tree
@@ -501,7 +496,7 @@ export function WorktreeChanges({
       key: JSON.stringify([worktreePath, comparison, patches]),
       load: () => loadChangedSymbols(worktreePath, comparison, comparisonFiles),
     };
-  }, [worktreePath, comparison, comparisonFiles, diffMode]);
+  }, [worktreePath, comparison, comparisonFiles]);
 
   const refreshAll = useCallback(() => {
     setRefresh((value) => ({ count: value.count + 1, background: true }));
@@ -743,17 +738,6 @@ export function WorktreeChanges({
         },
       },
       {
-        id: "changes-diff-mode",
-        scope: "changes",
-        label: diffMode === "semantic" ? CHANGES_COMMANDS.line : CHANGES_COMMANDS.semantic,
-        detail: CHANGES_DIFF_MODE_KEY,
-        keywords: "diff mode syntax structural ast toggle",
-        run: () => {
-          toggleDiffMode();
-          refocus();
-        },
-      },
-      {
         id: "changes-refresh",
         scope: "changes",
         label: CHANGES_COMMANDS.refresh,
@@ -855,14 +839,6 @@ export function WorktreeChanges({
       return;
     }
 
-    // m anywhere in Changes, the diff included: semantic / line diff.
-    if (event.key === CHANGES_DIFF_MODE_KEY) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (!event.repeat) toggleDiffMode();
-      return;
-    }
-
     // v outside the diff marks the active file; the diff handles its own.
     if (event.key === CHANGES_VIEWED_KEY && !inCursor && selectedFile) {
       event.preventDefault();
@@ -918,7 +894,6 @@ export function WorktreeChanges({
             loadSides={loadSides}
             symbolGraphRequest={symbolGraphRequest}
             onRelatedJump={(location) => jumpToFile(location.path, false, location)}
-            semantic={diffMode === "semantic"}
           />
         </Suspense>
       </div>
@@ -1023,20 +998,6 @@ export function WorktreeChanges({
               ]}
             />
           </label>
-        </div>
-        <div role="group" aria-label="Diff mode" className="document-views">
-          {(["semantic", "line"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              aria-pressed={diffMode === mode}
-              aria-keyshortcuts={CHANGES_DIFF_MODE_KEY.toUpperCase()}
-              title={`${mode === "semantic" ? CHANGES_COMMANDS.semantic : CHANGES_COMMANDS.line} (${CHANGES_DIFF_MODE_KEY})`}
-              onClick={() => setDiffMode(mode)}
-            >
-              {mode === "semantic" ? "Semantic" : "Line"}
-            </button>
-          ))}
         </div>
         <div role="group" aria-label="Diff layout" className="document-views">
           {(["unified", "split"] as const).map((style) => (

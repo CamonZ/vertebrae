@@ -42,7 +42,7 @@ import {
 } from "./changesCursorPointer";
 import {
   DeclarationCounts,
-  DiffModeBadge,
+  FormattingBadge,
   SemanticLabelRow,
 } from "./SemanticLabel";
 import {
@@ -86,21 +86,12 @@ export interface AllChangesViewProps {
   loadSides?: LoadSides;
   symbolGraphRequest?: SymbolGraphRequest;
   onRelatedJump?(location: SourceLocation): void;
-  /**
-   * Semantic mode: each hunk opens at its declaration, hunks of one
-   * declaration join, and structural changes are labelled. Line numbers,
-   * selections and comments are the line diff's.
-   */
-  semantic?: boolean;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
 
-/**
- * Why a file is folded: marked viewed, folded by hand, or (in semantic
- * mode) every change is whitespace. Opening it clears whichever applies.
- */
-type FoldReason = "viewed" | "hand" | "formatting";
+/** Why a file is folded: marked viewed, or folded by hand. */
+type FoldReason = "viewed" | "hand";
 
 /** Context kept visible around the keyboard cursor, in pixels (~4 lines). */
 const CURSOR_SCROLL_MARGIN = 80;
@@ -168,13 +159,12 @@ export default function AllChangesView({
   loadSides,
   symbolGraphRequest,
   onRelatedJump,
-  semantic: semanticOn = false,
 }: AllChangesViewProps): ReactNode {
   const onToggleViewed = onViewedChange
     ? (path: string) => onViewedChange(path, !viewedPaths.has(path))
     : undefined;
   const options = usePierreDiffOptions();
-  // Folded or opened by hand; overrides the formatting-only fold.
+  // Folded or opened by hand.
   const [handFolds, setHandFolds] = useState<
     ReadonlyMap<string, "folded" | "open">
   >(new Map());
@@ -188,35 +178,23 @@ export default function AllChangesView({
       for (const file of result.reviewFiles) byPath.set(canonicalPath(file), file);
     return byPath;
   }, [parsedPatches]);
-  // Line mode reads a file's sides only to reveal its unchanged lines.
+  // The line diff, with semantic labels wherever the sides can be read.
+  const semanticOn = !!loadSides;
   const gapsEnabled =
     !!loadSides && LINE_INFO_SEPARATORS.has(options.hunkSeparators);
-  const changeFiles = useChangeFiles(
-    changes,
-    patchesByPath,
-    semanticOn || gapsEnabled ? loadSides : undefined,
-    semanticOn,
-    gapsEnabled
-  );
+  const changeFiles = useChangeFiles(changes, patchesByPath, loadSides, semanticOn);
   const [expanded, setExpanded] = useState<ExpandedLabel | null>(null);
   const returnFocus = useRef<ExpandedLabel | null>(null);
-  useEffect(() => {
-    if (!semanticOn) {
-      returnFocus.current = null;
-      setExpanded(null);
-    }
-  }, [semanticOn]);
   const { request: requestFile, fileFor } = changeFiles;
-  const semantic = useSemanticMode(changeFiles, patchesByPath, semanticOn);
+  const semantic = useSemanticMode(changeFiles, semanticOn);
   const related = useRelatedSymbols(semanticOn ? symbolGraphRequest : undefined, patchesByPath);
   const foldReason = useCallback(
     (path: string): FoldReason | null => {
       if (viewedPaths.has(path)) return "viewed";
       const hand = handFolds.get(path);
-      if (hand) return hand === "folded" ? "hand" : null;
-      return semantic.viewFor(path)?.formattingOnly ? "formatting" : null;
+      return hand === "folded" ? "hand" : null;
     },
-    [viewedPaths, handFolds, semantic]
+    [viewedPaths, handFolds]
   );
   const collapsedPaths = useMemo<ReadonlySet<string>>(
     () =>
@@ -309,12 +287,9 @@ export default function AllChangesView({
     contentsFor,
     enabled: gapsEnabled,
     viewRef,
-    autoReveals: semantic.autoReveals,
   });
   const { fileDiffFor, onPostRender: onGapsPostRender } = gaps;
   const lastCursorMove = useRef(-Infinity);
-  /** The file the line cursor was last in, to return to after a mode switch. */
-  const lastCursorPath = useRef<string | null>(null);
   const review = useDiffComments({ kind: "worktree" }, patchFiles, undefined, {
     layout,
     onExit,
@@ -329,7 +304,6 @@ export default function AllChangesView({
       const now = performance.now();
       const behavior = changesCursorScrollBehavior(now - lastCursorMove.current);
       lastCursorMove.current = now;
-      lastCursorPath.current = path;
       onCursorFile?.(path);
       requestFile(path);
       viewRef.current?.scrollTo({
@@ -448,8 +422,6 @@ export default function AllChangesView({
       ? { id: selectedPath, range: selectedLinesFor(selectedPath)! }
       : null
     : undefined;
-  const latestSelection = useRef(selectedLines);
-  latestSelection.current = selectedLines;
   const [dismissedEvidence, setDismissedEvidence] = useState<number | null>(
     null
   );
@@ -468,7 +440,6 @@ export default function AllChangesView({
         : { start: to.line, end: to.line, side: to.side };
     setDismissedEvidence(jumpTarget?.nonce ?? null);
     onSelectionChange(path, range);
-    lastCursorPath.current = path;
     onCursorFile?.(path);
     requestFile(path);
   };
@@ -496,28 +467,6 @@ export default function AllChangesView({
     semanticOn
   );
 
-  // Switching modes remounts the diffs (revealed lines cannot be hidden
-  // again in place); return to the selection, or the file being read.
-  const renderedMode = useRef(semanticOn);
-  useEffect(() => {
-    if (renderedMode.current === semanticOn) return;
-    renderedMode.current = semanticOn;
-    const frame = requestAnimationFrame(() => {
-      const selection = latestSelection.current;
-      if (selection) {
-        viewRef.current?.scrollTo({
-          type: "line",
-          id: selection.id,
-          lineNumber: selection.range.end,
-          side: selection.range.endSide ?? selection.range.side ?? "additions",
-          align: "center",
-        });
-      } else if (lastCursorPath.current) {
-        viewRef.current?.scrollTo({ type: "item", id: lastCursorPath.current, align: "start" });
-      }
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [semanticOn]);
   const codeViewOptions = useMemo(
     () => ({
       ...options,
@@ -693,9 +642,6 @@ export default function AllChangesView({
           </div>
         )}
         <CodeView
-          // Revealed lines stay revealed in a Pierre instance; a mode
-          // switch starts the diffs afresh.
-          key={semanticOn ? "semantic" : "line"}
           ref={viewRef}
           containerRef={containerRef}
           className="changes-code-view"
@@ -804,7 +750,7 @@ export default function AllChangesView({
                     {fileDiff?.name ?? path}
                   </span>
                 </button>
-                <DiffModeBadge file={semantic.fileFor(path)} />
+                <FormattingBadge file={semantic.fileFor(path)} />
                 {semanticView && (
                   <DeclarationCounts summary={semanticView.summary} />
                 )}

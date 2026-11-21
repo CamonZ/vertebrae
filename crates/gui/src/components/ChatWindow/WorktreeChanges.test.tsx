@@ -58,7 +58,7 @@ vi.mock("./workspace/AllChangesView", () => ({
     diffStyle,
     onExit,
     loadSides,
-    semantic,
+    symbolGraphRequest,
   }: AllChangesViewProps) {
     const [folded, setFolded] = useState(false);
     // Stand-in for the cursor resting on collapsed lines.
@@ -68,7 +68,7 @@ vi.mock("./workspace/AllChangesView", () => ({
       <div
         data-testid="all-diffs"
         data-layout={diffStyle}
-        data-semantic={String(!!semantic)}
+        data-symbols={String(!!symbolGraphRequest)}
       >
         <button type="button" onClick={() => void loadSides?.(files[0], true)}>
           Load semantic
@@ -1465,20 +1465,16 @@ describe("Changes palette and viewed files", () => {
   });
 });
 
-it("switches the pane between semantic and line diff with m, without reloading Git", async () => {
+it("always shows the line diff with semantic data, without a mode switch", async () => {
   load.mockResolvedValue({ status: "ok", data: modified });
   render(<WorktreeChanges worktreePath="/worktree" />);
   await screen.findByLabelText("Diff for src/app.ts");
-  const semantic = screen.getByRole("button", { name: "Semantic" });
-  expect(semantic).toHaveAttribute("aria-pressed", "true");
-  expect(semantic).toHaveAttribute("aria-keyshortcuts", "M");
-  expect(screen.getByTestId("all-diffs")).toHaveAttribute("data-semantic", "true");
+  expect(screen.queryByRole("group", { name: "Diff mode" })).toBeNull();
+  expect(screen.getByTestId("all-diffs")).toHaveAttribute("data-symbols", "true");
 
-  fireEvent.keyDown(screen.getByRole("region", { name: "Worktree changes" }), { key: "m" });
-  expect(screen.getByRole("button", { name: "Line" })).toHaveAttribute("aria-pressed", "true");
-  expect(screen.getByTestId("all-diffs")).toHaveAttribute("data-semantic", "false");
-
-  fireEvent.click(screen.getByRole("button", { name: "Semantic" }));
-  expect(screen.getByTestId("all-diffs")).toHaveAttribute("data-semantic", "true");
-  expect(load).toHaveBeenCalledTimes(1);
+  const region = screen.getByRole("region", { name: "Worktree changes" });
+  fireEvent.keyDown(region, { key: "k", metaKey: true });
+  const labels = useCommandPaletteStore.getState().contextItems.map((item) => item.label);
+  expect(labels).not.toContain("Semantic diff");
+  expect(labels).not.toContain("Line diff");
 });
