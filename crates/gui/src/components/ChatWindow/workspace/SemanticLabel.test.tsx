@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Fact } from "../../../bindings";
 import { SemanticLabelRow } from "./SemanticLabel";
 import type { SemanticLabel } from "./semanticHunks";
-import { MAX_FACT_CHIPS, type FactGroup } from "./semanticFacts";
+import { type FactGroup } from "./semanticFacts";
 
 const call = (subject: string): Fact => ({
   kind: { type: "call" },
@@ -31,21 +31,18 @@ const group = (facts: Fact[], whole = false, omitted = 0): FactGroup => ({
   omitted,
 });
 
-const factChips = (container: HTMLElement) =>
-  [...container.querySelectorAll("[data-semantic-fact], [data-semantic-fact-count]")].map(
-    (chip) => chip.textContent
-  );
-
 describe("SemanticLabelRow", () => {
-  it("names the first facts, folds the rest into a button that lists them all", () => {
-    const facts = Array.from({ length: MAX_FACT_CHIPS + 2 }, (_, i) => call(`step${i}`));
+  it("keeps a multi-line label clear of source expressions", () => {
+    const branch: Fact = {
+      kind: { type: "branch" },
+      change: { kind: "added", subject: "language != Language::Rust" },
+    };
     const { container } = render(
-      <SemanticLabelRow label={label([group(facts)])} onJump={vi.fn()} />
+      <SemanticLabelRow label={label([group([branch])])} onJump={vi.fn()} />
     );
-    expect(factChips(container)).toEqual(
-      facts.slice(0, MAX_FACT_CHIPS).map((_, i) => `+ calls step${i}`)
-    );
-    const more = screen.getByRole("button", { name: "+2 more" });
+    expect(container).not.toHaveTextContent("language != Language::Rust");
+    expect(container).not.toHaveTextContent("changed");
+    const more = screen.getByRole("button", { name: "Facts" });
     expect(more).toHaveAttribute("aria-expanded", "false");
     // The facts are not hidden in a hover-only title.
     expect(container.querySelector("[title]")).toBeNull();
@@ -53,20 +50,19 @@ describe("SemanticLabelRow", () => {
     const panel = screen.getByRole("region", { name: "Facts" });
     expect(panel).toHaveFocus();
     expect(within(panel).getAllByRole("listitem").map((item) => item.textContent)).toEqual(
-      facts.map((_, i) => `+ calls step${i}`)
+      ["+ if language != Language::Rust"]
     );
     fireEvent.keyDown(panel, { key: "Escape" });
     expect(screen.queryByRole("region", { name: "Facts" })).toBeNull();
     expect(more).toHaveFocus();
   });
 
-  it("names an added declaration's signal and counts the rest", () => {
+  it("groups an added declaration's facts in the disclosure", () => {
     const calls = [call("a"), call("b"), call("c")];
-    const { container } = render(
+    render(
       <SemanticLabelRow label={label([group([...calls, lock], true, 1)])} onJump={vi.fn()} />
     );
-    expect(factChips(container)).toEqual(["+ lock CACHE.lock", "3 calls"]);
-    fireEvent.click(screen.getByRole("button", { name: "+1 more" }));
+    fireEvent.click(screen.getByRole("button", { name: "Facts" }));
     const panel = screen.getByRole("region", { name: "Facts" });
     expect(within(panel).getByText("Concurrency")).toBeInTheDocument();
     expect(within(panel).getByText("Calls")).toBeInTheDocument();
@@ -75,9 +71,44 @@ describe("SemanticLabelRow", () => {
 
   it("tags test code on the scope and shows no fact chips without facts", () => {
     const { container } = render(<SemanticLabelRow label={label([], true)} onJump={vi.fn()} />);
-    expect(factChips(container)).toEqual([]);
     expect(screen.queryByRole("button")).toBeNull();
     expect(container.querySelector(".semantic-scope")?.textContent).toBe("fn difftest");
-    expect(screen.getByText("changed")).toBeInTheDocument();
+    expect(screen.queryByText("changed")).toBeNull();
   });
+});
+
+it("keeps a single-line edit quiet while exposing facts and related hunks", () => {
+  const jump = vi.fn();
+  const location = { path: "other.rs", line: 2, side: "new" as const };
+  const { container } = render(
+    <SemanticLabelRow
+      label={{ ...label([group([call("retry"), lock])]), singleLine: true }}
+      onJump={vi.fn()}
+      related={[{ text: "Calls retry (added)", location }]}
+      onRelatedJump={jump}
+    />
+  );
+  expect(screen.queryByText("changed")).toBeNull();
+  expect(container).not.toHaveTextContent("CACHE.lock");
+  fireEvent.click(screen.getByRole("button", { name: "Calls retry (added) ↗" }));
+  expect(jump).toHaveBeenCalledWith(location);
+  fireEvent.click(screen.getByRole("button", { name: "Facts" }));
+  const panel = screen.getByRole("region", { name: "Facts" });
+  expect(within(panel).getByText("+ calls retry")).toBeVisible();
+  expect(within(panel).getByText("+ lock CACHE.lock")).toBeVisible();
+});
+
+it("omits an empty row for a self-explanatory single-line addition", () => {
+  const { container } = render(
+    <SemanticLabelRow
+      label={{
+        ...label([]),
+        singleLine: true,
+        scope: [],
+        chips: [{ kind: "added", declaration: { keyword: "const", name: "LIMIT" } }],
+      }}
+      onJump={vi.fn()}
+    />
+  );
+  expect(container).toBeEmptyDOMElement();
 });

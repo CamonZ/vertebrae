@@ -1,109 +1,107 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
+import type { SymbolLink } from "./relatedSymbols";
 import type { SemanticFile } from "./useChangeFiles";
 import {
   FALLBACK_TEXT,
   chipText,
+  labelChips,
   summaryCounts,
   summaryDetail,
   type DeclarationSummary,
   type DiffSide,
   type SemanticLabel,
 } from "./semanticHunks";
-import {
-  categoryOf,
-  countText,
-  factChips,
-  factSections,
-  factText,
-  type FactGroup,
-} from "./semanticFacts";
+import { factSections, type FactGroup } from "./semanticFacts";
 
-/**
- * A structural change label under a changed line, on one row: the
- * enclosing declarations (tagged when they are test code), what happened,
- * then what kind of code it touches. A moved copy links to the other copy.
- * Facts that do not fit fold into a `+N more` button whose panel lists
- * every fact by declaration and category.
- */
+/** Declaration context and structural edits, with facts available on demand. */
 export function SemanticLabelRow({
   label,
   onJump,
+  related = [],
+  onRelatedJump,
+  onClose,
 }: {
   label: SemanticLabel;
   onJump(line: number, side: DiffSide): void;
+  related?: readonly SymbolLink[];
+  onRelatedJump?(location: SourceLocation): void;
+  onClose?(): void;
 }): ReactNode {
-  const { chips: facts, hidden } = factChips(label.facts);
-  const summarized = facts.some((chip) => chip.kind === "count");
+  const chips = labelChips(label);
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const panelId = useId();
+  const details = useRef<HTMLDivElement>(null);
+  useEffect(() => details.current?.focus({ preventScroll: true }), []);
+  const namedEdit = chips.some((chip) => "declaration" in chip && chip.declaration);
+  const scope = namedEdit ? undefined : label.scope.at(-1);
+  const showFacts = label.facts.length > 0;
+  const showLabel = !!scope || label.test || chips.length > 0 || showFacts;
+  const showRelated = related.length > 0 && !!onRelatedJump;
+  if (!showLabel && !showRelated) return null;
   return (
-    <div className="semantic-label-block">
-      <div className="semantic-label" data-semantic-label="">
-        {(label.scope.length > 0 || label.test) && (
-          <span className="semantic-scope">
-            {label.scope.map((segment, index) => (
-              <span key={index} className="semantic-scope-segment">
-                <span className="semantic-scope-keyword">{segment.keyword}</span>{" "}
-                {segment.name}
-              </span>
-            ))}
-            {label.test && <span className="semantic-test-tag">test</span>}
-          </span>
-        )}
-        {label.chips.map((chip, index) =>
-          chip.kind === "moved" ? (
-            <button
-              key={index}
-              type="button"
-              className="semantic-chip semantic-chip--moved"
-              title={`Go to the ${chip.direction === "from" ? "old" : "new"} location`}
-              onClick={() => onJump(chip.line, chip.side)}
-            >
-              {chipText(chip)} ↗
-            </button>
-          ) : (
-            <span key={index} className={`semantic-chip semantic-chip--${chip.kind}`}>
-              {chipText(chip)}
+    <div
+      className="semantic-label-block"
+      ref={onClose ? details : undefined}
+      tabIndex={onClose ? -1 : undefined}
+      aria-label={onClose ? "Semantic details" : undefined}
+      role={onClose ? "region" : undefined}
+      onKeyDown={(event) => {
+        if (event.key !== "Escape" || !onClose) return;
+        event.stopPropagation();
+        onClose();
+      }}
+    >
+      {showLabel && (
+        <div className="semantic-label" data-semantic-label="">
+          {(scope || label.test) && (
+            <span className="semantic-scope">
+              {scope && (
+                <span className="semantic-scope-segment">
+                  <span className="semantic-scope-keyword">
+                    {label.inScope && "In "}{scope.keyword}
+                  </span>{" "}
+                  {scope.name}
+                </span>
+              )}
+              {label.test && <span className="semantic-test-tag">test</span>}
             </span>
-          )
-        )}
-        {facts.length > 0 && (
-          <span className="semantic-facts">
-            {facts.map((chip, index) =>
-              chip.kind === "fact" ? (
-                <span
-                  key={index}
-                  className={`semantic-fact semantic-fact--${categoryOf(chip.fact.kind)}`}
-                  data-semantic-fact={chip.fact.kind.type}
-                >
-                  {factText(chip.fact)}
-                </span>
-              ) : (
-                <span
-                  key={index}
-                  className="semantic-fact semantic-fact--count"
-                  data-semantic-fact-count={chip.category}
-                >
-                  {countText(chip.category, chip.count)}
-                </span>
-              )
-            )}
-          </span>
-        )}
-        {(hidden > 0 || summarized) && (
-          <button
-            ref={button}
-            type="button"
-            className="semantic-fact semantic-fact--more"
-            aria-expanded={open}
-            aria-controls={panelId}
-            onClick={() => setOpen((was) => !was)}
-          >
-            {hidden > 0 ? `+${hidden} more` : "all facts"}
-          </button>
-        )}
-      </div>
+          )}
+          {chips.map((chip, index) =>
+            chip.kind === "moved" ? (
+              <button
+                key={index}
+                type="button"
+                className="semantic-chip semantic-chip--moved"
+                title={`Go to the ${chip.direction === "from" ? "old" : "new"} location`}
+                onClick={() => onJump(chip.line, chip.side)}
+              >
+                {chipText(chip)} ↗
+              </button>
+            ) : (
+              <span key={index} className={`semantic-chip semantic-chip--${chip.kind}`}>
+                {chipText(chip)}
+              </span>
+            )
+          )}
+          {showFacts && (
+            <button
+              ref={button}
+              type="button"
+              className="semantic-facts-toggle"
+              aria-expanded={open}
+              aria-controls={panelId}
+              onClick={() => setOpen((was) => !was)}
+            >
+              Facts
+            </button>
+          )}
+        </div>
+      )}
+      {showRelated && onRelatedJump && (
+        <RelatedLinks links={related} onJump={onRelatedJump} />
+      )}
       {open && (
         <FactPanel
           id={panelId}
@@ -113,6 +111,36 @@ export function SemanticLabelRow({
             button.current?.focus();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+function RelatedLinks({
+  links,
+  onJump,
+}: {
+  links: readonly SymbolLink[];
+  onJump(location: SourceLocation): void;
+}) {
+  const linkButton = (link: SymbolLink) => (
+    <button
+      key={JSON.stringify(link)}
+      type="button"
+      title={`${link.location.path}:${link.location.line}`}
+      onClick={() => onJump(link.location)}
+    >
+      {link.text} ↗
+    </button>
+  );
+  return (
+    <div className="semantic-relations" aria-label="Related changed symbols" role="group">
+      {linkButton(links[0])}
+      {links.length > 1 && (
+        <details>
+          <summary>{links.length - 1} more</summary>
+          <div className="semantic-relations-list">{links.slice(1).map(linkButton)}</div>
+        </details>
       )}
     </div>
   );

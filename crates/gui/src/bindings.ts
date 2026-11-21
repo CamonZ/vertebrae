@@ -1284,6 +1284,17 @@ async codeIntelligence(worktreePath: string, snapshot: IntelligenceSnapshot, req
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Semantic edits and their one-hop call relations for a comparison.
+ */
+async compareChangedSymbols(worktreePath: string, comparison: ComparisonSnapshot, paths: ChangedPath[]) : Promise<Result<ChangedSymbols, CodeIntelligenceError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("compare_changed_symbols", { worktreePath, comparison, paths }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listComparisonChoices(worktreePath: string) : Promise<Result<ComparisonChoice[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_comparison_choices", { worktreePath }) };
@@ -1808,6 +1819,7 @@ create_ticket: boolean;
 diagnostic: string | null }
 export type AssociationSelection = { kind: "keep" } | { kind: "unknown" } | { kind: "entity"; id: string; title: string; level: TaskLevel }
 export type AssociationWorktree = { path: string; branch: string | null }
+export type BoundaryEffect = { callee: string; site: SourceLocation; kind: EffectKind }
 /**
  * One call site.
  */
@@ -1832,6 +1844,13 @@ export type ChangeSides = { old: FileBody; new: FileBody;
  * In semantic mode only.
  */
 semantic: SemanticOutcome | null }
+export type ChangedPath = { path: string; old_path: string | null }
+export type ChangedSymbol = { id: SymbolId; change: EditKind; edits: SymbolEdit[];
+/**
+ * Indices into the comparison's calls, on their respective sides.
+ */
+effects: number[] }
+export type ChangedSymbols = { symbols: ChangedSymbol[]; calls: ComparisonCall[]; provider: ProviderId; incomplete: boolean }
 /**
  * Why a request has no answer. `Provider` keeps the provider's reason,
  * so a caller can tell a stale symbol key (`unknown_symbol`: fetch the
@@ -1899,6 +1918,16 @@ scope: string[] }
  * Error response type for commands - simple string wrapper with specta support
  */
 export type CommandError = { message: string }
+export type ComparisonCall = { side: Side; call: Call; changed_caller: number | null;
+/**
+ * Changed candidates. The call still contains the provider's full
+ * resolution, including unchanged candidates.
+ */
+changed_targets: number[]; effect: EffectKind | null;
+/**
+ * Recognized boundary calls made by an exact, unchanged callee.
+ */
+callee_effects: BoundaryEffect[] }
 export type ComparisonChoice = { label: string; endpoint: ComparisonEndpoint }
 /**
  * Endpoints resolve to commits once per request. Only WorkingTree includes dirty files.
@@ -2078,6 +2107,7 @@ path: string;
  */
 kind: EntryKind; symlink: boolean }
 export type DirectoryListing = { path: string; entries: DirectoryEntry[]; truncated: boolean }
+export type EditKind = "added" | "removed" | "modified" | "renamed" | "moved" | "signature_changed"
 /**
  * What a known API touches.
  */
@@ -2936,6 +2966,7 @@ export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string
 export type SessionMode = "new" | "resume" | "fork"
 export type SettingsEdit = { section: "decision_model"; enabled: boolean; provider: string; model: string } | { section: "connection"; url: string; token: SecretEdit } | { section: "typesafe"; url: string; key: SecretEdit } | { section: "provider"; id: string; create: boolean; harness: string; endpoint: string; models: string[]; default_model: string; api_key_env: string; key: SecretEdit; environment: EnvironmentEdit[]; wire_api: string } | { section: "observability"; settings: ObservabilitySettings }
 export type SharedSettings = { decision_model: DecisionModelSettings; revision: string; path: string; connection_url: string; has_connection_token: boolean; effective_connection_url: string; connection_url_override: boolean; connection_token_override: boolean; typesafe_url: string; typesafe_endpoint_hidden: boolean; has_typesafe_key: boolean; typesafe_key_storage: string; credential_warning: string | null; typesafe_key_override: boolean; typesafe_url_override: boolean; providers: ProviderSettings[]; observability: ObservabilitySettings }
+export type Side = "old" | "new"
 /**
  * A point in a file, 1-based.
  */
@@ -3184,6 +3215,15 @@ state: JsonValue | null;
  * System One question map the step asks the provider.
  */
 questions: JsonValue | null }
+/**
+ * A semantic declaration and its edit spans, in the comparison's diff file.
+ */
+export type SymbolEdit = { path: string; old_path: string; index: number; old_revision: string | null; new_revision: string | null; declaration: DeclarationDiff }
+export type SymbolId = { path: string; scope: string[]; kind: DeclarationKind | null;
+/**
+ * Distinguishes repeated declarations with the same scope path.
+ */
+occurrence: number }
 /**
  * Identifies a definition in a request: its file, name and the line of
  * its name, as a [`CodeSymbol`] from an earlier answer reports them.

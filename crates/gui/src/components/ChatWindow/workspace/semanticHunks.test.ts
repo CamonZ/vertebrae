@@ -104,7 +104,9 @@ describe("semanticHunks", () => {
     expect(view.labels).toEqual([
       {
         side: "additions",
-        lineNumber: 15,
+        lineNumber: 10,
+        declarationIndices: [0],
+        singleLine: true,
         scope: [scope("f", 10, 10)],
         chips: [{ kind: "changed" }],
         facts: [],
@@ -161,7 +163,7 @@ describe("semanticHunks", () => {
     // Gaps between the hunks are empty here, so nothing needs revealing;
     // one label covers all three sites.
     expect(view.labels).toHaveLength(1);
-    expect(view.labels[0].lineNumber).toBe(2);
+    expect(view.labels[0].lineNumber).toBe(1);
     expect(view.labels[0].chips.map(chipText)).toEqual(["renamed sum → acc"]);
   });
 
@@ -199,7 +201,7 @@ describe("semanticHunks", () => {
     ]);
     expect(texts).toEqual([
       ["deletions", 2, ["moved fn deposit to L7"]],
-      ["additions", 6, ["moved fn deposit from L2"]],
+      ["additions", 7, ["moved fn deposit from L2"]],
     ]);
     // The function is named on the chip, under the scope around it.
     expect(view.labels[0].scope.map((s) => s.name)).toEqual(["Account"]);
@@ -282,6 +284,7 @@ describe("declarations", () => {
       {
         side: "deletions",
         lineNumber: 3,
+        declarationIndices: [0],
         scope: [],
         chips: [
           { kind: "removed", declaration: { keyword: "fn", name: "gone" } },
@@ -463,5 +466,69 @@ describe("label facts", () => {
     ]);
     expect(view.labels[0].test).toBe(true);
     expect(view.labels[0].facts.flatMap((group) => group.facts)).toEqual([literal]);
+  });
+});
+
+it("keeps both ends of moves on their own lines in a mixed replacement block", () => {
+  const file = patch("@@ -10,3 +20,3 @@\n-old();\n-a();\n-b();\n+b();\n+new();\n+a();\n");
+  const declaration = update(10, [scope("body", 1, 1)]);
+  const moves = [
+    { kind: "moved" as const, old: at(11), new: at(22), facts: NO_FACTS },
+    { kind: "moved" as const, old: at(12), new: at(20), facts: NO_FACTS },
+  ];
+  const { labels } = semanticHunks(file, [{ ...declaration, parts: moves }]);
+  expect(labels.map(({ side, lineNumber, chips }) => [side, lineNumber, chips.map(chipText)])).toEqual([
+    ["deletions", 11, ["moved to L22"]],
+    ["deletions", 12, ["moved to L20"]],
+    ["additions", 20, ["moved from L12"]],
+    ["additions", 22, ["moved from L11"]],
+  ]);
+});
+
+it("anchors edits in one replacement block to each struct, impl, and function header", () => {
+  const file = patch(
+    "@@ -10,5 +20,5 @@\n-struct Account { old: u8 }\n-impl Account {\n-  const LIMIT: u8 = 1;\n-  fn get() { old(); }\n-}\n+struct Account { new: u8 }\n+impl Account {\n+  const LIMIT: u8 = 2;\n+  fn get() { new(); }\n+}\n"
+  );
+  const impl = scope("Account", 11, 21, "impl");
+  const edits = [
+    modified([scope("Account", 10, 20, "struct")],
+      { kind: "changed", old: at(10), new: at(20), facts: facts(literal) }),
+    modified([impl],
+      { kind: "changed", old: at(12), new: at(22), facts: facts(write) }),
+    modified([impl, scope("get", 13, 23, "fn")],
+      { kind: "changed", old: at(13), new: at(23), facts: facts(call("new")) }),
+  ];
+  expect(semanticHunks(file, edits).labels.map((label) => [
+    label.side, label.lineNumber, label.scope.at(-1)?.keyword, label.declarationIndices,
+    label.facts.flatMap((group) => group.facts),
+  ])).toEqual([
+    ["additions", 20, "struct", [0], [literal]],
+    ["additions", 21, "impl", [1], [write]],
+    ["additions", 23, "fn", [2], [call("new")]],
+  ]);
+});
+
+it("identifies scope as context when the declaration line cannot be revealed", () => {
+  const file = patch("@@ -8,1 +9,1 @@\n-old();\n+new();\n");
+  const edit = modified([scope("f", 2, 3, "fn")],
+    { kind: "changed", old: at(8), new: at(9), facts: NO_FACTS });
+  const view = semanticHunks(file, [edit], false);
+  expect(view.reveals.size).toBe(0);
+  expect(view.labels[0]).toMatchObject({
+    side: "additions", lineNumber: 9, inScope: true,
+  });
+});
+
+it("labels an added field on the revealed header of its struct", () => {
+  const file = patch("@@ -141,1 +141,2 @@\n   existing: u8,\n+  added: u8,\n");
+  const changed = declaring({ kind: "added", new: at(142) }, [
+    scope("Ctx", 133, 133, "struct"),
+    scope("added", null, 142, "field"),
+  ], facts(literal));
+  const { labels, reveals } = semanticHunks(file, [changed]);
+  expect(reveals.get(0)).toEqual({ top: 0, bottom: 8 });
+  expect(labels[0]).toMatchObject({
+    side: "additions", lineNumber: 133, declarationIndices: [0], chips: [],
+    scope: [scope("Ctx", 133, 133, "struct")],
   });
 });

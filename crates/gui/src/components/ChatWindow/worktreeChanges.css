@@ -805,12 +805,6 @@
   font-family: var(--font-mono);
 }
 
-.semantic-scope-segment + .semantic-scope-segment::before {
-  content: "›";
-  margin-inline: 4px;
-  color: var(--color-fg-faint);
-}
-
 .semantic-scope-keyword {
   color: var(--color-fg-faint);
 }
@@ -844,48 +838,17 @@ button.semantic-chip--moved:hover {
   color: var(--color-fg);
 }
 
-/* Facts about the code a change touches, on the label's one row:
-   outlined (not tinted) so they read as evidence beside the edit chips.
-   Only effects, the system-boundary signal, carry the accent. Chips that
-   do not fit are clipped; the `+N more` button stays and lists them all. */
-.semantic-facts {
-  display: inline-flex;
-  flex: 0 1 auto;
-  gap: 4px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-.semantic-fact {
+.semantic-facts-toggle {
   flex-shrink: 0;
   padding: 0 6px;
-  border: 1px solid var(--color-line-soft);
+  border: 1px dashed var(--color-line-soft);
   border-radius: 999px;
-  background: transparent;
   color: var(--color-fg-soft);
-  font: inherit;
-  font-family: var(--font-mono);
-  white-space: nowrap;
-}
-
-.semantic-fact--effects {
-  border-color: color-mix(in oklch, var(--color-accent) 40%, transparent);
-  color: var(--color-fg);
-}
-
-.semantic-fact--count,
-.semantic-fact--more {
-  color: var(--color-fg-faint);
-  font-family: var(--font-sans);
-}
-
-.semantic-fact--more {
-  border-style: dashed;
   cursor: pointer;
 }
 
-.semantic-fact--more:hover,
-.semantic-fact--more[aria-expanded="true"] {
+.semantic-facts-toggle:hover,
+.semantic-facts-toggle[aria-expanded="true"] {
   color: var(--color-fg);
 }
 
@@ -960,4 +923,43 @@ button.semantic-chip--moved:hover {
   color: var(--color-fg-mute);
   font-size: 11px;
   white-space: nowrap;
+}
+
+.semantic-relations,
+.semantic-relations-status {
+  background: var(--color-bg-1);
+  color: var(--color-fg-mute);
+  font: 11px/1.5 var(--font-sans);
+  padding: 4px 12px;
+}
+
+.semantic-relations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  gap: 4px 8px;
+}
+
+.semantic-relations-list {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  padding-block-start: 4px;
+}
+
+.semantic-relations button,
+.semantic-relations summary {
+  cursor: pointer;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.semantic-relations button {
+  color: var(--color-fg-soft);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.semantic-relations :is(button, summary):hover {
+  color: var(--color-fg);
 }

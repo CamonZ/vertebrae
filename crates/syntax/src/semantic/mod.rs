@@ -31,8 +31,8 @@ mod tree;
 use crate::Grammar;
 pub use declarations::{DeclarationChange, DeclarationDiff, Part};
 pub(crate) use facts::{
-    call_parts as facts_call_parts, ignored_ranges as facts_ignored, inside as facts_inside,
-    ApiTable,
+    call_effect, call_parts as facts_call_parts, ignored_ranges as facts_ignored,
+    inside as facts_inside, ApiTable,
 };
 pub use facts::{EffectKind, Fact, FactCategory, FactChange, FactKind, Facts};
 use serde::Serialize;

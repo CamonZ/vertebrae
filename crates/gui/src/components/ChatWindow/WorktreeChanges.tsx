@@ -77,7 +77,7 @@ import { FilesTree } from "./workspace/FilesTree";
 import { STATUS_LETTER } from "./workspace/status";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import type { JumpTarget } from "./workspace/AllChangesView";
-import { loadChangeSides } from "./workspace/changeContents";
+import { loadChangeSides, loadChangedSymbols } from "./workspace/changeContents";
 import { routeSource, type FileReveal } from "./workspace/sourceRoute";
 import "./workspaceTabs.css";
 import "./worktreeChanges.css";
@@ -489,6 +489,20 @@ export function WorktreeChanges({
     [worktreePath, comparison]
   );
 
+  const comparisonFiles = state.status === "ready" ? state.data.files : null;
+  const symbolGraphRequest = useMemo(() => {
+    if (!comparison || !comparisonFiles || diffMode !== "semantic") return undefined;
+    // Background refreshes may return a fresh copy of the same comparison.
+    // Reuse graph results until an endpoint or its working-tree patch changes.
+    const patches = comparison.working_tree
+      ? comparisonFiles.map(({ path, old_path, patch, marker }) => [path, old_path, patch, marker])
+      : null;
+    return {
+      key: JSON.stringify([worktreePath, comparison, patches]),
+      load: () => loadChangedSymbols(worktreePath, comparison, comparisonFiles),
+    };
+  }, [worktreePath, comparison, comparisonFiles, diffMode]);
+
   const refreshAll = useCallback(() => {
     setRefresh((value) => ({ count: value.count + 1, background: true }));
     setTreeToken((value) => value + 1);
@@ -561,12 +575,16 @@ export function WorktreeChanges({
     jumpToFile(last, true);
   };
 
-  const jumpToFile = (path: string, focusHeader = false) => {
+  const jumpToFile = (
+    path: string,
+    focusHeader = false,
+    location?: Pick<JumpTarget, "line" | "side">
+  ) => {
     setReveal(null);
     setActivePath(path);
     activate(worktreePath, null);
     setHistoricalDocument(null);
-    setJumpTarget({ path, nonce: --nextLocalJump.current, focusHeader });
+    setJumpTarget({ ...location, path, nonce: --nextLocalJump.current, focusHeader });
   };
 
   const open = (path: string, view: "file" | "diff") => {
@@ -898,6 +916,8 @@ export function WorktreeChanges({
             viewedPaths={viewedPaths}
             onViewedChange={setViewed}
             loadSides={loadSides}
+            symbolGraphRequest={symbolGraphRequest}
+            onRelatedJump={(location) => jumpToFile(location.path, false, location)}
             semantic={diffMode === "semantic"}
           />
         </Suspense>

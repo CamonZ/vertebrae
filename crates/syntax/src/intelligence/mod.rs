@@ -309,6 +309,9 @@ pub trait CodeIntelligence: Send + Sync {
         budget: &Budget,
     ) -> Outcome<Call>;
 
+    /// Calls made outside any declaration.
+    fn module_calls(&self, snapshot: &dyn Snapshot, path: &str, budget: &Budget) -> Outcome<Call>;
+
     /// Calls that may reach the symbol, up to `depth` callers away
     /// (1: direct callers), each caller visited once.
     fn incoming_calls(
