@@ -82,6 +82,7 @@ import {
   sharedChangedSymbols,
 } from "./workspace/changeContents";
 import { routeSource, type FileReveal } from "./workspace/sourceRoute";
+import { CallTreeView } from "./workspace/callTree/CallTreeView";
 import "./workspaceTabs.css";
 import "./worktreeChanges.css";
 
@@ -237,6 +238,8 @@ export function WorktreeChanges({
   });
   const preferredDiffOptions = usePierreDiffOptions();
   const [diffStyle, setDiffStyle] = useState(preferredDiffOptions.diffStyle);
+  // The comparison's call-tree diff in place of its file diffs.
+  const [callTree, setCallTree] = useState(false);
   const wholeBranch = base?.kind !== "head";
 
   const [choices, setChoices] = useState<ComparisonChoice[]>([]);
@@ -344,6 +347,9 @@ export function WorktreeChanges({
   const activeDocument = useDocumentStore(
     (store) => store.workspaces[worktreePath]?.active ?? null
   );
+  const showingChanges = historical
+    ? historicalPath == null
+    : activeDocument == null;
   const dirtyKey = useDocumentStore((store) => {
     const workspace = store.workspaces[worktreePath];
 
@@ -584,6 +590,7 @@ export function WorktreeChanges({
     focusHeader = false,
     location?: Pick<JumpTarget, "line" | "side">
   ) => {
+    setCallTree(false);
     setReveal(null);
     setActivePath(path);
     activate(worktreePath, null);
@@ -858,7 +865,14 @@ export function WorktreeChanges({
   };
 
   const changesBody =
-    state.status === "loading" ? (
+    callTree && state.status === "ready" && symbolGraphRequest ? (
+      <CallTreeView
+        request={symbolGraphRequest}
+        files={state.data.files}
+        layout={diffStyle === "split" ? "split" : "unified"}
+        onJump={(site) => jumpToFile(site.path, false, site)}
+      />
+    ) : state.status === "loading" ? (
       <p role="status">Loading changes…</p>
     ) : state.status === "error" ? (
       <p role="alert">{state.message}</p>
@@ -1256,12 +1270,9 @@ export function WorktreeChanges({
             <button
               type="button"
               className="changes-tab"
-              aria-current={
-                (historical ? historicalPath == null : activeDocument == null)
-                  ? "page"
-                  : undefined
-              }
+              aria-current={showingChanges && !callTree ? "page" : undefined}
               onClick={() => {
+                setCallTree(false);
                 setReveal(null);
                 activate(worktreePath, null);
                 setHistoricalDocument(null);
@@ -1269,6 +1280,21 @@ export function WorktreeChanges({
             >
               All changes
             </button>
+            {symbolGraphRequest && (
+              <button
+                type="button"
+                className="changes-tab"
+                aria-current={showingChanges && callTree ? "page" : undefined}
+                onClick={() => {
+                  setCallTree(true);
+                  setReveal(null);
+                  activate(worktreePath, null);
+                  setHistoricalDocument(null);
+                }}
+              >
+                Call tree
+              </button>
+            )}
             {!historical &&
               order.map((path) => (
                 <span key={path} className="changes-tab-group">

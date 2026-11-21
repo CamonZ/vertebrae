@@ -1,0 +1,144 @@
+/* Call-tree diff: base calls beside target calls, aligned like a split
+   line diff. Added and removed calls take the diff's colours; unchanged
+   calls stay quiet context. */
+.call-tree-view {
+  --call-tree-added: var(--diffs-addition-color-override, #68ad71);
+  --call-tree-removed: var(--diffs-deletion-color-override, #e06c75);
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  padding: 4px 0 16px;
+  font: 12px/20px var(--font-mono);
+}
+
+.call-tree-columns,
+.call-tree-row[data-layout="split"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.call-tree-columns {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 2px 0;
+  background: var(--color-bg);
+  color: var(--color-fg-mute);
+  font: 500 11px/16px var(--font-sans);
+}
+
+.call-tree-columns > span {
+  padding-inline: 12px;
+}
+
+.call-tree-columns > span + span,
+.call-tree-row[data-layout="split"] > .call-tree-cell + .call-tree-cell {
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.call-tree-row[data-layout="unified"] {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+}
+
+.call-tree-path {
+  padding: 0 12px 2px;
+  color: var(--color-fg-mute);
+  font: 11px/16px var(--font-mono);
+}
+
+.call-tree-cell {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--color-fg-soft);
+  font: inherit;
+  text-align: start;
+  white-space: pre;
+}
+
+button.call-tree-cell {
+  cursor: pointer;
+}
+
+button.call-tree-cell:hover .call-tree-label,
+button.call-tree-root:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.call-tree-guide {
+  color: var(--color-fg-mute);
+}
+
+.call-tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.call-tree-root {
+  display: block;
+  overflow: hidden;
+  color: var(--color-fg);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
+.call-tree-count {
+  margin-inline-start: 6px;
+  color: var(--color-fg-mute);
+}
+
+.call-tree-fold {
+  color: var(--color-fg-mute);
+  font-style: italic;
+}
+
+.call-tree-mark {
+  color: var(--color-fg-mute);
+  text-align: center;
+}
+
+/* Added and removed: tinted on the side that has the call. */
+.call-tree-cell[data-change="added"]:not([data-empty]) {
+  background: color-mix(in oklab, var(--call-tree-added) 14%, transparent);
+  color: var(--color-fg);
+}
+
+.call-tree-cell[data-change="removed"]:not([data-empty]) {
+  background: color-mix(in oklab, var(--call-tree-removed) 14%, transparent);
+  color: var(--color-fg);
+}
+
+.call-tree-row[data-change="added"] > .call-tree-mark {
+  color: var(--call-tree-added);
+}
+
+.call-tree-row[data-change="removed"] > .call-tree-mark {
+  color: var(--call-tree-removed);
+}
+
+/* The side without the call: a blank like a split diff's filler. */
+.call-tree-cell[data-empty] {
+  background: repeating-linear-gradient(
+    -45deg,
+    transparent 0 4px,
+    color-mix(in oklab, var(--color-fg-mute) 8%, transparent) 4px 5px
+  );
+}
+
+.call-tree-row:focus-visible {
+  background: var(--color-bg-hover);
+}
+
+.call-tree-status {
+  padding: 8px 12px;
+  color: var(--color-fg-mute);
+  font: 12px/1.4 var(--font-sans);
+}
