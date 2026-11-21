@@ -73,7 +73,7 @@ pub enum CodeIntelligenceError {
 }
 
 impl CodeIntelligenceError {
-    fn files(error: impl std::fmt::Display) -> Self {
+    pub(super) fn files(error: impl std::fmt::Display) -> Self {
         Self::Files {
             message: error.to_string(),
         }
@@ -103,13 +103,7 @@ fn answer_with(
     request: &IntelligenceRequest,
     budget: &Budget,
 ) -> Result<IntelligenceAnswer, CodeIntelligenceError> {
-    let root = worktree_files::worktree_root(worktree).map_err(CodeIntelligenceError::files)?;
-    let files: Box<dyn Snapshot> = match snapshot {
-        IntelligenceSnapshot::WorkingTree => Box::new(WorkingTree { root }),
-        IntelligenceSnapshot::Commit { commit } => {
-            Box::new(CommitTree::open(&root, commit).map_err(CodeIntelligenceError::files)?)
-        }
-    };
+    let files = open_snapshot(worktree, snapshot)?;
     let files = files.as_ref();
     let provided = match request {
         IntelligenceRequest::Definitions { path } => provider
@@ -126,6 +120,24 @@ fn answer_with(
             .map(IntelligenceAnswer::IncomingCalls),
     };
     provided.map_err(|error| CodeIntelligenceError::Provider { error })
+}
+
+pub(crate) fn embedded() -> &'static EmbeddedProvider {
+    &EMBEDDED
+}
+
+pub(crate) fn open_snapshot(
+    worktree: &Path,
+    snapshot: &IntelligenceSnapshot,
+) -> Result<Box<dyn Snapshot>, CodeIntelligenceError> {
+    let root = worktree_files::worktree_root(worktree).map_err(CodeIntelligenceError::files)?;
+    let files: Box<dyn Snapshot> = match snapshot {
+        IntelligenceSnapshot::WorkingTree => Box::new(WorkingTree { root }),
+        IntelligenceSnapshot::Commit { commit } => {
+            Box::new(CommitTree::open(&root, commit).map_err(CodeIntelligenceError::files)?)
+        }
+    };
+    Ok(files)
 }
 
 /// Runs `work` on a blocking worker under one of `permits`, waiting at

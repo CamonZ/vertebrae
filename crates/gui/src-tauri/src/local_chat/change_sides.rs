@@ -129,6 +129,184 @@ pub(crate) fn load(
     Ok(ChangeSides { old, new, semantic })
 }
 
+#[derive(serde::Deserialize, specta::Type)]
+pub struct ChangedPath {
+    pub path: String,
+    pub old_path: Option<String>,
+}
+
+pub(crate) const GRAPH_TIME: std::time::Duration = std::time::Duration::from_secs(6);
+
+struct GraphSnapshot<'a> {
+    snapshot: &'a dyn vertebrae_syntax::intelligence::Snapshot,
+    changed: std::collections::HashMap<&'a str, Option<&'a str>>,
+    cached: std::cell::RefCell<SourceCache>,
+}
+
+#[derive(Default)]
+struct SourceCache {
+    bytes: usize,
+    sources: std::collections::HashMap<String, Option<Arc<str>>>,
+}
+
+impl vertebrae_syntax::intelligence::Snapshot for GraphSnapshot<'_> {
+    fn paths(&self) -> Result<Vec<String>, vertebrae_syntax::intelligence::SnapshotError> {
+        let mut paths = self.snapshot.paths()?;
+        paths.retain(|path| !matches!(self.changed.get(path.as_str()), Some(None)));
+        paths.extend(
+            self.changed
+                .iter()
+                .filter(|(_, text)| text.is_some())
+                .map(|(&path, _)| path.to_owned()),
+        );
+        paths.sort_unstable();
+        paths.dedup();
+        Ok(paths)
+    }
+
+    fn read(
+        &self,
+        path: &str,
+        max_bytes: usize,
+    ) -> Result<Option<String>, vertebrae_syntax::intelligence::SnapshotError> {
+        self.read_shared(path, max_bytes)
+            .map(|source| source.as_deref().map(str::to_owned))
+    }
+
+    fn read_shared(
+        &self,
+        path: &str,
+        max_bytes: usize,
+    ) -> Result<Option<Arc<str>>, vertebrae_syntax::intelligence::SnapshotError> {
+        if let Some(source) = self.changed.get(path) {
+            return Ok(source.filter(|text| text.len() <= max_bytes).map(Arc::from));
+        }
+        let mut cache = self.cached.borrow_mut();
+        if let Some(source) = cache.sources.get(path) {
+            return Ok(source
+                .as_ref()
+                .filter(|text| text.len() <= max_bytes)
+                .cloned());
+        }
+        let limit = vertebrae_syntax::intelligence::Budget::default()
+            .max_file_bytes
+            .max(max_bytes);
+        let source = self.snapshot.read_shared(path, limit)?;
+        let bytes = source.as_deref().map_or(0, str::len);
+        if cache.bytes + bytes <= CACHE_BYTES && cache.sources.len() < 4_000 {
+            cache.bytes += bytes;
+            cache.sources.insert(path.to_owned(), source.clone());
+        }
+        Ok(source.filter(|text| text.len() <= max_bytes))
+    }
+}
+
+/// Build the comparison graph on a blocking worker, reusing saved semantic diffs.
+pub(crate) fn changed_symbols(
+    worktree: &Path,
+    comparison: &ComparisonSnapshot,
+    paths: Vec<ChangedPath>,
+) -> Result<
+    vertebrae_syntax::changed_symbols::ChangedSymbols,
+    super::code_intelligence::CodeIntelligenceError,
+> {
+    use super::code_intelligence::{self, CodeIntelligenceError, IntelligenceSnapshot};
+    use vertebrae_syntax::changed_symbols::{self, ChangedFile};
+
+    let start = std::time::Instant::now();
+    let mut budget = vertebrae_syntax::intelligence::Budget {
+        time: GRAPH_TIME,
+        ..code_intelligence::budget()
+    };
+    let old = code_intelligence::open_snapshot(
+        worktree,
+        &IntelligenceSnapshot::Commit {
+            commit: comparison.base_commit.clone(),
+        },
+    )?;
+    let target = if comparison.working_tree {
+        IntelligenceSnapshot::WorkingTree
+    } else {
+        IntelligenceSnapshot::Commit {
+            commit: comparison.target_commit.clone(),
+        }
+    };
+    let new = code_intelligence::open_snapshot(worktree, &target)?;
+    let mut loaded = Vec::new();
+    let mut incomplete = false;
+    let mut bytes = 0;
+    let mut seen = std::collections::HashSet::new();
+    for file in &paths {
+        if start.elapsed() >= budget.time / 3 || bytes >= CACHE_BYTES {
+            incomplete = true;
+            break;
+        }
+        if !seen.insert(&file.path) || vertebrae_syntax::Grammar::for_path(&file.path).is_none() {
+            continue;
+        }
+        let sides = load(
+            worktree,
+            comparison,
+            &file.path,
+            file.old_path.as_deref(),
+            true,
+        )
+        .map_err(CodeIntelligenceError::files)?;
+        if let (Ok((old, _)), Ok((new, _))) = (text(&sides.old), text(&sides.new)) {
+            bytes += old.len() + new.len();
+        }
+        if !matches!(sides.semantic, Some(SemanticOutcome::Semantic { .. })) {
+            incomplete = true;
+        }
+        loaded.push((file, sides));
+    }
+    let files: Vec<_> = loaded
+        .iter_mut()
+        .filter_map(|(file, sides)| {
+            let SemanticOutcome::Semantic { declarations, .. } = sides.semantic.take()? else {
+                return None;
+            };
+            let (old, old_revision) = text(&sides.old).ok()?;
+            let (new, new_revision) = text(&sides.new).ok()?;
+            Some(ChangedFile {
+                path: &file.path,
+                old_path: file.old_path.as_deref().unwrap_or(&file.path),
+                old,
+                new,
+                old_revision: (!old_revision.is_empty()).then_some(old_revision),
+                new_revision: (!new_revision.is_empty()).then_some(new_revision),
+                declarations,
+            })
+        })
+        .collect();
+    let base = GraphSnapshot {
+        snapshot: old.as_ref(),
+        changed: files
+            .iter()
+            .map(|file| (file.old_path, file.old_revision.map(|_| file.old)))
+            .collect(),
+        cached: Default::default(),
+    };
+    let target = GraphSnapshot {
+        snapshot: new.as_ref(),
+        changed: files
+            .iter()
+            .map(|file| (file.path, file.new_revision.map(|_| file.new)))
+            .collect(),
+        cached: Default::default(),
+    };
+    budget.time = budget.time.saturating_sub(start.elapsed());
+    let mut graph = changed_symbols::project(
+        files,
+        code_intelligence::embedded(),
+        &base,
+        &target,
+        &budget,
+    );
+    graph.incomplete |= incomplete;
+    Ok(graph)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

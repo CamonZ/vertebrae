@@ -615,6 +615,14 @@ struct ApiRule {
     api: Api,
 }
 
+pub(crate) fn call_effect(path: &str, callee: &str) -> Option<EffectKind> {
+    let compiled = crate::Grammar::for_path(path)?.compiled()?;
+    match compiled.apis.lookup(&name_segments(callee)?) {
+        Some(Api::Effect(effect)) => Some(effect),
+        _ => None,
+    }
+}
+
 /// Known-API rows from a language's tables, in order.
 pub(crate) struct ApiTable {
     rules: Vec<ApiRule>,

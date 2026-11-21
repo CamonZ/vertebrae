@@ -27,12 +27,12 @@ export interface SemanticMode {
     lineNumber: number
   ): SemanticLabel | undefined;
   /**
-   * A file's review annotations plus a label-only annotation for each
-   * semantic label on a line without one (a line with comments renders both).
+   * Review annotations plus the expanded semantic label, when present.
    */
   annotate(
     path: string,
-    review: ReviewDiffAnnotation[]
+    review: ReviewDiffAnnotation[],
+    expanded: SemanticLabel | undefined
   ): ReviewDiffAnnotation[];
 }
 
@@ -75,18 +75,12 @@ export function useSemanticMode(
     [viewFor]
   );
   const annotate = useCallback(
-    (path: string, review: ReviewDiffAnnotation[]) => {
-      const labels = viewFor(path)?.labels;
-      if (!labels?.length) return review;
-      const taken = new Set(review.map((a) => `${a.side}:${a.lineNumber}`));
-      const extra = labels
-        .filter((label) => !taken.has(`${label.side}:${label.lineNumber}`))
-        .map((label) => ({
-          side: label.side,
-          lineNumber: label.lineNumber,
-          metadata: LABEL_ONLY,
-        }));
-      return extra.length ? [...review, ...extra] : review;
+    (path: string, review: ReviewDiffAnnotation[], expanded: SemanticLabel | undefined) => {
+      if (!expanded || !viewFor(path)?.labels.includes(expanded)) return review;
+      const { side, lineNumber } = expanded;
+      return review.some((annotation) => annotation.side === side && annotation.lineNumber === lineNumber)
+        ? review
+        : [...review, { side, lineNumber, metadata: LABEL_ONLY }];
     },
     [viewFor]
   );

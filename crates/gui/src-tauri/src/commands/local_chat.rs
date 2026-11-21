@@ -1680,6 +1680,25 @@ pub async fn load_change_sides(
 /// expansions in a call tree must not occupy them all.
 static INTELLIGENCE_IN_FLIGHT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
+/// Semantic edits and their one-hop call relations for a comparison.
+#[tauri::command]
+#[specta::specta]
+pub async fn compare_changed_symbols(
+    worktree_path: String,
+    comparison: crate::local_chat::changes::ComparisonSnapshot,
+    paths: Vec<crate::local_chat::change_sides::ChangedPath>,
+) -> Result<
+    vertebrae_syntax::changed_symbols::ChangedSymbols,
+    crate::local_chat::code_intelligence::CodeIntelligenceError,
+> {
+    use crate::local_chat::{change_sides, code_intelligence as intelligence};
+    let limit = change_sides::GRAPH_TIME + std::time::Duration::from_secs(1);
+    intelligence::bounded(&INTELLIGENCE_IN_FLIGHT, limit, move || {
+        change_sides::changed_symbols(Path::new(&worktree_path), &comparison, paths)
+    })
+    .await
+}
+
 /// Definitions, references, or incoming/outgoing calls in a worktree's
 /// working copy or one of its commits. Each answer names its provider and
 /// says when it was cut short by the request budget; a request never

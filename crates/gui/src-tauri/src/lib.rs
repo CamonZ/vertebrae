@@ -189,6 +189,7 @@ fn create_builder() -> Builder {
             commands::load_worktree_changes,
             commands::load_change_sides,
             commands::code_intelligence,
+            commands::compare_changed_symbols,
             commands::list_comparison_choices,
             commands::list_worktree_directory,
             commands::read_worktree_file,

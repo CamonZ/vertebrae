@@ -14,6 +14,8 @@ import { preparePatches } from "../../thread/toolChange/preparePatches";
 import { parsePatch } from "../../thread/toolChange/diffLineMapper";
 import type {
   ChangeSides,
+  ChangedSymbols,
+  CodeSymbol,
   SemanticOutcome,
   WorktreeChange,
 } from "../../../bindings";
@@ -38,11 +40,37 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
       ref
     ) {
       const instances = useMemo(() => new Map<string, object>(), []);
+      const hosts = useMemo(() => new Map<string, HTMLElement>(), []);
+      const mountGutter = (id: string, host: HTMLElement | null) => {
+        if (!host) return;
+        hosts.set(id, host);
+        if (host.shadowRoot) return;
+        const root = host.attachShadow({ mode: "open" });
+        const code = document.createElement("div");
+        code.setAttribute("data-code", "");
+        code.setAttribute("data-unified", "");
+        const gutter = document.createElement("div");
+        gutter.setAttribute("data-gutter", "");
+        for (let line = 1; line <= 30; line++) {
+          for (const side of [0, 1]) {
+            const row = document.createElement("div");
+            row.setAttribute("data-column-number", String(line));
+            row.setAttribute("data-line-index", `${line},${side}`);
+            gutter.append(row);
+          }
+        }
+        code.append(gutter);
+        root.append(code);
+      };
       const listed = useMemo(() => new Set<string>(), []);
       const all = () =>
         props.items.map((item) => {
-          if (!instances.has(item.id)) instances.set(item.id, {});
-          return { id: item.id, type: "diff", item, instance: instances.get(item.id), element: document.body };
+          if (!instances.has(item.id)) {
+            instances.set(item.id, {
+              getLineIndex: (line: number, side: string) => [line, side === "additions" ? 1 : 0],
+            });
+          }
+          return { id: item.id, type: "diff", item, instance: instances.get(item.id), element: hosts.get(item.id) ?? document.body };
         });
       const rendered = () => all().filter((item) => listed.has(item.id));
       useImperativeHandle(ref, () => ({
@@ -62,6 +90,7 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
               aria-label={`diff ${item.id}`}
               data-version={item.version}
             >
+              <div data-test-gutter="" ref={(node) => mountGutter(item.id, node)} />
               {props.renderCustomHeader(item)}
               {!item.collapsed &&
                 item.annotations?.map((annotation) => (
@@ -189,12 +218,28 @@ async function renderSemantic(enabled = true) {
   return view;
 }
 
+function indicator(path: string, side: "old" | "new", line: number) {
+  return screen.getByRole("region", { name: `diff ${path}` })
+    .querySelector("[data-test-gutter]")?.shadowRoot
+    ?.querySelector<HTMLButtonElement>(`button[aria-label^="Semantic details for ${side} line ${line}"]`);
+}
+
 describe("AllChangesView semantic mode", () => {
   it("labels a change with its enclosing function", async () => {
     await renderSemantic();
     const diff = screen.getByRole("region", { name: "diff f.ts" });
+    expect(diff).not.toHaveTextContent("function f");
+    const button = indicator("f.ts", "new", 10)!;
+    expect(button).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(button);
+    expect(button).toHaveAttribute("aria-expanded", "true");
     expect(diff).toHaveTextContent("function f");
-    expect(diff).toHaveTextContent("changed");
+    const details = within(diff).getByRole("region", { name: "Semantic details" });
+    expect(details).toHaveFocus();
+    fireEvent.keyDown(details, { key: "Escape" });
+    expect(diff).not.toHaveTextContent("function f");
+    expect(button.getRootNode()).toHaveProperty("activeElement", button);
+    expect(diff).not.toHaveTextContent("changed");
     // One request per file and patch, however often it renders.
     expect(load.mock.calls.map(([file]) => file.path).sort()).toEqual(["f.ts", "fmt.rs", "notes.md"]);
   });
@@ -326,21 +371,20 @@ describe("AllChangesView semantic mode", () => {
     const view = await renderSemantic();
     const fmt = () =>
       screen.getByRole("button", { name: "Toggle diff for fmt.rs" });
-    const labelled = () =>
-      screen.getByRole("region", { name: "diff f.ts" }).textContent;
-    expect(labelled()).toContain("function f");
+    const labelled = () => indicator("f.ts", "new", 10);
+    expect(labelled()).toBeTruthy();
     expect(fmt()).toHaveAttribute("aria-expanded", "false");
 
     view.rerender(
       <AllChangesView files={files} loadSides={load} semantic={false} />
     );
     await act(async () => {});
-    expect(labelled()).not.toContain("function f");
+    expect(labelled()).toBeFalsy();
     expect(fmt()).toHaveAttribute("aria-expanded", "true");
 
     view.rerender(<AllChangesView files={files} loadSides={load} semantic />);
     await act(async () => {});
-    expect(labelled()).toContain("function f");
+    expect(labelled()).toBeTruthy();
     expect(fmt()).toHaveAttribute("aria-expanded", "false");
   });
 
@@ -378,6 +422,7 @@ describe("AllChangesView semantic mode", () => {
       />
     );
     await act(async () => {});
+    fireEvent.click(indicator("m.rs", "new", 7)!);
     fireEvent.click(screen.getByRole("button", { name: "moved fn a from L1 ↗" }));
     expect(scrollTo).toHaveBeenCalledWith({
       type: "line",
@@ -387,6 +432,93 @@ describe("AllChangesView semantic mode", () => {
       align: "center",
     });
     expect(screen.getByRole("region", { name: "diff m.rs" })).toHaveTextContent("1 moved");
+    fireEvent.click(indicator("m.rs", "old", 1)!);
+    fireEvent.click(screen.getByRole("button", { name: "moved fn a to L7 ↗" }));
+    expect(scrollTo).toHaveBeenLastCalledWith({
+      type: "line",
+      id: "m.rs",
+      lineNumber: 7,
+      side: "additions",
+      align: "center",
+    });
     expect(screen.getByLabelText("Declarations: moved fn a")).toBeInTheDocument();
   });
+});
+
+it("links the current hunk to an ambiguous changed-symbol candidate", async () => {
+  const path = "target.ts";
+  const patch = "diff --git a/target.ts b/target.ts\n--- a/target.ts\n+++ b/target.ts\n@@ -1 +1 @@\n-function target() { return 1; }\n+function target() { return 2; }\n";
+  const source = results["f.ts"];
+  if (source.status !== "semantic") throw new Error("expected semantic fixture");
+  const origin = source.declarations[0];
+  const makeSymbol = (path: string, name: string, line: number): CodeSymbol => ({
+    path, name, line, kind: "function", scope: [], span: { start: line, end: line },
+  });
+  const target = makeSymbol(path, "target", 1);
+  const caller = makeSymbol("f.ts", "f", 10);
+  const declarations = [
+    origin,
+    {
+      ...origin,
+      subject: { kind: "function" as const, name: target.name, keyword: "function", old_line: 1, new_line: 1 },
+      parts: [{
+        kind: "changed" as const, old: target.span, new: target.span, facts: origin.facts,
+      }],
+    },
+  ];
+  const comparison: ChangedSymbols = {
+    provider: "embedded",
+    incomplete: false,
+    symbols: [caller, target].map((symbol, i) => ({
+      id: { path: symbol.path, scope: [symbol.name], kind: symbol.kind, occurrence: 0 },
+      change: "modified",
+      edits: [{
+        path: symbol.path, old_path: symbol.path, index: 0,
+        old_revision: "r", new_revision: "r", declaration: declarations[i],
+      }],
+      effects: [],
+    })),
+    calls: [{
+      side: "new", changed_caller: 0, changed_targets: [1], effect: null, callee_effects: [],
+      call: {
+        caller, callee: target.name, site: { path: caller.path, line: 15, column: 1 },
+        resolution: { quality: "ambiguous", candidates: [target, makeSymbol("another.ts", "target", 1)] },
+      },
+    }],
+  };
+  const jump = vi.fn();
+  let resolveGraph!: (graph: ChangedSymbols) => void;
+  const graph = new Promise<ChangedSymbols>((resolve) => { resolveGraph = resolve; });
+  const changedFiles = [files[0], change(path, patch)];
+  const loadSides = loader((file) => Promise.resolve({
+    ...source, declarations: [declarations[file.path === path ? 1 : 0]],
+  }));
+  const view = (load: () => Promise<ChangedSymbols>) => (
+    <AllChangesView
+      files={changedFiles}
+      loadSides={loadSides}
+      symbolGraphRequest={{ key: "current-comparison", load }}
+      onRelatedJump={jump}
+      semantic
+    />
+  );
+  const initialLoad = vi.fn(() => graph);
+  const refreshLoad = vi.fn(() => graph);
+  const { rerender } = render(view(initialLoad));
+  const originDiff = screen.getByRole("region", { name: "diff f.ts" });
+  await act(async () => {});
+  fireEvent.click(indicator("f.ts", "new", 10)!);
+  expect(within(originDiff).getByText("f")).toBeVisible();
+  const initialVersion = originDiff.getAttribute("data-version");
+  rerender(view(refreshLoad));
+  await act(async () => resolveGraph(comparison));
+  expect(initialLoad).toHaveBeenCalledTimes(1);
+  expect(refreshLoad).not.toHaveBeenCalled();
+  expect(originDiff.getAttribute("data-version")).not.toBe(initialVersion);
+  const link = within(originDiff).getByRole("button", { name: /Calls target.*ambiguous/ });
+  fireEvent.click(link);
+  expect(jump).toHaveBeenCalledWith({ path, line: 1, side: "new" });
+  const targetDiff = screen.getByRole("region", { name: `diff ${path}` });
+  fireEvent.click(indicator(path, "new", 1)!);
+  expect(within(targetDiff).getByRole("button", { name: /Called by f.*ambiguous/ })).toBeVisible();
 });

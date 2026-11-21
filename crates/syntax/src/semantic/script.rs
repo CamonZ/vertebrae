@@ -338,7 +338,9 @@ impl<'s> Script<'_, 's> {
         // or the one before it on the same line (a trailing comment).
         let partners: BTreeMap<NodeId, NodeId> = moved.iter().copied().collect();
         // A comment always travels with its node when that node moved too.
-        let artefact = |a: NodeId, b: NodeId| self.old.nodes[a].is_leaf() || !self.alike(a, b);
+        let artefact = |a: NodeId, b: NodeId| {
+            self.old.nodes[a].is_leaf() || self.changed_callee(a, b) || !self.alike(a, b)
+        };
         let attached =
             |a: NodeId, b: NodeId| artefact(a, b) || self.old.nodes[a].kind.contains("comment");
         let mut spans: BTreeMap<NodeId, (NodeId, LineSpan, LineSpan)> = BTreeMap::new();
@@ -401,6 +403,20 @@ impl<'s> Script<'_, 's> {
             });
         }
         Ok(())
+    }
+
+    /// Shared arguments can make calls with different callees look alike.
+    /// Only report a move when the call still names the same callee.
+    fn changed_callee(&self, a: NodeId, b: NodeId) -> bool {
+        if !matches!(self.old.nodes[a].kind, "call_expression" | "call") {
+            return false;
+        }
+        let callee = |tree: &SyntaxTree<'_>, id: NodeId| {
+            tree.nodes[id].children.iter().find_map(|&child| {
+                (tree.nodes[child].field == Some("function")).then_some(tree.nodes[child].hash)
+            })
+        };
+        matches!((callee(self.old, a), callee(self.new, b)), (Some(old), Some(new)) if old != new)
     }
 
     /// Whether a matched pair is recognisably the same code.

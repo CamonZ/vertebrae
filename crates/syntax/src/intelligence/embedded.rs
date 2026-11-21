@@ -216,8 +216,8 @@ impl<'a> Ctx<'a> {
             return None;
         }
         self.reads.set(self.reads.get() + 1);
-        let text = match self.snapshot.read(path, self.budget.max_file_bytes) {
-            Ok(text) => text.map(Arc::from),
+        let text = match self.snapshot.read_shared(path, self.budget.max_file_bytes) {
+            Ok(text) => text,
             Err(error) => {
                 self.fail(error);
                 None
@@ -626,6 +626,21 @@ impl CodeIntelligence for EmbeddedProvider {
             }
             items.push(ctx.call(&target.path, &target.file, index));
         }
+        self.answer(&ctx, items)
+    }
+
+    fn module_calls(&self, snapshot: &dyn Snapshot, path: &str, budget: &Budget) -> Outcome<Call> {
+        let ctx = Ctx::new(self, snapshot, budget);
+        let file = ctx.source_file(path)?;
+        let path = Arc::<str>::from(path);
+        let items = file
+            .calls
+            .iter()
+            .enumerate()
+            .take_while(|_| ctx.within_budget())
+            .filter(|(_, call)| call.caller.is_none())
+            .map(|(index, _)| ctx.call(&path, &file, index))
+            .collect();
         self.answer(&ctx, items)
     }
 

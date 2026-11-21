@@ -17,7 +17,7 @@ import {
   type CodeViewDiffItem,
   type CodeViewHandle,
 } from "@pierre/diffs/react";
-import type { SelectedLineRange } from "@pierre/diffs";
+import type { CodeViewRenderedItem, SelectedLineRange } from "@pierre/diffs";
 import type { WorktreeChange } from "../../../bindings";
 import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import { useDiffComments } from "../../../hooks/useDiffComments";
@@ -51,6 +51,12 @@ import {
   type SemanticFile,
 } from "./useChangeFiles";
 import { useSemanticMode } from "./useSemanticMode";
+import { linksAt, linksForFile, useRelatedSymbols, type SymbolGraphRequest } from "./relatedSymbols";
+
+import { labelChips, type SemanticLabel } from "./semanticHunks";
+import { SEMANTIC_GUTTER_CSS, syncSemanticGutter } from "./semanticGutter";
+
+type ExpandedLabel = { id: string; label: SemanticLabel };
 
 export interface JumpTarget extends SourceLocation {
   /** Distinguishes repeated jumps to the same file. */
@@ -78,6 +84,8 @@ export interface AllChangesViewProps {
    * revealed), and in semantic mode its semantic diff.
    */
   loadSides?: LoadSides;
+  symbolGraphRequest?: SymbolGraphRequest;
+  onRelatedJump?(location: SourceLocation): void;
   /**
    * Semantic mode: each hunk opens at its declaration, hunks of one
    * declaration join, and structural changes are labelled. Line numbers,
@@ -158,6 +166,8 @@ export default function AllChangesView({
   viewedPaths = NO_PATHS,
   onViewedChange,
   loadSides,
+  symbolGraphRequest,
+  onRelatedJump,
   semantic: semanticOn = false,
 }: AllChangesViewProps): ReactNode {
   const onToggleViewed = onViewedChange
@@ -185,10 +195,20 @@ export default function AllChangesView({
     changes,
     patchesByPath,
     semanticOn || gapsEnabled ? loadSides : undefined,
-    semanticOn
+    semanticOn,
+    gapsEnabled
   );
+  const [expanded, setExpanded] = useState<ExpandedLabel | null>(null);
+  const returnFocus = useRef<ExpandedLabel | null>(null);
+  useEffect(() => {
+    if (!semanticOn) {
+      returnFocus.current = null;
+      setExpanded(null);
+    }
+  }, [semanticOn]);
   const { request: requestFile, fileFor } = changeFiles;
   const semantic = useSemanticMode(changeFiles, patchesByPath, semanticOn);
+  const related = useRelatedSymbols(semanticOn ? symbolGraphRequest : undefined, patchesByPath);
   const foldReason = useCallback(
     (path: string): FoldReason | null => {
       if (viewedPaths.has(path)) return "viewed";
@@ -325,6 +345,37 @@ export default function AllChangesView({
   });
   const { annotationsFor, openComposer, onSelectionChange, selectedLinesFor } =
     review;
+  const gutterState = useRef({ semantic, related, itemPaths, expanded, onRelatedJump });
+  gutterState.current = { semantic, related, itemPaths, expanded, onRelatedJump };
+  const paintGutter = useCallback((item: CodeViewRenderedItem<ReviewAnnotation, undefined>) => {
+    const root = item.element.shadowRoot;
+    if (item.type !== "diff" || !root) return;
+    const state = gutterState.current;
+    const path = state.itemPaths.get(item.id) ?? item.id;
+    // Only the primary patch item receives a file's semantic coordinates.
+    const file = path === item.id ? state.semantic.fileFor(path) : null;
+    const links = linksForFile(state.related.links, path, file);
+    const labels = file?.status === "semantic"
+      ? file.view.labels.filter((label) =>
+          label.scope.length > 0 || label.test || label.facts.length > 0 ||
+          labelChips(label).length > 0 ||
+          (!!state.onRelatedJump && linksAt(links, label.declarationIndices ?? []).length > 0)
+        )
+      : [];
+    const active = state.expanded?.id === item.id ? state.expanded.label : undefined;
+    const focus = returnFocus.current?.id === item.id ? returnFocus.current.label : undefined;
+    if (syncSemanticGutter(root, item.instance, labels, active, (label) => {
+      setExpanded((current) =>
+        current?.id === item.id && current.label === label ? null : { id: item.id, label }
+      );
+    }, focus)) returnFocus.current = null;
+  }, []);
+  useEffect(() => {
+    for (const item of viewRef.current?.getInstance()?.getRenderedItems() ?? []) {
+      paintGutter(item);
+    }
+  }, [semantic, related, expanded, itemPaths, paintGutter]);
+
   const itemVersions = useRef(
     new Map<
       string,
@@ -333,6 +384,8 @@ export default function AllChangesView({
         signature: string;
         /** Labels come from the file's semantic result, built once on arrival. */
         semantic: SemanticFile | null;
+        links: ReturnType<typeof linksForFile>;
+        expanded: SemanticLabel | undefined;
         collapsed: boolean;
         version: number;
       }
@@ -352,10 +405,12 @@ export default function AllChangesView({
             }
           : patchItem;
         const review = own ? annotationsFor(item.id) : undefined;
-        const annotations = review && semantic.annotate(item.id, review);
-        const signature = JSON.stringify(review ?? []);
+        const active = expanded?.id === item.id ? expanded.label : undefined;
+        const annotations = review && semantic.annotate(item.id, review, active);
+        const signature = JSON.stringify(annotations ?? []);
         const path = itemPaths.get(item.id) ?? item.id;
         const file = semantic.fileFor(path);
+        const links = linksForFile(related.links, path, file);
         const collapsed = collapsedPaths.has(path);
         const previous = itemVersions.current.get(item.id);
         const changed =
@@ -363,18 +418,22 @@ export default function AllChangesView({
           (previous.fileDiff !== item.fileDiff ||
             previous.signature !== signature ||
             previous.semantic !== file ||
+            previous.links !== links ||
+            previous.expanded !== active ||
             previous.collapsed !== collapsed);
         const version = (previous?.version ?? 0) + (changed ? 1 : 0);
         itemVersions.current.set(item.id, {
           fileDiff: item.fileDiff,
           signature,
           semantic: file,
+          links,
+          expanded: active,
           collapsed,
           version,
         });
         return { ...item, annotations, collapsed, version };
       }),
-    [items, itemPaths, annotationsFor, collapsedPaths, fileDiffFor, semantic]
+    [items, itemPaths, annotationsFor, collapsedPaths, fileDiffFor, semantic, related.links, expanded]
   );
   const { gapCursor } = review;
   const { markCursor } = gaps;
@@ -467,7 +526,7 @@ export default function AllChangesView({
       // No top padding: the focus halo sits flush on the first file.
       layout: CODE_VIEW_LAYOUT,
       expansionLineCount: GAP_BATCH,
-      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}`,
+      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}\n${semanticOn ? SEMANTIC_GUTTER_CSS : ""}`,
       onPostRender: (...args: Parameters<typeof onGapsPostRender>) => {
         onGapsPostRender(...args);
         // Pierre renders an item before adding it to its rendered range, so
@@ -478,7 +537,10 @@ export default function AllChangesView({
             ?.getInstance()
             ?.getRenderedItems()
             .find((item) => item.instance === instance);
-          if (rendered) requestFile(itemPaths.get(rendered.id) ?? rendered.id);
+          if (rendered) {
+            requestFile(itemPaths.get(rendered.id) ?? rendered.id);
+            paintGutter(rendered);
+          }
         });
         scheduleCursorPaint();
       },
@@ -508,6 +570,8 @@ export default function AllChangesView({
       onGapsPostRender,
       scheduleCursorPaint,
       requestFile,
+      semanticOn,
+      paintGutter,
     ]
   );
 
@@ -623,6 +687,11 @@ export default function AllChangesView({
           <span className="changes-cursor-bar" hidden />
           <span className="changes-cursor-caret" hidden />
         </div>
+        {related.incomplete && (
+          <div className="semantic-relations-status" role="status">
+            Related symbols are incomplete for this comparison.
+          </div>
+        )}
         <CodeView
           // Revealed lines stay revealed in a Pierre instance; a mode
           // switch starts the diffs afresh.
@@ -650,7 +719,7 @@ export default function AllChangesView({
                   const [annotation, , item] = args;
                   const path = itemPaths.get(item.id) ?? item.id;
                   const label =
-                    "side" in annotation
+                    "side" in annotation && expanded?.id === item.id
                       ? semantic.labelAt(
                           path,
                           annotation.side,
@@ -663,9 +732,18 @@ export default function AllChangesView({
                       : null;
                   return (
                     <>
-                      {label && (
+                      {label && label === expanded?.label && (
                         <SemanticLabelRow
                           label={label}
+                          onClose={() => {
+                            returnFocus.current = { id: item.id, label };
+                            setExpanded(null);
+                          }}
+                          related={linksAt(
+                            linksForFile(related.links, path, semantic.fileFor(path)),
+                            label.declarationIndices ?? []
+                          )}
+                          onRelatedJump={onRelatedJump}
                           onJump={(lineNumber, side) =>
                             viewRef.current?.scrollTo({
                               type: "line",

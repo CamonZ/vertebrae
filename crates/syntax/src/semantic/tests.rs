@@ -893,3 +893,121 @@ fn an_elixir_file_with_a_syntax_error_falls_back() {
         }
     );
 }
+
+#[test]
+fn a_call_replaced_by_another_callee_is_not_a_move() {
+    let old = r#"fn bindings() {
+    while let Some(found_match) = matches.next() {
+        let mut parts: HashMap<ImportCapture, Node> = HashMap::new();
+        for capture in found_match.captures() {
+            let role = query.captures[capture.index as usize];
+            if role != ImportCapture::Ignored {
+                spans.push(capture.node.byte_range());
+                parts.insert(role, capture.node);
+            }
+        }
+        if let Some(local) = parts.get(&ImportCapture::Local) {
+            // A declarator that is a definition binds the definition.
+            if !def_names.contains(&(local.start_byte(), local.end_byte())) {
+                file.locals.push(Local {
+                    name: text(local),
+                    byte: local.start_byte(),
+                    scope: None,
+                });
+            }
+            continue;
+        }
+    }
+}
+"#;
+    let new = r#"fn bindings() {
+    while let Some(found_match) = matches.next() {
+        let mut parts: HashMap<ImportCapture, Node> = HashMap::new();
+        for capture in found_match.captures() {
+            let role = query.captures[capture.index as usize];
+            if role != ImportCapture::Ignored {
+                if role != ImportCapture::RustPattern {
+                    spans.push(capture.node.byte_range());
+                }
+                parts.insert(role, capture.node);
+            }
+        }
+        let mut record_local = |local: Node<'_>| {
+            // A declarator that is a definition binds the definition.
+            if !def_names.contains(&(local.start_byte(), local.end_byte())) {
+                file.locals.push(Local {
+                    name: text(&local),
+                    byte: local.start_byte(),
+                    scope: None,
+                });
+            }
+        };
+        if let Some(&local) = parts.get(&ImportCapture::Local) {
+            record_local(local);
+            continue;
+        }
+        if let Some(&pattern) = parts.get(&ImportCapture::RustPattern) {
+            rust_pattern_bindings(pattern, |local| {
+                spans.push(local.byte_range());
+                record_local(local);
+            });
+            continue;
+        }
+    }
+}
+"#;
+    let changes = semantic("extract.rs", old, new);
+    assert!(
+        changes
+            .iter()
+            .all(|change| change.node_kind != "call_expression"
+                || !matches!(change.edit, Edit::Move { .. })),
+        "{changes:#?}"
+    );
+}
+
+#[test]
+fn rust_doc_comment_stays_with_its_declaration_when_reflowed() {
+    let old = r#"struct CallSite {
+    caller: Option<usize>,
+}
+
+enum ImportTarget {
+    Module { source: String },
+    Default { source: String },
+    /// Every name of a module (`source`) or path.
+    Glob { source: String },
+}
+"#;
+    let new = r#"struct CallSite {
+    caller: Option<usize>,
+    /// Arguments passed, the piped one included, where the language
+    /// identifies callables by arity.
+    arity: Option<u32>,
+}
+
+enum ImportTarget {
+    Module { source: String },
+    Default { source: String },
+    /// Every name of a module (`source`) or path, but those `except`
+    /// names (at that arity, where one is given).
+    Glob {
+        source: String,
+        except: Vec<(String, Option<u32>)>,
+    },
+}
+"#;
+    let old_doc = LineSpan::new(8, 8);
+    let new_doc = LineSpan::new(11, 11);
+    for (before, after, from, to) in [(old, new, old_doc, new_doc), (new, old, new_doc, old_doc)] {
+        let changes = semantic("extract.rs", before, after);
+        assert!(
+            changes.iter().any(|change| {
+                change.edit == Edit::Update { old: from, new: to }
+                    && scope_names(change) == ["ImportTarget"]
+            }),
+            "{changes:#?}"
+        );
+        assert!(!kinds(&changes).contains(&"move"), "{changes:#?}");
+    }
+}

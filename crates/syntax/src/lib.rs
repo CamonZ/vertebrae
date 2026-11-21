@@ -1,6 +1,7 @@
 //! Native syntax parsing, tool activity projection and semantic diffs.
 
 mod activity;
+pub mod changed_symbols;
 mod classification;
 pub mod intelligence;
 mod registry;

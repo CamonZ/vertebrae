@@ -1,19 +1,4 @@
-/**
- * How a semantic label presents the engine's facts about the code its
- * changes touch.
- *
- * - One row of chips, ordered effects, concurrency, error handling, API,
- *   control flow, calls, data.
- * - Edits inside an existing declaration name each fact (`+ calls retry`,
- *   `if x > 1 → x > 2`).
- * - A declaration added or removed whole names only the signal categories
- *   (effects, concurrency, error handling, API) and counts the rest
- *   (`12 calls`).
- * - Chips past a limit fold into a `+N more` button whose panel lists
- *   every fact by declaration and category.
- *
- * No React imports.
- */
+/** Formats semantic facts for the disclosure below a change label. */
 import type { EffectKind, Fact, FactKind } from "../../../bindings";
 
 export type FactCategory =
@@ -36,14 +21,6 @@ export const CATEGORY_ORDER: readonly FactCategory[] = [
   "data",
   "test",
 ];
-
-/** Categories named on an added or removed declaration's label. */
-const SIGNAL: ReadonlySet<FactCategory> = new Set([
-  "effects",
-  "concurrency",
-  "error_handling",
-  "api",
-]);
 
 const CATEGORY_NAMES: Record<FactCategory, string> = {
   effects: "Effects",
@@ -97,8 +74,7 @@ export interface FactOwner {
 }
 
 /**
- * The facts one label shows for one declaration. `whole` when the
- * declaration itself was added or removed, so only its signal is named.
+ * The facts for one declaration. `whole` identifies its addition or removal.
  */
 export interface FactGroup {
   owner: FactOwner | null;
@@ -107,13 +83,6 @@ export interface FactGroup {
   /** Facts the engine left out of a long list. */
   omitted: number;
 }
-
-/** Fact chips shown on a label before the rest fold into `+N more`. */
-export const MAX_FACT_CHIPS = 4;
-
-export type FactChip =
-  | { kind: "fact"; fact: Fact }
-  | { kind: "count"; category: FactCategory; count: number };
 
 const rank = (category: FactCategory) => CATEGORY_ORDER.indexOf(category);
 
@@ -128,54 +97,6 @@ export function orderFacts(facts: readonly Fact[]): Fact[] {
     .map(({ fact }) => fact);
 }
 
-/**
- * A label's chips: named facts (at most `max`), then counts of the
- * categories an added or removed declaration does not name. `hidden`
- * counts the facts not shown, which the `+N more` button lists.
- */
-export function factChips(
-  groups: readonly FactGroup[],
-  max = MAX_FACT_CHIPS
-): { chips: FactChip[]; hidden: number } {
-  const named: Fact[] = [];
-  const counts = new Map<FactCategory, number>();
-  let omitted = 0;
-  for (const group of groups) {
-    omitted += group.omitted;
-    for (const fact of group.facts) {
-      const category = categoryOf(fact.kind);
-      if (group.whole && !SIGNAL.has(category))
-        counts.set(category, (counts.get(category) ?? 0) + 1);
-      else named.push(fact);
-    }
-  }
-  const ordered = orderFacts(named);
-  const shown = ordered.slice(0, max);
-  const countChips = [...counts]
-    .sort(([a], [b]) => rank(a) - rank(b))
-    .map(([category, count]): FactChip => ({ kind: "count", category, count }));
-  return {
-    chips: [...shown.map((fact): FactChip => ({ kind: "fact", fact })), ...countChips],
-    hidden: ordered.length - shown.length + omitted,
-  };
-}
-
-const COUNT_WORDS: Record<FactCategory, [string, string]> = {
-  effects: ["effect", "effects"],
-  concurrency: ["concurrency fact", "concurrency facts"],
-  error_handling: ["error fact", "error facts"],
-  api: ["API fact", "API facts"],
-  control_flow: ["control flow", "control flow"],
-  calls: ["call", "calls"],
-  data: ["data", "data"],
-  test: ["test", "test"],
-};
-
-export function countText(category: FactCategory, count: number): string {
-  const [one, many] = COUNT_WORDS[category];
-  return `${count} ${count === 1 ? one : many}`;
-}
-
 const EFFECT_WORDS: Record<EffectKind, string> = {
   filesystem: "fs",
   network: "network",
@@ -187,15 +108,9 @@ const EFFECT_WORDS: Record<EffectKind, string> = {
   ui: "ui",
 };
 
-/** Subjects longer than this are cut on chips (the panel shows them whole). */
-const CHIP_SUBJECT = 32;
-
-const clip = (text: string, max: number) =>
-  text.length > max ? `${text.slice(0, max - 1)}…` : text;
-
 /**
  * What a fact is about, as a phrase: `calls retry`, `fs std::fs::write`,
- * `if x > 1`, `early return`. `subject` is the (possibly clipped) name.
+ * `if x > 1`, `early return`. `subject` is the source detail.
  */
 function factPhrase(kind: FactKind, subject: string): string {
   switch (kind.type) {
@@ -244,24 +159,24 @@ function factPhrase(kind: FactKind, subject: string): string {
 
 /**
  * One fact as words, e.g. `+ calls retry`, `− fs fs::write`,
- * `if x > 1 → x > 2`; subjects are cut to `max` characters.
+ * `if x > 1 → x > 2`.
  */
-export function factText(fact: Fact, max = CHIP_SUBJECT): string {
+export function factText(fact: Fact): string {
   const { change, kind } = fact;
   switch (change.kind) {
     case "added":
-      return `+ ${factPhrase(kind, clip(change.subject, max))}`;
+      return `+ ${factPhrase(kind, change.subject)}`;
     case "removed":
-      return `− ${factPhrase(kind, clip(change.subject, max))}`;
+      return `− ${factPhrase(kind, change.subject)}`;
     case "changed":
-      return `${factPhrase(kind, clip(change.from, max))} → ${clip(change.to, max)}`;
+      return `${factPhrase(kind, change.from)} → ${change.to}`;
     case "inside":
       return factPhrase(kind, "");
   }
 }
 
 /** The same fact, compared by its full text. */
-export const factKey = (fact: Fact) => factText(fact, Infinity);
+export const factKey = factText;
 
 export interface FactSection {
   owner: FactOwner | null;
@@ -276,7 +191,7 @@ export function factSections(groups: readonly FactGroup[]): FactSection[] {
     for (const fact of orderFacts(group.facts)) {
       const category = categoryOf(fact.kind);
       const list = byCategory.get(category) ?? [];
-      list.push(factText(fact, Infinity));
+      list.push(factText(fact));
       byCategory.set(category, list);
     }
     return {

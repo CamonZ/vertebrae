@@ -39,6 +39,10 @@ impl Node<'_> {
         self.children.is_empty()
     }
 
+    pub(crate) fn is_comment(&self) -> bool {
+        self.kind.ends_with("comment")
+    }
+
     pub(crate) fn descendants(&self, id: NodeId) -> Range<NodeId> {
         id + 1..id + self.size
     }
@@ -160,7 +164,9 @@ impl<'s> SyntaxTree<'s> {
             if let Some(parent) = parent {
                 nodes[parent].children.push(id);
             }
-            if cursor.goto_first_child() {
+            // Match comments as a whole. Grammar-specific children such
+            // as Rust's doc markers are shared by unrelated comments.
+            if !nodes[id].is_comment() && cursor.goto_first_child() {
                 parents.push(id);
                 continue;
             }

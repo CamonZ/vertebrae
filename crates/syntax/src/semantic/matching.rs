@@ -115,6 +115,26 @@ pub(crate) fn token_similarity(ta: &SyntaxTree, tb: &SyntaxTree, a: NodeId, b: N
     2.0 * common as f64 / (x.len() + y.len()) as f64
 }
 
+/// Prefer the line that retains the wording when a comment is reflowed.
+fn comment_similarity(old: &str, new: &str) -> f64 {
+    fn words(text: &str) -> HashSet<&str> {
+        text.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .filter(|word| !word.is_empty())
+            .collect()
+    }
+
+    const MAX_BYTES: usize = 4096;
+    if old.len() > MAX_BYTES || new.len() > MAX_BYTES {
+        return 0.0;
+    }
+    let (old, new) = (words(old), words(new));
+    let total = old.len() + new.len();
+    if total == 0 {
+        return 0.0;
+    }
+    2.0 * old.intersection(&new).count() as f64 / total as f64
+}
+
 /// How many of a pair's adjacent siblings are matched to each other: the
 /// context that tells repeated subtrees (`#[test]`, `return;`) apart. The
 /// sibling a node belongs with counts double when both sides agree on it:
@@ -604,7 +624,9 @@ fn recover(
                 for &(j, y) in ys {
                     let (nx, ny) = (&ta.nodes[x], &tb.nodes[y]);
                     deadline.tick(nx.size + ny.size)?;
-                    let similarity = if nx.is_leaf() && ny.is_leaf() {
+                    let similarity = if nx.is_comment() && ny.is_comment() {
+                        comment_similarity(ta.text(x), tb.text(y))
+                    } else if nx.is_leaf() && ny.is_leaf() {
                         f64::from(u8::from(nx.own == ny.own))
                     } else {
                         dice(ta, tb, m, x, y).max(token_similarity(ta, tb, x, y))

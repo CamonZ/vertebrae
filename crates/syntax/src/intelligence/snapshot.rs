@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotError(pub String);
@@ -24,6 +25,11 @@ pub trait Snapshot {
     /// A file's text; `None` when it is missing, not UTF-8 text, or larger
     /// than `max_bytes`.
     fn read(&self, path: &str, max_bytes: usize) -> Result<Option<String>, SnapshotError>;
+
+    /// Reuse shared source text when several requests read the same snapshot.
+    fn read_shared(&self, path: &str, max_bytes: usize) -> Result<Option<Arc<str>>, SnapshotError> {
+        self.read(path, max_bytes).map(|text| text.map(Arc::from))
+    }
 }
 
 /// Files held in memory.

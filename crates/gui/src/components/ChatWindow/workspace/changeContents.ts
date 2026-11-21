@@ -28,6 +28,20 @@ export async function loadChangeSides(
   return result.data;
 }
 
+export async function loadChangedSymbols(
+  checkout: string,
+  comparison: ComparisonSnapshot,
+  files: readonly WorktreeChange[]
+) {
+  const result = await commands.compareChangedSymbols(
+    checkout,
+    comparison,
+    files.map(({ path, old_path }) => ({ path, old_path }))
+  );
+  if (result.status === "error") throw new Error(result.error.kind);
+  return result.data;
+}
+
 const lineAt = (lines: readonly string[], line: number) =>
   lines[line - 1]?.replace(/\r?\n$/, "");
 
