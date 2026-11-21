@@ -22,6 +22,9 @@ export function useArtifactChangeListener() {
       const presentationKey = queryKeys.artifacts.presentations(generation);
 
       void queryClient.invalidateQueries({ queryKey: presentationKey });
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.artifacts.inspector(generation, payload.artifact_id),
+      });
 
       if (payload.change_type === "Deleted") {
         removeArtifactFromQueryCache(

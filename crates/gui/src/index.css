@@ -2701,8 +2701,8 @@ html.light ::selection {
      `.detail-float`). */
   top: calc(38px + var(--s-3));
   bottom: var(--s-3);
-  /* Chat is the topmost side surface. This is only visible when wide/maximized
-     chat, or a constrained viewport, makes the panels overlap. */
+  /* Chat sits above unfocused detail panels. Paired inspectors have their
+     own layer when they overlap an expanded chat. */
   z-index: 70;
   width: 384px;
   height: auto;
@@ -4561,6 +4561,9 @@ html.light ::selection {
 }
 .detail.detail-float {
   transition: box-shadow var(--t-base, 180ms) var(--ease);
+}
+.detail.detail-float[data-above-chat] {
+  z-index: 71;
 }
 .detail.detail-float:not(.notifications-panel)[data-focused] {
   z-index: 72;

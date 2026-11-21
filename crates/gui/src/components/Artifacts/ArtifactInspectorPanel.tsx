@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import type { Artifact } from "../../bindings";
+import { ARTIFACT_INSPECTOR_PANEL_ID } from "../../stores/entityPanelStore";
 import { ArtifactPreviewBody } from "./ArtifactPreviewBody";
 import {
   CloseIcon,
@@ -9,6 +11,7 @@ import {
 
 interface ArtifactInspectorPanelProps {
   artifact: Artifact | null;
+  status?: ReactNode;
   closing?: boolean;
   onClose: () => void;
   onExitAnimationEnd: (event: {
@@ -20,6 +23,7 @@ interface ArtifactInspectorPanelProps {
 
 export function ArtifactInspectorPanel({
   artifact,
+  status,
   closing = false,
   onClose,
   onExitAnimationEnd,
@@ -32,15 +36,15 @@ export function ArtifactInspectorPanel({
   const name = slash >= 0 ? label.slice(slash + 1) : label;
   return (
     <FloatingDetailPanel
-      panelId="artifact-inspector"
+      panelId={ARTIFACT_INSPECTOR_PANEL_ID}
       widthStorageKey="artifact-inspector-panel-width"
       closing={closing}
       onExitAnimationEnd={onExitAnimationEnd}
       onClose={onClose}
-      isOpen={artifact != null && !closing}
       className="tasks-v2 detail-opaque"
       testId="artifact-inspector-panel"
       position={position}
+      aboveChat={position === "left-of-task" && !closing}
     >
       <div
         className="flex h-full min-h-0 flex-col"
@@ -85,7 +89,7 @@ export function ArtifactInspectorPanel({
           }
         />
         <div className="artifact-inspector-body min-h-0 flex-1 overflow-y-auto p-4">
-          {artifact && <ArtifactPreviewBody artifact={artifact} />}
+          {status ?? (artifact && <ArtifactPreviewBody artifact={artifact} />)}
         </div>
       </div>
     </FloatingDetailPanel>

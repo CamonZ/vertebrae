@@ -1,5 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { Artifact } from "../bindings";
 
@@ -12,6 +21,8 @@ const { useTaskArtifacts } = vi.hoisted(() => ({ useTaskArtifacts: vi.fn() }));
 vi.mock("../hooks/useTaskArtifacts", () => ({ useTaskArtifacts }));
 vi.mock("../hooks/useShellHeader", () => ({ useShellHeader: vi.fn() }));
 
+import { ArtifactPanelHost } from "../components/Artifacts/ArtifactPanelHost";
+import { usePanelFocusStore } from "../stores/panelFocusStore";
 import { ArtifactsPage } from "./ArtifactsPage";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
 
@@ -34,7 +45,31 @@ const artifact = (id: string, name: string): Artifact => ({
 });
 
 describe("ArtifactsPage", () => {
+  let client: QueryClient;
+  function renderPage(path = "/artifacts") {
+    return render(<ArtifactsPage />, {
+      wrapper: ({ children }) => (
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={[path]}>
+            {children}
+            <ArtifactPanelHost />
+          </MemoryRouter>
+        </QueryClientProvider>
+      ),
+    });
+  }
+
   beforeEach(() => {
+    client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command !== "find_artifact_presentation") return [];
+      return (
+        useProjectArtifacts().artifacts.find(
+          (file: Artifact) =>
+            file.id === (args as { artifactId: string }).artifactId
+        ) ?? null
+      );
+    });
     useProjectArtifacts.mockReset();
     useTaskArtifacts.mockReset();
     useTaskArtifacts.mockReturnValue({
@@ -51,16 +86,28 @@ describe("ArtifactsPage", () => {
     });
   });
 
-  it("opens and replaces the inspector from pointer or keyboard selection", () => {
-    render(<ArtifactsPage />, { wrapper: MemoryRouter });
+  afterEach(() => {
+    cleanup();
+    client.clear();
+    useEntityPanelStore.getState().reset();
+    usePanelFocusStore.getState().reset();
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("opens and replaces the inspector from pointer or keyboard selection", async () => {
+    renderPage();
     fireEvent.click(screen.getByRole("treeitem", { name: /First/i }));
-    expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
-      "First"
-    );
+    expect(
+      await screen.findByText("First", {
+        selector: "[data-testid=artifact-inspector-title]",
+      })
+    ).toBeInTheDocument();
 
     fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
-    expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
-      "Second"
+    await waitFor(() =>
+      expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
+        "Second"
+      )
     );
     expect(screen.getByRole("treeitem", { name: /Second/i })).toHaveAttribute(
       "aria-selected",
@@ -68,30 +115,19 @@ describe("ArtifactsPage", () => {
     );
   });
 
-  it("selects the artifact named by an artifact link once it is listed", () => {
+  it("resolves a legacy artifact URL independently of the project list", async () => {
     useProjectArtifacts.mockReturnValue({
       artifacts: [],
       isLoading: true,
       error: null,
     });
-    const { rerender } = render(<ArtifactsPage />, {
-      wrapper: ({ children }) => (
-        <MemoryRouter initialEntries={["/artifacts?artifactId=a-2"]}>
-          {children}
-        </MemoryRouter>
-      ),
-    });
-    expect(screen.queryByTestId("artifact-inspector-title")).toBeNull();
+    vi.mocked(invoke).mockResolvedValue(artifact("a-2", "Second"));
+    renderPage("/artifacts?artifactId=a-2");
 
-    useProjectArtifacts.mockReturnValue({
-      artifacts: [artifact("a-1", "First"), artifact("a-2", "Second")],
-      isLoading: false,
-      error: null,
-    });
-    rerender(<ArtifactsPage />);
-
-    expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
-      "Second"
+    await waitFor(() =>
+      expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
+        "Second"
+      )
     );
   });
 
@@ -106,7 +142,7 @@ describe("ArtifactsPage", () => {
       isLoading: false,
       error: null,
     });
-    render(<ArtifactsPage />, { wrapper: MemoryRouter });
+    renderPage();
 
     const filter = within(screen.getByTestId("artifacts-type-filter"));
     expect(
@@ -114,15 +150,17 @@ describe("ArtifactsPage", () => {
     ).toEqual(["All3", "Markdown2", "JSON1"]);
 
     fireEvent.click(filter.getByRole("button", { name: /^JSON/ }));
-    expect(screen.getByRole("treeitem", { name: /Payload/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("treeitem", { name: /Payload/ })
+    ).toBeInTheDocument();
     expect(screen.queryByRole("treeitem", { name: /First/ })).toBeNull();
 
     fireEvent.click(filter.getByRole("button", { name: /^JSON/ }));
     expect(screen.getByRole("treeitem", { name: /First/ })).toBeInTheDocument();
   });
 
-  it("closes only the artifact inspector", () => {
-    render(<ArtifactsPage />, { wrapper: MemoryRouter });
+  it("closes only the artifact inspector", async () => {
+    renderPage();
     fireEvent.click(screen.getByRole("treeitem", { name: /First/i }));
     fireEvent.click(screen.getByTestId("artifact-inspector-close"));
     expect(screen.queryByTestId("artifact-inspector-panel")).toHaveAttribute(
@@ -137,7 +175,7 @@ describe("ArtifactsPage", () => {
       isLoading: true,
       error: null,
     });
-    const { rerender } = render(<ArtifactsPage />, { wrapper: MemoryRouter });
+    const { rerender } = renderPage();
     expect(screen.getByLabelText("Loading artifacts")).toBeInTheDocument();
 
     useProjectArtifacts.mockReturnValueOnce({
@@ -157,7 +195,7 @@ describe("ArtifactsPage", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("No service");
   });
 
-  it("renders accessible folders and keeps folder toggles separate from selection", () => {
+  it("renders accessible folders and keeps folder toggles separate from selection", async () => {
     useProjectArtifacts.mockReturnValue({
       artifacts: [
         artifact("a-1", "reports/summary.md"),
@@ -167,7 +205,7 @@ describe("ArtifactsPage", () => {
       isLoading: false,
       error: null,
     });
-    render(<ArtifactsPage />, { wrapper: MemoryRouter });
+    renderPage();
 
     const folder = screen.getByTestId("artifact-tree-folder-folder:reports");
     expect(folder).toHaveAttribute("role", "treeitem");
@@ -198,8 +236,10 @@ describe("ArtifactsPage", () => {
 
     fireEvent.click(within(folder).getByRole("button", { name: "Expand" }));
     fireEvent.click(screen.getByTestId("artifact-tree-leaf-a-1"));
-    expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
-      "reports/summary.md"
+    await waitFor(() =>
+      expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
+        "reports/summary.md"
+      )
     );
     expect(screen.getByTestId("markdown-content")).toHaveTextContent(
       "reports/summary.md"
@@ -216,13 +256,13 @@ describe("ArtifactsPage", () => {
       error: null,
     });
 
-    render(<ArtifactsPage />, { wrapper: MemoryRouter });
+    renderPage();
 
     expect(screen.getAllByRole("treeitem")).toHaveLength(60);
     expect(screen.getByTestId("artifact-tree-leaf-a-60")).toBeInTheDocument();
   });
 
-  it("navigates visible leaves in depth-first order and skips collapsed descendants", () => {
+  it("navigates visible leaves in depth-first order and skips collapsed descendants", async () => {
     useProjectArtifacts.mockReturnValue({
       artifacts: [
         artifact("a-1", "docs/one.md"),
@@ -232,26 +272,30 @@ describe("ArtifactsPage", () => {
       isLoading: false,
       error: null,
     });
-    render(<ArtifactsPage />, { wrapper: MemoryRouter });
+    renderPage();
 
     fireEvent.click(screen.getByTestId("artifact-tree-leaf-a-1"));
     fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
-    expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
-      "docs/two.md"
+    await waitFor(() =>
+      expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
+        "docs/two.md"
+      )
     );
 
     const folder = screen.getByTestId("artifact-tree-folder-folder:docs");
     fireEvent.click(within(folder).getByRole("button", { name: "Collapse" }));
     fireEvent.keyDown(screen.getByRole("tree"), { key: "ArrowDown" });
-    expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
-      "root.md"
+    await waitFor(() =>
+      expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
+        "root.md"
+      )
     );
     expect(
       screen.queryByTestId("artifact-tree-leaf-a-2")
     ).not.toBeInTheDocument();
   });
 
-  it("keeps selection keyed by artifact ID when the query refetches in a new order", () => {
+  it("keeps selection keyed by artifact ID when the query refetches in a new order", async () => {
     const first = artifact("a-1", "docs/one.md");
     const second = artifact("a-2", "docs/two.md");
     const root = artifact("a-3", "root.md");
@@ -260,7 +304,7 @@ describe("ArtifactsPage", () => {
       isLoading: false,
       error: null,
     });
-    const { rerender } = render(<ArtifactsPage />, { wrapper: MemoryRouter });
+    const { rerender } = renderPage();
 
     fireEvent.click(screen.getByTestId("artifact-tree-leaf-a-1"));
     useProjectArtifacts.mockReturnValue({
@@ -270,8 +314,10 @@ describe("ArtifactsPage", () => {
     });
     rerender(<ArtifactsPage />);
 
-    expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
-      "docs/one.md"
+    await waitFor(() =>
+      expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
+        "docs/one.md"
+      )
     );
     expect(screen.getByTestId("artifact-tree-leaf-a-1")).toHaveAttribute(
       "aria-selected",
@@ -289,35 +335,46 @@ describe("ArtifactsPage", () => {
         ...state,
       });
 
-    it("keeps the ticket and places an attached artifact to its left", () => {
+    it("keeps the ticket and places an attached artifact to its left", async () => {
       taskLookup({});
       useEntityPanelStore.getState().openTask("t-1");
-      render(<ArtifactsPage />, { wrapper: MemoryRouter });
+      renderPage();
       fireEvent.click(screen.getByRole("treeitem", { name: /First/i }));
       expect(useEntityPanelStore.getState().selection).toEqual({
         type: "task",
         taskId: "t-1",
       });
-      expect(screen.getByTestId("artifact-inspector-panel")).toBeInTheDocument();
+      expect(
+        screen.getByTestId("artifact-inspector-panel")
+      ).toBeInTheDocument();
     });
 
-    it("replaces the ticket when the artifact is unrelated", () => {
+    it("replaces the ticket when the artifact is unrelated", async () => {
       taskLookup({});
       useEntityPanelStore.getState().openTask("t-1");
-      render(<ArtifactsPage />, { wrapper: MemoryRouter });
+      renderPage();
       fireEvent.click(screen.getByRole("treeitem", { name: /Second/i }));
-      expect(useEntityPanelStore.getState().selection).toBeNull();
-      expect(screen.getByTestId("artifact-inspector-title")).toHaveTextContent(
-        "Second"
+      await waitFor(() =>
+        expect(useEntityPanelStore.getState().selection).toBeNull()
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByTestId("artifact-inspector-title")
+        ).toHaveTextContent("Second")
       );
     });
 
-    it("does not close the ticket while the lookup is loading or failed", () => {
+    it("does not close the ticket while the lookup is loading or failed", async () => {
       for (const state of [{ isLoading: true }, { error: "boom" }]) {
         taskLookup(state);
         useEntityPanelStore.getState().openTask("t-1");
-        const view = render(<ArtifactsPage />, { wrapper: MemoryRouter });
+        const view = renderPage();
         fireEvent.click(screen.getByRole("treeitem", { name: /First/i }));
+        await waitFor(() =>
+          expect(
+            screen.getByTestId("artifact-inspector-title")
+          ).toHaveTextContent("First")
+        );
         expect(useEntityPanelStore.getState().selection).not.toBeNull();
         view.unmount();
       }

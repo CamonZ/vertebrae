@@ -7,6 +7,7 @@ import {
   type ReactNode,
 } from "react";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
+import { TASK_DETAIL_PANEL_ID } from "../../stores/entityPanelStore";
 import {
   SIDE_PANEL_GAP_PX,
   SIDE_PANEL_INSET_PX,
@@ -42,6 +43,8 @@ interface FloatingDetailPanelProps {
   /** Test id for the float root. */
   testId?: string;
   position?: "right" | "left-of-task";
+  /** Keep a paired inspector visible above chat while its sibling has focus. */
+  aboveChat?: boolean;
   children: ReactNode;
 }
 
@@ -71,6 +74,7 @@ export function FloatingDetailPanel({
   className = "",
   testId,
   position = "right",
+  aboveChat = false,
   children,
 }: FloatingDetailPanelProps) {
   // Right-anchored: a drag on the left edge widens the panel as the cursor moves
@@ -106,20 +110,21 @@ export function FloatingDetailPanel({
   const chatOffset = isChatAdjacent
     ? `calc(${chatLayout.renderedWidth}px + var(--s-3))`
     : "0px";
-  const taskOffset =
-    position === "left-of-task" && taskDetailLayout.isPresent
-      ? `calc(${chatLayout.renderedWidth}px + var(--s-3) + ${taskDetailLayout.renderedWidth}px + var(--s-3))`
-      : chatOffset;
   const chatOffsetPx = isChatAdjacent
     ? chatLayout.renderedWidth + SIDE_PANEL_GAP_PX
     : 0;
-  const taskOffsetPx =
-    position === "left-of-task" && taskDetailLayout.isPresent
-      ? chatOffsetPx + taskDetailLayout.renderedWidth + SIDE_PANEL_GAP_PX
-      : chatOffsetPx;
+  const taskInset = taskDetailLayout.renderedWidth + SIDE_PANEL_GAP_PX;
+  const isTaskAdjacent =
+    position === "left-of-task" &&
+    taskDetailLayout.isPresent &&
+    viewportWidth - chatOffsetPx - taskInset - SIDE_PANEL_INSET_PX * 2 >= minWidth;
+  const taskOffset = isTaskAdjacent
+    ? `calc(${chatOffset} + ${taskDetailLayout.renderedWidth}px + var(--s-3))`
+    : chatOffset;
+  const taskOffsetPx = chatOffsetPx + (isTaskAdjacent ? taskInset : 0);
 
   useEffect(() => {
-    if (panelId !== "task-detail") return;
+    if (panelId !== TASK_DETAIL_PANEL_ID) return;
     setTaskDetailLayout({ isPresent: !closing, renderedWidth: panelWidth });
     return () => clearTaskDetailLayout();
   }, [
@@ -189,6 +194,7 @@ export function FloatingDetailPanel({
       }
       data-testid={testId}
       data-focused={isFocused || undefined}
+      data-above-chat={aboveChat || undefined}
       data-closing={closing || undefined}
       data-chat-adjacent={isChatAdjacent || undefined}
       onAnimationEnd={onExitAnimationEnd}

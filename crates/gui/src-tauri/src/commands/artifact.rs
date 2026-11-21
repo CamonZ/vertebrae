@@ -156,6 +156,25 @@ pub async fn list_task_artifacts(
 pub async fn list_artifact_presentations(
     state: State<'_, AppState>,
 ) -> Result<Vec<Artifact>, CommandError> {
+    artifact_presentations(&state, None).await
+}
+
+/// Resolve a project or task attachment by ID in the active project.
+/// Returns no artifact when the ID is missing from both associations.
+#[tauri::command]
+#[specta::specta]
+pub async fn find_artifact_presentation(
+    state: State<'_, AppState>,
+    artifact_id: String,
+) -> Result<Option<Artifact>, CommandError> {
+    let artifacts = artifact_presentations(&state, Some(&artifact_id)).await?;
+    Ok(artifacts.into_iter().next())
+}
+
+async fn artifact_presentations(
+    state: &AppState,
+    artifact_id: Option<&str>,
+) -> Result<Vec<Artifact>, CommandError> {
     use std::collections::HashSet;
     use vertebrae_sacrum_client::api_types::ArtifactResponse;
 
@@ -215,6 +234,7 @@ pub async fn list_artifact_presentations(
     let mut seen = HashSet::new();
 
     artifacts
+        .filter(|artifact| artifact_id.is_none_or(|id| artifact.id == id))
         .filter(|artifact| {
             let artifact_id = artifact.id.clone();
 
@@ -438,8 +458,10 @@ mod tests {
         let state = app.state();
 
         let result = list_artifact_presentations(state).await;
+        let lookup = find_artifact_presentation(app.state(), "missing".into()).await;
 
         assert_no_project_error(result);
+        assert_no_project_error(lookup);
     }
 
     #[tokio::test]
@@ -494,7 +516,7 @@ mod tests {
             .and(archived_tasks)
             .and(operation)
             .respond_with(response_template)
-            .expect(1)
+            .expect(4)
             .mount(&server)
             .await;
 
@@ -511,7 +533,7 @@ mod tests {
 
         *state.sacrum_client.write().await = Some(shared_client);
 
-        let result = list_artifact_presentations(state).await.unwrap();
+        let result = list_artifact_presentations(app.state()).await.unwrap();
         let correct_project = result
             .iter()
             .all(|artifact| artifact.project_id.as_deref() == Some(project_id));
@@ -523,12 +545,30 @@ mod tests {
         assert!(correct_project);
         assert_eq!(task_metadata.content_kind, "statechart");
 
-        let requests = server.received_requests().await.unwrap();
-        let request_body = &requests[0].body;
-        let request: serde_json::Value = serde_json::from_slice(request_body).unwrap();
-        let expected_variables = json!({ "project_id": project_id });
+        for expected in &result {
+            let found = find_artifact_presentation(app.state(), expected.id.clone())
+                .await
+                .unwrap()
+                .expect("artifact in active project");
+            assert_eq!(found.body, expected.body);
+            assert_eq!(found.project_id, expected.project_id);
+            assert_eq!(
+                found.metadata.unwrap().content_kind,
+                expected.metadata.as_ref().unwrap().content_kind
+            );
+        }
+        let missing =
+            find_artifact_presentation(app.state(), "44444444-4444-4444-8444-444444444444".into())
+                .await
+                .unwrap();
+        assert!(missing.is_none());
 
-        assert_eq!(request["variables"], expected_variables);
+        let requests = server.received_requests().await.unwrap();
+        let expected_variables = json!({ "project_id": project_id });
+        for request in requests {
+            let request: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            assert_eq!(request["variables"], expected_variables);
+        }
         server.verify().await;
     }
 
