@@ -174,6 +174,7 @@ pub(crate) const LANGUAGES: [LanguageEntry; 7] = [
                 include_str!("../queries/elixir/locals.scm"),
             ],
             nested_sees_locals: true,
+            locals_hide_call_targets: false,
             module_scopes: true,
             reach: Reach::File,
             modules: Modules::Declared {

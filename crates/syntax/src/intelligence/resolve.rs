@@ -236,7 +236,7 @@ impl Ctx<'_> {
                 Some(scope) => closest_function(file, here) == Some(scope),
             };
             if visible && module_of(local.scope) == site_module {
-                if rules.locals_hide_call_targets && wanted == Wanted::Callable {
+                if rules.locals_hide_call_targets && matches!(wanted, Wanted::Callable(_)) {
                     return Res::Unresolved;
                 }
                 bindings.push((depth(file, local.scope) + 1, Binding::Local));
