@@ -49,6 +49,33 @@ export interface DocumentEditorProps {
   onRevealed?(): void;
 }
 
+/**
+ * Centre a line in its nearest vertical scroller. Not `scrollIntoView`: on
+ * a line wider than the view it also scrolls the code sideways, under the
+ * sticky gutter. Without a scrolling ancestor the document scrolls.
+ */
+function scrollVerticallyIntoView(row: Element) {
+  for (let node: Element | null = row; node; ) {
+    const root = node.getRootNode();
+    node = node.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
+    if (!node) {
+      row.scrollIntoView({ block: "center", inline: "nearest" });
+      return;
+    }
+    const { overflowY } = getComputedStyle(node);
+    if (
+      (overflowY === "auto" || overflowY === "scroll") &&
+      node.scrollHeight > node.clientHeight
+    ) {
+      const line = row.getBoundingClientRect();
+      const view = node.getBoundingClientRect();
+      node.scrollTop +=
+        line.top - view.top - (node.clientHeight - line.height) / 2;
+      return;
+    }
+  }
+}
+
 /** How long to wait for a large file's lines to render before giving up. */
 const REVEAL_TIMEOUT_MS = 15_000;
 
@@ -115,7 +142,7 @@ export default function DocumentEditor({
         container?.shadowRoot?.querySelector(selector) ??
         container?.querySelector(selector);
       if (row) {
-        row.scrollIntoView({ block: "center" });
+        scrollVerticallyIntoView(row);
         onRevealedRef.current?.();
       } else if (performance.now() < deadline)
         frame = requestAnimationFrame(scroll);
