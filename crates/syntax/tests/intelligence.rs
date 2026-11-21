@@ -418,7 +418,11 @@ fn locals_and_parameters_shadow_definitions() {
         let calls = outgoing(&provider, &snapshot, path, "run");
         assert_eq!(
             edges(&calls),
-            [format!("save → ambiguous@{path}:1")],
+            [if path.ends_with(".rs") {
+                "save → unresolved".to_owned()
+            } else {
+                format!("save → ambiguous@{path}:1")
+            }],
             "{path}"
         );
     }
@@ -442,6 +446,64 @@ fn locals_and_parameters_shadow_definitions() {
         edges(&outgoing(&provider, &snapshot, "src/lib.rs", "inner")),
         ["save → exact@src/lib.rs:1"]
     );
+}
+
+#[test]
+fn rust_destructured_locals_hide_call_targets() {
+    let provider = EmbeddedProvider::new();
+    let path = "src/lib.rs";
+    for (pattern, value, shadowed) in [
+        ("(retry,)", "(other,)", true),
+        (
+            "Wrap { callback: (ref retry,) }",
+            "Wrap { callback: (other,) }",
+            true,
+        ),
+        ("Named { retry }", "Named { retry: other }", true),
+        ("(mut retry,)", "(other,)", true),
+        ("Pair([retry])", "Pair([other])", true),
+        ("whole @ (retry,)", "(other,)", true),
+        ("Named { retry: _ }", "Named { retry: other }", false),
+        (
+            "constructors::retry(_)",
+            "constructors::retry(other)",
+            false,
+        ),
+    ] {
+        let source = format!(
+            "fn retry() {{}}\nstruct Wrap {{ callback: (fn(),) }}\nstruct Named {{ retry: fn() }}\nstruct Pair([fn(); 1]);\nmod constructors {{ pub struct retry(pub fn()); }}\nfn review(other: fn()) {{ let {pattern} = {value}; retry(); }}\nfn direct() {{ retry(); }}\n"
+        );
+        let snapshot: MemorySnapshot = [(path, source.as_str())].into_iter().collect();
+        let retry_resolution = if shadowed {
+            "retry → unresolved"
+        } else {
+            "retry → exact@src/lib.rs:1"
+        };
+        let mut review = outgoing(&provider, &snapshot, path, "review");
+        review.retain(|call| call.callee == "retry");
+        assert_eq!(edges(&review), [retry_resolution], "{pattern}");
+        let direct = outgoing(&provider, &snapshot, path, "direct");
+        assert_eq!(edges(&direct), ["retry → exact@src/lib.rs:1"]);
+
+        let Resolution::Exact { target } = &direct[0].resolution else {
+            panic!("direct call must resolve exactly");
+        };
+        let incoming = provider
+            .incoming_calls(&snapshot, &target.key(), 1, &Budget::default())
+            .unwrap();
+        assert_eq!(incoming.truncated, None);
+        let mut sites: Vec<_> = incoming
+            .items
+            .iter()
+            .map(|edge| edge.call.site.line)
+            .collect();
+        sites.sort_unstable();
+        assert_eq!(
+            sites,
+            if shadowed { vec![7] } else { vec![6, 7] },
+            "{pattern}"
+        );
+    }
 }
 
 /// Review nit: Rust inline modules are scopes; `use super::*` reaches out.

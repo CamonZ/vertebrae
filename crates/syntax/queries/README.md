@@ -50,10 +50,9 @@ attributes and comments after it, and the item they precede are test code.
 
 Code intelligence (`src/intelligence`) reads `imports.scm` and
 `locals.scm`, with the definitions of the declarations query and the
-`@call` captures of the facts query. Each match is one binding; the other
-resolution rules (reach, module layout, exports, `self` receivers, whether
-inline modules are scopes, whether nested functions see enclosing locals)
-are data in the language's registry entry (`intelligence::rules::Rules`).
+`@call` captures of the facts query. Each match identifies a binding or a
+binding pattern. The language's registry entry (`intelligence::rules::Rules`)
+defines reach, module layout, exports, receivers, and local visibility.
 
 | Capture | Meaning |
 |---|---|
@@ -63,7 +62,8 @@ are data in the language's registry entry (`intelligence::rules::Rules`).
 | `@import.module` | a local name for the source module, or (without a source) a module path whose first segment it binds (Python `import a.b`) |
 | `@import.default` | a local name for the source's default export |
 | `@import.glob` | a path (or the source) all of whose names are imported |
-| `@local` | a parameter, `let`, assignment or loop binding: it shadows definitions of its name in its function without being one, so a call bound to it and to a definition is ambiguous, and one bound only to it is unresolved |
+| `@local` | a parameter, `let`, assignment or loop binding. A call bound only to a local is unresolved. Other candidates are kept as ambiguous unless the language excludes shadowed items. |
+| `@local.rust_pattern` | a Rust binding pattern whose introduced names are extracted from its pattern positions. Visible Rust locals exclude shadowed items as unqualified call targets. |
 
 Re-exports (`pub use`, `export * from`) are not followed: a name reached
 only through one resolves by name match, or not at all.
