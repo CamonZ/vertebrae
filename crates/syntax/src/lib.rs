@@ -2,6 +2,7 @@
 
 mod activity;
 mod classification;
+pub mod intelligence;
 mod registry;
 pub mod semantic;
 

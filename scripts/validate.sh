@@ -30,6 +30,7 @@ run_gui_rust_tests() {
   cargo test --locked -p gui --lib local_chat::worktree_delta
   cargo test --locked -p gui --lib local_chat::file_history
   cargo test --locked -p gui --lib local_chat::annotations
+  cargo test --locked -p gui --lib local_chat::code_intelligence
   # Background-work bridge mapping (harness event -> local chat event).
   cargo test --locked -p gui --lib local_chat::harnesses::shared::tests::background_work_bridge
 }

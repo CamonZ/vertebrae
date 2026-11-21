@@ -188,6 +188,7 @@ fn create_builder() -> Builder {
             worktree_watch::unwatch_worktree,
             commands::load_worktree_changes,
             commands::load_change_sides,
+            commands::code_intelligence,
             commands::list_comparison_choices,
             commands::list_worktree_directory,
             commands::read_worktree_file,

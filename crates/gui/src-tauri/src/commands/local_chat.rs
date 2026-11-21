@@ -1676,6 +1676,32 @@ pub async fn load_change_sides(
     .await
 }
 
+/// Code-intelligence requests run on blocking workers; a burst of
+/// expansions in a call tree must not occupy them all.
+static INTELLIGENCE_IN_FLIGHT: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+/// Definitions, references, or incoming/outgoing calls in a worktree's
+/// working copy or one of its commits. Each answer names its provider and
+/// says when it was cut short by the request budget; a request never
+/// blocks past the budget plus a margin.
+#[tauri::command]
+#[specta::specta]
+pub async fn code_intelligence(
+    worktree_path: String,
+    snapshot: crate::local_chat::code_intelligence::IntelligenceSnapshot,
+    request: crate::local_chat::code_intelligence::IntelligenceRequest,
+) -> Result<
+    crate::local_chat::code_intelligence::IntelligenceAnswer,
+    crate::local_chat::code_intelligence::CodeIntelligenceError,
+> {
+    use crate::local_chat::code_intelligence as intelligence;
+    let limit = intelligence::budget().time + std::time::Duration::from_secs(1);
+    intelligence::bounded(&INTELLIGENCE_IN_FLIGHT, limit, move || {
+        intelligence::answer(Path::new(&worktree_path), &snapshot, &request)
+    })
+    .await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn list_comparison_choices(
