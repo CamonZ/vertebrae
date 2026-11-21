@@ -18,6 +18,8 @@ pub(crate) struct Rules {
     /// A nested function sees its enclosing functions' locals (closures
     /// do in every language; Rust's nested `fn` items do not).
     pub(crate) nested_sees_locals: bool,
+    /// A visible local excludes item candidates for an unqualified call.
+    pub(crate) locals_hide_call_targets: bool,
     /// Inline modules are scopes of their own: an item outside one is not
     /// visible inside without an import (Rust's `mod`, not TypeScript's
     /// `namespace`).
@@ -131,6 +133,7 @@ pub(crate) enum ImportCapture {
     /// A local binding (parameter, `let`, assignment): it shadows
     /// definitions without being one.
     Local,
+    RustPattern,
     Ignored,
 }
 
@@ -151,6 +154,7 @@ impl ImportsQuery {
                     "import.default" => ImportCapture::Default,
                     "import.glob" => ImportCapture::Glob,
                     "local" => ImportCapture::Local,
+                    "local.rust_pattern" => ImportCapture::RustPattern,
                     _ if name.starts_with('_') => ImportCapture::Ignored,
                     _ => return Err(error(format!("unknown capture @{name}"))),
                 })

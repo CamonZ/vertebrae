@@ -311,8 +311,12 @@ fn expected(
         bindings.push(vec![(m, f, true)]);
     }
     // A parameter binds no definition.
-    if function.param == Some(name) && !(nested && language == Language::Rust) {
-        bindings.push(Vec::new());
+    if function.param == Some(name) {
+        if language != Language::Rust {
+            bindings.push(Vec::new());
+        } else if !nested {
+            return Expected::Unresolved;
+        }
     }
     let top_level = |module: usize, name: &str| -> Vec<Def> {
         program.modules[module]

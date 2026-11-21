@@ -439,6 +439,41 @@ fn compact(text: &str) -> String {
     out
 }
 
+/// Walk only pattern positions: constructor paths, explicit field labels,
+/// range endpoints and macro contents do not introduce locals.
+fn rust_pattern_bindings(pattern: Node<'_>, mut record: impl FnMut(Node<'_>)) {
+    let mut pending = vec![pattern];
+    while let Some(node) = pending.pop() {
+        match node.kind() {
+            "identifier" | "shorthand_field_identifier" => record(node),
+            "field_pattern" => {
+                if let Some(binding) = node
+                    .child_by_field_name("pattern")
+                    .or_else(|| node.child_by_field_name("name"))
+                {
+                    pending.push(binding);
+                }
+            }
+            "tuple_pattern"
+            | "tuple_struct_pattern"
+            | "struct_pattern"
+            | "slice_pattern"
+            | "mut_pattern"
+            | "ref_pattern"
+            | "reference_pattern"
+            | "captured_pattern"
+            | "or_pattern" => {
+                let constructor = node.child_by_field_name("type");
+                pending.extend(
+                    node.named_children(&mut node.walk())
+                        .filter(|child| Some(*child) != constructor),
+                );
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Imports and locals; returns the spans they cover (not plain uses).
 fn bindings(
     file: &mut FileSymbols,
@@ -465,19 +500,31 @@ fn bindings(
         for capture in found_match.captures() {
             let role = query.captures[capture.index as usize];
             if role != ImportCapture::Ignored {
-                spans.push(capture.node.byte_range());
+                if role != ImportCapture::RustPattern {
+                    spans.push(capture.node.byte_range());
+                }
                 parts.insert(role, capture.node);
             }
         }
-        if let Some(local) = parts.get(&ImportCapture::Local) {
+        let mut record_local = |local: Node<'_>| {
             // A declarator that is a definition binds the definition.
             if !def_names.contains(&(local.start_byte(), local.end_byte())) {
                 file.locals.push(Local {
-                    name: text(local),
+                    name: text(&local),
                     byte: local.start_byte(),
                     scope: None,
                 });
             }
+        };
+        if let Some(&local) = parts.get(&ImportCapture::Local) {
+            record_local(local);
+            continue;
+        }
+        if let Some(&pattern) = parts.get(&ImportCapture::RustPattern) {
+            rust_pattern_bindings(pattern, |local| {
+                spans.push(local.byte_range());
+                record_local(local);
+            });
             continue;
         }
         let source_text = parts.get(&ImportCapture::Source).map(&text);

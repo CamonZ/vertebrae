@@ -74,6 +74,7 @@ const fn ecmascript_rules(bindings: &'static [&'static str]) -> Rules {
         family: "ecmascript",
         bindings,
         nested_sees_locals: true,
+        locals_hide_call_targets: false,
         module_scopes: false,
         reach: Reach::File,
         modules: Modules::Specifier {
@@ -179,6 +180,7 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
                 include_str!("../queries/python/locals.scm"),
             ],
             nested_sees_locals: true,
+            locals_hide_call_targets: false,
             module_scopes: false,
             reach: Reach::File,
             modules: Modules::Dotted {
@@ -225,6 +227,7 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
                 include_str!("../queries/rust/locals.scm"),
             ],
             nested_sees_locals: false,
+            locals_hide_call_targets: true,
             module_scopes: true,
             reach: Reach::File,
             modules: Modules::Crate {
