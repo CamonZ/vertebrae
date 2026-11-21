@@ -1,16 +1,18 @@
 //! The language registry: one entry per grammar holding everything this
 //! crate knows about it (its tree-sitter grammar, the paths it applies to
 //! and, for languages the semantic diff supports, the scope profile, the
-//! declarations and facts queries and the known-API tables). Supporting a
+//! declarations and facts queries and the known-API tables, and the
+//! name-resolution rules code intelligence follows). Supporting a
 //! language means adding its entry here; nothing else matches on
 //! [`Grammar`].
 
+use crate::intelligence::rules::{Exports, ImportsQuery, Modules, Reach, Rules};
 use crate::semantic::profile::{Compiled, Profile};
 use std::sync::OnceLock;
 use tree_sitter::Language;
 use tree_sitter_language::LanguageFn;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Grammar {
     Bash,
     JavaScript,
@@ -28,6 +30,8 @@ pub(crate) struct LanguageEntry {
     pub(crate) extensions: &'static [&'static str],
     /// `None` for grammars the semantic diff does not cover.
     pub(crate) profile: Option<Profile>,
+    /// Name resolution for code intelligence; `None` without a profile.
+    pub(crate) rules: Option<Rules>,
 }
 
 /// Leaf kinds of JavaScript names.
@@ -62,6 +66,44 @@ const ECMASCRIPT_APIS: &[&str] = &[
     include_str!("../apis/ecmascript-trivial.tsv"),
 ];
 
+/// ECMAScript resolution: a module sees what it declares and imports;
+/// other files see what it exports. Parameters differ between the
+/// grammars, so each adds its own locals.
+const fn ecmascript_rules(bindings: &'static [&'static str]) -> Rules {
+    Rules {
+        family: "ecmascript",
+        bindings,
+        nested_sees_locals: true,
+        module_scopes: false,
+        reach: Reach::File,
+        modules: Modules::Specifier {
+            extensions: &["ts", "tsx", "d.ts", "js", "jsx", "mjs", "cjs", "mts", "cts"],
+            index: "index",
+        },
+        exports: Exports::Wrapper {
+            kind: "export_statement",
+            default: "default",
+        },
+        receivers: &["this"],
+        qualified: &[("member_expression", "property")],
+        prefix: None,
+        unit_markers: &["package.json"],
+    }
+}
+
+const ECMASCRIPT_IMPORTS: &str = include_str!("../queries/ecmascript/imports.scm");
+const ECMASCRIPT_LOCALS: &str = include_str!("../queries/ecmascript/locals.scm");
+const JAVASCRIPT_RULES: Rules = ecmascript_rules(&[
+    ECMASCRIPT_IMPORTS,
+    ECMASCRIPT_LOCALS,
+    include_str!("../queries/javascript/locals.scm"),
+]);
+const TYPESCRIPT_RULES: Rules = ecmascript_rules(&[
+    ECMASCRIPT_IMPORTS,
+    ECMASCRIPT_LOCALS,
+    include_str!("../queries/typescript/locals.scm"),
+]);
+
 /// TypeScript's tags query extends JavaScript's.
 const TYPESCRIPT: Profile = Profile {
     identifiers: TYPESCRIPT_IDENTIFIERS,
@@ -87,6 +129,7 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
         language: tree_sitter_bash::LANGUAGE,
         extensions: &[],
         profile: None,
+        rules: None,
     },
     LanguageEntry {
         grammar: Grammar::JavaScript,
@@ -107,6 +150,7 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
             ],
             apis: ECMASCRIPT_APIS,
         }),
+        rules: Some(JAVASCRIPT_RULES),
     },
     LanguageEntry {
         grammar: Grammar::Python,
@@ -127,6 +171,24 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
                 include_str!("../apis/python-stdlib.tsv"),
                 include_str!("../apis/python-trivial.tsv"),
             ],
+        }),
+        rules: Some(Rules {
+            family: "python",
+            bindings: &[
+                include_str!("../queries/python/imports.scm"),
+                include_str!("../queries/python/locals.scm"),
+            ],
+            nested_sees_locals: true,
+            module_scopes: false,
+            reach: Reach::File,
+            modules: Modules::Dotted {
+                files: &["{}.py", "{}.pyi", "{}/__init__.py", "{}/__init__.pyi"],
+            },
+            exports: Exports::All,
+            receivers: &["self", "cls"],
+            qualified: &[("attribute", "attribute"), ("keyword_argument", "name")],
+            prefix: None,
+            unit_markers: &["pyproject.toml", "setup.py", "setup.cfg"],
         }),
     },
     LanguageEntry {
@@ -154,6 +216,39 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
                 include_str!("../apis/rust-trivial.tsv"),
             ],
         }),
+        // Items in a module (a file, or an inline `mod`) see each other;
+        // others are reached by `use` or a path from the crate root.
+        rules: Some(Rules {
+            family: "rust",
+            bindings: &[
+                include_str!("../queries/rust/imports.scm"),
+                include_str!("../queries/rust/locals.scm"),
+            ],
+            nested_sees_locals: false,
+            module_scopes: true,
+            reach: Reach::File,
+            modules: Modules::Crate {
+                manifest: "Cargo.toml",
+                source: "src",
+                roots: &["lib.rs", "main.rs"],
+                files: &["{}.rs", "{}/mod.rs"],
+                root: "crate",
+                current: "self",
+                parent: "super",
+                separator: "::",
+            },
+            exports: Exports::Modifier("visibility_modifier"),
+            receivers: &["self", "Self"],
+            qualified: &[
+                ("field_expression", "field"),
+                ("scoped_identifier", "name"),
+                ("scoped_type_identifier", "name"),
+                ("field_initializer", "field"),
+                ("shorthand_field_initializer", "name"),
+            ],
+            prefix: Some(("scoped_use_list", "path")),
+            unit_markers: &["Cargo.toml"],
+        }),
     },
     LanguageEntry {
         grammar: Grammar::TypeScript,
@@ -161,6 +256,7 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
         language: tree_sitter_typescript::LANGUAGE_TYPESCRIPT,
         extensions: &["ts", "mts", "cts"],
         profile: Some(TYPESCRIPT),
+        rules: Some(TYPESCRIPT_RULES),
     },
     LanguageEntry {
         grammar: Grammar::Tsx,
@@ -168,6 +264,7 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
         language: tree_sitter_typescript::LANGUAGE_TSX,
         extensions: &["tsx"],
         profile: Some(TYPESCRIPT),
+        rules: Some(TYPESCRIPT_RULES),
     },
 ];
 
@@ -211,6 +308,23 @@ impl Grammar {
         // reports `UnsupportedLanguage` rather than diffing without them.
         COMPILED[self as usize]
             .get_or_init(|| Compiled::new(self, profile).ok())
+            .as_ref()
+    }
+
+    /// Name-resolution rules; `None` for grammars code intelligence does
+    /// not cover.
+    pub(crate) fn rules(self) -> Option<&'static Rules> {
+        self.entry().rules.as_ref()
+    }
+
+    /// The compiled imports query, built once per grammar.
+    pub(crate) fn imports(self) -> Option<&'static ImportsQuery> {
+        static IMPORTS: [OnceLock<Option<ImportsQuery>>; LANGUAGES.len()] =
+            [const { OnceLock::new() }; LANGUAGES.len()];
+        let rules = self.rules()?;
+        // Fixed at build time and covered by a test, as for `compiled`.
+        IMPORTS[self as usize]
+            .get_or_init(|| ImportsQuery::compile(self, rules.bindings).ok())
             .as_ref()
     }
 }
@@ -272,6 +386,45 @@ mod tests {
             "queries or API tables changed: bump ENGINE_VERSION and set \
              ENGINE_INPUTS to (ENGINE_VERSION, {digest:#x})"
         );
+    }
+
+    #[test]
+    fn every_language_with_a_profile_has_resolution_rules() {
+        for entry in &LANGUAGES {
+            assert_eq!(
+                entry.profile.is_some(),
+                entry.rules.is_some(),
+                "{}",
+                entry.name
+            );
+            let Some(rules) = &entry.rules else { continue };
+            let imports = ImportsQuery::compile(entry.grammar, rules.bindings);
+            assert!(imports.is_ok(), "{}: {:?}", entry.name, imports.err());
+            // A typo in a node kind would silently disable a rule.
+            let language = entry.grammar.language();
+            let mut kinds: Vec<&str> = rules.qualified.iter().map(|(kind, _)| *kind).collect();
+            kinds.extend(rules.prefix.map(|(kind, _)| kind));
+            match &rules.exports {
+                Exports::Modifier(kind) | Exports::Wrapper { kind, .. } => kinds.push(kind),
+                Exports::All => {}
+            }
+            for kind in kinds {
+                assert_ne!(
+                    language.id_for_node_kind(kind, true),
+                    0,
+                    "{} lacks {kind}",
+                    entry.name
+                );
+            }
+            let fields = rules.qualified.iter().map(|(_, field)| *field);
+            for field in fields.chain(rules.prefix.map(|(_, field)| field)) {
+                assert!(
+                    language.field_id_for_name(field).is_some(),
+                    "{} lacks field {field}",
+                    entry.name
+                );
+            }
+        }
     }
 
     #[test]

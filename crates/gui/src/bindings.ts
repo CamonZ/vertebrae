@@ -1270,6 +1270,20 @@ async loadChangeSides(worktreePath: string, comparison: ComparisonSnapshot, path
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Definitions, references, or incoming/outgoing calls in a worktree's
+ * working copy or one of its commits. Each answer names its provider and
+ * says when it was cut short by the request budget; a request never
+ * blocks past the budget plus a margin.
+ */
+async codeIntelligence(worktreePath: string, snapshot: IntelligenceSnapshot, request: IntelligenceRequest) : Promise<Result<IntelligenceAnswer, CodeIntelligenceError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("code_intelligence", { worktreePath, snapshot, request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async listComparisonChoices(worktreePath: string) : Promise<Result<ComparisonChoice[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("list_comparison_choices", { worktreePath }) };
@@ -1738,6 +1752,14 @@ json_schema: string | null }
  */
 export type AnnotationSubject = { kind: "association"; id: string } | { kind: "turn"; id: string }
 /**
+ * An answer: its items, the provider and, when incomplete, why.
+ */
+export type Answer<T> = { provider: ProviderId; items: T[];
+/**
+ * `None` when the answer is complete.
+ */
+truncated: Truncation | null }
+/**
  * A file projection returned from the project artifact list or Task.artifacts.
  */
 export type Artifact = { id: string; project_id: string | null; filename: string; body: string; logical_name: string | null; metadata: ArtifactLinkMetadata | null; created_at: string | null; updated_at: string | null }
@@ -1786,12 +1808,48 @@ create_ticket: boolean;
 diagnostic: string | null }
 export type AssociationSelection = { kind: "keep" } | { kind: "unknown" } | { kind: "entity"; id: string; title: string; level: TaskLevel }
 export type AssociationWorktree = { path: string; branch: string | null }
+/**
+ * One call site.
+ */
+export type Call = {
+/**
+ * The definition the call is in; `None` for code outside every
+ * definition (module-level code).
+ */
+caller: CodeSymbol | null;
+/**
+ * The callee as written, receiver or path included (`self.save`,
+ * `fs::write`).
+ */
+callee: string;
+/**
+ * The callee's name at the call.
+ */
+site: SourceLocation; resolution: Resolution }
 export type CapturedReviewAnchor = { originalCommitId: string; originalBlobId: string }
 export type ChangeSides = { old: FileBody; new: FileBody;
 /**
  * In semantic mode only.
  */
 semantic: SemanticOutcome | null }
+/**
+ * Why a request has no answer. `Provider` keeps the provider's reason,
+ * so a caller can tell a stale symbol key (`unknown_symbol`: fetch the
+ * file's definitions again) from an unsupported language.
+ */
+export type CodeIntelligenceError = { kind: "provider"; error: IntelligenceError } |
+/**
+ * The worktree, path or commit was refused or could not be read.
+ */
+{ kind: "files"; message: string } |
+/**
+ * The request outlived its budget and the command's margin.
+ */
+{ kind: "timed_out" } |
+/**
+ * The worker failed.
+ */
+{ kind: "failed"; message: string }
 /**
  * Code reference - file location reference
  */
@@ -1816,6 +1874,27 @@ name: string | null;
  * Optional description
  */
 description: string | null }
+/**
+ * A definition: where it is and what it is.
+ */
+export type CodeSymbol = {
+/**
+ * Snapshot-relative, with `/` separators.
+ */
+path: string; name: string; kind: DeclarationKind;
+/**
+ * The whole definition, comments and attributes before it excluded.
+ */
+span: LineSpan;
+/**
+ * The line of its name (1-based); with `path` and `name`, it
+ * identifies the symbol in requests ([`SymbolKey`]).
+ */
+line: number;
+/**
+ * Enclosing definitions' names, outermost first.
+ */
+scope: string[] }
 /**
  * Error response type for commands - simple string wrapper with specta support
  */
@@ -2207,6 +2286,15 @@ output_schema: JsonValue | null;
  * Top-level properties of `output_schema` in schema order
  */
 fields: GateField[] }
+/**
+ * A call into a symbol, `depth` calls away from the requested one.
+ */
+export type IncomingCall = {
+/**
+ * The symbol called: the requested one at depth 1, a caller of the
+ * previous depth's below that.
+ */
+target: SymbolKey; call: Call; depth: number }
 export type InferLocalChatSessionTitleInput = { harness: LocalChatHarnessKind; initial_prompts: string[]; working_dir: string | null;
 /**
  * Provider the chat runs on. Custom providers infer titles through
@@ -2243,6 +2331,36 @@ project_created: boolean }
  * `installation_status()` and `install_components()`.
  */
 export type InstallationStatus = { cli: ComponentStatus; daemon: ComponentStatus; gate: ComponentStatus; service: ServiceState }
+export type IntelligenceAnswer = ({ operation: "definitions" } & Answer<CodeSymbol>) | ({ operation: "references" } & Answer<Reference>) | ({ operation: "outgoing_calls" } & Answer<Call>) | ({ operation: "incoming_calls" } & Answer<IncomingCall>)
+/**
+ * Why a request has no answer at all.
+ */
+export type IntelligenceError =
+/**
+ * No provider covers the file's language.
+ */
+{ kind: "unsupported_language"; path: string } |
+/**
+ * The file is missing, binary or too large.
+ */
+{ kind: "unreadable"; path: string } |
+/**
+ * No definition matches the key (the file may have changed).
+ */
+{ kind: "unknown_symbol"; key: SymbolKey } |
+/**
+ * Reading the snapshot failed.
+ */
+{ kind: "snapshot"; message: string }
+export type IntelligenceRequest = { operation: "definitions"; path: string } | { operation: "references"; symbol: SymbolKey } | { operation: "outgoing_calls"; symbol: SymbolKey } | { operation: "incoming_calls"; symbol: SymbolKey; depth: number }
+/**
+ * The files a request reads.
+ */
+export type IntelligenceSnapshot = { kind: "working_tree" } |
+/**
+ * A commit (or anything naming one) of the worktree's repository.
+ */
+{ kind: "commit"; commit: string }
 export type JsonValue = null | boolean | number | string | JsonValue[] | Partial<{ [key in string]: JsonValue }>
 /**
  * 1-based inclusive line range.
@@ -2574,7 +2692,49 @@ export type PipelineWorkflow = { id: string; name: string; description: string |
  * Inter-workflow transition entry returned by `pipeline_summary`.
  */
 export type PipelineWorkflowTransition = { id: string; from_workflow_id: string; to_workflow_id: string; target_step_id: string | null; label: string }
+/**
+ * Which provider produced an answer, such as `embedded`.
+ */
+export type ProviderId = string
 export type ProviderSettings = { id: string; harness: string; endpoint: string; endpoint_hidden: boolean; models: string[]; default_model: string; api_key_env: string; has_api_key: boolean; key_storage: string; credential_override: boolean; environment_names: string[]; wire_api: string }
+/**
+ * One use of a symbol's name that may refer to it.
+ */
+export type Reference = { kind: ReferenceKind; site: SourceLocation;
+/**
+ * The definition the use is in, if any.
+ */
+enclosing: CodeSymbol | null; resolution: Resolution }
+/**
+ * What a reference is.
+ */
+export type ReferenceKind = "call" | "import" |
+/**
+ * Any other use of the name.
+ */
+"use"
+/**
+ * How sure an edge's target is.
+ */
+export type Resolution =
+/**
+ * Exactly one definition is bound to the name where it is used.
+ */
+{ quality: "exact"; target: CodeSymbol } |
+/**
+ * Nothing binds the name there; one definition elsewhere has it.
+ */
+{ quality: "name_match"; target: CodeSymbol } |
+/**
+ * Several definitions may be meant: shadowed or duplicated names, or
+ * several definitions sharing the name. Innermost binding first.
+ */
+{ quality: "ambiguous"; candidates: CodeSymbol[] } |
+/**
+ * No definition was found (an external API, a dynamic call, a name
+ * the provider cannot follow).
+ */
+{ quality: "unresolved" }
 export type ResolvePermissionRequestError = { kind: ResolvePermissionRequestErrorKind; message: string }
 export type ResolvePermissionRequestErrorKind = "unavailable" | "not_found" | "invalid" | "internal"
 export type ResolvePermissionRequestInput = { request_id: string; behavior: PermissionDecisionBehavior; message: string | null; updated_input: JsonValue | null }
@@ -2776,6 +2936,14 @@ export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string
 export type SessionMode = "new" | "resume" | "fork"
 export type SettingsEdit = { section: "decision_model"; enabled: boolean; provider: string; model: string } | { section: "connection"; url: string; token: SecretEdit } | { section: "typesafe"; url: string; key: SecretEdit } | { section: "provider"; id: string; create: boolean; harness: string; endpoint: string; models: string[]; default_model: string; api_key_env: string; key: SecretEdit; environment: EnvironmentEdit[]; wire_api: string } | { section: "observability"; settings: ObservabilitySettings }
 export type SharedSettings = { decision_model: DecisionModelSettings; revision: string; path: string; connection_url: string; has_connection_token: boolean; effective_connection_url: string; connection_url_override: boolean; connection_token_override: boolean; typesafe_url: string; typesafe_endpoint_hidden: boolean; has_typesafe_key: boolean; typesafe_key_storage: string; credential_warning: string | null; typesafe_key_override: boolean; typesafe_url_override: boolean; providers: ProviderSettings[]; observability: ObservabilitySettings }
+/**
+ * A point in a file, 1-based.
+ */
+export type SourceLocation = { path: string; line: number;
+/**
+ * In UTF-8 bytes from the line's start, 1-based.
+ */
+column: number }
 /**
  * Workflow step entity - mirrors core::Step
  */
@@ -3016,6 +3184,11 @@ state: JsonValue | null;
  * System One question map the step asks the provider.
  */
 questions: JsonValue | null }
+/**
+ * Identifies a definition in a request: its file, name and the line of
+ * its name, as a [`CodeSymbol`] from an earlier answer reports them.
+ */
+export type SymbolKey = { path: string; name: string; line: number }
 /**
  * Full task details - mirrors core::Task with string IDs and dates
  */
@@ -3337,6 +3510,27 @@ export type TaskRunTrace = { root_task_run_id: string; task_runs?: TaskRun[]; st
  * `TaskRunStepChangedEvent` instead.
  */
 export type TaskStepChangedEvent = { task_id: string; from_step_id: string | null; to_step_id: string | null; workflow_id: string; level: TaskLevel }
+/**
+ * Why an answer is incomplete.
+ */
+export type Truncation =
+/**
+ * The time budget ran out.
+ */
+"timed_out" |
+/**
+ * More files needed reading than the budget allows.
+ */
+"file_limit" |
+/**
+ * More results were found than the budget allows.
+ */
+"result_limit" |
+/**
+ * Callers exist beyond the deepest level answered (the depth asked,
+ * or the budget's `max_depth` when that is lower).
+ */
+"depth_limit"
 export type UpdateComponentResult = { component: string; state: UpdateComponentState; message: string }
 export type UpdateComponentState = "pending" | "downloaded" | "verified" | "staged" | "activated" | "health_checked" | "pending_relaunch" | "rolled_back" | "failed"
 /**

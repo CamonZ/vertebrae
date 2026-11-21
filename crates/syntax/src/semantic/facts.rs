@@ -332,6 +332,31 @@ impl FactsQuery {
     }
 }
 
+/// The `@call` captures of one query match: each callee name node, with
+/// its receiver or path (`true` for a path) when the pattern has one.
+pub(crate) fn call_parts<'t>(
+    facts: &FactsQuery,
+    captures: &[tree_sitter::QueryCapture<'t>],
+) -> Vec<(tree_sitter::Node<'t>, Option<(bool, tree_sitter::Node<'t>)>)> {
+    let part = |want: Part| {
+        captures.iter().find_map(|capture| {
+            matches!(
+                facts.names[capture.index as usize],
+                CaptureName::Part(Role::Call, part) if part == want
+            )
+            .then_some(capture.node)
+        })
+    };
+    let qualifier = part(Part::Receiver)
+        .map(|node| (false, node))
+        .or_else(|| part(Part::Path).map(|node| (true, node)));
+    captures
+        .iter()
+        .filter(|capture| facts.names[capture.index as usize] == CaptureName::Primary(Role::Call))
+        .map(|capture| (capture.node, qualifier))
+        .collect()
+}
+
 /// One primary capture in a tree.
 pub(crate) struct Captured {
     pub(crate) node: NodeId,
@@ -489,6 +514,25 @@ fn name_segments(text: &str) -> Option<Segments<'_>> {
     }
 }
 
+/// A name's segments with its qualifier's before it. An annotation or use
+/// without one may be a whole path (`tauri::command`).
+fn qualified_segments<'t>(qualifier: Option<(Part, &'t str)>, subject: &'t str) -> Segments<'t> {
+    let opaque = || vec![(Sep::Member, None)];
+    match qualifier {
+        Some((part, text)) => {
+            let mut name = name_segments(text).unwrap_or_else(opaque);
+            let sep = if part == Part::Path {
+                Sep::Path
+            } else {
+                Sep::Member
+            };
+            name.push((sep, Some(subject)));
+            name
+        }
+        None => name_segments(subject).unwrap_or_else(opaque),
+    }
+}
+
 struct ApiRule {
     /// A leading `**`, and how the first matched segment must join what
     /// is before it (if anything is).
@@ -592,6 +636,15 @@ impl ApiTable {
                 )
             })
             .map(|rule| rule.api)
+    }
+
+    /// Whether a call is to an API the tables know (an effect, a
+    /// concurrency primitive or a trivial call): code outside the
+    /// project, or too common to resolve by name.
+    pub(crate) fn knows_call(&self, qualifier: Option<(bool, &str)>, name: &str) -> bool {
+        let qualifier =
+            qualifier.map(|(path, text)| (if path { Part::Path } else { Part::Receiver }, text));
+        self.lookup(&qualified_segments(qualifier, name)).is_some()
     }
 
     #[cfg(test)]
@@ -724,21 +777,10 @@ pub(crate) fn derive(sides: [&Touched; 2], apis: &ApiTable) -> Facts {
             let qualifier = capture
                 .qualifier
                 .map(|(part, id)| (part, compact(tree.text(id))));
-            let opaque = || vec![(Sep::Member, None)];
-            let name = match &qualifier {
-                Some((part, text)) => {
-                    let mut name = name_segments(text).unwrap_or_else(opaque);
-                    let sep = if *part == Part::Path {
-                        Sep::Path
-                    } else {
-                        Sep::Member
-                    };
-                    name.push((sep, Some(subject.as_str())));
-                    name
-                }
-                // An annotation or use may be a whole path (`tauri::command`).
-                None => name_segments(&subject).unwrap_or_else(opaque),
-            };
+            let qualified = qualifier
+                .as_ref()
+                .map(|(part, text)| (*part, text.as_str()));
+            let name = qualified_segments(qualified, &subject);
             let kind = match (apis.lookup(&name), capture.role) {
                 (Some(Api::Effect(effect)), _) => FactKind::Effect { effect },
                 (Some(Api::Spawn), _) => FactKind::Spawn,
@@ -746,10 +788,7 @@ pub(crate) fn derive(sides: [&Touched; 2], apis: &ApiTable) -> Facts {
                 (None, Role::Call) => FactKind::Call,
                 _ => return None,
             };
-            let qualifier = qualifier
-                .as_ref()
-                .map(|(part, text)| (*part, text.as_str()));
-            return Some((kind, display_name(&call_name(qualifier, &subject))));
+            return Some((kind, display_name(&call_name(qualified, &subject))));
         };
         Some((kind, display_name(&subject)))
     };

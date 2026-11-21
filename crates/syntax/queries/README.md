@@ -45,3 +45,25 @@ code inside it.
 
 `@test.marker` marks an attribute (`#[test]`, `#[cfg(test)]`): it, the
 attributes and comments after it, and the item they precede are test code.
+
+## Bindings capture vocabulary
+
+Code intelligence (`src/intelligence`) reads `imports.scm` and
+`locals.scm`, with the definitions of the declarations query and the
+`@call` captures of the facts query. Each match is one binding; the other
+resolution rules (reach, module layout, exports, `self` receivers, whether
+inline modules are scopes, whether nested functions see enclosing locals)
+are data in the language's registry entry (`intelligence::rules::Rules`).
+
+| Capture | Meaning |
+|---|---|
+| `@import.source` | the module the names come from (`'./m'`, `.pkg.m`) |
+| `@import.name` | an imported name, relative to the source when there is one; without one, a whole path whose last segment it binds (Rust `use a::b`, prefixed by enclosing `a::{…}` lists) |
+| `@import.alias` | the local name, when it is not the imported one |
+| `@import.module` | a local name for the source module, or (without a source) a module path whose first segment it binds (Python `import a.b`) |
+| `@import.default` | a local name for the source's default export |
+| `@import.glob` | a path (or the source) all of whose names are imported |
+| `@local` | a parameter, `let`, assignment or loop binding: it shadows definitions of its name in its function without being one, so a call bound to it and to a definition is ambiguous, and one bound only to it is unresolved |
+
+Re-exports (`pub use`, `export * from`) are not followed: a name reached
+only through one resolves by name match, or not at all.
