@@ -1,5 +1,6 @@
 import { useContext } from "react";
 import { EvidenceNavigationContext } from "../../shared/EvidenceNavigationContext";
+import { ReferenceContext } from "../../shared/markdownReferenceContext";
 import { useAttachmentRenderers } from "./attachmentRenderers";
 import type { AttachmentSpec } from "./spec";
 
@@ -12,7 +13,18 @@ export function AttachmentPanel({
   label?: string;
 }) {
   const attachmentRenderers = useAttachmentRenderers();
-  const openSource = useContext(EvidenceNavigationContext);
+  const navigate = useContext(EvidenceNavigationContext);
+  const { sessionId, turnId, assignedRoot } = useContext(ReferenceContext);
+  const openSource: typeof navigate = navigate && ((location) => {
+    if (sessionId && turnId) {
+      navigate(location, {
+        root: assignedRoot,
+        history: { sessionId, turnId },
+      });
+    } else {
+      navigate(location);
+    }
+  });
   if (!attachments.length) return null;
   return (
     <ul aria-label={label} className="mt-2 flex min-w-0 flex-col gap-2 text-xs">

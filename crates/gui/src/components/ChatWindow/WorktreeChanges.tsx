@@ -1,3 +1,8 @@
+import {
+  TurnDocument,
+  type TurnDocumentTarget,
+  type TurnDocumentVersion,
+} from "./workspace/TurnDocument";
 import { flushSync } from "react-dom";
 import { useOpenLocalFile } from "../../hooks/useOpenLocalFile";
 import { isEditableShortcutTarget } from "../../utils/keyboard";
@@ -215,6 +220,9 @@ export function WorktreeChanges({
   worktreePath,
   onChangesLoaded,
   sourceJump,
+  turnDocument: shownTurn,
+  onTurnDismiss,
+  onTurnVersionChange,
   onExit,
 }: {
   ref?: Ref<HTMLElement>;
@@ -222,6 +230,13 @@ export function WorktreeChanges({
   onExit?(): void;
   worktreePath: string;
   sourceJump?: JumpTarget | null;
+  turnDocument?: {
+    nonce: number;
+    target: TurnDocumentTarget;
+    version: TurnDocumentVersion;
+  } | null;
+  onTurnDismiss?(nonce: number): void;
+  onTurnVersionChange?(nonce: number, version: TurnDocumentVersion): void;
   /** Called with the parsed All Changes patch after every successful load. */
   onChangesLoaded?: (snapshot: WorktreeSnapshot) => void;
 }) {
@@ -301,6 +316,15 @@ export function WorktreeChanges({
   >(null);
   // An external reference waiting for a working-tree comparison to route on.
   const [pendingSource, setPendingSource] = useState<JumpTarget | null>(null);
+  const dismissTurn = () => {
+    if (shownTurn) onTurnDismiss?.(shownTurn.nonce);
+  };
+  const turnNonce = shownTurn?.nonce;
+  useEffect(() => {
+    if (turnNonce === undefined) return;
+    setFilesOpen(false);
+    setPendingSource(null);
+  }, [turnNonce]);
   useEffect(() => {
     if (!sourceJump) return;
     // References name the working copy and open beside a collapsed explorer.
@@ -314,7 +338,7 @@ export function WorktreeChanges({
   // Route only on a working-copy result: a ready or failed past-commit load
   // may still be shown while the working copy loads. A failed working-copy
   // load still opens the referenced file.
-  const sourceRoute = !pendingSource
+  const sourceRoute = shownTurn || !pendingSource
     ? null
     : state.status === "ready" && state.data.comparison.working_tree
       ? routeSource(pendingSource, state.data.files, state.parsed)
@@ -359,9 +383,8 @@ export function WorktreeChanges({
   const activeDocument = useDocumentStore(
     (store) => store.workspaces[worktreePath]?.active ?? null
   );
-  const showingChanges = historical
-    ? historicalPath == null
-    : activeDocument == null;
+  const showingChanges =
+    !shownTurn && (historical ? historicalPath == null : activeDocument == null);
   const dirtyKey = useDocumentStore((store) => {
     const workspace = store.workspaces[worktreePath];
 
@@ -602,6 +625,7 @@ export function WorktreeChanges({
     focusHeader = false,
     location?: Pick<JumpTarget, "line" | "side">
   ) => {
+    dismissTurn();
     setReveal(null);
     setActivePath(path);
     activate(worktreePath, null);
@@ -610,6 +634,7 @@ export function WorktreeChanges({
   };
 
   const open = (path: string, view: "file" | "diff") => {
+    dismissTurn();
     setReveal(null);
     setActivePath(path);
     if (historical) setHistoricalDocument({ path, view });
@@ -792,7 +817,7 @@ export function WorktreeChanges({
       event.key.toLowerCase() === "s"
     ) {
       event.preventDefault();
-      if (!historical && activeDocument) save(activeDocument);
+      if (!shownTurn && !historical && activeDocument) save(activeDocument);
       return;
     }
     const origin = event.nativeEvent.composedPath()[0];
@@ -1006,6 +1031,7 @@ export function WorktreeChanges({
                 const endpoint = endpointFor(value);
 
                 if (endpoint) {
+                  dismissTurn();
                   setTarget(endpoint);
                   setHistoricalDocument(null);
                   setMode("changes");
@@ -1276,6 +1302,7 @@ export function WorktreeChanges({
               className="changes-tab"
               aria-current={showingChanges ? "page" : undefined}
               onClick={() => {
+                dismissTurn();
                 setReveal(null);
                 activate(worktreePath, null);
                 setHistoricalDocument(null);
@@ -1289,9 +1316,12 @@ export function WorktreeChanges({
                   <button
                     type="button"
                     className="changes-tab"
-                    aria-current={activeDocument === path ? "page" : undefined}
+                    aria-current={
+                      !shownTurn && activeDocument === path ? "page" : undefined
+                    }
                     title={path}
                     onClick={() => {
+                      dismissTurn();
                       setReveal(null);
                       setActivePath(path);
                       activate(worktreePath, path);
@@ -1316,7 +1346,17 @@ export function WorktreeChanges({
                 </span>
               ))}
           </nav>
-          {historical && historicalDocument && state.status === "ready" ? (
+          {shownTurn ? (
+            <TurnDocument
+              key={shownTurn.nonce}
+              target={shownTurn.target}
+              version={shownTurn.version}
+              onVersionChange={(version) =>
+                onTurnVersionChange?.(shownTurn.nonce, version)
+              }
+              onClose={dismissTurn}
+            />
+          ) : historical && historicalDocument && state.status === "ready" ? (
             <HistoricalDocument
               key={`${historicalPath}:${state.data.comparison.base_commit}:${state.data.comparison.target_commit}`}
               worktreePath={worktreePath}

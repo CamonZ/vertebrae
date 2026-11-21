@@ -1,24 +1,23 @@
 import { commands, type FileBody } from "../../../bindings";
 import type { ResolvedSource } from "./resolveSource";
 
+export type TurnSource = Extract<
+  ResolvedSource,
+  { kind: "file" | "unavailable" }
+>;
+
 /** Read exactly one recorded or current file, with explicit recoverability. */
 export async function resolveTurnSource(
   checkout: string,
   path: string,
   history: { sessionId: string; turnId: string | null },
   latest: boolean
-): Promise<ResolvedSource> {
+): Promise<TurnSource> {
   const turnId = history.turnId;
   if (latest && !checkout)
     return {
       kind: "unavailable",
       message: "The original checkout was not recorded for this reference.",
-      retryable: false,
-    };
-  if (!latest && !turnId)
-    return {
-      kind: "unavailable",
-      message: "Historical context was not captured for this reference.",
       retryable: false,
     };
   let body: FileBody;
@@ -32,7 +31,12 @@ export async function resolveTurnSource(
       };
     body = result.data;
   } else {
-    if (!turnId) throw new Error("Missing turn identity");
+    if (!turnId)
+      return {
+        kind: "unavailable",
+        message: "Historical context was not captured for this reference.",
+        retryable: false,
+      };
     const result = await commands.readChatHistoryFile(
       history.sessionId,
       turnId,

@@ -19,6 +19,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as hegel from "@hegeldev/hegel";
@@ -49,29 +50,12 @@ import {
   dropdownOptionValues,
 } from "../../test/dropdown";
 
-vi.mock("./workspace/SourceEvidence", () => ({
-  SourceEvidence: ({
-    checkout,
-    target,
-    exactPath,
-    onClose,
-  }: {
-    checkout: string;
-    target: { path: string; line?: number; column?: number };
-    exactPath?: boolean;
-    onClose(): void;
-  }) => (
-    <div
-      data-testid="source-target"
-      data-checkout={checkout}
-      data-path={target.path}
-      data-line={target.line}
-      data-column={target.column}
-      data-exact={exactPath}
-    >
-      <button onClick={onClose}>Close source</button>
-    </div>
-  ),
+vi.mock("./workspace/SourceEvidenceCode", () => ({
+  default: ({ source, line, endLine }: {
+    source: { contents: string };
+    line?: number;
+    endLine?: number;
+  }) => <pre data-line={line} data-end-line={endLine}>{source.contents}</pre>,
 }));
 
 // Mock scrollIntoView
@@ -86,6 +70,10 @@ vi.mock("../../bindings", async () => {
       worktreeFileExists: vi
         .fn()
         .mockResolvedValue({ status: "ok", data: true }),
+      readChatHistoryFile: vi.fn().mockResolvedValue({
+        status: "ok",
+        data: { kind: "text", contents: "recorded file", revision: "old" },
+      }),
       readWorktreeFile: vi.fn().mockResolvedValue({
         status: "ok",
         data: { kind: "text", contents: "file", revision: "r" },
@@ -260,13 +248,15 @@ describe("ChatWindow", () => {
     });
   });
 
-  it("uses the shared source panel without retargeting a saved reference after reassignment", async () => {
-    const text = "[source](src/a.ts:12:3)";
+  it.each([
+    { name: "main checkout", original: "/test/project", current: null },
+    { name: "association worktree", original: "/saved-feature", current: "/current" },
+  ])("opens recorded files in Changes for a $name", async ({ original, current }) => {
     const association = {
       ticketId: null,
       ticketTitle: null,
-      worktreePath: "/current",
-      branch: "feature",
+      worktreePath: current,
+      branch: null,
       lastProcessedAt: null,
       processedAtCount: 0,
       awaitingWorktree: null,
@@ -276,59 +266,41 @@ describe("ChatWindow", () => {
       sessions: {
         "test-session": createSession({
           projectPath: "/test/project",
-          association,
+          ...(current ? { association } : {}),
           toolAnnotations: {
             '["turn","saved-turn"]': {
-              worktree_history: {
+              worktree_origin: {
                 session_id: "test-session",
                 tool_id: "",
                 subject: { kind: "turn", id: "saved-turn" },
-                kind: "worktree_history",
+                kind: "worktree_origin",
                 recorded_at: "2026-11-16T00:00:00Z",
-                payload: {
-                  version: 1,
-                  worktree: "/saved-feature",
-                  state: "ready",
-                },
+                payload: { worktree: original, epoch: "original" },
               },
             },
           },
-          messages: [
-            {
-              kind: "assistant",
-              turnId: "saved-turn",
-              itemId: "saved-source",
-              text,
-              timestamp: "2026-11-16T00:00:00Z",
-            },
-          ],
+          messages: [{
+            kind: "assistant",
+            turnId: "saved-turn",
+            itemId: "saved-source",
+            text: "[source](src/a.ts:12:3)",
+            timestamp: "2026-11-16T00:00:00Z",
+          }],
         }),
       },
     });
-
     render(<ChatWindow sessionId="test-session" />);
     await userEvent.click(screen.getByTestId("local-file-reference-link"));
 
-    expect(screen.getByTestId("source-target")).toHaveAttribute(
-      "data-checkout",
-      "/saved-feature"
+    const changes = () =>
+      within(screen.getByRole("complementary", { name: "Changes panel" }));
+    const file = () => within(changes().getByRole("region", { name: "File src/a.ts" }));
+    expect(await file().findByText("recorded file")).toHaveAttribute("data-line", "12");
+    expect(commands.readChatHistoryFile).toHaveBeenCalledExactlyOnceWith(
+      "test-session", "saved-turn", "src/a.ts"
     );
-    expect(screen.getByTestId("source-target")).toHaveAttribute(
-      "data-path",
-      "src/a.ts"
-    );
-    expect(screen.getByTestId("source-target")).toHaveAttribute(
-      "data-line",
-      "12"
-    );
-    expect(screen.getByTestId("source-target")).toHaveAttribute(
-      "data-column",
-      "3"
-    );
-    expect(screen.getByTestId("source-target")).toHaveAttribute(
-      "data-exact",
-      "true"
-    );
+    expect(commands.readWorktreeFile).not.toHaveBeenCalled();
+    expect(useDocumentStore.getState().workspaces[original]?.documents["src/a.ts"]).toBeUndefined();
 
     act(() =>
       useChatStore.getState().setSessionAssociation("test-session", {
@@ -336,22 +308,56 @@ describe("ChatWindow", () => {
         worktreePath: "/replacement",
       })
     );
+    await userEvent.click(file().getByRole("radio", { name: "Latest file" }));
+    expect(await file().findByText("file")).toHaveAttribute("data-line", "12");
+    expect(commands.readWorktreeFile).toHaveBeenCalledExactlyOnceWith(original, "src/a.ts");
 
-    expect(screen.getByTestId("source-target")).toHaveAttribute(
-      "data-checkout",
-      "/saved-feature"
-    );
+    await userEvent.click(file().getByRole("button", { name: "Close file reference" }));
+    expect(changes().queryByRole("region", { name: "File src/a.ts" })).not.toBeInTheDocument();
+  });
 
-    firePaneControl("Changes");
-
-    expect(screen.queryByTestId("source-target")).not.toBeInTheDocument();
-
-    firePaneControl("Changes");
-
+  it("keeps a missing capture explicit and a dismissed reference closed", async () => {
+    mockedCommands.readChatHistoryFile.mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        error: { kind: "not_captured", message: "Capture pending", retryable: true },
+      },
+    });
+    useChatStore.setState({
+      sessions: {
+        "test-session": createSession({
+          projectPath: "/test/project",
+          messages: [{
+            kind: "assistant",
+            turnId: "pending-turn",
+            itemId: "reply",
+            text: "[source](src/pending.ts:12)",
+            timestamp: "2026-11-16T00:00:00Z",
+          }],
+        }),
+      },
+    });
+    render(<ChatWindow sessionId="test-session" />);
     await userEvent.click(screen.getByTestId("local-file-reference-link"));
-    await userEvent.click(screen.getByRole("button", { name: "Close source" }));
 
-    expect(screen.queryByTestId("source-target")).not.toBeInTheDocument();
+    const changes = within(screen.getByRole("complementary", { name: "Changes panel" }));
+    expect(await changes.findByText("Capture pending")).toBeVisible();
+    expect(mockedCommands.readWorktreeFile).not.toHaveBeenCalled();
+    await userEvent.click(changes.getByRole("button", { name: "Close file reference" }));
+
+    act(() =>
+      useChatStore.getState().applyToolAnnotation("test-session", {
+        session_id: "test-session",
+        tool_id: "",
+        subject: { kind: "turn", id: "pending-turn" },
+        kind: "worktree_origin",
+        recorded_at: "2026-11-16T00:00:00Z",
+        payload: { worktree: "/original", epoch: "pending" },
+      })
+    );
+    expect(screen.getByRole("complementary", { name: "Changes panel" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "File src/pending.ts" })).toBeNull();
+    expect(mockedCommands.readChatHistoryFile).toHaveBeenCalledTimes(1);
   });
 
   it("keeps Changes resizable after a worktree association replaces its container", async () => {

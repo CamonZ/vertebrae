@@ -2,8 +2,11 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { commands } from "../../../bindings";
+import { useState } from "react";
+import { useToolAnnotation } from "../../../hooks/useToolAnnotation";
+import { annotationWorktree } from "../../../stores/toolAnnotations";
 import { useChatStore } from "../../../stores/chatStore";
-import { SourceEvidence } from "./SourceEvidence";
+import { TurnDocument, type TurnDocumentVersion } from "./TurnDocument";
 
 vi.mock("../../../bindings", () => ({
   commands: {
@@ -22,9 +25,31 @@ vi.mock("./OpenInExternalEditor", () => ({
 }));
 const target = {
   path: "a.ts",
-  nonce: 1,
+  reveal: null,
   history: { sessionId: "chat", turnId: "one" },
 };
+
+function Document({ checkout }: { checkout: string }) {
+  const [version, setVersion] = useState<TurnDocumentVersion>("turn");
+  const capture = useToolAnnotation(
+    "chat",
+    '["turn","one"]',
+    "worktree_history"
+  );
+  const origin = useToolAnnotation("chat", '["turn","one"]', "worktree_origin");
+  return (
+    <TurnDocument
+      target={{
+        ...target,
+        root:
+          annotationWorktree(origin) ?? annotationWorktree(capture) ?? checkout,
+      }}
+      version={version}
+      onVersionChange={setVersion}
+      onClose={() => {}}
+    />
+  );
+}
 
 beforeEach(() => {
   vi.resetAllMocks();
@@ -40,19 +65,12 @@ beforeEach(() => {
 });
 
 it("defaults to the recorded turn, and requires an explicit action to show the latest deleted file", async () => {
-  render(
-    <SourceEvidence
-      checkout="/feature"
-      target={target}
-      onClose={() => {}}
-      exactPath
-    />
-  );
+  render(<Document checkout="/feature" />);
   expect(await screen.findByText("historical contents")).toBeInTheDocument();
   expect(commands.readWorktreeFile).not.toHaveBeenCalled();
   expect(screen.queryByText("Open in external editor")).not.toBeInTheDocument();
 
-  await userEvent.click(screen.getByRole("button", { name: "Latest file" }));
+  await userEvent.click(screen.getByRole("radio", { name: "Latest file" }));
   expect(
     await screen.findByText("This file no longer exists in its worktree.")
   ).toBeInTheDocument();
@@ -61,7 +79,7 @@ it("defaults to the recorded turn, and requires an explicit action to show the l
     "a.ts"
   );
 
-  await userEvent.click(screen.getByRole("button", { name: "At this turn" }));
+  await userEvent.click(screen.getByRole("radio", { name: "At this turn" }));
   expect(await screen.findByText("historical contents")).toBeInTheDocument();
 });
 
@@ -78,10 +96,8 @@ it("does not let a late historical response replace the explicitly selected late
     status: "ok",
     data: { kind: "text", contents: "latest contents", revision: "new" },
   });
-  render(
-    <SourceEvidence checkout="/feature" target={target} onClose={() => {}} />
-  );
-  await userEvent.click(screen.getByRole("button", { name: "Latest file" }));
+  render(<Document checkout="/feature" />);
+  await userEvent.click(screen.getByRole("radio", { name: "Latest file" }));
   expect(await screen.findByText("latest contents")).toBeInTheDocument();
 
   await act(async () =>
@@ -98,10 +114,8 @@ it("retries explicitly after a historical storage failure without falling back",
   vi.mocked(commands.readChatHistoryFile).mockRejectedValueOnce(
     new Error("Storage unavailable")
   );
-  render(
-    <SourceEvidence checkout="/feature" target={target} onClose={() => {}} />
-  );
-  expect(await screen.findByRole("alert")).toHaveTextContent(
+  render(<Document checkout="/feature" />);
+  expect(await screen.findByText("Storage unavailable")).toHaveTextContent(
     "Storage unavailable"
   );
   await userEvent.click(screen.getByRole("button", { name: "Retry" }));
@@ -116,9 +130,7 @@ it("offers retry for the normal command-error result", async () => {
     status: "error",
     error: { message: "Repository temporarily unavailable" },
   });
-  render(
-    <SourceEvidence checkout="/feature" target={target} onClose={() => {}} />
-  );
+  render(<Document checkout="/feature" />);
   expect(
     await screen.findByText("Repository temporarily unavailable")
   ).toBeInTheDocument();
@@ -160,9 +172,9 @@ it("keeps unknown latest unavailable, then follows the original identity when it
       },
     },
   });
-  render(<SourceEvidence checkout="" target={target} onClose={() => {}} />);
+  render(<Document checkout="" />);
   await screen.findByText("Capture pending");
-  await userEvent.click(screen.getByRole("button", { name: "Latest file" }));
+  await userEvent.click(screen.getByRole("radio", { name: "Latest file" }));
   expect(
     await screen.findByText(
       "The original checkout was not recorded for this reference."
@@ -202,9 +214,7 @@ it("corrects an already-open panel's latest root when historical identity arrive
       },
     },
   });
-  render(
-    <SourceEvidence checkout="/stale" target={target} onClose={() => {}} />
-  );
+  render(<Document checkout="/stale" />);
   await screen.findByText("historical contents");
   act(() =>
     useChatStore.getState().applyToolAnnotation("chat", {
@@ -216,7 +226,7 @@ it("corrects an already-open panel's latest root when historical identity arrive
       payload: { worktree: "/original", state: "ready" },
     })
   );
-  await userEvent.click(screen.getByRole("button", { name: "Latest file" }));
+  await userEvent.click(screen.getByRole("radio", { name: "Latest file" }));
   await waitFor(() =>
     expect(commands.readWorktreeFile).toHaveBeenCalledWith("/original", "a.ts")
   );

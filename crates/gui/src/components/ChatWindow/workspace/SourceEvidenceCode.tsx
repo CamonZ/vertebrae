@@ -52,7 +52,7 @@ export default function SourceEvidenceCode({
             fileDiff: parseDiffFromFile(
               source.before == null
                 ? null
-                : { name: source.oldPath, contents: source.before },
+                : { name: source.path, contents: source.before },
               source.after == null
                 ? null
                 : { name: source.path, contents: source.after }

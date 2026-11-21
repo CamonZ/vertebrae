@@ -1,4 +1,5 @@
 import { createContext } from "react";
+import type { FileTarget } from "./FileReferenceNavigationContext";
 
 /**
  * Source coordinates are one-based and relative to the conversation's
@@ -19,5 +20,5 @@ export interface SourceLocation {
 }
 
 export const EvidenceNavigationContext = createContext<
-  ((location: SourceLocation) => void) | undefined
+  ((location: SourceLocation, reference?: Pick<FileTarget, "root" | "history">) => void) | undefined
 >(undefined);

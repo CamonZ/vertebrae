@@ -339,7 +339,11 @@ it.each([
     });
     render(<Surface text={`[source](${destination})`} />);
     const button = screen.getByRole("button", { name: "source" });
-    expect(button).toHaveClass("text-[var(--warn)]", "bg-[var(--warn-wash)]");
+    expect(button).toHaveClass(
+      destination.startsWith("/main/")
+        ? "bg-[var(--inline-code-bg)]"
+        : "bg-[var(--warn-wash)]"
+    );
     expect(button).toHaveAccessibleDescription(
       /Historical context is unavailable/
     );
@@ -350,6 +354,25 @@ it.each([
     );
   }
 );
+
+it("renders an explicit main-checkout link with normal styling when its turn belongs to a worktree", async () => {
+  render(<Surface text="[source](/main/src/a.ts:12)" />);
+  const link = screen.getByRole("button", { name: "source" });
+
+  expect(link).toHaveClass(
+    "bg-[var(--inline-code-bg)]",
+    "text-[var(--inline-code-fg)]"
+  );
+  expect(link).toHaveAccessibleDescription(/Historical context is unavailable/);
+  await userEvent.click(link);
+  expect(navigate).toHaveBeenCalledExactlyOnceWith({
+    root: "/main",
+    path: "src/a.ts",
+    line: 12,
+    column: null,
+    history: { sessionId: "s", turnId: null },
+  });
+});
 
 it("discloses missing history on hover and keyboard focus without visible inline warning prose", async () => {
   const session = useChatStore.getState().sessions.s;
