@@ -7,7 +7,7 @@
 //! [`Grammar`].
 
 use crate::intelligence::rules::{Exports, ImportsQuery, Modules, Reach, Rules};
-use crate::semantic::profile::{Compiled, Profile};
+use crate::semantic::profile::{Arity, Compiled, Profile};
 use std::sync::OnceLock;
 use tree_sitter::Language;
 use tree_sitter_language::LanguageFn;
@@ -15,6 +15,7 @@ use tree_sitter_language::LanguageFn;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Grammar {
     Bash,
+    Elixir,
     JavaScript,
     Python,
     Rust,
@@ -89,6 +90,8 @@ const fn ecmascript_rules(bindings: &'static [&'static str]) -> Rules {
         qualified: &[("member_expression", "property")],
         prefix: None,
         unit_markers: &["package.json"],
+        local_calls: true,
+        unbound_search: true,
     }
 }
 
@@ -120,10 +123,16 @@ const TYPESCRIPT: Profile = Profile {
         include_str!("../queries/typescript/facts.scm"),
     ],
     apis: ECMASCRIPT_APIS,
+    test_files: &[],
+    arity: None,
 };
 
+/// Elixir's definition forms: the call targets that define a function.
+/// Private ones are not visible outside their module.
+const ELIXIR_PRIVATE: &[&str] = &["defp", "defmacrop", "defguardp", "defnp"];
+
 /// Indexed by `Grammar as usize`.
-pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
+pub(crate) const LANGUAGES: [LanguageEntry; 7] = [
     LanguageEntry {
         grammar: Grammar::Bash,
         name: "bash",
@@ -131,6 +140,59 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
         extensions: &[],
         profile: None,
         rules: None,
+    },
+    // Elixir declares with calls (`defmodule`, `def`): its declarations
+    // query replaces the grammar's tags query, naming each construct by
+    // its call target.
+    LanguageEntry {
+        grammar: Grammar::Elixir,
+        name: "elixir",
+        language: tree_sitter_elixir::LANGUAGE,
+        extensions: &["ex", "exs"],
+        profile: Some(Profile {
+            identifiers: &["identifier", "alias"],
+            literals: &["string", "charlist", "sigil", "quoted_content"],
+            declarations: &[include_str!("../queries/elixir/declarations.scm")],
+            facts: &[include_str!("../queries/elixir/facts.scm")],
+            apis: &[
+                include_str!("../apis/elixir-libs.tsv"),
+                include_str!("../apis/elixir-stdlib.tsv"),
+                include_str!("../apis/elixir-trivial.tsv"),
+            ],
+            test_files: &[("test", "_test.exs")],
+            arity: Some(Arity {
+                default: ("binary_operator", "\\\\"),
+            }),
+        }),
+        // A module's functions see each other; other modules' are reached
+        // through their name, an `alias` or an `import`, by name and
+        // arity, and only when public.
+        rules: Some(Rules {
+            family: "elixir",
+            bindings: &[
+                include_str!("../queries/elixir/imports.scm"),
+                include_str!("../queries/elixir/locals.scm"),
+            ],
+            nested_sees_locals: true,
+            module_scopes: true,
+            reach: Reach::File,
+            modules: Modules::Declared {
+                dirs: &["lib", "test/support", "test"],
+                extensions: &["ex", "exs"],
+                separator: ".",
+                current: "__MODULE__",
+            },
+            exports: Exports::Unless {
+                field: "target",
+                private: ELIXIR_PRIVATE,
+            },
+            receivers: &[],
+            qualified: &[("dot", "right")],
+            prefix: Some(("dot", "left")),
+            unit_markers: &["mix.exs"],
+            local_calls: false,
+            unbound_search: false,
+        }),
     },
     LanguageEntry {
         grammar: Grammar::JavaScript,
@@ -150,6 +212,8 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
                 include_str!("../queries/javascript/facts.scm"),
             ],
             apis: ECMASCRIPT_APIS,
+            test_files: &[],
+            arity: None,
         }),
         rules: Some(JAVASCRIPT_RULES),
     },
@@ -172,6 +236,8 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
                 include_str!("../apis/python-stdlib.tsv"),
                 include_str!("../apis/python-trivial.tsv"),
             ],
+            test_files: &[],
+            arity: None,
         }),
         rules: Some(Rules {
             family: "python",
@@ -191,6 +257,8 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
             qualified: &[("attribute", "attribute"), ("keyword_argument", "name")],
             prefix: None,
             unit_markers: &["pyproject.toml", "setup.py", "setup.cfg"],
+            local_calls: true,
+            unbound_search: true,
         }),
     },
     LanguageEntry {
@@ -217,6 +285,8 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
                 include_str!("../apis/rust-std.tsv"),
                 include_str!("../apis/rust-trivial.tsv"),
             ],
+            test_files: &[],
+            arity: None,
         }),
         // Items in a module (a file, or an inline `mod`) see each other;
         // others are reached by `use` or a path from the crate root.
@@ -251,6 +321,8 @@ pub(crate) const LANGUAGES: [LanguageEntry; 6] = [
             ],
             prefix: Some(("scoped_use_list", "path")),
             unit_markers: &["Cargo.toml"],
+            local_calls: true,
+            unbound_search: true,
         }),
     },
     LanguageEntry {
@@ -355,6 +427,14 @@ mod tests {
             Grammar::for_path("tool.py"),
             Some(Grammar::Python)
         ));
+        assert!(matches!(
+            Grammar::for_path("lib/app/accounts.ex"),
+            Some(Grammar::Elixir)
+        ));
+        assert!(matches!(
+            Grammar::for_path("test/accounts_test.exs"),
+            Some(Grammar::Elixir)
+        ));
         assert!(Grammar::for_path("run.sh").is_none());
         assert!(Grammar::for_path("Makefile").is_none());
         assert!(Grammar::for_path("dir.rs/README").is_none());
@@ -409,8 +489,10 @@ mod tests {
             kinds.extend(rules.prefix.map(|(kind, _)| kind));
             match &rules.exports {
                 Exports::Modifier(kind) | Exports::Wrapper { kind, .. } => kinds.push(kind),
-                Exports::All => {}
+                Exports::All | Exports::Unless { .. } => {}
             }
+            let arity = entry.profile.as_ref().and_then(|p| p.arity.as_ref());
+            kinds.extend(arity.map(|arity| arity.default.0));
             for kind in kinds {
                 assert_ne!(
                     language.id_for_node_kind(kind, true),
@@ -420,7 +502,14 @@ mod tests {
                 );
             }
             let fields = rules.qualified.iter().map(|(_, field)| *field);
-            for field in fields.chain(rules.prefix.map(|(_, field)| field)) {
+            let export_field = match &rules.exports {
+                Exports::Unless { field, .. } => Some(*field),
+                _ => None,
+            };
+            for field in fields
+                .chain(rules.prefix.map(|(_, field)| field))
+                .chain(export_field)
+            {
                 assert!(
                     language.field_id_for_name(field).is_some(),
                     "{} lacks field {field}",

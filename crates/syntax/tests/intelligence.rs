@@ -599,3 +599,177 @@ fn depth_limit_reports_only_callers_beyond_the_answer() {
     assert_eq!(incoming(&flush, 3, 8), None);
     assert_eq!(incoming(&main_entry, 1, 8), None);
 }
+
+/// A Mix project whose files are not named after their modules.
+fn elixir_project() -> MemorySnapshot {
+    [
+        ("mix.exs", "defmodule Shop.MixProject do\n  use Mix.Project\nend\n"),
+        (
+            "lib/shop/accounts.ex",
+            "defmodule Shop.Accounts do\n  alias Shop.Billing.Ledger\n  alias Shop.Repo, as: Store\n  import Shop.Format, only: [money: 1]\n\n  def get(id) when is_integer(id), do: Store.fetch(id)\n  def get(%{id: id}), do: get(id)\n\n  def get(id, opts), do: {get(id), opts}\n\n  def charge(user, amount) do\n    user\n    |> get()\n    |> Ledger.record(amount)\n    |> money()\n    |> secret()\n\n    Ledger.secret(amount)\n    mod = Ledger\n    mod.record(user, amount)\n    __MODULE__.get(user, [])\n    missing(amount)\n  end\n\n  defp secret(x), do: x\nend\n",
+        ),
+        (
+            "lib/billing.ex",
+            "defmodule Shop.Billing do\n  defmodule Ledger do\n    def record(entry, amount), do: {entry, amount}\n    defp secret(x), do: x\n  end\n\n  def total(entries), do: Enum.count(entries) |> Ledger.record(0)\nend\n",
+        ),
+        ("lib/shop/repo.ex", "defmodule Shop.Repo do\n  def fetch(id), do: id\nend\n"),
+        (
+            "lib/shop/format.ex",
+            "defmodule Shop.Format do\n  def money(x), do: x\n  def money(x, currency), do: {x, currency}\nend\n",
+        ),
+        (
+            "lib/shop/report.ex",
+            "defmodule Shop.Report do\n  import Shop.Format, except: [money: 2]\n  import Shop.Accounts\n\n  def run(user) do\n    money(user)\n    get(user, :all)\n    charge(user, 1)\n  end\nend\n",
+        ),
+    ]
+    .into_iter()
+    .collect()
+}
+
+#[test]
+fn elixir_calls_resolve_by_declared_module_alias_import_and_arity() {
+    let provider = EmbeddedProvider::new();
+    let snapshot = elixir_project();
+    assert_eq!(
+        edges(&outgoing(
+            &provider,
+            &snapshot,
+            "lib/shop/accounts.ex",
+            "charge"
+        )),
+        [
+            // Piped: the value piped in is the first argument.
+            "get → exact@lib/shop/accounts.ex:6",
+            // Through an alias to a module declared in another file.
+            "Ledger.record → exact@lib/billing.ex:3",
+            // Imported with `only: [money: 1]`: not `money/2`.
+            "money → exact@lib/shop/format.ex:2",
+            "secret → exact@lib/shop/accounts.ex:25",
+            // A private function is not reachable from another module.
+            "Ledger.secret → unresolved",
+            // A call through a variable is dynamic.
+            "mod.record → unresolved",
+            "__MODULE__.get → exact@lib/shop/accounts.ex:9",
+            "missing → unresolved",
+        ]
+    );
+    // Clauses are one function: the second clause's call is its own
+    // function's, and `get/2` calls `get/1`.
+    let definitions = provider
+        .definitions(&snapshot, "lib/shop/accounts.ex", &Budget::default())
+        .unwrap();
+    let gets: Vec<_> = definitions
+        .items
+        .iter()
+        .filter(|symbol| symbol.name == "get")
+        .map(|symbol| (symbol.line, symbol.span.start, symbol.span.end))
+        .collect();
+    assert_eq!(gets, [(6, 6, 7), (9, 9, 9)]);
+    let get = SymbolKey {
+        path: "lib/shop/accounts.ex".into(),
+        name: "get".into(),
+        line: 6,
+    };
+    let calls = provider
+        .outgoing_calls(&snapshot, &get, &Budget::default())
+        .unwrap();
+    assert_eq!(
+        edges(&calls.items),
+        [
+            "is_integer → unresolved",
+            "Store.fetch → exact@lib/shop/repo.ex:2",
+            "get → exact@lib/shop/accounts.ex:6",
+        ]
+    );
+    // A nested module is reached by its short name inside its parent.
+    assert_eq!(
+        edges(&outgoing(&provider, &snapshot, "lib/billing.ex", "total")),
+        [
+            "Enum.count → unresolved",
+            "Ledger.record → exact@lib/billing.ex:3"
+        ]
+    );
+    // Glob imports bring public functions, less those left out.
+    assert_eq!(
+        edges(&outgoing(&provider, &snapshot, "lib/shop/report.ex", "run")),
+        [
+            "money → exact@lib/shop/format.ex:2",
+            "get → exact@lib/shop/accounts.ex:9",
+            "charge → exact@lib/shop/accounts.ex:11",
+        ]
+    );
+}
+
+#[test]
+fn elixir_incoming_calls_agree_with_outgoing_ones() {
+    let provider = EmbeddedProvider::new();
+    let snapshot = elixir_project();
+    let get = SymbolKey {
+        path: "lib/shop/accounts.ex".into(),
+        name: "get".into(),
+        line: 6,
+    };
+    let answer = provider
+        .incoming_calls(&snapshot, &get, 1, &Budget::default())
+        .unwrap();
+    let callers: Vec<String> = answer
+        .items
+        .iter()
+        .map(|item| {
+            let caller = item.call.caller.as_ref().unwrap();
+            format!(
+                "{}:{} {}",
+                item.call.site.path, item.call.site.line, caller.name
+            )
+        })
+        .collect();
+    assert_eq!(
+        callers,
+        [
+            "lib/shop/accounts.ex:7 get",
+            "lib/shop/accounts.ex:9 get",
+            "lib/shop/accounts.ex:13 charge",
+        ]
+    );
+    let record = SymbolKey {
+        path: "lib/billing.ex".into(),
+        name: "record".into(),
+        line: 3,
+    };
+    let answer = provider
+        .incoming_calls(&snapshot, &record, 1, &Budget::default())
+        .unwrap();
+    let sites: Vec<_> = answer
+        .items
+        .iter()
+        .map(|item| (item.call.site.path.as_str(), item.call.site.line))
+        .collect();
+    // `mod.record` is dynamic: not an edge either way.
+    assert_eq!(sites, [("lib/billing.ex", 7), ("lib/shop/accounts.ex", 14)]);
+}
+
+#[test]
+fn elixir_lookups_past_the_budget_are_marked_truncated() {
+    let provider = EmbeddedProvider::new();
+    let snapshot = elixir_project();
+    let charge = symbol(&provider, &snapshot, "lib/shop/accounts.ex", "charge");
+    // Finding `Shop.Billing.Ledger` means searching files beyond the two
+    // allowed: the answer still lists every call, marked truncated.
+    let budget = Budget {
+        max_files: 2,
+        ..Budget::default()
+    };
+    let answer = provider
+        .outgoing_calls(&snapshot, &charge, &budget)
+        .unwrap();
+    assert_eq!(answer.truncated, Some(Truncation::FileLimit));
+    assert_eq!(answer.items.len(), 8);
+    let budget = Budget {
+        time: Duration::ZERO,
+        ..Budget::default()
+    };
+    let answer = provider
+        .incoming_calls(&snapshot, &charge, 3, &budget)
+        .unwrap();
+    assert_eq!(answer.truncated, Some(Truncation::TimedOut));
+}

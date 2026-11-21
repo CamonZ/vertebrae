@@ -10,7 +10,7 @@
 use super::facts::{ApiTable, FactsQuery};
 use super::DeclarationKind;
 use crate::Grammar;
-use tree_sitter::Query;
+use tree_sitter::{Node, Query};
 
 pub(crate) struct Profile {
     /// Leaf kinds whose text changes are reported as renames.
@@ -24,6 +24,78 @@ pub(crate) struct Profile {
     pub(crate) facts: &'static [&'static str],
     /// Known-API tables, most specific first: the first matching row wins.
     pub(crate) apis: &'static [&'static str],
+    /// Test files: a path with directory `.0` above a file name ending in
+    /// `.1` (Elixir's `test/…_test.exs`) is test code throughout.
+    pub(crate) test_files: &'static [(&'static str, &'static str)],
+    /// Callables are identified by name and arity (Elixir's `get/1` and
+    /// `get/2` are different functions); `None` where calls match by
+    /// name alone.
+    pub(crate) arity: Option<Arity>,
+}
+
+/// How arity is counted, where it identifies a callable: a definition's
+/// `@parameters` and a call's `@call.arguments` are counted by their named
+/// children, a call's `@call.piped` value adds one, and a parameter with a
+/// default (`b \\ 1`) makes it optional. A function's clauses (several
+/// definitions of one name and arity in one module) are one function: one
+/// scope in the semantic diff, one definition for code intelligence.
+pub(crate) struct Arity {
+    /// The node kind and operator of a parameter with a default value.
+    pub(crate) default: (&'static str, &'static str),
+}
+
+impl Arity {
+    /// The fewest and most arguments a definition with these parameters
+    /// takes (none without a parameter list).
+    pub(crate) fn of_parameters(&self, parameters: Option<Node>, source: &[u8]) -> (u32, u32) {
+        let Some(parameters) = parameters else {
+            return (0, 0);
+        };
+        let (kind, operator) = self.default;
+        let mut cursor = parameters.walk();
+        let (mut min, mut max) = (0, 0);
+        for child in parameters.named_children(&mut cursor) {
+            if child.is_extra() {
+                continue;
+            }
+            max += 1;
+            let defaulted = child.kind() == kind
+                && child
+                    .child_by_field_name("operator")
+                    .and_then(|op| op.utf8_text(source).ok())
+                    == Some(operator);
+            if !defaulted {
+                min += 1;
+            }
+        }
+        (min, max)
+    }
+
+    /// Arguments a call passes: its `@call.arguments` node's (comments
+    /// aside) and a piped value.
+    pub(crate) fn of_call(&self, arguments: Option<Node>, piped: bool) -> u32 {
+        let passed = arguments.map_or(0, |arguments| {
+            let mut cursor = arguments.walk();
+            let count = arguments
+                .named_children(&mut cursor)
+                .filter(|child| !child.is_extra())
+                .count();
+            u32::try_from(count).unwrap_or(u32::MAX)
+        });
+        passed.saturating_add(u32::from(piped))
+    }
+}
+
+impl Profile {
+    /// Whether every change in the file at `path` is in test code.
+    pub(crate) fn is_test_file(&self, path: &str) -> bool {
+        let mut parts = path.rsplit('/');
+        let name = parts.next().unwrap_or(path);
+        let dirs: Vec<&str> = parts.collect();
+        self.test_files
+            .iter()
+            .any(|(dir, suffix)| name.ends_with(suffix) && dirs.contains(dir))
+    }
 }
 
 /// A profile's queries and tables, compiled.
@@ -44,11 +116,18 @@ impl Compiled {
     }
 }
 
-/// A compiled declarations query: the `@definition.<kind>` captures and the
-/// `@name` capture.
+/// A compiled declarations query: the `@definition.<kind>` captures, the
+/// `@name` capture and the optional ones: `@keyword` (the token naming
+/// the construct, where the grammar has no keyword token: Elixir's
+/// `def`), `@parameters` (a callable's parameters, for its arity) and
+/// `@body` (where a callable's signature ends, where the grammar has no
+/// `body` field).
 pub(crate) struct Declarations {
     pub(crate) query: Query,
     pub(crate) name: u32,
+    pub(crate) keyword: Option<u32>,
+    pub(crate) parameters: Option<u32>,
+    pub(crate) body: Option<u32>,
     /// Per capture index, the declaration kind it marks.
     pub(crate) kinds: Vec<Option<DeclarationKind>>,
 }
@@ -79,7 +158,14 @@ impl Declarations {
         let name = query
             .capture_index_for_name("name")
             .ok_or_else(|| format!("{}: no @name capture", grammar.name()))?;
-        Ok(Self { query, name, kinds })
+        Ok(Self {
+            name,
+            keyword: query.capture_index_for_name("keyword"),
+            parameters: query.capture_index_for_name("parameters"),
+            body: query.capture_index_for_name("body"),
+            query,
+            kinds,
+        })
     }
 }
 
@@ -149,12 +235,13 @@ impl DeclarationKind {
 mod tests {
     use super::*;
 
-    const SEMANTIC: [Grammar; 5] = [
+    const SEMANTIC: [Grammar; 6] = [
         Grammar::Rust,
         Grammar::JavaScript,
         Grammar::TypeScript,
         Grammar::Tsx,
         Grammar::Python,
+        Grammar::Elixir,
     ];
 
     #[test]
@@ -165,6 +252,18 @@ mod tests {
             let compiled = compiled.unwrap_or_else(|error| panic!("{error}"));
             assert!(compiled.declarations.kinds.iter().any(Option::is_some));
         }
+    }
+
+    #[test]
+    fn test_files_need_their_directory_and_suffix() {
+        let elixir = Grammar::Elixir.profile().unwrap();
+        assert!(elixir.is_test_file("test/accounts_test.exs"));
+        assert!(elixir.is_test_file("apps/web/test/web/page_test.exs"));
+        assert!(!elixir.is_test_file("lib/accounts_test.exs"));
+        assert!(!elixir.is_test_file("test/support/fixtures.ex"));
+        assert!(!elixir.is_test_file("test_test.exs"));
+        let rust = Grammar::Rust.profile().unwrap();
+        assert!(!rust.is_test_file("test/a_test.exs"));
     }
 
     #[test]

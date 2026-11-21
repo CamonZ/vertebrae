@@ -39,6 +39,14 @@ pub(crate) struct Rules {
     /// Files marking the root of a package or crate: name-matched
     /// fallbacks search below the nearest one.
     pub(crate) unit_markers: &'static [&'static str],
+    /// A bare call may be to a local variable (a closure). Not in Elixir,
+    /// which calls a variable as `f.(x)`.
+    pub(crate) local_calls: bool,
+    /// A bare call nothing binds is searched for among other files'
+    /// exported definitions (a name match). Not where every callable
+    /// name is bound by a definition or import in scope (Elixir; its
+    /// `use` can inject more, which are left unresolved).
+    pub(crate) unbound_search: bool,
 }
 
 /// Files whose top-level definitions a file sees without importing them,
@@ -81,13 +89,27 @@ pub(crate) enum Modules {
         extensions: &'static [&'static str],
         index: &'static str,
     },
+    /// Elixir-like: a module is named by its declaration (`defmodule
+    /// MyApp.Accounts`), not its file. It is looked for below the nearest
+    /// unit marker (a Mix project): first in the file its name suggests
+    /// (`lib/my_app/accounts.ex`, the snake-cased segments under each of
+    /// `dirs`, with each extension), then in any file there declaring it.
+    /// Nested modules' names join their parents'. Module names are
+    /// capitalized, so a lowercase receiver is a value (a dynamic call);
+    /// `current` names the enclosing module.
+    Declared {
+        dirs: &'static [&'static str],
+        extensions: &'static [&'static str],
+        separator: &'static str,
+        current: &'static str,
+    },
 }
 
 impl Modules {
     /// How a qualifier's segments are joined (`a::b`, `a.b`).
     pub(crate) fn separator(&self) -> &'static str {
         match self {
-            Self::Crate { separator, .. } => separator,
+            Self::Crate { separator, .. } | Self::Declared { separator, .. } => separator,
             Self::Dotted { .. } | Self::Specifier { .. } => ".",
         }
     }
@@ -104,6 +126,12 @@ pub(crate) enum Exports {
     Wrapper {
         kind: &'static str,
         default: &'static str,
+    },
+    /// Every definition but those whose `field` child reads as one of
+    /// `private` (Elixir's `defp`).
+    Unless {
+        field: &'static str,
+        private: &'static [&'static str],
     },
 }
 
@@ -130,6 +158,8 @@ pub(crate) enum ImportCapture {
     Default,
     /// A path (or the source) all of whose names are imported.
     Glob,
+    /// A name a glob import leaves out (Elixir's `except:`).
+    Except,
     /// A local binding (parameter, `let`, assignment): it shadows
     /// definitions without being one.
     Local,
@@ -153,6 +183,7 @@ impl ImportsQuery {
                     "import.module" => ImportCapture::Module,
                     "import.default" => ImportCapture::Default,
                     "import.glob" => ImportCapture::Glob,
+                    "import.except" => ImportCapture::Except,
                     "local" => ImportCapture::Local,
                     "local.rust_pattern" => ImportCapture::RustPattern,
                     _ if name.starts_with('_') => ImportCapture::Ignored,

@@ -46,13 +46,15 @@ enum Language {
     TypeScript,
     JavaScript,
     Python,
+    Elixir,
 }
 
-const LANGUAGES: [Language; 4] = [
+const LANGUAGES: [Language; 5] = [
     Language::Rust,
     Language::TypeScript,
     Language::JavaScript,
     Language::Python,
+    Language::Elixir,
 ];
 
 impl Language {
@@ -62,6 +64,7 @@ impl Language {
             Self::TypeScript => "fixture.ts",
             Self::JavaScript => "fixture.js",
             Self::Python => "fixture.py",
+            Self::Elixir => "lib/fixture.ex",
         }
     }
 
@@ -70,6 +73,8 @@ impl Language {
             Self::Rust => &['"'],
             Self::TypeScript | Self::JavaScript => &['"', '\'', '`'],
             Self::Python => &['"', '\''],
+            // Single quotes make a charlist, a different value.
+            Self::Elixir => &['"'],
         }
     }
 }
@@ -104,17 +109,20 @@ impl Program {
 
     fn render(&self, language: Language, style: Style) -> String {
         // Python's layout is its syntax; it is never put on one line.
-        let one_line = style.one_line && language != Language::Python;
+        // Elixir separates statements on one line with `;`, a token of
+        // its own, as no formatter writes them.
+        let one_line = style.one_line && !matches!(language, Language::Python | Language::Elixir);
         let pad = " ".repeat(style.indent);
         let (open, close) = if one_line { (" ", " ") } else { ("\n", "\n") };
         let indent = if one_line { "" } else { pad.as_str() };
         let separator = "\n".repeat(style.blank_lines + 1);
-        self.functions
+        let body = self
+            .functions
             .iter()
             .map(|function| {
                 let name = &function.name;
                 let mut out = match (&function.note, language) {
-                    (Some(note), Language::Python) => format!("# {note}\n"),
+                    (Some(note), Language::Python | Language::Elixir) => format!("# {note}\n"),
                     (Some(note), _) => format!("// {note}\n"),
                     (None, _) => String::new(),
                 };
@@ -125,6 +133,7 @@ impl Program {
                     }
                     Language::JavaScript => format!("function {name}(x) {{{open}"),
                     Language::Python => format!("def {name}(x):{open}"),
+                    Language::Elixir => format!("def {name}(x) do{open}"),
                 };
                 for statement in &function.body {
                     let value = match &statement.value {
@@ -151,7 +160,9 @@ impl Program {
                         Language::TypeScript | Language::JavaScript => {
                             format!("{indent}const {var} = {value};{open}")
                         }
-                        Language::Python => format!("{indent}{var} = {value}{open}"),
+                        Language::Python | Language::Elixir => {
+                            format!("{indent}{var} = {value}{open}")
+                        }
                     };
                 }
                 let last = function.body.last().map_or("x", |s| s.var.as_str());
@@ -161,12 +172,18 @@ impl Program {
                         format!("{indent}return {last};{close}}}")
                     }
                     Language::Python => format!("{indent}return {last}"),
+                    Language::Elixir => format!("{indent}{last}{close}end"),
                 };
                 out
             })
             .collect::<Vec<_>>()
             .join(&separator)
-            + "\n"
+            + "\n";
+        // Elixir's functions live in a module.
+        match language {
+            Language::Elixir => format!("defmodule Fixture do\n{body}end\n"),
+            _ => body,
+        }
     }
 }
 

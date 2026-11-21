@@ -853,3 +853,640 @@ fn the_extraction_cache_follows_its_model() {
         assert!(reached.contains(class), "never reached: {class}");
     }
 }
+
+/// Elixir, against its own oracle: callables are identified by module,
+/// name and arity, so the shared model above (nested functions, closures,
+/// name-matched fallbacks) does not apply.
+///
+/// Generated programs are modules `App.M<i>` (in a file named after the
+/// module or not) of functions drawn from a small pool of names and
+/// arities, public or private, sometimes with several clauses or a
+/// defaulted last parameter. Modules alias, glob-import (`except:` some
+/// name and arity) or import `only:` some name and arity from each other.
+/// Calls are local (sometimes piped, the value counting as the first
+/// argument), remote (through an alias, the full name or `__MODULE__`),
+/// through a variable (dynamic), or to a name nothing defines. The oracle
+/// predicts each call from the model alone:
+///
+/// - a local call binds the module's function of that name taking that
+///   many arguments, and each `only:` import of that name and arity; one
+///   binding is followed (to the source module's public function, else
+///   unresolved), several are ambiguous with every target;
+/// - without bindings, the public functions of that name and arity in
+///   glob-imported modules (not excepted): one is exact, several
+///   ambiguous, none unresolved;
+/// - a remote call reaches the named module's public function of that
+///   name and arity, else is unresolved; dynamic and undefined calls are
+///   unresolved.
+mod elixir {
+    use super::*;
+
+    const NAMES: [&str; 3] = ["alpha", "beta", "gamma"];
+
+    #[derive(Clone, Debug)]
+    struct Function {
+        name: &'static str,
+        arity: u32,
+        /// The last parameter has a default: it also takes `arity - 1`.
+        defaulted: bool,
+        public: bool,
+        clauses: usize,
+        /// Calls, each in clause `.0`.
+        calls: Vec<(usize, Call)>,
+    }
+
+    impl Function {
+        fn takes(&self, arity: u32) -> bool {
+            arity == self.arity || (self.defaulted && arity + 1 == self.arity)
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Via {
+        Alias,
+        Full,
+        Current,
+    }
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Call {
+        Local {
+            name: &'static str,
+            arity: u32,
+            piped: bool,
+        },
+        Remote {
+            module: usize,
+            name: &'static str,
+            arity: u32,
+            via: Via,
+        },
+        Dynamic,
+        Undefined,
+    }
+
+    #[derive(Clone, Debug)]
+    enum Import {
+        Glob { except: Option<(&'static str, u32)> },
+        Only(&'static str, u32),
+    }
+
+    #[derive(Clone, Debug)]
+    struct Module {
+        functions: Vec<Function>,
+        aliases: Vec<usize>,
+        imports: Vec<(usize, Import)>,
+        /// In the file its name suggests (`lib/app/m0.ex`).
+        hinted: bool,
+    }
+
+    /// A function: its module and index.
+    type Def = (usize, usize);
+
+    #[derive(Clone, Debug, PartialEq)]
+    enum Expected {
+        Exact(Def),
+        Ambiguous(Vec<Def>),
+        Unresolved,
+    }
+
+    fn draw_program(tc: &TestCase) -> Vec<Module> {
+        let count = tc.draw(gs::integers::<usize>().min_value(2).max_value(3));
+        let mut modules: Vec<Module> = (0..count)
+            .map(|_| Module {
+                functions: Vec::new(),
+                aliases: Vec::new(),
+                imports: Vec::new(),
+                hinted: tc.draw(gs::booleans()),
+            })
+            .collect();
+        let name = || tc.draw(gs::sampled_from(NAMES.to_vec()));
+        let arity = || tc.draw(gs::integers::<u32>().min_value(0).max_value(2));
+        for module in &mut modules {
+            for _ in 0..tc.draw(gs::integers::<usize>().min_value(1).max_value(4)) {
+                let clauses = tc.draw(gs::integers::<usize>().min_value(1).max_value(2));
+                let function = Function {
+                    name: name(),
+                    arity: arity(),
+                    defaulted: false,
+                    public: tc.draw(gs::booleans()),
+                    clauses,
+                    calls: Vec::new(),
+                };
+                let defaulted = function.arity > 0 && clauses == 1 && tc.draw(gs::booleans());
+                let function = Function {
+                    defaulted,
+                    ..function
+                };
+                // One function per name and arity: Elixir merges clauses
+                // and rejects overlapping defaults.
+                let overlaps = module.functions.iter().any(|g| {
+                    g.name == function.name && (0..=2).any(|a| g.takes(a) && function.takes(a))
+                });
+                if !overlaps {
+                    module.functions.push(function);
+                }
+            }
+        }
+        for (m, current) in modules.iter_mut().enumerate() {
+            for other in (0..count).filter(|&o| o != m) {
+                match tc.draw(gs::integers::<u8>().min_value(0).max_value(4)) {
+                    0 => current.aliases.push(other),
+                    1 => current.imports.push((other, Import::Glob { except: None })),
+                    2 => current.imports.push((
+                        other,
+                        Import::Glob {
+                            except: Some((name(), arity())),
+                        },
+                    )),
+                    3 => current.imports.push((other, Import::Only(name(), arity()))),
+                    _ => {}
+                }
+            }
+        }
+        for (m, current) in modules.iter_mut().enumerate() {
+            for function in &mut current.functions {
+                let clauses = function.clauses;
+                let calls = (0..tc.draw(gs::integers::<usize>().min_value(0).max_value(4)))
+                    .map(|_| {
+                        let clause =
+                            tc.draw(gs::integers::<usize>().min_value(0).max_value(clauses - 1));
+                        let call = match tc.draw(gs::integers::<u8>().min_value(0).max_value(9)) {
+                            0 => Call::Dynamic,
+                            1 => Call::Undefined,
+                            2..=5 => {
+                                let arity = arity();
+                                Call::Local {
+                                    name: name(),
+                                    arity,
+                                    piped: arity > 0 && tc.draw(gs::booleans()),
+                                }
+                            }
+                            _ => {
+                                let module = tc.draw(
+                                    gs::integers::<usize>().min_value(0).max_value(count - 1),
+                                );
+                                let via = if module == m {
+                                    Via::Current
+                                } else if current.aliases.contains(&module)
+                                    && tc.draw(gs::booleans())
+                                {
+                                    Via::Alias
+                                } else {
+                                    Via::Full
+                                };
+                                Call::Remote {
+                                    module,
+                                    name: name(),
+                                    arity: arity(),
+                                    via,
+                                }
+                            }
+                        };
+                        (clause, call)
+                    })
+                    .collect();
+                function.calls = calls;
+            }
+        }
+        modules
+    }
+
+    fn module_name(m: usize) -> String {
+        format!("App.M{m}")
+    }
+
+    fn path(module: &Module, m: usize) -> String {
+        if module.hinted {
+            format!("lib/app/m{m}.ex")
+        } else {
+            format!("lib/part_{m}.ex")
+        }
+    }
+
+    struct Rendered {
+        snapshot: MemorySnapshot,
+        /// Each function's path and the line of its first clause.
+        lines: BTreeMap<Def, (String, u32)>,
+        /// Each call's site line, per function, in source order.
+        sites: BTreeMap<Def, Vec<u32>>,
+    }
+
+    fn args(arity: u32) -> String {
+        (0..arity)
+            .map(|i| format!("{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    fn render(modules: &[Module]) -> Rendered {
+        let mut snapshot = MemorySnapshot::new();
+        snapshot.insert("mix.exs", "defmodule App.MixProject do\nend\n");
+        let mut lines = BTreeMap::new();
+        let mut sites = BTreeMap::new();
+        for (m, module) in modules.iter().enumerate() {
+            let mut out = vec![format!("defmodule {} do", module_name(m))];
+            for &other in &module.aliases {
+                out.push(format!("  alias {}", module_name(other)));
+            }
+            for (other, import) in &module.imports {
+                let source = module_name(*other);
+                out.push(match import {
+                    Import::Glob { except: None } => format!("  import {source}"),
+                    Import::Glob {
+                        except: Some((name, arity)),
+                    } => format!("  import {source}, except: [{name}: {arity}]"),
+                    Import::Only(name, arity) => {
+                        format!("  import {source}, only: [{name}: {arity}]")
+                    }
+                });
+            }
+            for (f, function) in module.functions.iter().enumerate() {
+                out.push(String::new());
+                let def = if function.public { "def" } else { "defp" };
+                let params: Vec<String> = (0..function.arity)
+                    .map(|i| {
+                        if function.defaulted && i + 1 == function.arity {
+                            format!("p{i} \\\\ 0")
+                        } else {
+                            format!("p{i}")
+                        }
+                    })
+                    .collect();
+                let head = if function.arity == 0 {
+                    function.name.to_owned()
+                } else {
+                    format!("{}({})", function.name, params.join(", "))
+                };
+                let mut call_lines = Vec::new();
+                for clause in 0..function.clauses {
+                    if clause == 0 {
+                        lines.insert(
+                            (m, f),
+                            (path(module, m), u32::try_from(out.len() + 1).unwrap()),
+                        );
+                    }
+                    // Earlier clauses are guarded, so the later ones are
+                    // reachable.
+                    let guard = if clause + 1 < function.clauses && function.arity > 0 {
+                        " when p0 > 0"
+                    } else {
+                        ""
+                    };
+                    out.push(format!("  {def} {head}{guard} do"));
+                    for (_, call) in function.calls.iter().filter(|(c, _)| *c == clause) {
+                        call_lines.push(u32::try_from(out.len() + 1).unwrap());
+                        out.push(match call {
+                            Call::Local {
+                                name,
+                                arity,
+                                piped: true,
+                            } => format!("    0 |> {name}({})", args(arity - 1)),
+                            Call::Local { name, arity, .. } => {
+                                format!("    {name}({})", args(*arity))
+                            }
+                            Call::Remote {
+                                module,
+                                name,
+                                arity,
+                                via,
+                            } => {
+                                let receiver = match via {
+                                    Via::Alias => format!("M{module}"),
+                                    Via::Full => module_name(*module),
+                                    Via::Current => "__MODULE__".to_owned(),
+                                };
+                                format!("    {receiver}.{name}({})", args(*arity))
+                            }
+                            Call::Dynamic => "    target.alpha(1)".to_owned(),
+                            Call::Undefined => "    omega(1)".to_owned(),
+                        });
+                    }
+                    out.push("    :ok".to_owned());
+                    out.push("  end".to_owned());
+                }
+                sites.insert((m, f), call_lines);
+            }
+            out.push("end".to_owned());
+            out.push(String::new());
+            snapshot.insert(path(module, m), out.join("\n"));
+        }
+        Rendered {
+            snapshot,
+            lines,
+            sites,
+        }
+    }
+
+    /// The calls of a function in source order: by clause, then as drawn.
+    fn ordered(function: &Function) -> Vec<&Call> {
+        (0..function.clauses)
+            .flat_map(|clause| {
+                function
+                    .calls
+                    .iter()
+                    .filter(move |(c, _)| *c == clause)
+                    .map(|(_, call)| call)
+            })
+            .collect()
+    }
+
+    fn public(modules: &[Module], m: usize, name: &str, arity: u32) -> Vec<Def> {
+        modules[m]
+            .functions
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| g.public && g.name == name && g.takes(arity))
+            .map(|(g, _)| (m, g))
+            .collect()
+    }
+
+    fn follow(targets: Vec<Def>) -> Expected {
+        match targets.len() {
+            0 => Expected::Unresolved,
+            1 => Expected::Exact(targets[0]),
+            _ => Expected::Ambiguous(targets),
+        }
+    }
+
+    /// The oracle, and the class of the case for coverage.
+    fn expected(modules: &[Module], m: usize, call: &Call) -> (Expected, &'static str) {
+        let module = &modules[m];
+        match call {
+            Call::Dynamic => (Expected::Unresolved, "unresolved_dynamic"),
+            Call::Undefined => (Expected::Unresolved, "unresolved_undefined"),
+            Call::Remote {
+                module: target,
+                name,
+                arity,
+                via,
+            } => {
+                let found = follow(public(modules, *target, name, *arity));
+                let class = match (&found, via) {
+                    (Expected::Exact(_), Via::Alias) => "exact_alias",
+                    (Expected::Exact(_), Via::Full) => "exact_full_name",
+                    (Expected::Exact(_), Via::Current) => "exact_current_module",
+                    _ if modules[*target]
+                        .functions
+                        .iter()
+                        .any(|g| !g.public && g.name == *name && g.takes(*arity)) =>
+                    {
+                        "unresolved_private"
+                    }
+                    _ => "unresolved_remote",
+                };
+                (found, class)
+            }
+            Call::Local { name, arity, piped } => {
+                let mut bindings: Vec<Vec<Def>> = Vec::new();
+                let local: Vec<Def> = module
+                    .functions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, g)| g.name == *name && g.takes(*arity))
+                    .map(|(g, _)| (m, g))
+                    .collect();
+                bindings.extend(local.iter().map(|def| vec![*def]));
+                for (other, import) in &module.imports {
+                    if let Import::Only(only, only_arity) = import {
+                        if only == name && only_arity == arity {
+                            bindings.push(public(modules, *other, name, *arity));
+                        }
+                    }
+                }
+                let found = match bindings.len() {
+                    0 => {
+                        let mut found = Vec::new();
+                        for (other, import) in &module.imports {
+                            if let Import::Glob { except } = import {
+                                if *except != Some((name, *arity)) {
+                                    found.extend(public(modules, *other, name, *arity));
+                                }
+                            }
+                        }
+                        follow(found)
+                    }
+                    1 => follow(bindings.remove(0)),
+                    _ => {
+                        let all: Vec<Def> = bindings.into_iter().flatten().collect();
+                        if all.is_empty() {
+                            Expected::Unresolved
+                        } else {
+                            Expected::Ambiguous(all)
+                        }
+                    }
+                };
+                let other_arity = module
+                    .functions
+                    .iter()
+                    .any(|g| g.name == *name && !g.takes(*arity));
+                let class = match &found {
+                    Expected::Exact((o, g)) if *o == m => {
+                        if *piped {
+                            "exact_piped"
+                        } else if modules[m].functions[*g].clauses > 1 {
+                            "exact_multi_clause"
+                        } else if modules[m].functions[*g].defaulted
+                            && modules[m].functions[*g].arity != *arity
+                        {
+                            "exact_default"
+                        } else {
+                            "exact_local"
+                        }
+                    }
+                    Expected::Exact(_) if local.is_empty() => "exact_import",
+                    Expected::Exact(_) => "exact_other",
+                    Expected::Ambiguous(_) => "ambiguous",
+                    Expected::Unresolved if other_arity => "unresolved_other_arity",
+                    Expected::Unresolved
+                        if module.imports.iter().any(|(_, i)| {
+                            matches!(i, Import::Glob { except: Some((n, a)) } if n == name && a == arity)
+                        }) =>
+                    {
+                        "unresolved_excepted"
+                    }
+                    Expected::Unresolved => "unresolved_local",
+                };
+                (found, class)
+            }
+        }
+    }
+
+    fn describe(modules: &[Module], rendered: &Rendered) -> String {
+        let mut out = String::new();
+        for (m, module) in modules.iter().enumerate() {
+            let path = path(module, m);
+            out.push_str(&format!("--- {path}\n{}\n", rendered.snapshot_text(&path)));
+        }
+        out
+    }
+
+    impl Rendered {
+        fn snapshot_text(&self, path: &str) -> String {
+            use vertebrae_syntax::intelligence::Snapshot;
+            self.snapshot
+                .read(path, usize::MAX)
+                .unwrap()
+                .unwrap_or_default()
+        }
+
+        fn key(&self, modules: &[Module], def: Def) -> SymbolKey {
+            let (path, line) = self.lines[&def].clone();
+            SymbolKey {
+                path,
+                name: modules[def.0].functions[def.1].name.to_owned(),
+                line,
+            }
+        }
+
+        fn def_at(&self, path: &str, line: u32) -> Option<Def> {
+            self.lines
+                .iter()
+                .find(|(_, (p, l))| p == path && *l == line)
+                .map(|(def, _)| *def)
+        }
+
+        fn observed(&self, resolution: &Resolution, context: &str) -> Expected {
+            let def = |target: &vertebrae_syntax::intelligence::CodeSymbol| {
+                self.def_at(&target.path, target.line)
+                    .unwrap_or_else(|| panic!("unknown target {target:?}\n{context}"))
+            };
+            match resolution {
+                Resolution::Exact { target } => Expected::Exact(def(target)),
+                Resolution::Ambiguous { candidates } => {
+                    let mut candidates: Vec<Def> = candidates.iter().map(def).collect();
+                    candidates.sort();
+                    Expected::Ambiguous(candidates)
+                }
+                Resolution::Unresolved => Expected::Unresolved,
+                Resolution::NameMatch { target } => {
+                    panic!("Elixir calls are never name-matched: {target:?}\n{context}")
+                }
+            }
+        }
+    }
+
+    fn defs(modules: &[Module]) -> Vec<Def> {
+        modules
+            .iter()
+            .enumerate()
+            .flat_map(|(m, module)| (0..module.functions.len()).map(move |f| (m, f)))
+            .collect()
+    }
+
+    fn run(cases: u64, test: impl Fn(&[Module], &Rendered, &mut BTreeSet<&'static str>)) {
+        let reached = RefCell::new(BTreeSet::new());
+        Hegel::new(|tc: TestCase| {
+            let modules = draw_program(&tc);
+            let rendered = render(&modules);
+            let mut classes = BTreeSet::new();
+            for (m, module) in modules.iter().enumerate() {
+                classes.insert(if module.hinted {
+                    "hinted_file"
+                } else {
+                    "unhinted_file"
+                });
+                for function in &module.functions {
+                    for call in ordered(function) {
+                        classes.insert(expected(&modules, m, call).1);
+                    }
+                }
+            }
+            test(&modules, &rendered, &mut classes);
+            reached.borrow_mut().extend(classes);
+        })
+        .settings(Settings::new().test_cases(cases))
+        .run();
+        let reached = reached.into_inner();
+        let wanted = [
+            "hinted_file",
+            "unhinted_file",
+            "exact_local",
+            "exact_piped",
+            "exact_multi_clause",
+            "exact_default",
+            "exact_import",
+            "exact_alias",
+            "exact_full_name",
+            "exact_current_module",
+            "ambiguous",
+            "unresolved_dynamic",
+            "unresolved_undefined",
+            "unresolved_private",
+            "unresolved_remote",
+            "unresolved_other_arity",
+            "unresolved_excepted",
+            "unresolved_local",
+        ];
+        let missing: Vec<_> = wanted.iter().filter(|w| !reached.contains(*w)).collect();
+        assert!(missing.is_empty(), "never reached: {missing:?}");
+    }
+
+    #[test]
+    fn elixir_calls_resolve_as_the_oracle_predicts() {
+        run(300, |modules, rendered, _| {
+            let provider = EmbeddedProvider::new();
+            for (m, f) in defs(modules) {
+                let function = &modules[m].functions[f];
+                let context = describe(modules, rendered);
+                let answer = provider
+                    .outgoing_calls(
+                        &rendered.snapshot,
+                        &rendered.key(modules, (m, f)),
+                        &Budget::default(),
+                    )
+                    .unwrap_or_else(|error| panic!("{error}\n{context}"));
+                assert_eq!(answer.truncated, None, "{context}");
+                // Every call is reported, in every clause, at its line.
+                let lines: Vec<u32> = answer.items.iter().map(|c| c.site.line).collect();
+                assert_eq!(lines, rendered.sites[&(m, f)], "{m}#{f}\n{context}");
+                for (call, model) in answer.items.iter().zip(ordered(function)) {
+                    let (mut want, _) = expected(modules, m, model);
+                    if let Expected::Ambiguous(c) = &mut want {
+                        c.sort();
+                    }
+                    let got = rendered.observed(&call.resolution, &context);
+                    assert_eq!(got, want, "{model:?} in {m}#{f}\n{context}");
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn elixir_incoming_and_outgoing_calls_agree() {
+        run(200, |modules, rendered, _| {
+            let provider = EmbeddedProvider::new();
+            let snapshot = &rendered.snapshot;
+            let context = describe(modules, rendered);
+            let mut forward = BTreeSet::new();
+            for caller in defs(modules) {
+                let answer = provider
+                    .outgoing_calls(snapshot, &rendered.key(modules, caller), &Budget::default())
+                    .unwrap();
+                for call in answer.items {
+                    for target in call.resolution.targets() {
+                        let target = rendered.def_at(&target.path, target.line).unwrap();
+                        forward.insert((caller, call.site.path.clone(), call.site.line, target));
+                    }
+                }
+            }
+            let mut backward = BTreeSet::new();
+            for target in defs(modules) {
+                let answer = provider
+                    .incoming_calls(
+                        snapshot,
+                        &rendered.key(modules, target),
+                        1,
+                        &Budget::default(),
+                    )
+                    .unwrap();
+                for item in answer.items {
+                    let caller = item.call.caller.as_ref().expect("calls are in functions");
+                    let caller = rendered.def_at(&caller.path, caller.line).unwrap();
+                    backward.insert((caller, item.call.site.path, item.call.site.line, target));
+                }
+            }
+            assert_eq!(forward, backward, "{context}");
+        });
+    }
+}

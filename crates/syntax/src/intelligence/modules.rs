@@ -43,7 +43,68 @@ impl Ctx<'_> {
                 let segments: Vec<String> = source.split(separator).map(str::to_owned).collect();
                 self.crate_path(rules, from, None, 0, &segments)
             }
+            // Only a module declared once is followed.
+            Modules::Declared { .. } => match self.declared_modules(rules, from, source).as_slice()
+            {
+                [module] => Some(module.clone()),
+                _ => None,
+            },
         }
+    }
+
+    /// Every module declared with the full name `name` (`MyApp.Accounts`)
+    /// in the project `from` is in: the file its name suggests when that
+    /// declares it, else every file there that does, in path order.
+    pub(super) fn declared_modules(&self, rules: &Rules, from: &str, name: &str) -> Vec<ModuleLoc> {
+        let Modules::Declared {
+            dirs,
+            extensions,
+            separator,
+            ..
+        } = &rules.modules
+        else {
+            return Vec::new();
+        };
+        let root = self.unit_root(from, rules);
+        let key = (root.clone(), name.to_owned());
+        if let Some(found) = self.declared.borrow().get(&key) {
+            return found.clone();
+        }
+        let declares = |path: &str| {
+            let file = self.file(path)?;
+            declared_in(&file, name, separator).map(|inline| ModuleLoc {
+                path: path.to_owned(),
+                inline,
+            })
+        };
+        let stem = name
+            .split(*separator)
+            .map(snake_case)
+            .collect::<Vec<_>>()
+            .join("/");
+        let (root_dir, stem) = (&root, &stem);
+        let hinted = dirs
+            .iter()
+            .flat_map(|dir| {
+                extensions
+                    .iter()
+                    .map(move |extension| join(root_dir, &format!("{dir}/{stem}.{extension}")))
+            })
+            .filter(|path| self.exists(path))
+            .find_map(|path| declares(&path));
+        let found = match hinted {
+            Some(module) => vec![module],
+            None => {
+                // Nested modules declare only their last segment.
+                let last = name.rsplit(*separator).next().unwrap_or(name);
+                self.search(rules.family, &root, &[last])
+                    .iter()
+                    .filter_map(|path| declares(path))
+                    .collect()
+            }
+        };
+        self.declared.borrow_mut().insert(key, found.clone());
+        found
     }
 
     /// The module a qualifier's segments name at byte `at` of `from`
@@ -59,6 +120,9 @@ impl Ctx<'_> {
         match &rules.modules {
             Modules::Crate { .. } => self.crate_path(rules, from, Some(file), at, segments),
             Modules::Dotted { .. } => self.module_from_source(rules, from, &segments.join(".")),
+            Modules::Declared { separator, .. } => {
+                self.module_from_source(rules, from, &segments.join(separator))
+            }
             Modules::Specifier { .. } => None,
         }
     }
@@ -370,6 +434,69 @@ fn inline_module(file: &FileSymbols, inline: &[String]) -> Option<Option<usize>>
     Some(container)
 }
 
+/// The chain of module definitions (outermost first) declaring the full
+/// name `name` in a file, where nested modules' names join their
+/// parents'.
+fn declared_in(file: &FileSymbols, name: &str, separator: &str) -> Option<Vec<String>> {
+    (0..file.defs.len()).find_map(|index| {
+        let mut chain = Vec::new();
+        let mut next = Some(index);
+        while let Some(current) = next {
+            let def = &file.defs[current];
+            if def.kind != DeclarationKind::Module {
+                return None;
+            }
+            chain.push(def.name.clone());
+            next = def.container;
+        }
+        chain.reverse();
+        (chain.join(separator) == name).then_some(chain)
+    })
+}
+
+/// The full name of the module definition at `index` or around it.
+pub(super) fn declared_name(
+    file: &FileSymbols,
+    index: Option<usize>,
+    separator: &str,
+) -> Option<String> {
+    let mut names = Vec::new();
+    let mut next = index;
+    while let Some(current) = next {
+        let def = &file.defs[current];
+        if def.kind == DeclarationKind::Module {
+            names.push(def.name.as_str());
+        }
+        next = def.container;
+    }
+    names.reverse();
+    (!names.is_empty()).then(|| names.join(separator))
+}
+
+/// `HTTPClient` → `http_client`, as a module name's file is named.
+fn snake_case(segment: &str) -> String {
+    let chars: Vec<char> = segment.chars().collect();
+    let mut out = String::with_capacity(segment.len() + 4);
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_uppercase() {
+            let previous = i.checked_sub(1).map(|j| chars[j]);
+            let next = chars.get(i + 1);
+            let boundary = previous.is_some_and(|p| {
+                p.is_lowercase()
+                    || p.is_ascii_digit()
+                    || (p.is_uppercase() && next.is_some_and(|n| n.is_lowercase()))
+            });
+            if boundary {
+                out.push('_');
+            }
+            out.extend(c.to_lowercase());
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
 /// `name` in a manifest's `[package]` table.
 fn package_name(manifest: &str) -> Option<String> {
     let mut in_package = false;
@@ -414,6 +541,15 @@ mod tests {
         let manifest = "[workspace]\nname = \"no\"\n[package]\nname = \"vertebrae-syntax\"\n";
         assert_eq!(package_name(manifest).as_deref(), Some("vertebrae-syntax"));
         assert_eq!(package_name("[dependencies]\nname = \"x\"\n"), None);
+    }
+
+    #[test]
+    fn module_names_snake_case_as_their_files_do() {
+        assert_eq!(snake_case("MyApp"), "my_app");
+        assert_eq!(snake_case("HTTPClient"), "http_client");
+        assert_eq!(snake_case("Accounts"), "accounts");
+        assert_eq!(snake_case("OAuth2Token"), "o_auth2_token");
+        assert_eq!(snake_case("V1"), "v1");
     }
 
     #[test]

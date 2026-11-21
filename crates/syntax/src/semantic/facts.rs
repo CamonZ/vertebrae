@@ -240,6 +240,9 @@ pub(crate) enum Role {
     Test,
     /// The next item after it (past attributes and comments) is test code.
     TestMarker,
+    /// The node is not a call site (a declaration's head, a module
+    /// attribute): calls and uses inside it are not captured.
+    Ignore,
     Fact(FactKind),
 }
 
@@ -251,6 +254,7 @@ const PRIMARY: &[(&str, Role)] = &[
     ("annotation", Role::Annotation),
     ("test", Role::Test),
     ("test.marker", Role::TestMarker),
+    ("ignore", Role::Ignore),
     ("control.branch", Role::Fact(FactKind::Branch)),
     ("control.match_arm", Role::Fact(FactKind::MatchArm)),
     ("control.early_return", Role::Fact(FactKind::EarlyReturn)),
@@ -279,6 +283,10 @@ pub(crate) enum Part {
     Receiver,
     /// `path::name`.
     Path,
+    /// A call's arguments, for its arity (code intelligence).
+    Arguments,
+    /// A value piped into the call as its first argument (`x |> f()`).
+    Piped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -308,6 +316,8 @@ pub(crate) fn capture_name(name: &str) -> Option<CaptureName> {
         "subject" => Part::Subject,
         "receiver" => Part::Receiver,
         "path" => Part::Path,
+        "arguments" => Part::Arguments,
+        "piped" => Part::Piped,
         _ => return None,
     };
     Some(CaptureName::Part(primary(base)?, part))
@@ -332,12 +342,23 @@ impl FactsQuery {
     }
 }
 
-/// The `@call` captures of one query match: each callee name node, with
-/// its receiver or path (`true` for a path) when the pattern has one.
+/// One `@call` capture of a query match.
+pub(crate) struct CallParts<'t> {
+    /// The callee's name.
+    pub(crate) name: tree_sitter::Node<'t>,
+    /// Its receiver or path (`true` for a path), when the pattern has one.
+    pub(crate) qualifier: Option<(bool, tree_sitter::Node<'t>)>,
+    /// Its `@call.arguments` node, when the pattern has one.
+    pub(crate) arguments: Option<tree_sitter::Node<'t>>,
+    /// The pattern pipes a value in as the first argument.
+    pub(crate) piped: bool,
+}
+
+/// The `@call` captures of one query match.
 pub(crate) fn call_parts<'t>(
     facts: &FactsQuery,
     captures: &[tree_sitter::QueryCapture<'t>],
-) -> Vec<(tree_sitter::Node<'t>, Option<(bool, tree_sitter::Node<'t>)>)> {
+) -> Vec<CallParts<'t>> {
     let part = |want: Part| {
         captures.iter().find_map(|capture| {
             matches!(
@@ -350,11 +371,36 @@ pub(crate) fn call_parts<'t>(
     let qualifier = part(Part::Receiver)
         .map(|node| (false, node))
         .or_else(|| part(Part::Path).map(|node| (true, node)));
+    let arguments = part(Part::Arguments);
+    let piped = part(Part::Piped).is_some();
     captures
         .iter()
         .filter(|capture| facts.names[capture.index as usize] == CaptureName::Primary(Role::Call))
-        .map(|capture| (capture.node, qualifier))
+        .map(|capture| CallParts {
+            name: capture.node,
+            qualifier,
+            arguments,
+            piped,
+        })
         .collect()
+}
+
+/// Byte ranges of the `@ignore` captures of one query match.
+pub(crate) fn ignored_ranges(
+    facts: &FactsQuery,
+    captures: &[tree_sitter::QueryCapture],
+) -> Vec<std::ops::Range<usize>> {
+    captures
+        .iter()
+        .filter(|capture| facts.names[capture.index as usize] == CaptureName::Primary(Role::Ignore))
+        .map(|capture| capture.node.byte_range())
+        .collect()
+}
+
+/// Whether a byte range lies inside one of the sorted, ignored ranges.
+pub(crate) fn inside(ignored: &[std::ops::Range<usize>], range: &std::ops::Range<usize>) -> bool {
+    let end = ignored.partition_point(|r| r.start <= range.start);
+    ignored[..end].iter().any(|r| r.end >= range.end)
 }
 
 /// One primary capture in a tree.
@@ -385,6 +431,7 @@ impl Captures {
     ) -> Result<Self, super::FallbackReason> {
         let mut out = Self::default();
         let mut markers = Vec::new();
+        let mut ignored = Vec::new();
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(&facts.query, syntax.root_node(), tree.source.as_bytes());
         let mut seen: usize = 0;
@@ -420,6 +467,10 @@ impl Captures {
                         markers.push(node);
                         continue;
                     }
+                    Role::Ignore => {
+                        ignored.push(tree.nodes[node].bytes.clone());
+                        continue;
+                    }
                     _ => {}
                 }
                 let qualifier = parts(role, Part::Receiver)
@@ -446,6 +497,14 @@ impl Captures {
                 }
                 next = tree.siblings(id).1;
             }
+        }
+        // Names in a head or attribute are not calls or uses.
+        ignored.sort_by_key(|range| range.start);
+        if !ignored.is_empty() {
+            out.all.retain(|c| {
+                !matches!(c.role, Role::Call | Role::Reference)
+                    || !inside(&ignored, &tree.nodes[c.node].bytes)
+            });
         }
         // One capture per node and role: patterns overlap, and a node is
         // one thing.
@@ -487,16 +546,30 @@ enum Sep {
 /// the first). `None` text is an expression that is not a name (`f(x)`).
 type Segments<'t> = Vec<(Sep, Option<&'t str>)>;
 
-/// Splits `std::fs`, `self.client` or `os.path` into segments; `None`
-/// when the text is not a plain name chain.
+/// Splits `std::fs`, `self.client`, `os.path` or `:ets` (an Erlang
+/// module) into segments; `None` when the text is not a plain name chain.
 fn name_segments(text: &str) -> Option<Segments<'_>> {
+    segments(text, false)
+}
+
+/// As [`name_segments`]; with `suffixed`, a segment may end in `?` or
+/// `!` (`File.exists?`), as API patterns name such functions.
+fn segments(text: &str, suffixed: bool) -> Option<Segments<'_>> {
     let plain = |c: char| c.is_alphanumeric() || matches!(c, '_' | '$' | '#');
     let mut out = Vec::new();
     let mut sep = Sep::Member;
     let mut rest = text;
     loop {
-        let end = rest.find(|c: char| !plain(c)).unwrap_or(rest.len());
-        if end == 0 {
+        // An atom module (`:ets`) leads with one colon, not a path's two.
+        let atom = out.is_empty() && rest.starts_with(':') && !rest.starts_with("::");
+        let start = usize::from(atom);
+        let mut end = rest[start..]
+            .find(|c: char| !plain(c))
+            .map_or(rest.len(), |end| end + start);
+        if suffixed && end > start && rest[end..].starts_with(['?', '!']) {
+            end += 1;
+        }
+        if end == start {
             return None;
         }
         out.push((sep, Some(&rest[..end])));
@@ -584,7 +657,7 @@ impl ApiTable {
                     (None, pattern)
                 };
                 // `*` is a plain name for splitting, then a wildcard.
-                let segments = name_segments(&body.replace('*', "_wildcard_"))
+                let segments = segments(&body.replace('*', "_wildcard_"), true)
                     .ok_or_else(bad)?
                     .into_iter()
                     .map(|(sep, text)| {

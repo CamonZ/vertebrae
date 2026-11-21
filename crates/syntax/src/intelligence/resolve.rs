@@ -14,10 +14,16 @@
 //! A qualified name (`self.m`, `a::b::f`, `ns.f`, `x.m`) resolves through
 //! the enclosing type, a module, a type, or (for a value receiver) by
 //! searching members with the name.
+//!
+//! Where the language identifies callables by arity (Elixir), a call
+//! binds only definitions taking its number of arguments; where modules
+//! are declared by name (Elixir), a qualified call names a module
+//! (`Accounts.get`, through an `alias`) and reaches its public
+//! definitions only, and a call through a value is dynamic: unresolved.
 
 use super::embedded::{parent, Ctx};
 use super::extract::{bare_type_name, is_type_container, FileSymbols, ImportTarget, Qualifier};
-use super::modules::ModuleLoc;
+use super::modules::{declared_name, ModuleLoc};
 use super::rules::{Modules, Reach, Rules};
 use crate::semantic::DeclarationKind;
 use std::sync::Arc;
@@ -85,19 +91,32 @@ fn dedup(found: &mut Vec<Found>) {
     });
 }
 
-/// What a name may be: something called, or anything at all.
+/// What a name may be: something called (with this many arguments, where
+/// arity counts), or anything at all.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Wanted {
-    Callable,
+    Callable(Option<u32>),
     Any,
     Type,
 }
 
 impl Wanted {
+    fn arity(self) -> Option<u32> {
+        match self {
+            Self::Callable(arity) => arity,
+            Self::Any | Self::Type => None,
+        }
+    }
+
+    /// Whether a definition is what is wanted, its arity included.
+    fn matches(self, def: &super::extract::Def) -> bool {
+        self.accepts(def.kind) && def.takes(self.arity())
+    }
+
     fn accepts(self, kind: DeclarationKind) -> bool {
         match self {
             Self::Any => !matches!(kind, DeclarationKind::Import | DeclarationKind::Impl),
-            Self::Callable => matches!(
+            Self::Callable(_) => matches!(
                 kind,
                 DeclarationKind::Function | DeclarationKind::Class | DeclarationKind::Constant
             ),
@@ -129,9 +148,17 @@ impl Ctx<'_> {
             return Res::Unresolved;
         };
         let call = &file.calls[index];
+        let wanted = Wanted::Callable(call.arity);
         match &call.qualifier {
-            None => self.bare(rules, path, file, call.byte, &call.name, Wanted::Callable),
-            Some(qualifier) => self.qualified(rules, path, file, call.byte, qualifier, &call.name),
+            None => self.bare(rules, path, file, call.byte, &call.name, wanted),
+            Some(Qualifier::Receiver(receiver))
+                if matches!(rules.modules, Modules::Declared { .. }) =>
+            {
+                self.declared_call(rules, path, file, call.byte, receiver, &call.name, wanted)
+            }
+            Some(qualifier) => {
+                self.qualified(rules, path, file, call.byte, qualifier, &call.name, wanted)
+            }
         }
     }
 
@@ -157,7 +184,7 @@ impl Ctx<'_> {
         index: usize,
     ) -> Res {
         match file.grammar.rules() {
-            Some(rules) => Res::bound(self.import_targets(rules, path, file, index)),
+            Some(rules) => Res::bound(self.import_targets(rules, path, file, index, None)),
             None => Res::Unresolved,
         }
     }
@@ -183,7 +210,7 @@ impl Ctx<'_> {
         let site_module = module_of(here);
         let mut bindings: Vec<(usize, Binding)> = Vec::new();
         for (index, def) in file.defs.iter().enumerate() {
-            if def.name != name || !wanted.accepts(def.kind) || file.is_member(index) {
+            if def.name != name || !wanted.matches(def) || file.is_member(index) {
                 continue;
             }
             // Visible where its container encloses the use.
@@ -197,7 +224,9 @@ impl Ctx<'_> {
         }
         // Parameters and local variables shadow definitions without being
         // one; nested functions see them where the language says so.
-        for local in &file.locals {
+        // Where a variable is not called by name, it binds no call.
+        let locals_bind = rules.local_calls || !matches!(wanted, Wanted::Callable(_));
+        for local in file.locals.iter().filter(|_| locals_bind) {
             if local.name != name {
                 continue;
             }
@@ -225,7 +254,19 @@ impl Ctx<'_> {
             if matches!(import.target, ImportTarget::Glob { .. }) {
                 globs.push(index);
             } else if import.local == name {
-                bindings.push((depth(file, import.scope), Binding::Import(index)));
+                // An import of other arities binds nothing here.
+                let arity = wanted.arity();
+                let mismatched = arity.is_some()
+                    && (import.arity.is_some_and(|only| Some(only) != arity)
+                        || !self
+                            .import_targets(rules, path, file, index, None)
+                            .is_empty()
+                            && self
+                                .import_targets(rules, path, file, index, arity)
+                                .is_empty());
+                if !mismatched {
+                    bindings.push((depth(file, import.scope), Binding::Import(index)));
+                }
             }
         }
         for other in self.reach_files(rules, path) {
@@ -235,7 +276,7 @@ impl Ctx<'_> {
             let other: Arc<str> = Arc::from(other.as_str());
             for index in 0..other_file.defs.len() {
                 let def = &other_file.defs[index];
-                if def.container.is_none() && def.name == name && wanted.accepts(def.kind) {
+                if def.container.is_none() && def.name == name && wanted.matches(def) {
                     bindings.push((
                         0,
                         Binding::Elsewhere(Found {
@@ -251,12 +292,21 @@ impl Ctx<'_> {
         if bindings.is_empty() {
             for index in globs {
                 let import = &file.imports[index];
-                let ImportTarget::Glob { source } = &import.target else {
+                let ImportTarget::Glob { source, except } = &import.target else {
                     continue;
                 };
+                let left_out = except.iter().any(|(left_out, arity)| {
+                    left_out == name
+                        && (arity.is_none() || wanted.arity().is_none() || *arity == wanted.arity())
+                });
+                if left_out {
+                    continue;
+                }
                 if let Some(module) = self.import_module(rules, path, file, import.byte, source) {
-                    for found in self.items(&module, name) {
-                        bindings.push((0, Binding::Elsewhere(found)));
+                    for found in self.items(&module, name, wanted.arity()) {
+                        if reachable(rules, &found) {
+                            bindings.push((0, Binding::Elsewhere(found)));
+                        }
                     }
                 }
             }
@@ -273,13 +323,14 @@ impl Ctx<'_> {
                     index,
                 }),
                 Binding::Import(index) => {
-                    targets.extend(self.import_targets(rules, path, file, index));
+                    targets.extend(self.import_targets(rules, path, file, index, wanted.arity()));
                 }
                 Binding::Local => {}
                 Binding::Elsewhere(found) => targets.push(found),
             }
         }
         match count {
+            0 if !rules.unbound_search => Res::Unresolved,
             0 => self.exported_search(rules, path, name, wanted),
             1 => Res::bound(targets),
             _ => {
@@ -334,7 +385,7 @@ impl Ctx<'_> {
                 if def.name == name
                     && def.container.is_none()
                     && def.exported
-                    && wanted.accepts(def.kind)
+                    && wanted.matches(def)
                 {
                     found.push(Found {
                         path: other.clone(),
@@ -380,6 +431,83 @@ impl Ctx<'_> {
         found
     }
 
+    /// A call through a declared module (`Accounts.get(x)`): the receiver
+    /// names a module, absolutely, through an `alias`, as a module nested
+    /// in an enclosing one, or as the enclosing module itself
+    /// (`__MODULE__`). Only its public definitions are reached. A receiver
+    /// that is a value (`mod.f()`) or an atom (`:ets`) is dynamic or
+    /// external: unresolved.
+    #[allow(clippy::too_many_arguments, reason = "the call site's parts")]
+    fn declared_call(
+        &self,
+        rules: &Rules,
+        path: &Arc<str>,
+        file: &Arc<FileSymbols>,
+        at: usize,
+        receiver: &str,
+        name: &str,
+        wanted: Wanted,
+    ) -> Res {
+        let Modules::Declared {
+            separator, current, ..
+        } = &rules.modules
+        else {
+            return Res::Unresolved;
+        };
+        let segments: Vec<&str> = receiver.split(*separator).collect();
+        if !segments.iter().all(|segment| plain(segment)) {
+            return Res::Unresolved;
+        }
+        let (head, rest) = (segments[0], &segments[1..]);
+        let joined = |base: &str| {
+            std::iter::once(base)
+                .chain(rest.iter().copied())
+                .collect::<Vec<_>>()
+                .join(separator)
+        };
+        let here = file.enclosing(at);
+        let enclosing = declared_name(file, here, separator);
+        let module = if head == *current {
+            match &enclosing {
+                Some(enclosing) => joined(enclosing),
+                None => return Res::Unresolved,
+            }
+        } else if !head.starts_with(|c: char| c.is_uppercase()) {
+            return Res::Unresolved;
+        } else if let Some(import) = self.visible_import(file, at, head) {
+            match &import.target {
+                ImportTarget::Path(full) => joined(full),
+                _ => receiver.to_owned(),
+            }
+        } else {
+            // `Inner` inside `Outer` (or a module nested in it) may name
+            // `Outer.Inner`, innermost first; else the name is absolute.
+            let mut scopes: Vec<String> = Vec::new();
+            let mut next = here;
+            while let Some(index) = next {
+                if file.defs[index].kind == DeclarationKind::Module {
+                    scopes.extend(declared_name(file, Some(index), separator));
+                }
+                next = file.defs[index].container;
+            }
+            scopes
+                .into_iter()
+                .map(|scope| format!("{scope}{separator}{receiver}"))
+                .find(|nested| !self.declared_modules(rules, path, nested).is_empty())
+                .unwrap_or_else(|| receiver.to_owned())
+        };
+        let mut found = Vec::new();
+        for module in self.declared_modules(rules, path, &module) {
+            found.extend(
+                self.items(&module, name, wanted.arity())
+                    .into_iter()
+                    .filter(|found| reachable(rules, found)),
+            );
+        }
+        Res::bound(found)
+    }
+
+    #[allow(clippy::too_many_arguments, reason = "the call site's parts")]
     fn qualified(
         &self,
         rules: &Rules,
@@ -388,7 +516,9 @@ impl Ctx<'_> {
         at: usize,
         qualifier: &Qualifier,
         name: &str,
+        wanted: Wanted,
     ) -> Res {
+        let arity = wanted.arity();
         let (text, is_path) = match qualifier {
             Qualifier::Path(text) => (text.as_str(), true),
             Qualifier::Receiver(text) => (text.as_str(), false),
@@ -448,7 +578,7 @@ impl Ctx<'_> {
                 ImportTarget::Module { source } if dotted_modules => {
                     if let Some(module) = self.module_from_source(rules, path, source) {
                         if segments.len() == 1 {
-                            return Res::bound(self.items(&module, name));
+                            return Res::bound(self.items(&module, name, arity));
                         }
                     }
                     let mut replaced: Vec<String> = source.split('.').map(str::to_owned).collect();
@@ -478,7 +608,7 @@ impl Ctx<'_> {
             None => self.module_at(rules, path, file, at, &expanded),
         };
         if let Some(module) = module {
-            return Res::bound(self.items(&module, name));
+            return Res::bound(self.items(&module, name, arity));
         }
         // A type: `Type::f`, `mod::Type::f`, `Class.f`.
         let owner = segments.last().cloned().unwrap_or_default();
@@ -486,14 +616,14 @@ impl Ctx<'_> {
             (Some((source, item)), 1) => self
                 .module_from_source(rules, path, source)
                 .map_or(Res::Unresolved, |module| {
-                    Res::bound(self.items(&module, item))
+                    Res::bound(self.items(&module, item, None))
                 }),
             (None, 1) => self.bare(rules, path, file, at, &owner, Wanted::Type),
             _ => {
                 let module_path = &expanded[..expanded.len() - 1];
                 self.module_at(rules, path, file, at, module_path)
                     .map_or(Res::Unresolved, |module| {
-                        Res::bound(self.items(&module, &owner))
+                        Res::bound(self.items(&module, &owner, None))
                     })
             }
         };
@@ -608,20 +738,24 @@ impl Ctx<'_> {
         }
     }
 
-    /// The definitions an import's target names.
+    /// The definitions an import's target names (taking `arity`
+    /// arguments, when given).
     fn import_targets(
         &self,
         rules: &Rules,
         path: &Arc<str>,
         file: &FileSymbols,
         index: usize,
+        arity: Option<u32>,
     ) -> Vec<Found> {
         let import = &file.imports[index];
         let at = import.byte;
-        match &import.target {
+        // An import of one arity names only definitions taking it.
+        let arity = arity.or(import.arity);
+        let mut targets = match &import.target {
             ImportTarget::Item { source, name } => self
                 .import_module(rules, path, file, at, source)
-                .map(|module| self.items(&module, name))
+                .map(|module| self.items(&module, name, arity))
                 .unwrap_or_default(),
             ImportTarget::Path(full) => {
                 let separator = rules.modules.separator();
@@ -629,7 +763,7 @@ impl Ctx<'_> {
                     return Vec::new();
                 };
                 self.import_module(rules, path, file, at, module)
-                    .map(|module| self.items(&module, name))
+                    .map(|module| self.items(&module, name, arity))
                     .unwrap_or_default()
             }
             ImportTarget::Default { source } => {
@@ -652,17 +786,21 @@ impl Ctx<'_> {
                     .collect()
             }
             ImportTarget::Module { .. } | ImportTarget::Glob { .. } => Vec::new(),
-        }
+        };
+        targets.retain(|found| reachable(rules, found));
+        targets
     }
 
-    /// A module's definitions named `name`.
-    fn items(&self, module: &ModuleLoc, name: &str) -> Vec<Found> {
+    /// A module's definitions named `name` (taking `arity` arguments, when
+    /// given).
+    fn items(&self, module: &ModuleLoc, name: &str, arity: Option<u32>) -> Vec<Found> {
         let Some(file) = self.file(&module.path) else {
             return Vec::new();
         };
         let path: Arc<str> = Arc::from(module.path.as_str());
         self.module_items(module, name)
             .into_iter()
+            .filter(|&index| file.defs[index].takes(arity))
             .map(|index| Found {
                 path: path.clone(),
                 file: file.clone(),
@@ -670,6 +808,12 @@ impl Ctx<'_> {
             })
             .collect()
     }
+}
+
+/// Whether another module may reach a definition: where modules are
+/// declared by name, only a public one is (Elixir's `defp` is not).
+fn reachable(rules: &Rules, found: &Found) -> bool {
+    !matches!(rules.modules, Modules::Declared { .. }) || found.file.defs[found.index].exported
 }
 
 /// The innermost inline module at or around a definition.

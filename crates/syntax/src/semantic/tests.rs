@@ -646,3 +646,250 @@ fn a_parameter_change_is_a_signature_part() {
         "{found:#?}"
     );
 }
+
+const ELIXIR_BASE: &str = r#"defmodule MyApp.Accounts do
+  @moduledoc "Accounts."
+  alias MyApp.Repo
+
+  @timeout 5_000
+  @type id :: integer
+  @callback fetch(id) :: term
+
+  defstruct [:name, age: 0]
+
+  @doc "Gets one."
+  def get(id) when is_integer(id), do: Repo.get(User, id)
+  def get(%{id: id}), do: get(id)
+
+  defp helper(x) do
+    x + 1
+  end
+
+  defmodule Inner do
+    def run, do: :ok
+  end
+end
+"#;
+
+/// What one declaration diff reports, compactly: its subject as `keyword
+/// name`, its change and its parts' kinds.
+fn summary(declaration: &DeclarationDiff) -> (String, &'static str, String) {
+    let subject = place(declaration).1.unwrap_or_default();
+    let change = match &declaration.change {
+        DeclarationChange::Added { .. } => "added",
+        DeclarationChange::Removed { .. } => "removed",
+        DeclarationChange::Moved { .. } => "moved",
+        DeclarationChange::Renamed { .. } => "renamed",
+        DeclarationChange::Modified => "modified",
+    };
+    let parts = declaration
+        .parts
+        .iter()
+        .map(|part| match part {
+            Part::Added { .. } => "added",
+            Part::Removed { .. } => "removed",
+            Part::Changed { .. } => "changed",
+            Part::Signature { .. } => "signature",
+            Part::Moved { .. } => "moved",
+            Part::Renamed { .. } => "renamed",
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    (subject, change, parts)
+}
+
+#[test]
+fn elixir_scope_kinds_are_inserted_deleted_updated_moved_and_renamed() {
+    let base = ELIXIR_BASE;
+    let helper = "  defp helper(x) do\n    x + 1\n  end\n\n";
+    let inner = "\n  defmodule Inner do\n    def run, do: :ok\n  end\n";
+    let cases: Vec<(&str, String, (&str, &str, &str))> = vec![
+        // Functions.
+        (
+            "insert function",
+            base.replace(
+                "  defmodule Inner",
+                "  def added(a), do: a\n\n  defmodule Inner",
+            ),
+            ("def added", "added", ""),
+        ),
+        (
+            "delete function",
+            base.replace(helper, ""),
+            ("defp helper", "removed", ""),
+        ),
+        (
+            "update function",
+            base.replace("x + 1", "x + 2"),
+            ("defp helper", "modified", "changed"),
+        ),
+        (
+            "move function",
+            base.replace(helper, "")
+                .replace("  @timeout", &format!("{helper}  @timeout")),
+            ("defp helper", "moved", ""),
+        ),
+        (
+            "rename function",
+            base.replace("helper", "assist"),
+            ("defp assist", "renamed", ""),
+        ),
+        (
+            "change parameters",
+            base.replace("defp helper(x)", "defp helper(x, y)"),
+            ("defp helper", "modified", "signature"),
+        ),
+        (
+            "change a guard",
+            base.replace("is_integer(id)", "is_integer(id) and id > 0"),
+            ("def get", "modified", "signature"),
+        ),
+        // A further clause is part of its function.
+        (
+            "insert clause",
+            base.replace(
+                "  def get(%{id: id}), do: get(id)\n",
+                "  def get(%{id: id}), do: get(id)\n  def get(nil), do: nil\n",
+            ),
+            ("def get", "modified", "added"),
+        ),
+        (
+            "update a later clause",
+            base.replace("do: get(id)", "do: find(id)"),
+            ("def get", "modified", "changed"),
+        ),
+        // Modules.
+        (
+            "insert module",
+            base.replace("\nend\n", "\n\n  defmodule Other do\n  end\nend\n"),
+            ("defmodule Other", "added", ""),
+        ),
+        (
+            "delete module",
+            base.replace(inner, ""),
+            ("defmodule Inner", "removed", ""),
+        ),
+        (
+            "rename module",
+            base.replace("Inner", "Outer"),
+            ("defmodule Outer", "renamed", ""),
+        ),
+        (
+            "move module",
+            base.replace(inner, "").replace(
+                "  @timeout",
+                "  defmodule Inner do\n    def run, do: :ok\n  end\n\n  @timeout",
+            ),
+            ("defmodule Inner", "moved", ""),
+        ),
+        // Structs and their fields.
+        (
+            "insert field",
+            base.replace("[:name, age: 0]", "[:name, :email, age: 0]"),
+            ("field :email", "added", ""),
+        ),
+        (
+            "update struct",
+            base.replace("age: 0", "age: 1"),
+            ("defstruct MyApp.Accounts", "modified", "changed"),
+        ),
+        (
+            "delete struct",
+            base.replace("  defstruct [:name, age: 0]\n\n", ""),
+            ("defstruct MyApp.Accounts", "removed", ""),
+        ),
+        // Types, callbacks and constants.
+        (
+            "insert type",
+            base.replace(
+                "  @type id :: integer\n",
+                "  @type id :: integer\n  @type name :: String.t()\n",
+            ),
+            ("type name", "added", ""),
+        ),
+        (
+            "update type",
+            base.replace("@type id :: integer", "@type id :: pos_integer"),
+            ("type id", "modified", "changed"),
+        ),
+        (
+            "rename type",
+            base.replace("@type id ::", "@type key ::"),
+            ("type key", "renamed", ""),
+        ),
+        (
+            "delete callback",
+            base.replace("  @callback fetch(id) :: term\n", ""),
+            ("callback fetch", "removed", ""),
+        ),
+        (
+            "update constant",
+            base.replace("5_000", "6_000"),
+            ("@ timeout", "modified", "changed"),
+        ),
+        (
+            "rename constant",
+            base.replace("@timeout", "@wait"),
+            ("@ wait", "renamed", ""),
+        ),
+        (
+            "move constant",
+            base.replace("  @timeout 5_000\n", "")
+                .replace("  defstruct", "  @timeout 5_000\n\n  defstruct"),
+            ("@ timeout", "moved", ""),
+        ),
+        // Imports.
+        (
+            "insert import",
+            base.replace(
+                "  alias MyApp.Repo\n",
+                "  alias MyApp.Repo\n  import Ecto.Query\n",
+            ),
+            ("import Ecto.Query", "added", ""),
+        ),
+    ];
+    let mut failures = Vec::new();
+    for (name, new, (subject, change, parts)) in cases {
+        let found = declarations("lib/accounts.ex", base, &new);
+        let got: Vec<_> = found.iter().map(summary).collect();
+        let want = vec![(subject.to_owned(), change, parts.to_owned())];
+        if got != want {
+            failures.push(format!("{name}: {got:?}, not {want:?}"));
+        }
+        // Every declaration but the top module sits in it.
+        if !found
+            .iter()
+            .all(|d| d.scope.first().is_some_and(|s| s.name == "MyApp.Accounts"))
+        {
+            failures.push(format!("{name}: outside the module: {found:#?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+fn elixir_declarations_carry_their_call_target_as_keyword() {
+    let changes = semantic(
+        "lib/accounts.ex",
+        ELIXIR_BASE,
+        &ELIXIR_BASE.replace("x + 1", "x + 2"),
+    );
+    assert_eq!(
+        changes.iter().map(labels).collect::<Vec<_>>(),
+        [vec!["defmodule MyApp.Accounts", "defp helper"]],
+        "{changes:#?}"
+    );
+    // A change in a `do` block is not the signature.
+    assert!(!changes[0].signature);
+}
+
+#[test]
+fn an_elixir_file_with_a_syntax_error_falls_back() {
+    let broken = ELIXIR_BASE.replace("defp helper(x) do", "defp helper(x do");
+    assert_eq!(
+        diff("lib/accounts.ex", ELIXIR_BASE, &broken, &Budget::default()),
+        SemanticOutcome::Fallback {
+            reason: FallbackReason::SyntaxError
+        }
+    );
+}
