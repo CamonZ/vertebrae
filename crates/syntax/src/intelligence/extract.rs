@@ -5,7 +5,7 @@
 
 use super::rules::{Exports, ImportCapture, Rules};
 use crate::semantic::profile::Compiled;
-use crate::semantic::{facts_call_parts, DeclarationKind, LineSpan};
+use crate::semantic::{facts_call_parts, facts_ignored, facts_inside, DeclarationKind, LineSpan};
 use crate::Grammar;
 use std::collections::HashMap;
 use std::ops::Range;
@@ -35,6 +35,20 @@ pub(crate) struct Def {
     /// For types and impls: the type's bare name (`Foo` for `impl<T>
     /// Display for a::Foo<T>`).
     pub(crate) type_name: Option<String>,
+    /// The fewest and most arguments it takes, where the language
+    /// identifies callables by arity; `None` for what is not callable.
+    pub(crate) arity: Option<(u32, u32)>,
+}
+
+impl Def {
+    /// Whether a call with `arity` arguments may be to it.
+    pub(crate) fn takes(&self, arity: Option<u32>) -> bool {
+        match (arity, self.arity) {
+            (None, _) => true,
+            (Some(arity), Some((min, max))) => (min..=max).contains(&arity),
+            (Some(_), None) => false,
+        }
+    }
 }
 
 /// How a callee is reached.
@@ -54,6 +68,9 @@ pub(crate) struct CallSite {
     pub(crate) at: Position,
     /// The innermost definition containing the call.
     pub(crate) caller: Option<usize>,
+    /// Arguments passed, the piped one included, where the language
+    /// identifies callables by arity.
+    pub(crate) arity: Option<u32>,
 }
 
 /// What an import binds its local name to.
@@ -67,8 +84,12 @@ pub(crate) enum ImportTarget {
     Module { source: String },
     /// A module's default export.
     Default { source: String },
-    /// Every name of a module (`source`) or path.
-    Glob { source: String },
+    /// Every name of a module (`source`) or path, but those `except`
+    /// names (at that arity, where one is given).
+    Glob {
+        source: String,
+        except: Vec<(String, Option<u32>)>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +101,19 @@ pub(crate) struct Import {
     pub(crate) scope: Option<usize>,
     pub(crate) byte: usize,
     pub(crate) at: Position,
+    /// The only arity imported, where the import gives one (Elixir's
+    /// `only: [save: 1]`).
+    pub(crate) arity: Option<u32>,
+}
+
+/// The arity beside an imported or excluded name written as a keyword
+/// key with an integer value (Elixir's `save: 1`).
+fn keyword_arity(node: &Node, source: &str) -> Option<u32> {
+    let value = node.parent()?.child_by_field_name("value")?;
+    if value.kind() != "integer" {
+        return None;
+    }
+    source.get(value.byte_range())?.parse().ok()
 }
 
 /// A local binding (parameter, `let`, assignment target): a name that
@@ -246,17 +280,23 @@ fn definitions(
     rules: &Rules,
 ) -> Vec<Range<usize>> {
     let declarations = &compiled.declarations;
+    let arity_rule = file.grammar.profile().and_then(|p| p.arity.as_ref());
     let source = file.text.clone();
-    // By definition node: kind (most specific wins), node and name node.
-    let mut found: HashMap<usize, (DeclarationKind, Node, Node)> = HashMap::new();
+    // By definition node: kind (most specific wins), node, name node and
+    // parameters.
+    type Found<'t> = (DeclarationKind, Node<'t>, Node<'t>, Option<Node<'t>>);
+    let mut found: HashMap<usize, Found> = HashMap::new();
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&declarations.query, tree.root_node(), source.as_bytes());
     while let Some(found_match) = matches.next() {
         let mut name = None;
+        let mut parameters = None;
         let mut declaration = None;
         for capture in found_match.captures() {
             if capture.index == declarations.name {
                 name = Some(capture.node);
+            } else if Some(capture.index) == declarations.parameters {
+                parameters = Some(capture.node);
             } else if let Some(Some(kind)) = declarations.kinds.get(capture.index as usize) {
                 declaration = Some((*kind, capture.node));
             }
@@ -271,17 +311,17 @@ fn definitions(
             .get(&node.id())
             .is_none_or(|(existing, ..)| kind.precedence() < existing.precedence());
         if replace {
-            found.insert(node.id(), (kind, node, name));
+            found.insert(node.id(), (kind, node, name, parameters));
         }
     }
-    let mut defs: Vec<(Node, DeclarationKind, Node)> = found
+    let mut defs: Vec<(Node, DeclarationKind, Node, Option<Node>)> = found
         .into_values()
-        .map(|(k, n, name)| (n, k, name))
+        .map(|(k, n, name, parameters)| (n, k, name, parameters))
         .collect();
     defs.sort_by_key(|(node, ..)| (node.start_byte(), std::cmp::Reverse(node.end_byte())));
     let mut stack: Vec<usize> = Vec::new();
     let mut name_spans = Vec::new();
-    for (node, kind, name_node) in defs {
+    for (node, kind, name_node, parameters) in defs {
         while let Some(&top) = stack.last() {
             if file.defs[top].bytes.end >= node.end_byte() {
                 break;
@@ -301,6 +341,12 @@ fn definitions(
         )
         .then(|| bare_type_name(raw));
         let (exported, default_export) = exported(node, &rules.exports, source.as_bytes());
+        let arity = match (arity_rule, kind) {
+            (Some(rule), DeclarationKind::Function | DeclarationKind::Method) => {
+                Some(rule.of_parameters(parameters, source.as_bytes()))
+            }
+            _ => None,
+        };
         let start = node.start_position();
         let end = node.end_position();
         let end_row = if end.column == 0 && end.row > start.row {
@@ -320,8 +366,28 @@ fn definitions(
             }
             _ => kind,
         };
-        let index = file.defs.len();
         name_spans.push(name_node.byte_range());
+        // A further clause of a function in the same module (same name and
+        // most arguments) extends it rather than defining another.
+        let clause_of = arity.and_then(|(_, max)| {
+            file.defs.iter().position(|def| {
+                def.container == container
+                    && def.name == raw
+                    && def.kind == kind
+                    && def.arity.is_some_and(|(_, other)| other == max)
+            })
+        });
+        if let Some(first) = clause_of {
+            let def = &mut file.defs[first];
+            def.bytes.end = def.bytes.end.max(node.end_byte());
+            def.lines.end = def.lines.end.max(line(end_row));
+            if let (Some((min, max)), Some((other, _))) = (arity, def.arity) {
+                def.arity = Some((min.min(other), max));
+            }
+            stack.push(first);
+            continue;
+        }
+        let index = file.defs.len();
         file.defs.push(Def {
             name: raw.to_owned(),
             kind,
@@ -335,6 +401,7 @@ fn definitions(
             exported,
             default_export,
             type_name,
+            arity,
         });
         stack.push(index);
     }
@@ -364,6 +431,13 @@ fn exported(node: Node, exports: &Exports, source: &[u8]) -> (bool, bool) {
                 .any(|child| child.kind() == *kind);
             (found, false)
         }
+        Exports::Unless { field, private } => {
+            let private = node
+                .child_by_field_name(field)
+                .and_then(|child| child.utf8_text(source).ok())
+                .is_some_and(|text| private.contains(&text));
+            (!private, false)
+        }
         Exports::Wrapper { kind, default } => {
             let mut next = node.parent();
             while let Some(parent) = next {
@@ -383,13 +457,18 @@ fn exported(node: Node, exports: &Exports, source: &[u8]) -> (bool, bool) {
 
 fn calls(file: &mut FileSymbols, tree: &Tree, compiled: &Compiled) -> Vec<Range<usize>> {
     let source = file.text.clone();
+    let arity_rule = file.grammar.profile().and_then(|p| p.arity.as_ref());
     let mut cursor = QueryCursor::new();
     let facts = &compiled.facts;
+    let mut ignored = Vec::new();
     let mut matches = cursor.matches(&facts.query, tree.root_node(), source.as_bytes());
     while let Some(found) = matches.next() {
-        for (call, qualifier) in facts_call_parts(facts, found.captures()) {
+        ignored.extend(facts_ignored(facts, found.captures()));
+        for parts in facts_call_parts(facts, found.captures()) {
+            let call = parts.name;
             let name = source.get(call.byte_range()).unwrap_or_default().to_owned();
-            let qualifier = qualifier.map(|(path, node)| {
+            let arity = arity_rule.map(|rule| rule.of_call(parts.arguments, parts.piped));
+            let qualifier = parts.qualifier.map(|(path, node)| {
                 let text = compact(source.get(node.byte_range()).unwrap_or_default());
                 if path {
                     Qualifier::Path(text)
@@ -403,14 +482,24 @@ fn calls(file: &mut FileSymbols, tree: &Tree, compiled: &Compiled) -> Vec<Range<
                 byte: call.start_byte(),
                 at: point(call),
                 caller: None,
+                arity,
             });
         }
     }
-    // Patterns overlap; a call is one call. Keep the one with a qualifier.
+    // Names in a head or attribute are not calls.
+    ignored.sort_by_key(|range| range.start);
+    file.calls.retain(|call| {
+        let range = call.byte..call.byte + call.name.len();
+        !facts_inside(&ignored, &range)
+    });
+    // Patterns overlap; a call is one call. Keep the one with a qualifier,
+    // then the one that counts a piped argument (a piped call also matches
+    // the plain call pattern).
     file.calls.sort_by(|a, b| {
         a.byte
             .cmp(&b.byte)
             .then(b.qualifier.is_some().cmp(&a.qualifier.is_some()))
+            .then(b.arity.cmp(&a.arity))
     });
     file.calls.dedup_by_key(|call| call.byte);
     let callers: Vec<_> = file
@@ -485,7 +574,14 @@ fn bindings(
         return Vec::new();
     };
     let source = file.text.clone();
-    let text = |node: &Node| source.get(node.byte_range()).unwrap_or_default().to_owned();
+    // A keyword list's key (`only: [save: 1]`) reads `save: `.
+    let text = |node: &Node| {
+        let text = source.get(node.byte_range()).unwrap_or_default();
+        match node.kind() {
+            "keyword" => text.trim_end().trim_end_matches(':').to_owned(),
+            _ => text.to_owned(),
+        }
+    };
     let separator = rules.modules.separator();
     let def_names: std::collections::HashSet<(usize, usize)> = def_names
         .iter()
@@ -493,6 +589,8 @@ fn bindings(
         .collect();
     let mut spans = Vec::new();
     let mut found: Vec<Import> = Vec::new();
+    // Names left out of the glob import at a byte.
+    let mut excepts: HashMap<usize, Vec<(String, Option<u32>)>> = HashMap::new();
     let mut cursor = QueryCursor::new();
     let mut matches = cursor.matches(&query.query, tree.root_node(), source.as_bytes());
     while let Some(found_match) = matches.next() {
@@ -582,13 +680,27 @@ fn bindings(
             let Some(source) = source_text else { continue };
             (*default, text(default), ImportTarget::Default { source })
         } else if let Some(glob) = parts.get(&ImportCapture::Glob) {
+            if let Some(except) = parts.get(&ImportCapture::Except) {
+                excepts
+                    .entry(glob.start_byte())
+                    .or_default()
+                    .push((text(except), keyword_arity(except, &source)));
+            }
             let source = match source_text {
                 Some(source) => source,
                 None => prefixed(*glob, &compact(&text(glob)), rules, &source),
             };
-            (*glob, String::new(), ImportTarget::Glob { source })
+            let target = ImportTarget::Glob {
+                source,
+                except: Vec::new(),
+            };
+            (*glob, String::new(), target)
         } else {
             continue;
+        };
+        let arity = match target {
+            ImportTarget::Item { .. } => keyword_arity(&anchor, &source),
+            _ => None,
         };
         found.push(Import {
             local,
@@ -596,10 +708,20 @@ fn bindings(
             scope: None,
             byte: anchor.start_byte(),
             at: point(anchor),
+            arity,
         });
     }
     found.sort_by_key(|import| import.byte);
     found.dedup_by(|a, b| a.byte == b.byte && a.local == b.local && a.target == b.target);
+    for import in &mut found {
+        if let (ImportTarget::Glob { except, .. }, Some(names)) =
+            (&mut import.target, excepts.get(&import.byte))
+        {
+            except.clone_from(names);
+            except.sort();
+            except.dedup();
+        }
+    }
     for import in &mut found {
         import.scope = file.enclosing(import.byte);
     }

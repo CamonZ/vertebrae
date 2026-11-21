@@ -26,14 +26,16 @@ enum Language {
     Tsx,
     JavaScript,
     Python,
+    Elixir,
 }
 
-const LANGUAGES: [Language; 5] = [
+const LANGUAGES: [Language; 6] = [
     Language::Rust,
     Language::TypeScript,
     Language::Tsx,
     Language::JavaScript,
     Language::Python,
+    Language::Elixir,
 ];
 
 impl Language {
@@ -44,6 +46,24 @@ impl Language {
             Self::Tsx => "fixture.tsx",
             Self::JavaScript => "fixture.js",
             Self::Python => "fixture.py",
+            Self::Elixir => "lib/fixture.ex",
+        }
+    }
+
+    /// Statements the language has: Elixir has no early return.
+    fn stmt_kinds(self) -> Vec<StmtKind> {
+        STMT_KINDS
+            .into_iter()
+            .filter(|kind| self != Self::Elixir || *kind != StmtKind::Return)
+            .collect()
+    }
+
+    /// A loop's subject as the fact names it: Elixir loops over `x` with
+    /// `for`, the others while `x > 0`.
+    fn loop_subject(self) -> &'static str {
+        match self {
+            Self::Elixir => "x",
+            _ => "x > 0",
         }
     }
 
@@ -56,6 +76,7 @@ impl Language {
         match self {
             Self::Rust => "std::fs::remove_file",
             Self::Python => "os.remove",
+            Self::Elixir => "File.rm",
             _ => "fs.unlinkSync",
         }
     }
@@ -63,7 +84,7 @@ impl Language {
     fn throw(self) -> &'static str {
         match self {
             Self::Rust => "panic",
-            Self::Python => "raise",
+            Self::Python | Self::Elixir => "raise",
             _ => "throw",
         }
     }
@@ -182,6 +203,16 @@ impl Render<'_> {
                 }
                 return;
             }
+            Language::Elixir => {
+                let (keyword, condition) = match keyword {
+                    "while" => ("for", "y <- x"),
+                    _ => (keyword, condition),
+                };
+                out.push_str(&format!("{keyword} {condition} do\n"));
+                self.body(out, body, depth + 1);
+                out.push_str(&format!("{indent}end\n"));
+                return;
+            }
             Language::Rust => out.push_str(&format!("{keyword} {condition} {{")),
             _ => out.push_str(&format!("{keyword} ({condition}) {{")),
         }
@@ -210,16 +241,16 @@ impl Render<'_> {
                     };
                     match language {
                         Language::Rust => format!("let {var} = {value};"),
-                        Language::Python => format!("{var} = {value}"),
+                        Language::Python | Language::Elixir => format!("{var} = {value}"),
                         _ => format!("const {var} = {value};"),
                     }
                 }
                 Stmt::Call { callee } => match language {
-                    Language::Python => format!("{callee}(x)"),
+                    Language::Python | Language::Elixir => format!("{callee}(x)"),
                     _ => format!("{callee}(x);"),
                 },
                 Stmt::Effect => match language {
-                    Language::Python => format!("{}(x)", language.effect()),
+                    Language::Python | Language::Elixir => format!("{}(x)", language.effect()),
                     _ => format!("{}(x);", language.effect()),
                 },
                 Stmt::Branch { bound, body } => {
@@ -231,6 +262,7 @@ impl Render<'_> {
                     continue;
                 }
                 Stmt::Return { bound } => match language {
+                    Language::Elixir => unreachable!("Elixir has no early return"),
                     Language::Rust => format!("if x > {bound} {{ return x; }}"),
                     Language::Python => format!("if x > {bound}:\n{indent}{}return x", self.pad),
                     _ => format!("if (x > {bound}) return x;"),
@@ -238,6 +270,7 @@ impl Render<'_> {
                 Stmt::Throw => match language {
                     Language::Rust => "panic!(\"stop\");".to_owned(),
                     Language::Python => "raise x".to_owned(),
+                    Language::Elixir => "raise \"stop\"".to_owned(),
                     _ => "throw x;".to_owned(),
                 },
             };
@@ -260,7 +293,8 @@ impl Program {
             pad: &pad,
         };
         let separator = "\n".repeat(style.blank_lines + 1);
-        self.functions
+        let body = self
+            .functions
             .iter()
             .map(|f| {
                 let name = &f.name;
@@ -276,6 +310,10 @@ impl Program {
                         format!("{vis}function {name}(x) {{\n")
                     }
                     Language::Python => format!("def {name}(x):\n"),
+                    Language::Elixir => {
+                        let def = if f.public { "def" } else { "defp" };
+                        format!("{def} {name}(x) do\n")
+                    }
                     _ => {
                         let vis = if public { "export " } else { "" };
                         format!("{vis}function {name}(x: {ty}): number {{\n")
@@ -285,13 +323,18 @@ impl Program {
                 out += &match language {
                     Language::Rust => format!("{pad}x\n}}"),
                     Language::Python => format!("{pad}return x"),
+                    Language::Elixir => format!("{pad}x\nend"),
                     _ => format!("{pad}return x;\n}}"),
                 };
                 out
             })
             .collect::<Vec<_>>()
             .join(&separator)
-            + "\n"
+            + "\n";
+        match language {
+            Language::Elixir => format!("defmodule Fixture do\n{body}end\n"),
+            _ => body,
+        }
     }
 }
 
@@ -316,7 +359,7 @@ fn brings(stmt: &Stmt, language: Language, out: &mut BTreeSet<String>) {
             body.iter().for_each(|s| brings(s, language, out));
         }
         Stmt::Loop { body } => {
-            out.insert("loop x > 0".to_owned());
+            out.insert(format!("loop {}", language.loop_subject()));
             body.iter().for_each(|s| brings(s, language, out));
         }
         Stmt::Return { bound } => {
@@ -333,7 +376,7 @@ fn index(tc: &TestCase, len: usize) -> usize {
     tc.draw(gs::integers::<usize>().min_value(0).max_value(len - 1))
 }
 
-fn stmt(tc: &TestCase, p: &mut Program, kind: StmtKind, depth: usize) -> Stmt {
+fn stmt(tc: &TestCase, language: Language, p: &mut Program, kind: StmtKind, depth: usize) -> Stmt {
     let callee = || tc.draw(gs::sampled_from(CALLEES.to_vec()));
     let bound = || tc.draw(gs::integers::<u32>().min_value(1).max_value(9));
     match kind {
@@ -352,28 +395,28 @@ fn stmt(tc: &TestCase, p: &mut Program, kind: StmtKind, depth: usize) -> Stmt {
         StmtKind::Effect => Stmt::Effect,
         StmtKind::Branch => Stmt::Branch {
             bound: bound(),
-            body: body(tc, p, depth + 1),
+            body: body(tc, language, p, depth + 1),
         },
         StmtKind::Loop => Stmt::Loop {
-            body: body(tc, p, depth + 1),
+            body: body(tc, language, p, depth + 1),
         },
         StmtKind::Return => Stmt::Return { bound: bound() },
         StmtKind::Throw => Stmt::Throw,
     }
 }
 
-fn body(tc: &TestCase, p: &mut Program, depth: usize) -> Vec<Stmt> {
+fn body(tc: &TestCase, language: Language, p: &mut Program, depth: usize) -> Vec<Stmt> {
     let max = if depth >= MAX_DEPTH { 0 } else { 3 };
     let len = tc.draw(gs::integers::<usize>().min_value(0).max_value(max));
     (0..len)
         .map(|_| {
-            let kind = tc.draw(gs::sampled_from(STMT_KINDS.to_vec()));
-            stmt(tc, p, kind, depth)
+            let kind = tc.draw(gs::sampled_from(language.stmt_kinds()));
+            stmt(tc, language, p, kind, depth)
         })
         .collect()
 }
 
-fn program(tc: &TestCase) -> Program {
+fn program(tc: &TestCase, language: Language) -> Program {
     let mut p = Program {
         functions: Vec::new(),
         fresh: 0,
@@ -384,7 +427,7 @@ fn program(tc: &TestCase) -> Program {
         // Sometimes the same body as the function before.
         let body = match p.functions.last() {
             Some(previous) if tc.draw(gs::booleans()) => previous.body.clone(),
-            _ => body(tc, &mut p, 0),
+            _ => body(tc, language, &mut p, 0),
         };
         p.functions.push(Function {
             name,
@@ -506,7 +549,7 @@ fn pick(tc: &TestCase, f: &Function, want: impl Fn(&Stmt) -> bool) -> (BlockPath
 
 /// Makes sure function `f` has a statement the mutation needs, so cases
 /// are not rejected: a call, an assignment of calls, a literal or local.
-fn seed(tc: &TestCase, p: &mut Program, f: usize, mutation: Mutation) {
+fn seed(tc: &TestCase, language: Language, p: &mut Program, f: usize, mutation: Mutation) {
     let kind = match mutation {
         Mutation::ChangeCallee => StmtKind::Call,
         Mutation::ToggleTwice | Mutation::ChangeLiteral | Mutation::RenameLocal => StmtKind::Assign,
@@ -534,7 +577,7 @@ fn seed(tc: &TestCase, p: &mut Program, f: usize, mutation: Mutation) {
     if statements(&p.functions[f]).iter().any(|(_, _, s)| fits(s)) {
         return;
     }
-    let mut added = stmt(tc, p, kind, 0);
+    let mut added = stmt(tc, language, p, kind, 0);
     if let Stmt::Assign { value, .. } = &mut added {
         *value = match mutation {
             Mutation::ChangeLiteral => Value::Literal(1),
@@ -569,11 +612,12 @@ fn mutate(
     };
     match mutation {
         Mutation::Add(kind) => {
+            tc.assume(language.stmt_kinds().contains(&kind));
             let mut paths = Vec::new();
             blocks(&p.functions[f].body, &mut Vec::new(), &mut paths);
             let path = paths[index(tc, paths.len())].clone();
             nested(&path);
-            let added = stmt(tc, &mut p, kind, path.len());
+            let added = stmt(tc, language, &mut p, kind, path.len());
             let target = block(&mut p.functions[f].body, &path);
             let at = tc.draw(gs::integers::<usize>().min_value(0).max_value(target.len()));
             target.insert(at, added.clone());
@@ -673,7 +717,16 @@ fn mutate(
             let function = &mut p.functions[f];
             function.public = !function.public;
             let mut lines = BTreeSet::new();
-            if language == Language::Rust {
+            if language == Language::Elixir {
+                // `def` and `defp` are both visibilities; as with Rust's
+                // `pub`, only that token changes.
+                let (from, to) = if function.public {
+                    ("defp", "def")
+                } else {
+                    ("def", "defp")
+                };
+                facts.insert(format!("~visibility {from} → {to}"));
+            } else if language == Language::Rust {
                 lines.insert("visibility pub".to_owned());
             } else {
                 // `export` wraps the function, exposing its signature.
@@ -686,7 +739,7 @@ fn mutate(
                     lines.insert("signature number".to_owned());
                 }
             }
-            facts = sign(function.public, lines);
+            facts.extend(sign(function.public, lines));
         }
         Mutation::RenameFunction => p.functions[f].name = p.fresh("r"),
         Mutation::RenameLocal => {
@@ -842,10 +895,10 @@ struct Case {
 
 fn draw_case(tc: &TestCase) -> Case {
     let language = tc.draw(gs::sampled_from(LANGUAGES.to_vec()));
-    let mut before = program(tc);
+    let mut before = program(tc, language);
     let mutation = tc.draw(gs::sampled_from(mutations()));
     let f = index(tc, before.functions.len());
-    seed(tc, &mut before, f, mutation);
+    seed(tc, language, &mut before, f, mutation);
     let mutated = mutate(tc, language, before.clone(), mutation, f);
     Case {
         language,
@@ -868,7 +921,8 @@ fn run(cases: u64, test: impl Fn(&Case)) {
         reached.insert(mutation_class(case.mutation));
         reached.extend(case.mutated.classes.iter().cloned());
     })
-    .settings(Settings::new().test_cases(cases))
+    // Keep the generated class-coverage check reproducible.
+    .settings(Settings::new().test_cases(cases).seed(Some(20261121)))
     .run();
     let reached = reached.into_inner();
     let mut wanted: Vec<String> = LANGUAGES.iter().map(|l| format!("{l:?}")).collect();

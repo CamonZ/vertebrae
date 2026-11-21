@@ -1,0 +1,16 @@
+# Common Elixir libraries: HTTP clients, Ecto repositories, Phoenix PubSub.
+Req.*                       network
+HTTPoison.*                 network
+Finch.*                     network
+Tesla.*                     network
+Mint.HTTP.*                 network
+**.Repo.*                   database
+Ecto.Adapters.SQL.*         database
+Ecto.Multi.*                database
+Phoenix.PubSub.*            event
+**.PubSub.broadcast         event
+**.PubSub.broadcast!        event
+**.PubSub.broadcast_from    event
+**.PubSub.subscribe         event
+**.Endpoint.broadcast       event
+**.Endpoint.broadcast!      event

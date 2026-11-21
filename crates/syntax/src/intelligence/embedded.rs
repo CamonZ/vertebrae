@@ -142,6 +142,8 @@ pub(super) struct Ctx<'a> {
     truncated: Cell<Option<Truncation>>,
     error: RefCell<Option<SnapshotError>>,
     pub(super) crates: OnceCell<BTreeMap<String, String>>,
+    /// Declared modules by project root and full name, as found.
+    pub(super) declared: RefCell<HashMap<(String, String), Vec<super::modules::ModuleLoc>>>,
 }
 
 impl<'a> Ctx<'a> {
@@ -158,6 +160,7 @@ impl<'a> Ctx<'a> {
             truncated: Cell::new(None),
             error: RefCell::new(None),
             crates: OnceCell::new(),
+            declared: RefCell::new(HashMap::new()),
         }
     }
 

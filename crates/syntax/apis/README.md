@@ -10,7 +10,10 @@ uses, most specific first. Each row is `pattern kind`:
   one segment and a leading `**::` or `**.` any number of leading
   segments, none included, joined by that separator;
 - a receiver that is not a plain name (`open(path).write`) is one segment
-  that only `*` or `**` match;
+  that only `*` or `**` match; an Erlang module (`:ets`) is a plain name
+  with its colon;
+- a pattern's segment may end in `?` or `!` (`File.exists?`,
+  `System.fetch_env!`), as Elixir functions are named;
 - a kind is an effect (`filesystem`, `network`, `process`, `database`,
   `ipc_command`, `event`, `env`, `ui`), a concurrency primitive (`spawn`,
   `lock`) or `ignore`: a trivial call (`map`, `clone`, `len`) that is not

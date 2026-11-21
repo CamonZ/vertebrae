@@ -3,7 +3,7 @@
 //! exactly the ids `i + 1 .. i + size`.
 
 use super::facts::{Captures, FactsQuery};
-use super::profile::Declarations;
+use super::profile::{Arity, Declarations};
 use super::{Deadline, DeclarationKind, FallbackReason, LineSpan};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -51,6 +51,13 @@ pub(crate) struct Declaration {
     pub(crate) name: String,
     /// The node holding the name.
     pub(crate) name_node: NodeId,
+    /// Where a callable's signature ends, when the declarations query
+    /// says (`@body`); else its `body` field.
+    pub(crate) body: Option<NodeId>,
+    /// For a later clause of a function (Elixir's `def f(0)` after `def
+    /// f(n)`: same name and arity, same parent), the first clause, which
+    /// stands for the function as one scope.
+    pub(crate) clause_of: Option<NodeId>,
 }
 
 pub(crate) struct SyntaxTree<'s> {
@@ -100,12 +107,14 @@ fn content(text: &str, literal: bool) -> impl Iterator<Item = u8> + '_ {
 }
 
 impl<'s> SyntaxTree<'s> {
+    #[allow(clippy::too_many_arguments, reason = "the profile's parts")]
     pub(crate) fn build(
         source: &'s str,
         syntax: &'s Tree,
         declarations: &Declarations,
         facts: &FactsQuery,
         literals: &[&str],
+        arity: Option<&Arity>,
         max_nodes: usize,
         deadline: &Deadline,
     ) -> Result<Self, FallbackReason> {
@@ -167,7 +176,7 @@ impl<'s> SyntaxTree<'s> {
                         captures: Captures::default(),
                     };
                     tree.summarize(literals);
-                    tree.scopes = tree.find_scopes(syntax, declarations, &ids, deadline)?;
+                    tree.scopes = tree.find_scopes(syntax, declarations, arity, &ids, deadline)?;
                     tree.captures = Captures::find(&tree, syntax, facts, &ids, deadline)?;
                     return Ok(tree);
                 }
@@ -231,10 +240,15 @@ impl<'s> SyntaxTree<'s> {
         &self,
         syntax: &Tree,
         declarations: &Declarations,
+        arity: Option<&Arity>,
         ids: &HashMap<usize, NodeId>,
         deadline: &Deadline,
     ) -> Result<HashMap<NodeId, Declaration>, FallbackReason> {
-        let mut found: HashMap<NodeId, (DeclarationKind, NodeId)> = HashMap::new();
+        // Per node: kind, name node and the `@keyword` node if any.
+        let mut found: HashMap<NodeId, (DeclarationKind, NodeId, Option<NodeId>)> = HashMap::new();
+        let mut bodies: HashMap<NodeId, NodeId> = HashMap::new();
+        // Per callable node, the most arguments it takes.
+        let mut arities: HashMap<NodeId, u32> = HashMap::new();
         let mut cursor = QueryCursor::new();
         let mut matches = cursor.matches(
             &declarations.query,
@@ -248,30 +262,73 @@ impl<'s> SyntaxTree<'s> {
                 deadline.check()?;
             }
             let mut name = None;
+            let mut keyword = None;
+            let mut body = None;
+            let mut parameters = None;
             let mut declaration = None;
             for capture in found_match.captures() {
+                let id = ids.get(&capture.node.id()).copied();
                 if capture.index == declarations.name {
-                    name = ids.get(&capture.node.id()).copied();
+                    name = id;
+                } else if Some(capture.index) == declarations.parameters {
+                    parameters = Some(capture.node);
+                } else if Some(capture.index) == declarations.keyword {
+                    keyword = id;
+                } else if Some(capture.index) == declarations.body {
+                    body = id;
                 } else if let Some(Some(kind)) = declarations.kinds.get(capture.index as usize) {
-                    declaration = ids.get(&capture.node.id()).map(|&id| (*kind, id));
+                    declaration = id.map(|id| (*kind, id));
                 }
             }
-            let (Some(name), Some((kind, id))) = (name, declaration) else {
+            let Some((kind, id)) = declaration else {
                 continue;
             };
+            if let Some(body) = body {
+                bodies.entry(id).or_insert(body);
+            }
+            let Some(name) = name else {
+                continue;
+            };
+            if let (Some(arity), true) = (arity, kind.callable()) {
+                let (_, max) = arity.of_parameters(parameters, self.source.as_bytes());
+                arities.insert(id, max);
+            }
             match found.entry(id) {
                 Entry::Vacant(entry) => {
-                    entry.insert((kind, name));
+                    entry.insert((kind, name, keyword));
                 }
                 Entry::Occupied(mut entry) if kind.precedence() < entry.get().0.precedence() => {
-                    entry.insert((kind, name));
+                    entry.insert((kind, name, keyword));
                 }
                 Entry::Occupied(_) => {}
             }
         }
+        // Clauses: callables sharing parent, kind, name and arity, the
+        // first in the source standing for all.
+        type Function<'t> = (Option<NodeId>, DeclarationKind, &'t str, u32);
+        let mut first_clause: HashMap<Function, NodeId> = HashMap::new();
+        let mut clauses: Vec<(NodeId, Function)> = found
+            .iter()
+            .filter_map(|(&id, &(kind, name, _))| {
+                let arity = *arities.get(&id)?;
+                Some((id, (self.nodes[id].parent, kind, self.text(name), arity)))
+            })
+            .collect();
+        clauses.sort_unstable_by_key(|(id, _)| *id);
+        let mut clause_of: HashMap<NodeId, NodeId> = HashMap::new();
+        for (id, key) in clauses {
+            match first_clause.entry(key) {
+                Entry::Vacant(entry) => {
+                    entry.insert(id);
+                }
+                Entry::Occupied(entry) => {
+                    clause_of.insert(id, *entry.get());
+                }
+            }
+        }
         Ok(found
             .into_iter()
-            .map(|(id, (kind, name_node))| {
+            .map(|(id, (kind, name_node, keyword_node))| {
                 let name = self
                     .text(name_node)
                     .trim_matches(|c| matches!(c, '"' | '\'' | '`'));
@@ -282,11 +339,17 @@ impl<'s> SyntaxTree<'s> {
                     }
                     _ => name.to_owned(),
                 };
+                let keyword = match keyword_node {
+                    Some(node) => self.text(node).to_owned(),
+                    None => self.keyword(id, name_node, kind),
+                };
                 let declaration = Declaration {
                     kind,
-                    keyword: self.keyword(id, name_node, kind),
+                    keyword,
                     name: display_name(&name),
                     name_node,
+                    body: bodies.get(&id).copied(),
+                    clause_of: clause_of.get(&id).copied(),
                 };
                 (id, declaration)
             })

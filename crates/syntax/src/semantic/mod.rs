@@ -30,7 +30,10 @@ mod tree;
 
 use crate::Grammar;
 pub use declarations::{DeclarationChange, DeclarationDiff, Part};
-pub(crate) use facts::{call_parts as facts_call_parts, ApiTable};
+pub(crate) use facts::{
+    call_parts as facts_call_parts, ignored_ranges as facts_ignored, inside as facts_inside,
+    ApiTable,
+};
 pub use facts::{EffectKind, Fact, FactCategory, FactChange, FactKind, Facts};
 use serde::Serialize;
 use std::cell::Cell;
@@ -40,12 +43,12 @@ use std::time::{Duration, Instant};
 /// results by content key them with it too. Bump it whenever output for
 /// the same input changes (a query, table, or derivation edit), and update
 /// [`ENGINE_INPUTS`] with it.
-pub const ENGINE_VERSION: u32 = 2;
+pub const ENGINE_VERSION: u32 = 3;
 
 /// A digest of every query and API table the engine reads, pinned with
 /// [`ENGINE_VERSION`]: a test fails when they change without a bump.
 #[cfg(test)]
-pub(crate) const ENGINE_INPUTS: (u32, u64) = (ENGINE_VERSION, 0xc61e_8423_5ec4_4c9a);
+pub(crate) const ENGINE_INPUTS: (u32, u64) = (ENGINE_VERSION, 0x4119_4238_4ea7_b0c2);
 
 /// 1-based inclusive line range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
@@ -266,18 +269,47 @@ impl Deadline {
 }
 
 /// Semantic diff of two versions of `path`. The grammar comes from the
-/// path's extension.
+/// path's extension; in a test file (by the language's convention, such
+/// as Elixir's `test/…_test.exs`) every change is test code.
 pub fn diff(path: &str, old: &str, new: &str, budget: &Budget) -> SemanticOutcome {
-    match Grammar::for_path(path) {
-        Some(grammar) => diff_with(grammar, old, new, budget),
-        None => SemanticOutcome::Fallback {
+    let Some(grammar) = Grammar::for_path(path) else {
+        return SemanticOutcome::Fallback {
             reason: FallbackReason::UnsupportedLanguage,
-        },
-    }
+        };
+    };
+    let test_file = grammar
+        .profile()
+        .is_some_and(|profile| profile.is_test_file(path));
+    outcome(
+        grammar,
+        node_changes(grammar, old, new, budget).map(|changes| match test_file {
+            true => changes.into_iter().map(in_test).collect(),
+            false => changes,
+        }),
+    )
 }
 
 pub fn diff_with(grammar: Grammar, old: &str, new: &str, budget: &Budget) -> SemanticOutcome {
-    match node_changes(grammar, old, new, budget) {
+    outcome(grammar, node_changes(grammar, old, new, budget))
+}
+
+/// A change in a test file is test code, as one under `#[test]` is.
+fn in_test(mut change: SemanticChange) -> SemanticChange {
+    let inside = Fact {
+        kind: FactKind::TestCode,
+        change: FactChange::Inside,
+    };
+    if !change.facts.items.contains(&inside) {
+        change.facts.items.push(inside);
+    }
+    change
+}
+
+fn outcome(
+    grammar: Grammar,
+    changes: Result<Vec<SemanticChange>, FallbackReason>,
+) -> SemanticOutcome {
+    match changes {
         Ok(changes) => SemanticOutcome::Semantic {
             language: grammar.name().into(),
             declarations: declarations::group(changes),
@@ -320,6 +352,7 @@ pub(crate) fn node_changes(
             &compiled.declarations,
             &compiled.facts,
             profile.literals,
+            profile.arity.as_ref(),
             budget.max_nodes,
             &deadline,
         )

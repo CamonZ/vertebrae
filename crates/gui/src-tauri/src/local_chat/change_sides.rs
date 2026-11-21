@@ -305,6 +305,117 @@ mod tests {
         assert!(matches!(found[0].change, DeclarationChange::Added { .. }));
     }
 
+    const ACCOUNTS: &str = "defmodule Shop.Accounts do\n  def get(id), do: Repo.get(User, id)\n\n  defp audit(entry) do\n    entry\n  end\nend\n";
+
+    /// Labels (`keyword name`, outermost first) and fact kinds of each
+    /// changed declaration.
+    fn labelled(found: &[DeclarationDiff]) -> Vec<(Vec<String>, Vec<String>)> {
+        found
+            .iter()
+            .map(|d| {
+                let labels = d
+                    .scope
+                    .iter()
+                    .chain(&d.subject)
+                    .map(|s| format!("{} {}", s.keyword, s.name))
+                    .collect();
+                let facts = d
+                    .facts
+                    .items
+                    .iter()
+                    .chain(d.parts.iter().flat_map(|p| &p.facts().items))
+                    .map(|f| serde_json::to_value(f.kind).unwrap()["type"].to_string())
+                    .collect();
+                (labels, facts)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn elixir_worktree_edits_get_declaration_aligned_hunks_with_facts() {
+        let (dir, head) = repo();
+        let root = dir.path();
+        fs::create_dir_all(root.join("lib/shop")).unwrap();
+        fs::write(root.join("lib/shop/accounts.ex"), ACCOUNTS).unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "elixir"]);
+        let head_with_elixir = git(root, &["rev-parse", "HEAD"]);
+        assert_ne!(head, head_with_elixir);
+        fs::write(
+            root.join("lib/shop/accounts.ex"),
+            ACCOUNTS.replace("    entry\n", "    File.write!(\"audit.log\", entry)\n"),
+        )
+        .unwrap();
+        let sides = working_tree(root, &head_with_elixir, "lib/shop/accounts.ex").unwrap();
+        let found = declarations(outcome(sides));
+        assert_eq!(
+            labelled(&found),
+            [(
+                vec![
+                    "defmodule Shop.Accounts".to_owned(),
+                    "defp audit".to_owned()
+                ],
+                vec!["\"effect\"".to_owned(), "\"unwrap\"".to_owned()],
+            )],
+            "{found:#?}"
+        );
+        // The hunks are the function's changed line, not the whole file.
+        for part in &found[0].parts {
+            let (old, new) = part.spans();
+            for span in old.into_iter().chain(new) {
+                assert_eq!((span.start, span.end), (5, 5), "{found:#?}");
+            }
+        }
+    }
+
+    #[test]
+    fn elixir_scripts_in_commits_and_broken_files_take_their_paths() {
+        let (dir, base) = repo();
+        let root = dir.path();
+        fs::create_dir_all(root.join("test")).unwrap();
+        let script = "defmodule Shop.AccountsTest do\n  use ExUnit.Case\n\n  test \"gets\" do\n    assert get(1) == 1\n  end\nend\n";
+        fs::write(root.join("test/accounts_test.exs"), script).unwrap();
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "test"]);
+        let first = git(root, &["rev-parse", "HEAD"]);
+        fs::write(
+            root.join("test/accounts_test.exs"),
+            script.replace("== 1", "== 2"),
+        )
+        .unwrap();
+        git(root, &["commit", "-qam", "edit"]);
+        let second = git(root, &["rev-parse", "HEAD"]);
+        let sides = load(
+            root,
+            &comparison(&first, &second, false),
+            "test/accounts_test.exs",
+            None,
+            true,
+        )
+        .unwrap();
+        let found = declarations(outcome(sides));
+        assert_eq!(
+            labelled(&found),
+            [(
+                vec!["defmodule Shop.AccountsTest".to_owned()],
+                vec!["\"literal\"".to_owned(), "\"test_code\"".to_owned()],
+            )],
+            "{found:#?}"
+        );
+        // A side that does not parse falls back to the line diff.
+        fs::write(
+            root.join("test/accounts_test.exs"),
+            script.replace("get(1) == 1", "get(1 == 1"),
+        )
+        .unwrap();
+        assert_eq!(
+            outcome(working_tree(root, &base, "test/accounts_test.exs").unwrap()),
+            SemanticOutcome::Fallback {
+                reason: FallbackReason::SyntaxError
+            }
+        );
+    }
+
     #[test]
     fn results_are_cached_by_revision() {
         let body = |text: &str, revision: &str| FileBody::Text {

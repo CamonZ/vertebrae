@@ -211,6 +211,7 @@ impl<'s> Script<'_, 's> {
         for ((from, to), sites) in renames {
             let binding = sites.iter().copied().find(|&(_, b)| {
                 matches!(self.new.nodes[b].field, Some("name" | "pattern" | "left"))
+                    || self.declared_by(b).is_some()
             });
             // One unbound pair is as likely two unrelated names lined up
             // inside rewritten code.
@@ -242,12 +243,7 @@ impl<'s> Script<'_, 's> {
                 to: to.into(),
                 occurrences,
             };
-            let named = self.new.nodes[b].parent.filter(|&parent| {
-                self.new
-                    .scopes
-                    .get(&parent)
-                    .is_some_and(|d| d.name_node == b)
-            });
+            let named = self.declared_by(b);
             let facts = self.facts(Some(a..a + 1), Some(b..b + 1), Reach::Context)?;
             out.push(match named {
                 Some(declaration) => self.declaring(edit, Side::New, declaration, facts),
@@ -255,6 +251,20 @@ impl<'s> Script<'_, 's> {
             });
         }
         Ok(())
+    }
+
+    /// The declaration whose name is node `b` of the new side: the nearest
+    /// enclosing one, when `b` is its name (Elixir's names sit inside a
+    /// call's arguments rather than directly in the declaration).
+    fn declared_by(&self, b: NodeId) -> Option<NodeId> {
+        let mut cursor = self.new.nodes[b].parent;
+        while let Some(node) = cursor {
+            if let Some(declaration) = self.new.scopes.get(&node) {
+                return (declaration.name_node == b).then_some(node);
+            }
+            cursor = self.new.nodes[node].parent;
+        }
+        None
     }
 
     /// A rename only when the old name is gone from the scope enclosing all
@@ -466,9 +476,13 @@ impl<'s> Script<'_, 's> {
     }
 
     /// A change to the declaration `id` itself: added, removed, moved or
-    /// renamed as a whole.
+    /// renamed as a whole. A function's later clause is part of the
+    /// function, so a change to it is one inside the function.
     fn declaring(&self, edit: Edit, side: Side, id: NodeId, facts: Facts) -> SemanticChange {
         let tree = self.tree(side);
+        if tree.scopes.get(&id).is_some_and(|d| d.clause_of.is_some()) {
+            return self.change(edit, side, id, facts);
+        }
         SemanticChange {
             node_kind: tree.nodes[id].kind.to_string(),
             scope: self.scope(side, id),
@@ -569,6 +583,11 @@ impl<'s> Script<'_, 's> {
         let mut cursor = Some(id);
         while let Some(node) = cursor {
             if let Some(meta) = tree.scopes.get(&node) {
+                // A later clause is its function's first.
+                let (node, meta) = match meta.clause_of {
+                    Some(first) => (first, &tree.scopes[&first]),
+                    None => (node, meta),
+                };
                 let here = tree.nodes[node].lines.start;
                 let there = self
                     .partner(side, node)
@@ -599,7 +618,7 @@ impl<'s> Script<'_, 's> {
                 if !meta.kind.callable() {
                     return false;
                 }
-                return match tree.body(node) {
+                return match meta.body.or_else(|| tree.body(node)) {
                     Some(body) => tree.nodes[id].bytes.end <= tree.nodes[body].bytes.start,
                     None => true,
                 };

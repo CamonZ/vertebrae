@@ -482,12 +482,129 @@ const PYTHON: &[Fixture] = &[
     },
 ];
 
-const LANGUAGES: [(&str, &[Fixture]); 5] = [
+const ELIXIR: &[Fixture] = &[
+    Fixture {
+        path: "lib/sync.ex",
+        category: FactCategory::Calls,
+        old: "defmodule Sync do\n  def sync(store) do\n    Store.flush(store)\n  end\nend\n",
+        new: "defmodule Sync do\n  def sync(store) do\n    Store.flush(store)\n    retry(store)\n    store |> prepare() |> Queue.drain\n  end\nend\n",
+        expect: &["+call retry", "+call prepare", "+call Queue.drain"],
+    },
+    Fixture {
+        path: "lib/sync.ex",
+        category: FactCategory::Effects,
+        old: "defmodule Sync do\n  def save(body) do\n    log(body)\n  end\nend\n",
+        new: "defmodule Sync do\n  def save(body) do\n    File.write(\"out.json\", body)\n    Req.post(url(), json: body)\n    System.cmd(\"git\", [\"add\", \".\"])\n    MyApp.Repo.insert(body)\n    GenServer.cast(Saver, {:saved, body})\n    send(self(), :saved)\n    Phoenix.PubSub.broadcast(PubSub, \"saves\", body)\n    home = System.get_env(\"HOME\")\n  end\nend\n",
+        expect: &[
+            "+effect.filesystem File.write",
+            "+effect.network Req.post",
+            "+effect.process System.cmd",
+            "+effect.database MyApp.Repo.insert",
+            "+effect.ipc_command GenServer.cast",
+            "+effect.ipc_command send",
+            "+effect.event Phoenix.PubSub.broadcast",
+            "+effect.env System.get_env",
+            "+call url",
+            "+call self",
+            "-call log",
+        ],
+    },
+    Fixture {
+        path: "lib/flow.ex",
+        category: FactCategory::ControlFlow,
+        old: "defmodule Flow do\n  def step(x) do\n    if x > 1 do\n      go()\n    end\n    x\n  end\nend\n",
+        new: "defmodule Flow do\n  def step(x) do\n    if x > 2 do\n      go()\n    else\n      stop()\n    end\n    for item <- items(x), do: item\n    case x do\n      0 -> :none\n      _ -> :some\n    end\n    cond do\n      x > 9 -> :big\n    end\n    x\n  end\nend\n",
+        expect: &[
+            "~branch x > 1 → x > 2",
+            "+branch else",
+            "+call stop",
+            "+loop items(x)",
+            "+call items",
+            "+match_arm 0",
+            "+match_arm _",
+            "+branch x > 9",
+            "~literal 1 → 2",
+        ],
+    },
+    Fixture {
+        path: "lib/load.ex",
+        category: FactCategory::ErrorHandling,
+        old: "defmodule Load do\n  def load(text) do\n    {:ok, parse(text)}\n  end\nend\n",
+        new: "defmodule Load do\n  def load(text) do\n    with {:ok, v} <- parse(text) do\n      File.read!(v)\n    else\n      {:error, reason} -> raise ArgumentError, reason\n    end\n  rescue\n    e in RuntimeError -> {:error, e}\n  end\nend\n",
+        expect: &[
+            "+match_arm {:ok, v}",
+            "+catch else",
+            "+catch rescue",
+            "+error_type RuntimeError",
+            "+error_type {:error, reason}",
+            "+error_type {:error, e}",
+            "+throw raise",
+            "+unwrap read!",
+            "+effect.filesystem File.read!",
+        ],
+    },
+    Fixture {
+        path: "lib/budget.ex",
+        category: FactCategory::Data,
+        old: "defmodule Budget do\n  @max 200\n  @type amount :: integer\n  defstruct [:owner, spent: 0]\nend\n",
+        new: "defmodule Budget do\n  @max 250\n  @type amount :: float\n  defstruct [:owner, :limit, spent: 0]\n\n  def owner(budget), do: budget.owner\nend\n",
+        expect: &[
+            "~literal 200 → 250",
+            "~type_annotation integer → float",
+            // A struct field is an atom, which is a literal too.
+            "+field :limit",
+            "+literal :limit",
+            "+field owner",
+            "+visibility def",
+            "+signature (budget)",
+        ],
+    },
+    Fixture {
+        path: "lib/api.ex",
+        category: FactCategory::Api,
+        old: "defmodule Api do\n  def close(task_id) do\n    task_id\n  end\n\n  def open(id), do: id\nend\n",
+        new: "defmodule Api do\n  def close(task_id, force \\\\ false) do\n    task_id\n  end\n\n  defp open(id), do: id\nend\n",
+        expect: &[
+            "~signature (task_id) → (task_id, force \\\\ false)",
+            "~visibility def → defp",
+        ],
+    },
+    Fixture {
+        path: "lib/run.ex",
+        category: FactCategory::Concurrency,
+        old: "defmodule Run do\n  def run(state) do\n    work(state)\n  end\nend\n",
+        new: "defmodule Run do\n  def run(state) do\n    task = Task.async(fn -> work(state) end)\n    Task.await(task)\n    spawn(fn -> watch(state) end)\n    Agent.update(state, &(&1 + 1))\n  end\nend\n",
+        expect: &[
+            "+spawn Task.async",
+            "+await await",
+            "+spawn spawn",
+            "+lock Agent.update",
+            "+call watch",
+        ],
+    },
+    Fixture {
+        path: "test/budget_test.exs",
+        category: FactCategory::Test,
+        old: "defmodule BudgetTest do\n  use ExUnit.Case\n\n  def total, do: 1\nend\n",
+        new: "defmodule BudgetTest do\n  use ExUnit.Case\n\n  def total, do: 2\nend\n",
+        expect: &["@test_code", "~literal 1 → 2"],
+    },
+    Fixture {
+        path: "lib/budget_checks.ex",
+        category: FactCategory::Test,
+        old: "defmodule Checks do\n  test \"fits\" do\n    assert total() == 1\n  end\nend\n",
+        new: "defmodule Checks do\n  test \"fits\" do\n    assert total() == 2\n  end\nend\n",
+        expect: &["@test_code", "~literal 1 → 2"],
+    },
+];
+
+const LANGUAGES: [(&str, &[Fixture]); 6] = [
     ("rust", RUST),
     ("typescript", TYPESCRIPT),
     ("tsx", TSX),
     ("javascript", JAVASCRIPT),
     ("python", PYTHON),
+    ("elixir", ELIXIR),
 ];
 
 const CATEGORIES: [FactCategory; 8] = [

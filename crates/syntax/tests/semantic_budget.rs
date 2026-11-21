@@ -46,6 +46,24 @@ fn typescript_file(edit: bool) -> String {
     out
 }
 
+/// About 2,000 lines of Elixir: 200 ten-line functions, with a pipeline
+/// and a `case`, in one module.
+fn elixir_file(edit: bool) -> String {
+    let mut out = String::from("defmodule Ledger do\n");
+    for i in 0..200 {
+        let step = if edit && i % 40 == 5 { i + 500 } else { i };
+        let audit = if edit && i % 40 == 5 {
+            "    audit(scaled)\n"
+        } else {
+            ""
+        };
+        out += &format!(
+            "  def entry_{i}(amount) do\n    scaled = amount * {step}\n    case scaled do\n      n when n > {i} -> n\n      _ -> {i}\n    end\n{audit}    check = rem(scaled, 7)\n    check |> Kernel.+(scaled)\n  end\n\n"
+        );
+    }
+    out + "end\n"
+}
+
 fn assert_within_budget(path: &str, old: &str, new: &str) {
     assert!(
         old.lines().count() >= 2_000,
@@ -61,6 +79,10 @@ fn assert_within_budget(path: &str, old: &str, new: &str) {
             ..Budget::default()
         }
     };
+    // A grammar's queries compile once per process, on its first diff,
+    // outside that diff's budget (Elixir's take the longest, about
+    // 0.2 s in optimized builds); that is not per-file work.
+    semantic::diff(path, "", " ", &Budget::default());
     let started = Instant::now();
     let outcome = semantic::diff(path, old, new, &budget);
     let elapsed = started.elapsed();
@@ -109,6 +131,11 @@ fn two_thousand_line_typescript_file_fits_the_budget() {
     );
 }
 
+#[test]
+fn two_thousand_line_elixir_file_fits_the_budget() {
+    assert_within_budget("lib/ledger.ex", &elixir_file(false), &elixir_file(true));
+}
+
 /// Every phase (parsing, tree building, matching, the edit script) checks
 /// the deadline as it goes, so a diff stops soon after its budget runs out
 /// in any build, rather than only after matching finishes.
@@ -124,6 +151,7 @@ fn the_deadline_stops_every_phase_promptly() {
     let inputs = [
         ("ledger.rs", rust_file(false), rust_file(true)),
         ("entries.ts", typescript_file(false), typescript_file(true)),
+        ("lib/ledger.ex", elixir_file(false), elixir_file(true)),
     ];
     for (path, old, new) in &inputs {
         // Each grammar's declarations query compiles once per process, on
