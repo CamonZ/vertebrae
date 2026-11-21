@@ -94,6 +94,7 @@ fn create_builder() -> Builder {
             commands::save_statechart_artifact,
             commands::save_flow_artifact,
             commands::list_artifact_presentations,
+            commands::find_artifact_presentation,
             commands::list_task_artifacts,
             commands::list_project_notifications,
             commands::mark_notifications_read,

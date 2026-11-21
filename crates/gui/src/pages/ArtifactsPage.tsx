@@ -8,14 +8,11 @@ import {
 } from "react";
 import { useSearchParams } from "react-router-dom";
 import type { Artifact } from "../bindings";
-import { ArtifactInspectorPanel } from "../components/Artifacts/ArtifactInspectorPanel";
 import { TreeNode } from "../components/molecules/TreeNode";
 import { Spinner } from "../components/Spinner";
 import { ScopeChip } from "../components/molecules/ScopeChip";
-import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
 import { useProjectArtifacts } from "../hooks/useProjectArtifacts";
-import { useTaskArtifacts } from "../hooks/useTaskArtifacts";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
 import { useShellHeader } from "../hooks/useShellHeader";
 import { formatRelative } from "../utils/formatRelative";
@@ -248,10 +245,8 @@ export function ArtifactsPage() {
     [activeType, allArtifacts]
   );
   const expandedNodes = useExpandedNodes();
-  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(
-    null
-  );
-  const lastSelectedArtifactRef = useRef<Artifact | null>(null);
+  const selectedArtifactId = useEntityPanelStore((state) => state.artifactId);
+  const openArtifact = useEntityPanelStore((state) => state.openArtifact);
   const expansionProjectRef = useRef<string | null | undefined>(undefined);
   const initializedExpansionRef = useRef(false);
   const knownFolderIdsRef = useRef(new Set<string>());
@@ -293,92 +288,12 @@ export function ArtifactsPage() {
       expandedNodes.expandAll([...nextExpandedNodeIds]);
     }
   }, [artifacts.length, expandedNodes, folderIds, projectId]);
-  const selectedArtifact = useMemo(
-    () =>
-      artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null,
-    [artifacts, selectedArtifactId]
-  );
-  if (selectedArtifact) lastSelectedArtifactRef.current = selectedArtifact;
-
-  useEffect(() => {
-    if (
-      selectedArtifactId &&
-      !artifacts.some((artifact) => artifact.id === selectedArtifactId)
-    ) {
-      setSelectedArtifactId(null);
-    }
-  }, [artifacts, selectedArtifactId]);
-
-  // A `vtb://artifact/<id>` link opens this page with `?artifactId=`. Select
-  // it once it is listed; an artifact outside the project, or deleted, is
-  // never listed and leaves the page without a selection.
+  // Retain explicit /artifacts?artifactId= destinations for existing links.
   const [searchParams] = useSearchParams();
   const linkedArtifactId = searchParams.get("artifactId");
-  const appliedLinkRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!linkedArtifactId || appliedLinkRef.current === linkedArtifactId)
-      return;
-    if (!artifacts.some((artifact) => artifact.id === linkedArtifactId)) return;
-    appliedLinkRef.current = linkedArtifactId;
-    setSelectedArtifactId(linkedArtifactId);
-  }, [artifacts, linkedArtifactId]);
-
-  // Placement follows the ticket open in the shared entity panel. Only a
-  // confirmed task-artifact relationship counts as attached: while the lookup
-  // is loading or failed the relationship is unknown, so nothing is replaced.
-  const openTaskId = useEntityPanelStore((state) =>
-    state.selection?.type === "task" ? state.selection.taskId : null
-  );
-  const closeEntityPanel = useEntityPanelStore((state) => state.close);
-  const taskArtifacts = useTaskArtifacts(openTaskId);
-  const relationshipKnown =
-    openTaskId != null && !taskArtifacts.isLoading && !taskArtifacts.error;
-  const attachedToOpenTask =
-    relationshipKnown &&
-    selectedArtifactId != null &&
-    taskArtifacts.artifacts.some((item) => item.id === selectedArtifactId);
-  const handledArtifactRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!selectedArtifactId) {
-      handledArtifactRef.current = null;
-      return;
-    }
-    if (!openTaskId) {
-      handledArtifactRef.current = selectedArtifactId;
-      return;
-    }
-    if (!relationshipKnown) return;
-    if (attachedToOpenTask) {
-      handledArtifactRef.current = selectedArtifactId;
-      return;
-    }
-    // Whichever unrelated panel was opened last replaces the other. Closing
-    // the artifact inspector later never restores a replaced ticket.
-    if (handledArtifactRef.current === selectedArtifactId) {
-      setSelectedArtifactId(null);
-    } else {
-      handledArtifactRef.current = selectedArtifactId;
-      closeEntityPanel();
-    }
-  }, [
-    attachedToOpenTask,
-    closeEntityPanel,
-    openTaskId,
-    relationshipKnown,
-    selectedArtifactId,
-  ]);
-
-  const {
-    mounted: inspectorMounted,
-    closing: inspectorClosing,
-    onAnimationEnd: inspectorOnAnimationEnd,
-  } = usePanelExitTransition(selectedArtifactId != null, 180);
-
-  const selectArtifact = useCallback((artifact: Artifact) => {
-    setSelectedArtifactId(artifact.id);
-  }, []);
-  const closeInspector = useCallback(() => setSelectedArtifactId(null), []);
+    if (linkedArtifactId) openArtifact(linkedArtifactId);
+  }, [linkedArtifactId, openArtifact]);
 
   const onListKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -400,9 +315,9 @@ export function ArtifactsPage() {
                 currentIndex + (event.key === "ArrowDown" ? 1 : -1)
               )
             );
-      setSelectedArtifactId(visibleLeaves[next].id);
+      openArtifact(visibleLeaves[next].id);
     },
-    [selectedArtifactId, visibleLeaves]
+    [openArtifact, selectedArtifactId, visibleLeaves]
   );
 
   useShellHeader("Artifacts");
@@ -475,20 +390,11 @@ export function ArtifactsPage() {
               expandedNodeIds={expandedNodes.expandedNodeIds}
               selectedArtifactId={selectedArtifactId}
               onToggle={expandedNodes.toggleNode}
-              onSelect={selectArtifact}
+              onSelect={(artifact) => openArtifact(artifact.id)}
             />
           )}
         </div>
       </main>
-      {inspectorMounted && (
-        <ArtifactInspectorPanel
-          artifact={selectedArtifact ?? lastSelectedArtifactRef.current}
-          closing={inspectorClosing}
-          onClose={closeInspector}
-          onExitAnimationEnd={inspectorOnAnimationEnd}
-          position={attachedToOpenTask ? "left-of-task" : "right"}
-        />
-      )}
     </div>
   );
 }

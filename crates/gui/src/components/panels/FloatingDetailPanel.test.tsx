@@ -4,10 +4,11 @@ import { FloatingDetailPanel } from "./FloatingDetailPanel";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 
-function renderPanel() {
+function renderPanel(position?: "left-of-task") {
   return render(
     <FloatingDetailPanel
       panelId="test-detail"
+      position={position}
       widthStorageKey="test-detail-width"
       onClose={vi.fn()}
       testId="detail-panel"
@@ -96,6 +97,31 @@ describe("FloatingDetailPanel chat coordination", () => {
     expect(panel.style.getPropertyValue("--detail-panel-chat-offset")).toBe(
       "0px"
     );
+  });
+
+  it("keeps an attached panel reachable when chat and ticket exhaust adjacent space", () => {
+    window.innerWidth = 1450;
+    usePanelLayoutStore.getState().setChatLayout({
+      isPresent: true,
+      renderedWidth: 432,
+      isMaximized: false,
+    });
+    usePanelLayoutStore.getState().setTaskDetailLayout({
+      isPresent: true,
+      renderedWidth: 480,
+    });
+
+    renderPanel("left-of-task");
+    const panel = screen.getByTestId("detail-panel");
+    expect(panel.style.getPropertyValue("--detail-panel-right-offset")).toBe("936px");
+
+    window.innerWidth = 1100;
+    fireEvent(window, new Event("resize"));
+    expect(panel.style.getPropertyValue("--detail-panel-right-offset")).toBe("444px");
+
+    window.innerWidth = 680;
+    fireEvent(window, new Event("resize"));
+    expect(panel.style.getPropertyValue("--detail-panel-right-offset")).toBe("0px");
   });
 
 });

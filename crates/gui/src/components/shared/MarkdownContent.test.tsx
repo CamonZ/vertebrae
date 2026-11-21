@@ -364,7 +364,7 @@ describe("MarkdownContent", () => {
       });
     });
 
-    it("routes artifact links to the artifacts page and keeps escaped labels literal", () => {
+    it("preserves the artifact fallback URL and keeps escaped labels literal", () => {
       const artifactId = "9b7c1a52-1f0e-4f43-a0c7-2b8d7e6b1c10";
       const taskId = "3f1d9f6e-5c1b-4f8e-9f55-0b6f0c7d2a11";
       render(

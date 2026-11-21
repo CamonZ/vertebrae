@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import type { Artifact, Task, TaskChangedEvent } from "../../bindings";
+import type { Task, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
+import {
+  TASK_DETAIL_PANEL_ID,
+  useEntityPanelStore,
+} from "../../stores/entityPanelStore";
 import { useTask } from "../../hooks/useTask";
 import { useTaskArtifacts } from "../../hooks/useTaskArtifacts";
-import { usePanelExitTransition } from "../../hooks/usePanelExitTransition";
-import { ArtifactInspectorPanel } from "../Artifacts/ArtifactInspectorPanel";
 import { useTaskLocation } from "../../hooks/useTaskLocation";
 import { useTasks } from "../../hooks/useTasks";
 import { useRunTrace } from "../../hooks/useRunTrace";
@@ -152,34 +154,17 @@ export function TaskDetailPanel({
   closing = false,
   onExitAnimationEnd,
 }: TaskDetailPanelProps) {
-  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(
-    null
-  );
+  const artifactId = useEntityPanelStore((state) => state.artifactId);
+  const openArtifact = useEntityPanelStore((state) => state.openArtifact);
   const {
     artifacts,
     isLoading: artifactsLoading,
     error: artifactsError,
   } = useTaskArtifacts(taskId);
-  const selectedArtifact =
-    artifacts.find((artifact) => artifact.id === selectedArtifactId) ?? null;
-  const lastSelectedArtifact = useRef<Artifact | null>(null);
-  if (selectedArtifact) lastSelectedArtifact.current = selectedArtifact;
-  const artifactPreview = usePanelExitTransition(
-    selectedArtifactId != null,
-    180
-  );
-  useEffect(() => {
-    setSelectedArtifactId(null);
-    lastSelectedArtifact.current = null;
-  }, [taskId]);
-  useEffect(() => {
-    if (!closing) return;
-    setSelectedArtifactId(null);
-    lastSelectedArtifact.current = null;
-  }, [closing]);
-  useEffect(() => {
-    if (selectedArtifactId && !selectedArtifact) setSelectedArtifactId(null);
-  }, [selectedArtifact, selectedArtifactId]);
+  const hasOpenAttachment =
+    !closing &&
+    !artifactsError &&
+    artifacts.some((artifact) => artifact.id === artifactId);
   const [editingField, setEditingField] = useState<
     "title" | "priority" | "level" | null
   >(null);
@@ -1066,7 +1051,7 @@ export function TaskDetailPanel({
                     key={artifact.id}
                     type="button"
                     data-testid={`task-artifact-${artifact.id}`}
-                    onClick={() => setSelectedArtifactId(artifact.id)}
+                    onClick={() => openArtifact(artifact.id)}
                     className="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left hover:bg-[var(--color-bg-2)]"
                   >
                     <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-fg-soft)]">
@@ -1279,29 +1264,19 @@ export function TaskDetailPanel({
   // surface, drag/keyboard resize, and focus model; `tasks-v2` scopes the inner
   // content's typography and section styles.
   return (
-    <>
-      {artifactPreview.mounted && (
-        <ArtifactInspectorPanel
-          artifact={selectedArtifact ?? lastSelectedArtifact.current}
-          closing={artifactPreview.closing}
-          onClose={() => setSelectedArtifactId(null)}
-          onExitAnimationEnd={artifactPreview.onAnimationEnd}
-          position="left-of-task"
-        />
-      )}
-      <FloatingDetailPanel
-        panelId="task-detail"
-        widthStorageKey="task-detail-panel-width"
-        closing={closing}
-        onExitAnimationEnd={onExitAnimationEnd}
-        onClose={onClose}
-        isOpen={taskId != null && !closing}
-        shouldHandleEscape={() => editingField === null && onClose != null}
-        className="tasks-v2 detail-opaque"
-        testId="task-detail-panel"
-      >
-        {content}
-      </FloatingDetailPanel>
-    </>
+    <FloatingDetailPanel
+      panelId={TASK_DETAIL_PANEL_ID}
+      widthStorageKey="task-detail-panel-width"
+      closing={closing}
+      onExitAnimationEnd={onExitAnimationEnd}
+      onClose={onClose}
+      isOpen={taskId != null && !closing}
+      shouldHandleEscape={() => editingField === null && onClose != null}
+      className="tasks-v2 detail-opaque"
+      testId="task-detail-panel"
+      aboveChat={hasOpenAttachment}
+    >
+      {content}
+    </FloatingDetailPanel>
   );
 }

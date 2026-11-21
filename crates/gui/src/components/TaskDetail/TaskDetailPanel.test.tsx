@@ -8,6 +8,10 @@ import {
   createMockTaskRun,
 } from "../../test/test-utils";
 import { TaskDetailPanel } from "./TaskDetailPanel";
+import {
+  ARTIFACT_INSPECTOR_PANEL_ID,
+  useEntityPanelStore,
+} from "../../stores/entityPanelStore";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import * as eventsModule from "../../bindings";
 import type {
@@ -517,6 +521,31 @@ describe("TaskDetailPanel - Restructured Layout", () => {
   });
 
   describe("Attachments", () => {
+    it("keeps a ticket above chat while its attachment inspector has focus", async () => {
+      const attachment = taskArtifact(1);
+      mockTaskOverrides.listTaskArtifacts.mockResolvedValue({
+        status: "ok",
+        data: [attachment],
+      });
+      useEntityPanelStore.getState().openTask(mockTaskData.id);
+      render(<TaskDetailPanel taskId={mockTaskData.id} onClose={vi.fn()} />);
+      await screen.findByTestId(`task-artifact-${attachment.id}`);
+
+      const ticket = screen.getByTestId("task-detail-panel");
+      expect(ticket).not.toHaveAttribute("data-above-chat");
+
+      act(() => {
+        useEntityPanelStore.getState().openArtifact(attachment.id);
+        usePanelFocusStore.getState().open(ARTIFACT_INSPECTOR_PANEL_ID);
+      });
+
+      expect(ticket).not.toHaveAttribute("data-focused");
+      expect(ticket).toHaveAttribute("data-above-chat", "true");
+
+      act(() => useEntityPanelStore.getState().closeArtifact());
+      expect(ticket).not.toHaveAttribute("data-above-chat");
+    });
+
     it("renders 60 task attachments", async () => {
       const artifacts = Array.from({ length: 60 }, (_, index) =>
         taskArtifact(index + 1)

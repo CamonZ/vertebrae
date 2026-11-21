@@ -59,6 +59,8 @@ export const queryKeys = {
       [...queryKeys.artifacts.all(generation), "project"] as const,
     presentations: (generation: number) =>
       [...queryKeys.artifacts.all(generation), "presentations"] as const,
+    inspector: (generation: number, artifactId: string) =>
+      [...queryKeys.artifacts.all(generation), "inspector", artifactId] as const,
     task: (generation: number, taskId: string) =>
       [...queryKeys.artifacts.all(generation), "task", taskId] as const,
   },

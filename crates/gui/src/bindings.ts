@@ -263,6 +263,18 @@ async listArtifactPresentations() : Promise<Result<Artifact[], CommandError>> {
 }
 },
 /**
+ * Resolve a project or task attachment by ID in the active project.
+ * Returns no artifact when the ID is missing from both associations.
+ */
+async findArtifactPresentation(artifactId: string) : Promise<Result<Artifact | null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("find_artifact_presentation", { artifactId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * List artifact files attached to one task.
  */
 async listTaskArtifacts(taskId: string) : Promise<Result<Artifact[], CommandError>> {

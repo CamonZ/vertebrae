@@ -3,6 +3,7 @@ import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
 import { usePipelineSummary } from "../hooks/usePipelineSummary";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
 import type { EntityPanelSelection } from "../stores/entityPanelStore";
+import { ArtifactPanelHost } from "./Artifacts/ArtifactPanelHost";
 import { TaskDetailPanel } from "./TaskDetail";
 import {
   buildAtlasModel,
@@ -178,7 +179,7 @@ function AtlasEntityPanel({
   );
 }
 
-export function GlobalEntityPanelHost() {
+function PrimaryEntityPanel() {
   const selection = useEntityPanelStore((state) => state.selection);
   const close = useEntityPanelStore((state) => state.close);
   const openTask = useEntityPanelStore((state) => state.openTask);
@@ -216,5 +217,14 @@ export function GlobalEntityPanelHost() {
       closing={panelClosing}
       onExitAnimationEnd={panelOnAnimationEnd}
     />
+  );
+}
+
+export function GlobalEntityPanelHost() {
+  return (
+    <>
+      <PrimaryEntityPanel />
+      <ArtifactPanelHost />
+    </>
   );
 }
