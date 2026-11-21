@@ -1329,6 +1329,20 @@ it("renders Markdown replies and highlights the source from the discussion heade
 
   expect(codeSelections.at(-1)).toBeNull();
 
+  const reply = thread.querySelector(".markdown-content strong")!;
+  const range = document.createRange();
+  range.selectNodeContents(reply);
+  const selection = document.getSelection()!;
+  selection.removeAllRanges();
+  selection.addRange(range);
+  try {
+    fireEvent.click(reply);
+    expect(selection.toString()).toBe("Explanation");
+    expect(codeSelections.at(-1)).toBeNull();
+  } finally {
+    selection.removeAllRanges();
+  }
+
   fireEvent.click(
     screen.getByRole("button", { name: "Highlight selected code: a:1 (new)" })
   );

@@ -108,7 +108,17 @@ export async function resolveSource(
   location: SourceLocation,
   options: { exactPath?: boolean } = {}
 ): Promise<ResolvedSource> {
-  const { path, base, head } = location;
+  const { path, base, head, commit } = location;
+
+  if (commit !== undefined) {
+    const file = await readAt(checkout, path, commit);
+    if (file.kind === "text") return { kind: "file", path, contents: file.contents };
+    const revision = shortRevision(commit);
+    return {
+      kind: "unavailable",
+      message: problem(file, path, revision) ?? `${path} does not exist at ${revision}.`,
+    };
+  }
 
   if (base !== undefined) {
     const [before, after] = await Promise.all([

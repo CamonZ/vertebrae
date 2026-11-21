@@ -65,6 +65,17 @@ describe("resolveSource", () => {
     expect(shortRevision("main")).toBe("main");
   });
 
+  it("reads one pinned file without comparing it or reading the working copy", async () => {
+    const commit = "1".repeat(40);
+    files({ "a.ts": text("working"), [`a.ts@${commit}`]: text("pinned") });
+    expect(await resolveSource("/c", { path: "a.ts", commit })).toEqual({
+      kind: "file", path: "a.ts", contents: "pinned",
+    });
+    expect(mocked.readWorktreeBaselineFile).toHaveBeenCalledExactlyOnceWith("/c", "a.ts", commit);
+    expect(mocked.loadWorktreeChanges).not.toHaveBeenCalled();
+    expect(mocked.readWorktreeFile).not.toHaveBeenCalled();
+  });
+
   it("shows an unchanged working file, even when changes cannot load", async () => {
     mocked.loadWorktreeChanges.mockRejectedValue(new Error("not a repo"));
     files({ "a.ts": text("one") });

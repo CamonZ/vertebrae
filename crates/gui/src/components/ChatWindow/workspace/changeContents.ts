@@ -1,5 +1,6 @@
 import {
   commands,
+  type ChangedSymbols,
   type ChangeSides,
   type ComparisonSnapshot,
   type WorktreeChange,
@@ -40,6 +41,33 @@ export async function loadChangedSymbols(
   );
   if (result.status === "error") throw new Error(result.error.kind);
   return result.data;
+}
+
+/** Recent changed-symbol loads by comparison key, newest last. */
+const changedSymbolLoads = new Map<string, Promise<ChangedSymbols>>();
+const CHANGED_SYMBOL_LOADS = 4;
+
+/**
+ * One load per comparison key, shared by every view of the comparison.
+ * A failed load is forgotten so the next request retries.
+ */
+export function sharedChangedSymbols(
+  key: string,
+  load: () => Promise<ChangedSymbols>
+): Promise<ChangedSymbols> {
+  const cached = changedSymbolLoads.get(key);
+  if (cached) return cached;
+  const loading = load();
+  changedSymbolLoads.set(key, loading);
+  while (changedSymbolLoads.size > CHANGED_SYMBOL_LOADS) {
+    const oldest = changedSymbolLoads.keys().next().value;
+    if (oldest === undefined) break;
+    changedSymbolLoads.delete(oldest);
+  }
+  loading.catch(() => {
+    if (changedSymbolLoads.get(key) === loading) changedSymbolLoads.delete(key);
+  });
+  return loading;
 }
 
 const lineAt = (lines: readonly string[], line: number) =>

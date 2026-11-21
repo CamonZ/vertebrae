@@ -38,7 +38,6 @@ interface Entry {
   /** What the file was loaded for; a refreshed patch or mode reloads. */
   patch: string;
   semantic: boolean;
-  revealContext: boolean;
   file: ChangeFile;
 }
 
@@ -61,8 +60,7 @@ export function changeFile(
   change: WorktreeChange,
   patch: FilePatch | undefined,
   sides: ChangeSides,
-  semantic: boolean,
-  revealContext: boolean
+  semantic: boolean
 ): ChangeFile {
   const [before, after] = [text(sides.old), text(sides.new)];
   const fresh =
@@ -92,7 +90,7 @@ export function changeFile(
             status: "semantic",
             oldRevision: sides.old.kind === "text" ? sides.old.revision : null,
             newRevision: sides.new.kind === "text" ? sides.new.revision : null,
-            view: semanticHunks(patch, outcome.declarations, revealContext && contents !== null),
+            view: semanticHunks(patch, outcome.declarations),
           }
         : { status: "fallback", reason: outcome.reason },
   };
@@ -108,21 +106,20 @@ export function useChangeFiles(
   changes: ReadonlyMap<string, WorktreeChange>,
   patches: ReadonlyMap<string, FilePatch>,
   load: LoadSides | undefined,
-  semantic: boolean,
-  revealContext: boolean
+  semantic: boolean
 ): ChangeFiles {
   const [loaded, setLoaded] = useState<ReadonlyMap<string, Entry>>(new Map());
   const requested = useRef(new Map<string, Omit<Entry, "file">>());
-  const inputs = useRef({ changes, patches, load, semantic, revealContext });
-  inputs.current = { changes, patches, load, semantic, revealContext };
+  const inputs = useRef({ changes, patches, load, semantic });
+  inputs.current = { changes, patches, load, semantic };
 
   const request = useCallback((path: string) => {
-    const { changes, patches, load, semantic, revealContext } = inputs.current;
+    const { changes, patches, load, semantic } = inputs.current;
     const change = changes.get(path);
     if (!load || !change) return;
-    const key = { patch: change.patch, semantic, revealContext };
+    const key = { patch: change.patch, semantic };
     const latest = () => requested.current.get(path);
-    if (latest()?.patch === key.patch && latest()?.semantic === semantic && latest()?.revealContext === revealContext)
+    if (latest()?.patch === key.patch && latest()?.semantic === semantic)
       return;
     requested.current.set(path, key);
     const store = (file: ChangeFile) => {
@@ -131,7 +128,7 @@ export function useChangeFiles(
       setLoaded((current) => new Map(current).set(path, { ...key, file }));
     };
     load(change, semantic).then(
-      (sides) => store(changeFile(change, patches.get(path), sides, semantic, revealContext)),
+      (sides) => store(changeFile(change, patches.get(path), sides, semantic)),
       (error: unknown) => {
         console.error("Could not load", path, error);
         const message = String(error);
@@ -150,12 +147,11 @@ export function useChangeFiles(
       const entry = loaded.get(path);
       return entry &&
         entry.patch === changes.get(path)?.patch &&
-        entry.semantic === semantic &&
-        entry.revealContext === revealContext
+        entry.semantic === semantic
         ? entry.file
         : null;
     },
-    [loaded, changes, semantic, revealContext]
+    [loaded, changes, semantic]
   );
 
   return useMemo(() => ({ request, fileFor }), [request, fileFor]);

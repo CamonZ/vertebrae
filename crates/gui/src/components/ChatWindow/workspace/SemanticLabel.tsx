@@ -3,7 +3,6 @@ import type { SourceLocation } from "../../shared/EvidenceNavigationContext";
 import type { SymbolLink } from "./relatedSymbols";
 import type { SemanticFile } from "./useChangeFiles";
 import {
-  FALLBACK_TEXT,
   chipText,
   labelChips,
   summaryCounts,
@@ -202,35 +201,20 @@ function FactPanel({
   );
 }
 
-/**
- * The file header's diff mode marker in semantic mode: nothing while
- * loading or when the semantic diff applies, `formatting only` when it
- * finds no change, `line diff` (with the reason) when it does not apply.
- */
-export function DiffModeBadge({
+/** The file header's marker for a file whose every change is whitespace. */
+export function FormattingBadge({
   file,
 }: {
   file: SemanticFile | null;
 }): ReactNode {
-  if (!file) return null;
-  if (file.status === "semantic")
-    return file.view.formattingOnly ? (
-      <span
-        className="changes-diff-mode"
-        title="Every change in this file is whitespace"
-      >
-        formatting only
-      </span>
-    ) : null;
-  const reason = FALLBACK_TEXT[file.reason];
-  return (
+  return file?.status === "semantic" && file.view.formattingOnly ? (
     <span
       className="changes-diff-mode"
-      title={file.message ? `${reason}: ${file.message}` : reason}
+      title="Every change in this file is whitespace"
     >
-      line diff
+      formatting only
     </span>
-  );
+  ) : null;
 }
 
 /**

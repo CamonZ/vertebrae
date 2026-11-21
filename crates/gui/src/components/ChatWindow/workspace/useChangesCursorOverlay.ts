@@ -205,6 +205,9 @@ export function useChangesCursorOverlay(
         ? (root?.querySelector<HTMLElement>("pre[data-diff]") ?? null)
         : null;
       const viewport = container.getBoundingClientRect();
+      // Markers are placed in the overlay, which may start above the
+      // scroller (a status line between them).
+      const origin = overlay.getBoundingClientRect();
       const scroll = container.scrollTop;
       let barPosition: Marker | null = null;
       let caretPosition: Marker | null = null;
@@ -243,8 +246,8 @@ export function useChangesCursorOverlay(
               x < column.getBoundingClientRect().right
             ) {
               caretPosition = {
-                x: x - viewport.left,
-                y: top - viewport.top + scroll,
+                x: x - origin.left,
+                y: top - origin.top + scroll,
                 height,
               };
               caret.style.width = character ? `${character.width}px` : "1ch";
@@ -269,8 +272,8 @@ export function useChangesCursorOverlay(
         if (separator) {
           const rect = separator.getBoundingClientRect();
           barPosition = {
-            x: rect.left - viewport.left,
-            y: rect.top - viewport.top + scroll,
+            x: rect.left - origin.left,
+            y: rect.top - origin.top + scroll,
             height: rect.height,
           };
         }
@@ -286,8 +289,11 @@ export function useChangesCursorOverlay(
       );
       const headingBottom =
         heading?.getBoundingClientRect().bottom ?? viewport.top;
-      const clipTop = Math.max(0, headingBottom - viewport.top);
-      const clipRight = Math.max(0, viewport.width - container.clientWidth);
+      const clipTop = Math.max(0, headingBottom - origin.top);
+      const clipRight = Math.max(
+        0,
+        origin.right - (viewport.left + container.clientWidth)
+      );
       overlay.style.clipPath = `inset(${clipTop}px ${clipRight}px 0 0)`;
       overlay.style.setProperty("--changes-scroll-y", `${-scroll}px`);
 

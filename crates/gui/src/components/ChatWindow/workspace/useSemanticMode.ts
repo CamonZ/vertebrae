@@ -1,7 +1,6 @@
 import { useCallback, useMemo } from "react";
 import type { ReviewDiffAnnotation } from "../../../hooks/useDiffComments";
 import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
-import type { Reveals } from "../../thread/toolChange/diffGaps";
 import type { DiffSide, SemanticHunks, SemanticLabel } from "./semanticHunks";
 import type { ChangeFiles, SemanticFile } from "./useChangeFiles";
 
@@ -19,8 +18,6 @@ export interface SemanticMode {
   viewFor(path: string): SemanticHunks | undefined;
   /** `off`, `pending` until the file's result (and its labels) arrive, or `ready`. */
   status(path: string): "off" | "pending" | "ready";
-  /** Lines revealed so each hunk opens at its declaration, per path. */
-  autoReveals: Reveals;
   labelAt(
     path: string,
     side: DiffSide,
@@ -39,8 +36,6 @@ export interface SemanticMode {
 /** Semantic mode's view of the loaded files in Changes. */
 export function useSemanticMode(
   files: ChangeFiles,
-  /** The files shown, by path. */
-  paths: ReadonlyMap<string, unknown>,
   on: boolean
 ): SemanticMode {
   const { fileFor: loadedFor } = files;
@@ -59,14 +54,6 @@ export function useSemanticMode(
     (path: string) => (!on ? "off" : fileFor(path) ? "ready" : "pending"),
     [on, fileFor]
   );
-  const autoReveals = useMemo(() => {
-    const reveals = new Map<string, SemanticHunks["reveals"]>();
-    for (const path of paths.keys()) {
-      const view = viewFor(path);
-      if (view) reveals.set(path, view.reveals);
-    }
-    return reveals;
-  }, [paths, viewFor]);
   const labelAt = useCallback(
     (path: string, side: DiffSide, lineNumber: number) =>
       viewFor(path)?.labels.find(
@@ -85,7 +72,7 @@ export function useSemanticMode(
     [viewFor]
   );
   return useMemo(
-    () => ({ on, fileFor, viewFor, status, autoReveals, labelAt, annotate }),
-    [on, fileFor, viewFor, status, autoReveals, labelAt, annotate]
+    () => ({ on, fileFor, viewFor, status, labelAt, annotate }),
+    [on, fileFor, viewFor, status, labelAt, annotate]
   );
 }

@@ -9,7 +9,6 @@ import type {
 } from "../../../bindings";
 import { parsePatch } from "../../thread/toolChange/diffLineMapper";
 import {
-  MAX_REVEAL,
   chipText,
   semanticHunks,
   summaryCounts,
@@ -93,20 +92,20 @@ const declaring = (
 });
 
 describe("semanticHunks", () => {
-  it("opens a hunk at its function's signature and labels the scope", () => {
-    // `export default function f(` on line 10; the change on line 15.
+  it("labels a change inside its function, never revealing lines", () => {
+    // `export default function f(` on line 10, outside the hunk; the
+    // change on line 15.
     const file = patch(
       "@@ -12,7 +12,7 @@\n   a();\n   b();\n   c();\n-  count += 1;\n+  count += 2;\n   d();\n   e();\n   f();\n"
     );
     const view = semanticHunks(file, [update(15, [scope("f", 10, 10)])]);
-    // Lines 10 and 11 are revealed above the hunk starting at 12.
-    expect(view.reveals.get(0)).toEqual({ top: 0, bottom: 2 });
     expect(view.labels).toEqual([
       {
         side: "additions",
-        lineNumber: 10,
+        lineNumber: 15,
         declarationIndices: [0],
         singleLine: true,
+        inScope: true,
         scope: [scope("f", 10, 10)],
         chips: [{ kind: "changed" }],
         facts: [],
@@ -122,7 +121,6 @@ describe("semanticHunks", () => {
     );
     const view = semanticHunks(file, []);
     expect(view.formattingOnly).toBe(true);
-    expect(view.reveals.size).toBe(0);
     expect(view.labels.map((label) => label.chips)).toEqual([
       [{ kind: "formatting" }],
     ]);
@@ -167,7 +165,7 @@ describe("semanticHunks", () => {
     expect(view.labels[0].chips.map(chipText)).toEqual(["renamed sum → acc"]);
   });
 
-  it("reveals the gap between two hunks of one declaration", () => {
+  it("labels each separated hunk of one declaration on its own", () => {
     const file = patch(
       "@@ -2,7 +2,7 @@\n a\n b\n c\n-x = 1\n+x = 2\n d\n e\n f\n" +
         "@@ -20,7 +20,7 @@\n g\n h\n i\n-y = 1\n+y = 2\n j\n k\n l\n"
@@ -178,10 +176,7 @@ describe("semanticHunks", () => {
       { kind: "changed", old: at(23), new: at(23), facts: NO_FACTS }
     );
     const view = semanticHunks(file, [big]);
-    expect(view.reveals.get(0)).toEqual({ top: 0, bottom: 1 });
-    // Lines 9..19 between the hunks.
-    expect(view.reveals.get(1)).toEqual({ top: 11, bottom: 0 });
-    expect(view.labels).toHaveLength(1);
+    expect(view.labels.map((label) => label.lineNumber)).toEqual([5, 23]);
   });
 
   it("labels both copies of a moved function with links to each other", () => {
@@ -207,15 +202,11 @@ describe("semanticHunks", () => {
     expect(view.labels[0].scope.map((s) => s.name)).toEqual(["Account"]);
   });
 
-  it("does not reveal a declaration that opens far above its hunk", () => {
+  it("names a declaration that opens above its hunk in the label", () => {
     const start = 100;
     const file = patch(`@@ -${start},3 +${start},3 @@\n a\n-b\n+c\n d\n`);
-    const view = semanticHunks(file, [
-      update(start + 1, [
-        scope("far", start - MAX_REVEAL - 5, start - MAX_REVEAL - 5),
-      ]),
-    ]);
-    expect(view.reveals.size).toBe(0);
+    const view = semanticHunks(file, [update(start + 1, [scope("far", 50, 50)])]);
+    expect(view.labels[0]).toMatchObject({ lineNumber: start + 1, inScope: true });
     expect(view.labels[0].scope[0].name).toBe("far");
   });
 
@@ -508,27 +499,25 @@ it("anchors edits in one replacement block to each struct, impl, and function he
   ]);
 });
 
-it("identifies scope as context when the declaration line cannot be revealed", () => {
+it("identifies scope as context when the declaration line is not shown", () => {
   const file = patch("@@ -8,1 +9,1 @@\n-old();\n+new();\n");
   const edit = modified([scope("f", 2, 3, "fn")],
     { kind: "changed", old: at(8), new: at(9), facts: NO_FACTS });
-  const view = semanticHunks(file, [edit], false);
-  expect(view.reveals.size).toBe(0);
+  const view = semanticHunks(file, [edit]);
   expect(view.labels[0]).toMatchObject({
     side: "additions", lineNumber: 9, inScope: true,
   });
 });
 
-it("labels an added field on the revealed header of its struct", () => {
+it("labels an added field in its struct's scope, revealing nothing", () => {
   const file = patch("@@ -141,1 +141,2 @@\n   existing: u8,\n+  added: u8,\n");
   const changed = declaring({ kind: "added", new: at(142) }, [
     scope("Ctx", 133, 133, "struct"),
     scope("added", null, 142, "field"),
   ], facts(literal));
-  const { labels, reveals } = semanticHunks(file, [changed]);
-  expect(reveals.get(0)).toEqual({ top: 0, bottom: 8 });
+  const { labels } = semanticHunks(file, [changed]);
   expect(labels[0]).toMatchObject({
-    side: "additions", lineNumber: 133, declarationIndices: [0], chips: [],
+    side: "additions", lineNumber: 142, declarationIndices: [0], inScope: true,
     scope: [scope("Ctx", 133, 133, "struct")],
   });
 });

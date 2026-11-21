@@ -373,6 +373,7 @@ export function ChatWindow({
       target: {
         path: target.path,
         history: target.history,
+        commit: target.commit,
         line: target.line ?? undefined,
         column: target.column ?? undefined,
         nonce: (previous?.target.nonce ?? 0) + 1,
@@ -509,6 +510,9 @@ export function ChatWindow({
     setBackgroundSession(sessionId);
   }, [showBackground, sessionId]);
 
+  // The main checkout's Changes compares branches as well as its own edits.
+  const isMainCheckout =
+    !!worktreePath && worktreePath === chat.session?.projectPath;
   useEffect(() => {
     if (!registerChangesToggle || !worktreePath || !isForegroundPane) return;
 
@@ -516,6 +520,12 @@ export function ChatWindow({
     let pending = false;
 
     registerChangesToggle(() => {
+      // Closing needs no check, and neither does the main checkout: clean,
+      // it still opens Changes to compare other refs.
+      if (showChanges || isMainCheckout) {
+        toggleChanges();
+        return;
+      }
       if (pending) return;
 
       pending = true;
@@ -546,7 +556,14 @@ export function ChatWindow({
       current = false;
       registerChangesToggle(null);
     };
-  }, [registerChangesToggle, worktreePath, isForegroundPane, toggleChanges]);
+  }, [
+    registerChangesToggle,
+    worktreePath,
+    isForegroundPane,
+    toggleChanges,
+    showChanges,
+    isMainCheckout,
+  ]);
 
   const conversationRef = useRef<HTMLDivElement>(null);
   const find = usePaneFind(conversationRef);

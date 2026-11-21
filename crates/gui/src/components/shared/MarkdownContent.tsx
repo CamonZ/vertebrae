@@ -27,6 +27,7 @@ import { loadGraphviz } from "../../utils/graphviz";
 import { useNearViewport } from "../../hooks/useNearViewport";
 import { StatechartDiagramBlock } from "./StatechartDiagramBlock";
 import { FlowBlock } from "./FlowBlock";
+import { CallDiffBlock, CallTreeBlock } from "./CallDiagramBlock";
 import { VtbEntityMarkdownLink } from "./VtbEntityLink";
 import { parseVtbEntityHref } from "./vtbEntityLinkTarget";
 
@@ -180,6 +181,16 @@ const diagramRenderers: Record<string, DiagramRenderer> = {
     kind: "component",
     label: "Flow",
     component: FlowBlock,
+  },
+  calltree: {
+    kind: "component",
+    label: "Call tree",
+    component: CallTreeBlock,
+  },
+  calldiff: {
+    kind: "component",
+    label: "Call diff",
+    component: CallDiffBlock,
   },
   mermaid: {
     kind: "svg",

@@ -166,6 +166,8 @@
 .selection-mini-messages {
   padding-top: 16px;
   overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 /* The transcript renders through the main chat's Thread rows. */

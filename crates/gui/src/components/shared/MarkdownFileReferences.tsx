@@ -1,5 +1,6 @@
 import { annotationWorktree } from "../../stores/toolAnnotations";
-import { createContext, useContext, type ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
+import { ReferenceContext } from "./markdownReferenceContext";
 import { ChatSessionContext } from "../thread/toolChange/ChatSessionContext";
 import { useChatStore } from "../../stores/chatStore";
 import { fileReferenceReplyTurns } from "../../utils/fileReferenceReplyIds";
@@ -10,22 +11,6 @@ import {
 } from "./localFileReference";
 import { LocalFileReferenceLink } from "./LocalFileReferenceLink";
 import { ChatFileReferenceLink } from "./ChatFileReferenceLink";
-
-const ReferenceContext = createContext<{
-  replyId?: string;
-  projectPath: string | null;
-  roots: readonly string[];
-  sessionId: string | null;
-  turnId?: string;
-  capturedRoot: string | null;
-  assignedRoot: string | null;
-}>({
-  projectPath: null,
-  roots: [],
-  sessionId: null,
-  capturedRoot: null,
-  assignedRoot: null,
-});
 
 export function MarkdownFileReferences({
   replyId,
