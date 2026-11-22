@@ -180,8 +180,11 @@ export interface UserMessage extends BaseMessage {
   label?: string;
   /** The visible message text. */
   text?: string;
-  /** Whether string text should be interpreted as markdown. */
-  textFormat?: "plain" | "markdown";
+  /**
+   * How string text renders: plain, markdown, or a sent comment set (quote
+   * cards, then the follow-up as markdown).
+   */
+  textFormat?: "plain" | "markdown" | "comments";
   /**
    * Optional raw/expandable input body (the full interpolated prompt). Shown
    * behind a "show input" toggle.

@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import {
   CodeView,
   type CodeViewAnnotationArgs,
@@ -10,6 +10,7 @@ import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import type { DiffCommentsApi } from "../../../hooks/useDiffComments";
 import { DiffReviewContext } from "./DiffReviewContext";
 import type { ReviewAnnotation } from "./DiffCommentThread";
+import { COMMENTED_LINES_CSS, useCommentedLines } from "./commentedLines";
 
 /** One row- and file-virtualized scroll root for the entire inline frame. */
 export function InlinePatchView({
@@ -27,8 +28,13 @@ export function InlinePatchView({
 }) {
   const appearance = usePierreDiffOptions();
   const viewRef = useRef<CodeViewHandle<ReviewAnnotation, undefined>>(null);
-  const { annotationsFor, selectedLinesFor, openComposer, onSelectionChange } =
-    comments;
+  const {
+    annotationsFor,
+    selectedLinesFor,
+    openComposer,
+    onSelectionChange,
+    commentedRangesFor,
+  } = comments;
 
   const versions = useRef(
     new Map<
@@ -94,9 +100,22 @@ export function InlinePatchView({
     });
   });
 
+  const scheduleCommentPaint = useCommentedLines(
+    viewRef,
+    useCallback(
+      (id: string) => {
+        const path = reviewing ? paths.get(id) : undefined;
+        return path ? commentedRangesFor(path) : [];
+      },
+      [reviewing, paths, commentedRangesFor]
+    )
+  );
+
   const options = useMemo(
     () => ({
       ...appearance,
+      unsafeCSS: `${appearance.unsafeCSS ?? ""}\n${COMMENTED_LINES_CSS}`,
+      onPostRender: scheduleCommentPaint,
       ...(reviewing
         ? {
             enableGutterUtility: true,
@@ -112,7 +131,7 @@ export function InlinePatchView({
           }
         : {}),
     }),
-    [appearance, reviewing, openComposer, paths]
+    [appearance, reviewing, openComposer, paths, scheduleCommentPaint]
   );
 
   // Offscreen annotations have no DOM to scrollIntoView. Reveal their logical

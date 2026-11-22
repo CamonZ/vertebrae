@@ -22,6 +22,7 @@ import { useId, useState, type ReactNode } from "react";
 import { IdChip, RunChip } from "../shared/HearthPrimitives";
 import { Card } from "../molecules/Card";
 import { MarkdownContent, PlainTextContent } from "../shared/MarkdownContent";
+import { SentComments } from "../ChatWindow/SentComments";
 import {
   ChangeUnavailable,
   PayloadDiffs,
@@ -426,7 +427,13 @@ function UserBody({
       </div>
       {text ? (
         <div className="ev-text">
-          {textFormat === "markdown" ? <MarkdownContent text={text} /> : text}
+          {textFormat === "comments" ? (
+            <SentComments text={text} />
+          ) : textFormat === "markdown" ? (
+            <MarkdownContent text={text} />
+          ) : (
+            text
+          )}
         </div>
       ) : null}
       {body && open ? <div className="ev-prompt-body">{body}</div> : null}

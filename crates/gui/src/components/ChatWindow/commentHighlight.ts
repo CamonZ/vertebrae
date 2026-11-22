@@ -1,4 +1,9 @@
-import { useEffect, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 import {
   ASSISTANT_RESPONSE_SELECTOR,
   type PendingTextComment,
@@ -7,6 +12,8 @@ import {
 /** CSS Custom Highlight names; styled in chatComments.css. */
 export const PENDING_HIGHLIGHT = "vtb-comment";
 export const ACTIVE_HIGHLIGHT = "vtb-comment-active";
+export const HOVER_HIGHLIGHT = "vtb-comment-hover";
+export const JUMP_HIGHLIGHT = "vtb-comment-jump";
 
 interface Position {
   node: Text;
@@ -108,22 +115,31 @@ function highlightsSupported(): boolean {
  * highlights are rebuilt from all of them, so split panes do not overwrite
  * each other.
  */
-const contributions = new Map<object, { pending: Range[]; active: Range[] }>();
+interface Contribution {
+  pending: Range[];
+  hover: Range[];
+  active: Range[];
+}
+const contributions = new Map<object, Contribution>();
 
 function publish() {
   const pending = new Highlight();
+  const hover = new Highlight();
   const active = new Highlight();
   for (const ranges of contributions.values()) {
     ranges.pending.forEach((range) => pending.add(range));
+    ranges.hover.forEach((range) => hover.add(range));
     ranges.active.forEach((range) => active.add(range));
   }
   CSS.highlights.set(PENDING_HIGHLIGHT, pending);
+  CSS.highlights.set(HOVER_HIGHLIGHT, hover);
   CSS.highlights.set(ACTIVE_HIGHLIGHT, active);
 }
 
 /**
- * Mark every pending text comment's quote in the transcript, the hovered or
- * pinned one more strongly.
+ * Mark every pending text comment's quote in the transcript: the pointer's
+ * one more strongly, the hovered-chip or pinned one most. Returns the
+ * resolved range of each comment, for the transcript's comment markers.
  * Degrades to nothing where the CSS Custom Highlight API is missing.
  */
 export function useCommentHighlights(
@@ -131,18 +147,36 @@ export function useCommentHighlights(
   comments: readonly PendingTextComment[],
   activeId: string | null,
   /** Re-resolve when the rendered transcript changes. */
-  revision: unknown
-) {
+  revision: unknown,
+  /** The comment whose highlight the pointer is over. */
+  hoveredId: string | null = null,
+  /** Receives each comment's resolved range; one is created if omitted. */
+  externalRangesRef?: MutableRefObject<ReadonlyMap<string, Range>>
+): RefObject<ReadonlyMap<string, Range>> {
+  const ownRangesRef = useRef<ReadonlyMap<string, Range>>(new Map());
+  const rangesRef = externalRangesRef ?? ownRangesRef;
+
   useEffect(() => {
     const transcript = transcriptRef.current;
-    if (!transcript || !highlightsSupported()) return;
-
-    const key = {};
-    const ranges = { pending: [] as Range[], active: [] as Range[] };
+    if (!transcript) return;
+    const resolved = new Map<string, Range>();
     for (const comment of comments) {
       const range = findQuoteRange(transcript, comment);
-      if (range)
-        (comment.id === activeId ? ranges.active : ranges.pending).push(range);
+      if (range) resolved.set(comment.id, range);
+    }
+    rangesRef.current = resolved;
+    if (!highlightsSupported()) return;
+
+    const key = {};
+    const ranges: Contribution = { pending: [], hover: [], active: [] };
+    for (const [id, range] of resolved) {
+      const bucket =
+        id === activeId
+          ? ranges.active
+          : id === hoveredId
+            ? ranges.hover
+            : ranges.pending;
+      bucket.push(range);
     }
     contributions.set(key, ranges);
     publish();
@@ -151,5 +185,35 @@ export function useCommentHighlights(
       contributions.delete(key);
       publish();
     };
-  }, [transcriptRef, comments, activeId, revision]);
+  }, [transcriptRef, comments, activeId, hoveredId, revision, rangesRef]);
+
+  return rangesRef;
+}
+
+const JUMP_HIGHLIGHT_MS = 1600;
+let jumpTimer: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Scroll a comment's quote into view and tint it briefly, for jumping back
+ * from a sent comment to the text it quoted.
+ */
+export function revealCommentAnchor(range: Range) {
+  const element =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
+  const reduced =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  element?.scrollIntoView?.({
+    block: "center",
+    behavior: reduced ? "auto" : "smooth",
+  });
+  if (!highlightsSupported()) return;
+  clearTimeout(jumpTimer);
+  CSS.highlights.set(JUMP_HIGHLIGHT, new Highlight(range));
+  jumpTimer = setTimeout(
+    () => CSS.highlights.delete(JUMP_HIGHLIGHT),
+    JUMP_HIGHLIGHT_MS
+  );
 }
