@@ -127,7 +127,9 @@ async fn lock_file(root: &Path, name: &str) -> Result<fs::File, CommandError> {
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let file = options.open(root.join(name)).map_err(|_| error())?;
+    let file = options.open(root.join(name)).map_err(|err| CommandError {
+        message: format!("Could not open chat catalog lock {name}: {err}"),
+    })?;
     // A closing GUI or another window's process can still own the disk lock.
     // Give it time to finish without blocking the async runtime.
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -142,7 +144,9 @@ async fn lock_file(root: &Path, name: &str) -> Result<fs::File, CommandError> {
             }
             Err(err) => {
                 tracing::warn!(lock = name, error = %err, "chat_catalog_lock_failed");
-                return Err(error());
+                return Err(CommandError {
+                    message: format!("Could not acquire chat catalog lock {name}: {err}"),
+                });
             }
         }
     }

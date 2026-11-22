@@ -34,7 +34,7 @@ export function CatalogSaveWarning({
           onClick={async () => {
             setRetrying(true);
             try {
-              await retryCatalogSave();
+              await retryCatalogSave(sessionId);
             } finally {
               setRetrying(false);
             }
