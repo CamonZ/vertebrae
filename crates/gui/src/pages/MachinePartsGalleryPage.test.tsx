@@ -5,7 +5,7 @@ import { MACHINE_PARTS } from "../components/MachineDiagram/parts";
 import { UNIVERSAL_STATES } from "../components/MachineDiagram";
 import { useUIStore } from "../stores/uiStore";
 import { appRoutes } from "../router";
-import { DEV_MACHINE_PARTS_PATH } from "../devRoutes";
+import { MACHINE_PARTS_GALLERY_PATH } from "../devRoutes";
 
 // Part rendering is covered individually in parts/parts.test.tsx. Keep page
 // interaction tests independent of the size of the production catalogue.
@@ -112,11 +112,13 @@ describe("MachinePartsGalleryPage", () => {
     expect(frames).toHaveLength(0);
   });
 
-  it("is routed in dev builds", () => {
+  it("is routed in every build", () => {
     const root = appRoutes.find((r) => r.path === "/");
     expect(
-      root?.children?.some((r) => r.path === DEV_MACHINE_PARTS_PATH.slice(1))
-    ).toBe(import.meta.env.DEV);
+      root?.children?.some(
+        (r) => r.path === MACHINE_PARTS_GALLERY_PATH.slice(1)
+      )
+    ).toBe(true);
   });
 });
 

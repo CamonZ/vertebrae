@@ -67,12 +67,20 @@ losing focus without a user action logs a `[FOCUS_TRACE]` warning with the
 preceding `focus()` stack and chat-store change, and shows a badge;
 ⌃⌥⇧F (or clicking the badge) copies the trace as JSON.
 
-### Machine-parts dev gallery
+### Review galleries
 
-Dev builds (`npm run tauri:dev`) add a sidebar item, **Machine parts (dev)**,
-that opens `/dev/machine-parts` (`src/pages/MachinePartsGalleryPage.tsx`). The
-route and the sidebar item exist only when `import.meta.env.DEV` is true, so
-production builds don't include them.
+Two review galleries are registered in every build. Their sidebar icons stay
+hidden until you press ⌃⌥⌘⇧G, which toggles them for the session:
+
+- **Machine parts gallery**: `/galleries/machine-parts`
+  (`src/pages/MachinePartsGalleryPage.tsx`).
+- **Thinking lines gallery**: `/galleries/thinking-lines`
+  (`src/pages/ThinkingLinesGalleryPage.tsx`) shows the chat thinking-line
+  shaders (Shimmer, Uplink, Assembler) with the renderer's frame rate.
+
+The flow player (`/dev/flows`) stays dev-build only.
+
+#### Machine parts gallery
 
 The page shows every machine-diagram catalogue part. Each part gets one row
 per change mark (unchanged, added, changed, removed). The columns are the

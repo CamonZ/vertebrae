@@ -6,3 +6,4 @@ export { SettingsPage } from "./SettingsPage";
 export { DaemonsPage } from "./DaemonsPage";
 export { MachinePartsGalleryPage } from "./MachinePartsGalleryPage";
 export { FlowPlayerDevPage } from "./FlowPlayerDevPage";
+export { ThinkingLinesGalleryPage } from "./ThinkingLinesGalleryPage";

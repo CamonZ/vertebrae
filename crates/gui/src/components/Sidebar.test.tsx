@@ -97,6 +97,36 @@ describe("Sidebar Traces nav", () => {
     expect(link).toHaveAttribute("aria-label", "Daemons");
   });
 
+  it("toggles the review-gallery icons with ⌃⌥⌘⇧G", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={["/tasks"]}>
+        <Sidebar />
+      </MemoryRouter>
+    );
+    const galleries = [
+      ["sidebar-nav-gallery-machine-parts", "/galleries/machine-parts"],
+      ["sidebar-nav-gallery-thinking-lines", "/galleries/thinking-lines"],
+    ] as const;
+    for (const [id] of galleries)
+      expect(screen.queryByTestId(id)).not.toBeInTheDocument();
+
+    // a partial chord does nothing
+    await user.keyboard("{Control>}{Alt>}{Shift>}G{/Shift}{/Alt}{/Control}");
+    for (const [id] of galleries)
+      expect(screen.queryByTestId(id)).not.toBeInTheDocument();
+
+    const chord =
+      "{Control>}{Alt>}{Meta>}{Shift>}G{/Shift}{/Meta}{/Alt}{/Control}";
+    await user.keyboard(chord);
+    for (const [id, href] of galleries)
+      expect(screen.getByTestId(id)).toHaveAttribute("href", href);
+
+    await user.keyboard(chord);
+    for (const [id] of galleries)
+      expect(screen.queryByTestId(id)).not.toBeInTheDocument();
+  });
+
   it("shows the Settings badge when a GUI update is available", () => {
     useGuiUpdateStore.setState({
       ...useGuiUpdateStore.getState(),

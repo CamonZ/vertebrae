@@ -91,7 +91,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   excludedProviderThreadIds,
   spawnOutlineBySessionId,
   activityBySessionId,
-  thinkingIndicatorStyle = "classic",
+  thinkingIndicatorStyle = "shimmer",
   onSelect,
   onSelectAgent,
   onStartProjectChat,

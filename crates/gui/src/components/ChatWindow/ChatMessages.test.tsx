@@ -48,7 +48,7 @@ describe("ChatMessages", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useEntityPanelStore.getState().reset();
-    useUIStore.setState({ thinkingIndicatorStyle: "classic" });
+    useUIStore.setState({ thinkingIndicatorStyle: "shimmer" });
   });
 
   // --- Empty state ---
@@ -771,19 +771,22 @@ describe("ChatMessages", () => {
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
   });
 
-  it("renders the configured futuristic indicator only during the waiting turn", () => {
-    useUIStore.setState({ thinkingIndicatorStyle: "futuristic" });
+  it("renders the configured indicator style only during the waiting turn", () => {
+    useUIStore.setState({ thinkingIndicatorStyle: "uplink" });
     const { rerender } = render(
       <ChatMessages {...defaultProps({ isEmpty: false, isWaiting: true })} />
     );
 
-    expect(screen.getByTestId("thinking-matrix")).toBeInTheDocument();
+    expect(screen.getByTestId("thinking-indicator")).toHaveAttribute(
+      "data-style",
+      "uplink"
+    );
     expect(screen.getByRole("status")).toBeInTheDocument();
 
     rerender(
       <ChatMessages {...defaultProps({ isEmpty: false, isWaiting: false })} />
     );
-    expect(screen.queryByTestId("thinking-matrix")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("thinking-indicator")).not.toBeInTheDocument();
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
@@ -816,8 +819,8 @@ describe("ChatMessages", () => {
     expect(screen.getByRole("status")).toHaveAttribute("aria-live", "polite");
   });
 
-  it("uses a stable themed compaction phrase for the futuristic indicator", () => {
-    useUIStore.setState({ thinkingIndicatorStyle: "futuristic" });
+  it("uses a stable themed compaction phrase for the expressive indicators", () => {
+    useUIStore.setState({ thinkingIndicatorStyle: "assembler" });
     const random = vi.spyOn(Math, "random").mockReturnValue(0);
     const props = defaultProps({
       isEmpty: false,

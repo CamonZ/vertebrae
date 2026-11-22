@@ -12,7 +12,10 @@ import { Icon } from "./atoms/Icon";
 import { useGuiUpdateStore } from "../stores/guiUpdateStore";
 import { useShellStore } from "../stores/shellStore";
 import { useChatStore } from "../stores/chatStore";
-import { DEV_MACHINE_PARTS_PATH } from "../devRoutes";
+import {
+  MACHINE_PARTS_GALLERY_PATH,
+  THINKING_LINES_GALLERY_PATH,
+} from "../devRoutes";
 
 interface NavItemProps {
   to: string;
@@ -406,17 +409,29 @@ const SETTINGS_NAV_ITEM = {
   ),
 } as const;
 
-/** Dev builds only: the machine-parts review gallery (no shortcut). */
-const DEV_GALLERY_NAV_ITEM = {
-  id: "dev-machine-parts",
-  to: DEV_MACHINE_PARTS_PATH,
-  label: "Machine parts (dev)",
+/** Review gallery of the machine-diagram parts (shown with ⌃⌥⌘⇧G). */
+const MACHINE_PARTS_GALLERY_NAV_ITEM = {
+  id: "gallery-machine-parts",
+  to: MACHINE_PARTS_GALLERY_PATH,
+  label: "Machine parts gallery",
   icon: (
     <Icon size="sm" strokeWidth={2}>
       <rect x="3" y="3" width="7" height="7" rx="1" />
       <rect x="14" y="3" width="7" height="7" rx="1" />
       <rect x="3" y="14" width="7" height="7" rx="1" />
       <rect x="14" y="14" width="7" height="7" rx="1" />
+    </Icon>
+  ),
+} as const;
+
+/** Review gallery of the thinking-line shaders (shown with ⌃⌥⌘⇧G). */
+const THINKING_LINES_GALLERY_NAV_ITEM = {
+  id: "gallery-thinking-lines",
+  to: THINKING_LINES_GALLERY_PATH,
+  label: "Thinking lines gallery",
+  icon: (
+    <Icon size="sm" strokeWidth={2}>
+      <path d="M2 12h3l2-6 4 12 3-9 2 3h6" />
     </Icon>
   ),
 } as const;
@@ -447,6 +462,7 @@ export function Sidebar() {
   const hasActiveChat = useChatStore((state) => state.activeSessionId !== null);
   const previousPathname = useRef(location.pathname);
   const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [galleriesVisible, setGalleriesVisible] = useState(false);
   const [addProjectState, setAddProjectState] = useState<AddProjectState>({
     status: "idle",
   });
@@ -460,6 +476,27 @@ export function Sidebar() {
       setChatPanelPresentation("suspended");
     }
   }, [chatPanelPresentation, location.pathname, setChatPanelPresentation]);
+
+  // ⌃⌥⌘⇧G toggles the review-gallery icons. Matched on `code`: Option
+  // rewrites `key` on macOS.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.code !== "KeyG" ||
+        !(event.ctrlKey && event.altKey && event.metaKey && event.shiftKey) ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.repeat
+      ) {
+        return;
+      }
+      event.preventDefault();
+      setGalleriesVisible((visible) => !visible);
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -665,7 +702,12 @@ export function Sidebar() {
         className="flex flex-col items-center gap-1 pb-1"
         data-testid="sidebar-settings-utility"
       >
-        {import.meta.env.DEV && <NavItem {...DEV_GALLERY_NAV_ITEM} />}
+        {galleriesVisible && (
+          <>
+            <NavItem {...MACHINE_PARTS_GALLERY_NAV_ITEM} />
+            <NavItem {...THINKING_LINES_GALLERY_NAV_ITEM} />
+          </>
+        )}
         <NavItem
           {...SETTINGS_NAV_ITEM}
           shortcutIndex={RAIL_NAV_ITEMS.length + 1}

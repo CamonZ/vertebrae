@@ -1,8 +1,9 @@
 /**
- * Dev-only gallery of the machine-diagram catalogue parts: every part ×
+ * Review gallery of the machine-diagram catalogue parts: every part ×
  * scenario × universal state × change mark, with light/dark and labels-off
- * toggles. Reached at `/dev/machine-parts` in dev builds only (router.tsx);
- * a review surface for component tickets, not a product page.
+ * toggles. Reached at `/galleries/machine-parts` in every build (router.tsx;
+ * sidebar icon behind ⌃⌥⌘⇧G); a review surface for component tickets, not a
+ * product page.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "../components/atoms/Button";
@@ -191,7 +192,7 @@ function GalleryCell({
 }
 
 export function MachinePartsGalleryPage() {
-  useShellHeader("Machine parts (dev)");
+  useShellHeader("Machine parts gallery");
   const theme = useUIStore((s) => s.theme);
   const setTheme = useUIStore((s) => s.setTheme);
   const reducedMotion = useReducedMotion();

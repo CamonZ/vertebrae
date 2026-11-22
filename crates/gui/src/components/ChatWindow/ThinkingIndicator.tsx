@@ -1,33 +1,21 @@
 import { useState } from "react";
 import type { ThinkingIndicatorStyle } from "../../stores/uiStore";
+import { ThinkingLine } from "../ThinkingLine";
 import {
   selectFuturisticCompactingPhrase,
   selectFuturisticThinkingPhrase,
 } from "./thinkingPhrases";
-import {
-  getThinkingRadialBand,
-  THINKING_ALMOND_MASK,
-  THINKING_MATRIX_COLUMNS,
-  THINKING_MATRIX_LIGHT_COUNT,
-  THINKING_MAX_RADIAL_BAND,
-} from "./thinkingIndicatorGeometry";
 
+const THINKING_LABEL = "Thinking...";
 const COMPACTING_LABEL = "Compacting conversation…";
-const RADIAL_DELAY_SECONDS = 0.12;
-const MATRIX_LIGHT_TONES = [
-  "orange",
-  "purple",
-  "red",
-  "gray-dark",
-  "gray",
-  "gray-light",
-  "gray-bright",
-] as const;
 
-/** Thinking indicator shown while waiting for the assistant to respond. */
+/**
+ * Thinking indicator shown while waiting for the assistant to respond: the
+ * shader thinking line for the chosen style (each style is a line variant).
+ */
 export function ThinkingIndicator({
-  label = "Thinking...",
-  style = "classic",
+  label = THINKING_LABEL,
+  style = "shimmer",
   compact = false,
 }: {
   label?: string;
@@ -38,24 +26,22 @@ export function ThinkingIndicator({
   // The component is mounted for one waiting turn and unmounted when that
   // turn ends. Keeping the phrase in state prevents re-renders from causing
   // repeated, rapid screen-reader announcements.
-  const [futuristicPhrase] = useState(selectFuturisticThinkingPhrase);
-  const [futuristicCompactingPhrase] = useState(
-    selectFuturisticCompactingPhrase
-  );
-  const showFuturisticPhrase =
-    style === "futuristic" && label === "Thinking...";
-  const showFuturisticCompactingPhrase =
-    style === "futuristic" && label === COMPACTING_LABEL;
-  const isCompacting = showFuturisticCompactingPhrase;
-  const statusLabel = showFuturisticPhrase
-    ? futuristicPhrase
-    : showFuturisticCompactingPhrase
-      ? futuristicCompactingPhrase
-      : label;
+  const [thinkingPhrase] = useState(selectFuturisticThinkingPhrase);
+  const [compactingPhrase] = useState(selectFuturisticCompactingPhrase);
+  const isCompacting = label === COMPACTING_LABEL;
+  // the expressive styles narrate with the sci-fi phrases; shimmer stays plain
+  const usesPhrases = style !== "shimmer";
+  const statusLabel = !usesPhrases
+    ? label
+    : label === THINKING_LABEL
+      ? thinkingPhrase
+      : isCompacting
+        ? compactingPhrase
+        : label;
 
   return (
     <div
-      className={compact ? "thinking-indicator--compact" : "flex justify-start"}
+      className={compact ? "thinking-indicator--compact" : "flex w-full"}
       data-testid="thinking-indicator"
       data-style={style}
       data-compact={compact || undefined}
@@ -64,71 +50,15 @@ export function ThinkingIndicator({
       aria-atomic="true"
       aria-label={statusLabel}
     >
-      <div
-        className={
-          compact
-            ? "flex items-center justify-center"
-            : "flex items-center gap-2 rounded-lg bg-[var(--color-bg-2)] pl-2 pr-4 py-2"
-        }
-      >
-        {style === "futuristic" ? (
-          <div
-            className="thinking-matrix grid shrink-0 grid-cols-8 grid-rows-5 gap-px"
-            data-testid="thinking-matrix"
-            data-shape="wide-almond"
-            data-animation-direction={isCompacting ? "inward" : "outward"}
-            aria-hidden="true"
-          >
-            {Array.from({ length: THINKING_MATRIX_LIGHT_COUNT }, (_, index) => {
-              const row = Math.floor(index / THINKING_MATRIX_COLUMNS);
-              const column = index % THINKING_MATRIX_COLUMNS;
-              const radialBand = getThinkingRadialBand(row, column);
-              const tone =
-                radialBand === 0
-                  ? "gray"
-                  : MATRIX_LIGHT_TONES[index % MATRIX_LIGHT_TONES.length];
-              const animationBand = isCompacting
-                ? THINKING_MAX_RADIAL_BAND - radialBand
-                : radialBand;
-              const isAlmondCell = THINKING_ALMOND_MASK[row][column] === "X";
-
-              return (
-                <span
-                  className={`thinking-matrix__light thinking-matrix__light--${tone} thinking-matrix__light--${isAlmondCell ? "inside" : "outside"} ${compact ? "h-px w-px" : "h-[4px] w-[4px]"} rounded-full motion-reduce:animate-none`}
-                  data-column={column}
-                  data-radial-band={radialBand}
-                  data-row={row}
-                  key={index}
-                  style={{
-                    animationDelay: `${animationBand * RADIAL_DELAY_SECONDS}s`,
-                  }}
-                />
-              );
-            })}
-          </div>
-        ) : (
-          <div
-            className={`flex ${compact ? "gap-0.5" : "gap-1"}`}
-            data-testid="thinking-dots"
-            aria-hidden="true"
-          >
-            <span
-              className={`${compact ? "h-1 w-1" : "h-2 w-2"} animate-bounce rounded-full bg-[var(--color-accent)] motion-reduce:animate-none [animation-delay:-0.3s]`}
-            />
-            <span
-              className={`${compact ? "h-1 w-1" : "h-2 w-2"} animate-bounce rounded-full bg-[var(--color-accent)] motion-reduce:animate-none [animation-delay:-0.15s]`}
-            />
-            <span
-              className={`${compact ? "h-1 w-1" : "h-2 w-2"} animate-bounce rounded-full bg-[var(--color-accent)] motion-reduce:animate-none`}
-            />
-          </div>
-        )}
-        {!compact && (
-          <span className="text-sm text-[var(--color-fg-mute)]">
-            {statusLabel}
-          </span>
-        )}
-      </div>
+      <ThinkingLine
+        variant={style}
+        mode={isCompacting ? "compacting" : "thinking"}
+        // compact badges are too small for text: shimmer shows only its
+        // hairline there, the expressive lines keep their texture
+        text={compact && style === "shimmer" ? "" : statusLabel}
+        fallback={compact ? "hairline" : "text"}
+        style={compact ? { width: 40, height: 10 } : { height: 20 }}
+      />
     </div>
   );
 }

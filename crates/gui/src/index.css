@@ -912,87 +912,14 @@ html.light ::selection {
 }
 
 /* Futuristic waiting-state matrix: a soft accent-color wave through radial rings. */
-@keyframes thinking-blinkenlights {
-  0%,
-  100% {
-    opacity: 0.22;
-    background-color: var(--thinking-light-color);
-  }
-  42% {
-    opacity: 0.42;
-    background-color: var(--thinking-light-color);
-  }
-  50% {
-    opacity: 0.86;
-    background-color: var(--thinking-light-active-color);
-  }
-  65% {
-    opacity: 0.42;
-    background-color: var(--thinking-light-color);
-  }
-}
-
-.thinking-matrix__light {
-  --thinking-light-color: var(--color-fg-faint);
-  --thinking-light-active-color: var(--color-accent);
-  background-color: var(--thinking-light-color);
-  opacity: 0.22;
-  animation: thinking-blinkenlights 2.4s ease-in-out infinite;
-  animation-fill-mode: both;
-  will-change: opacity;
-}
-
-.thinking-matrix__light--outside {
-  animation: none;
-  opacity: 0;
-}
-
-.thinking-matrix__light--orange {
-  --thinking-light-color: var(--color-accent);
-  --thinking-light-active-color: var(--color-warn);
-}
-
-.thinking-matrix__light--purple {
-  --thinking-light-color: var(--color-step-llm);
-  --thinking-light-active-color: var(--color-step-llm-fg);
-}
-
-.thinking-matrix__light--red {
-  --thinking-light-color: var(--color-err);
-  --thinking-light-active-color: var(--color-warn);
-}
-
-.thinking-matrix__light--gray-dark {
-  --thinking-light-color: var(--color-line-strong);
-}
-
-.thinking-matrix__light--gray {
-  --thinking-light-color: var(--color-fg-faint);
-}
-
-.thinking-matrix__light--gray-light {
-  --thinking-light-color: var(--color-fg-mute);
-}
-
-.thinking-matrix__light--gray-bright {
-  --thinking-light-color: var(--color-fg-soft);
-}
-
+/* min 18px to sit in icon slots; grows to the 40px compact thinking line */
 .thinking-indicator--compact {
   display: inline-flex;
-  width: 18px;
+  min-width: 18px;
   height: 18px;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .thinking-matrix__light {
-    animation: none;
-    opacity: 0.8;
-    will-change: auto;
-  }
 }
 
 .animate-pulse-glow {
@@ -3903,6 +3830,10 @@ html.light ::selection {
 }
 .hc-panel .hc-mini-history-harness[data-harness="codex"] {
   color: #4f73ff;
+}
+.hc-panel .hc-mini-history-activity {
+  width: auto;
+  min-width: 18px;
 }
 .hc-panel .hc-mini-history-harness svg {
   display: block;

@@ -91,8 +91,13 @@ if (alert) {
 const indicatorLabel = thread.querySelector(
   '[data-testid="thinking-indicator"] .text-sm',
 );
+// The shader thinking line draws its phrase in a canvas, in its own mono
+// face; only its no-WebGL2 text fallback has to match the thread typography.
+const indicatorCanvas = thread.querySelector(
+  '[data-testid="thinking-indicator"] canvas[data-testid="thinking-line"]',
+);
 let indicatorContrast = true;
-let indicatorTypography = !expectedPending;
+let indicatorTypography = !expectedPending || !!indicatorCanvas;
 
 if (indicatorLabel) {
   const labelStyle = getComputedStyle(indicatorLabel);
