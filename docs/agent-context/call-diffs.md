@@ -2,10 +2,8 @@
 
 ## Inspect the source
 
-1. Use the conversation's checkout. Resolve refs to full commit IDs before
-   reading a committed snapshot. For a branch comparison, use the merge base
-   when the user asks for the branch's changes. Use `working-tree` for a snapshot
-   that includes current edits.
+1. Use the conversation's checkout and resolve refs to full commit IDs. Use
+   the merge base for a branch's changes and `working-tree` for current edits.
 2. Find the actual enclosing function, callback, or component. For a diff,
    read both versions. Group only the direct added, removed, or replaced
    calls under each enclosing function.
@@ -13,14 +11,22 @@
    the definition for the root and the site that demonstrates each edge. For
    incoming trees, cite the caller's site. Verify the line in the named
    snapshot. Label JSX component references as `render` and asynchronous
-   boundaries as `schedule`, `dispatch`, or `register` when the source supports it.
-4. Follow another level only if it explains the behavior. Mark an edge
-   `ambiguous` when multiple targets are possible, or `dynamic` when runtime
-   data selects the target. Use `incomplete` to say what you could not verify.
-   Stop at recursion or an unresolved boundary. Keep main paths short.
+   boundaries as `schedule`, `dispatch`, or `register` when supported.
+4. Keep paths short. Stop at recursion or an unresolved boundary.
 
-Write a completed Markdown fence containing one JSON object. Keep diagrams
-within 160 nodes or rows, 12 levels, and 64 Ki characters.
+Write a completed Markdown fence containing one JSON object of at most 65,536
+characters. A call tree can have up to 160 nodes and 12 levels. Count the root
+as one node at level 1 and count every child, including those on collapsed
+branches. If a path would reach level 13, split it at a boundary such as a
+Tauri command and use that boundary as the root of a second diagram. If you
+omit branches to fit, describe what was omitted in a top-level `incomplete`
+string. A call diff can have up to 160 rows, counting enclosing functions and
+their child rows.
+
+The allowed `certainty` values are `verified`, `ambiguous` (multiple targets
+are possible), and `dynamic` (runtime data selects the target). Omit an edge
+when you lack source evidence for it, such as an unverified component
+re-render. Describe the gap in the diagram's top-level `incomplete` string.
 
 ## Current call tree
 
@@ -33,7 +39,8 @@ for callers or omit it for outgoing calls. Add nested entries in `children`.
    "children": [
      {"label": "OrderSummary", "path": "src/CheckoutPanel.tsx", "line": 31, "relationship": "render"},
      {"label": "submitOrder", "path": "src/CheckoutPanel.tsx", "line": 38}
-   ]}}
+   ]},
+ "incomplete": "Omitted a cart re-render because its trigger could not be verified."}
 ```
 
 Replace the example locations with verified `label`, `path`, and `line` values.
