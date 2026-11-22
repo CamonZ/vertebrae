@@ -11,8 +11,11 @@ function isJsonRecord(
 
 export function PermissionRequestTurn({
   message,
+  onSettled,
 }: {
   message: Extract<ChatMessage, { kind: "permission_request" }>;
+  /** Records the answer so the chat's attention state clears. */
+  onSettled?: (requestId: string, status: "resolved" | "unavailable") => void;
 }) {
   const [updatedInput, setUpdatedInput] = useState(message.input ?? "");
   const [status, setStatus] = useState<
@@ -22,7 +25,7 @@ export function PermissionRequestTurn({
     | "resolved"
     | "unavailable"
     | "error"
-  >(message.requestId ? "pending" : "resolved");
+  >(message.requestId ? (message.status ?? "pending") : "resolved");
   const [error, setError] = useState<string | null>(null);
 
   const resolve = async (behavior: "allow" | "deny") => {
@@ -57,14 +60,14 @@ export function PermissionRequestTurn({
 
     if (result.status === "ok") {
       setStatus("resolved");
+      onSettled?.(message.requestId, "resolved");
     } else {
-      setStatus(
+      const unavailable =
         result.error.kind === "unavailable" ||
-          result.error.kind === "not_found"
-          ? "unavailable"
-          : "error"
-      );
+        result.error.kind === "not_found";
+      setStatus(unavailable ? "unavailable" : "error");
       setError(result.error.message);
+      if (unavailable) onSettled?.(message.requestId, "unavailable");
     }
   };
 

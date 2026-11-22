@@ -1025,6 +1025,19 @@ async classifyToolOperations(commands: string[], projectPath: string | null, ses
 }
 },
 /**
+ * Judge a completed root turn, reusing the chat catalog's stored answer for
+ * it. Model problems never fail the command: they fall back to your-turn
+ * with a diagnostic under the `chat_attention` log target.
+ */
+async classifyChatTurnAttention(input: TurnAttentionInput) : Promise<Result<TurnAttention, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("classify_chat_turn_attention", { input }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Open a validated local-chat file reference with the operating system's
  * external file handler. The frontend supplies the captured project root and
  * the raw reference path; canonicalization here closes symlink and traversal
@@ -3602,6 +3615,27 @@ export type Truncation =
  * or the budget's `max_depth` when that is lower).
  */
 "depth_limit"
+/**
+ * What the turn leaves for the user. `Undecided` means no stored answer
+ * exists and none was asked for (history replay).
+ */
+export type TurnAttention = "needs_you" | "your_turn" | "undecided"
+/**
+ * One completed root turn to judge or look up.
+ */
+export type TurnAttentionInput = { project_path: string | null; session_id: string;
+/**
+ * Opaque, stable identity of the completed turn within the chat.
+ */
+turn_key: string;
+/**
+ * The turn's last assistant message; truncated here, never in the client.
+ */
+message: string;
+/**
+ * Live completions may ask the decision model; replay only looks up.
+ */
+allow_inference: boolean }
 export type UpdateComponentResult = { component: string; state: UpdateComponentState; message: string }
 export type UpdateComponentState = "pending" | "downloaded" | "verified" | "staged" | "activated" | "health_checked" | "pending_relaunch" | "rolled_back" | "failed"
 /**

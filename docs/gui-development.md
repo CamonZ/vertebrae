@@ -1023,6 +1023,34 @@ without preventing settings from loading; disabling retains the selection. See
 See [Local chat associations](chat-associations.md) for the inference flow,
 header disclosure, persistence and prototype limits.
 
+## Local chat attention states
+
+Each chat has one attention state. It is derived in `utils/chatAttention.ts`
+and drawn by `ChatAttentionDot` on the pane header, the history rows and the
+launcher. In priority order:
+
+| State | Signal | Dot |
+|---|---|---|
+| blocked | pending permission, plan or question in the current root turn; gate drafting/rejected while idle | accent + reason |
+| error | lifecycle `error` | err, no glow |
+| needs-you | turn-end check answered yes for an unviewed completed turn | accent + "Asked you something" |
+| your-turn | the check answered no, is pending, or failed | muted |
+| running | the agent is working | ok with the running glow (glow only means running) |
+| closed | session closed | hollow |
+| idle | none of the above | none |
+
+The turn-end check (`classify_chat_turn_attention`) makes at most one
+decision-model call per live completed root turn. It is never run for child
+threads, discussions, cancelled or failed turns, turns with a deterministic
+signal, or queued follow-ups. Each answer is stored as a chat catalog
+classification keyed by turn identity and settings fingerprint. Replayed
+history only looks the answer up and never asks the model. A failure or a
+disabled model shows your-turn. Viewing the turn in the focused window clears
+your-turn and needs-you; the user's reply clears them too. Viewed markers are
+saved in localStorage. The launcher glows only while a chat is running and
+shows a flat dot when chats are blocked, errored or need you ("N need
+you"). `chatAttentionJumpOrder` puts blocked chats first, then the oldest.
+
 ## Changes view filesystem refresh
 
 The Changes view opens with **Whole branch** selected: the current worktree

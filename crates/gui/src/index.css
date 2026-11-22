@@ -2544,7 +2544,6 @@ html.light ::selection {
   border-radius: var(--r-full);
   box-shadow:
     var(--shadow-2),
-    0 0 18px var(--accent-glow),
     inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
   cursor: pointer;
   user-select: none;
@@ -2552,6 +2551,23 @@ html.light ::selection {
     border-color var(--t-base) var(--ease),
     box-shadow var(--t-base) var(--ease),
     transform var(--t-base) var(--ease);
+}
+/* Glow means running: the pill pulses the running glow (the active
+   status-indicator animation) only while a chat is working. A pseudo-element
+   carries it so the pill keeps its own shadows. */
+.hc-launch[data-running]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: pulse-glow var(--t-pulse) ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hc-launch[data-running]::after {
+    animation: none;
+    box-shadow: var(--shadow-glow-sm);
+  }
 }
 /* Hover wears the shared focus halo (edge + soft ring), not a solid accent line. */
 .hc-launch:hover {
@@ -2583,12 +2599,12 @@ html.light ::selection {
   border-radius: var(--r-xs);
   background: color-mix(in oklch, var(--bg-2) 70%, transparent);
 }
+/* Shown only while a chat needs the user; flat, since glow means running. */
 .hc-launch .ember {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 7px var(--accent-glow);
 }
 
 .hc-resume-prompt p {
@@ -2947,21 +2963,43 @@ html.light ::selection {
   font-size: var(--text-11);
 }
 /* Resting status ember; the active/closed dots reuse this footprint. */
-.hc-panel .hc-title .em {
+/* Chat attention dot (ticket 1f3f5cc0): one 6px treatment everywhere a chat
+   appears. Glow means running, nothing else; error and needs-you stay flat. */
+.chat-attention-dot {
   flex-shrink: 0;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 7px var(--accent-glow);
+  border-radius: var(--r-full);
 }
-.hc-panel .hc-title .em.ok {
+.chat-attention-dot[data-tone="accent"] {
+  background: var(--accent);
+}
+.chat-attention-dot[data-tone="err"] {
+  background: var(--err);
+}
+.chat-attention-dot[data-tone="mute"] {
+  background: var(--fg-mute);
+}
+.chat-attention-dot[data-tone="ok"] {
   background: var(--ok);
   box-shadow: 0 0 6px color-mix(in oklch, var(--ok) 60%, transparent);
 }
-.hc-panel .hc-title .em.mute {
-  background: var(--fg-mute);
-  box-shadow: none;
+.chat-attention-dot[data-tone="hollow"] {
+  border: 1px solid var(--fg-faint);
+}
+/* Reason beside the header dot; quiet sans meta, truncated before the title. */
+.hc-panel .hc-title .hc-attention-reason {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-11);
+  font-weight: 400;
+  color: var(--fg-soft);
+}
+.hc-panel .hc-title .hc-attention-reason[data-attention="error"] {
+  color: var(--err);
 }
 .hc-panel .hc-ctrls {
   display: flex;
@@ -4513,7 +4551,6 @@ html.light ::selection {
   border-color: color-mix(in oklch, var(--fg) 18%, transparent);
   box-shadow:
     var(--shadow-2),
-    0 0 18px var(--accent-glow),
     inset 0 1px 0 rgba(255, 255, 255, 0.82);
 }
 

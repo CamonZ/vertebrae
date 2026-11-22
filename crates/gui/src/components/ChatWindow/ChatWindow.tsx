@@ -1,3 +1,7 @@
+import {
+  useChatAttention,
+  useMarkChatTurnViewed,
+} from "../../hooks/useChatAttention";
 import { annotationWorktree } from "../../stores/toolAnnotations";
 import { useToolAnnotation } from "../../hooks/useToolAnnotation";
 import type {
@@ -185,6 +189,8 @@ export function ChatWindow({
     );
   });
   const chat = useChatSession(sessionId);
+  const attention = useChatAttention(sessionId);
+  useMarkChatTurnViewed(sessionId, isForegroundPane);
   const association = useChatAssociation(sessionId);
   const loadOlderReplayMessages = useChatStore(
     (state) => state.loadOlderReplayMessages
@@ -698,8 +704,7 @@ export function ChatWindow({
       <ChatHeader
         showProjectContext={showProjectContext}
         label={chat.session.title?.trim() || chat.session.label}
-        lifecycle={chat.lifecycle}
-        isActive={chat.isActive}
+        attention={attention}
         isClosing={chat.lifecycle === "closing"}
         canStopGeneration={chat.canStopGeneration}
         onClosePanel={onClosePanel}

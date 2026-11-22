@@ -57,11 +57,30 @@ export interface RunPaneWindowProps {
 /** Px from the bottom within which new output keeps the view pinned. */
 const PIN_THRESHOLD = 48;
 
-function runDotClass(run: TaskRun | null): string {
-  if (!run) return "em";
-  if (run.status === "failed") return "em err";
-  if (isActiveRunStatus(run.status)) return "em ok";
-  return "em mute";
+/**
+ * The run's header dot, on the shared chat dot treatment: glow only while
+ * the run is active, a flat err dot when it failed, muted otherwise. No dot
+ * while the run is loading.
+ */
+function RunStatusDot({ run }: { run: TaskRun | null }) {
+  if (!run) return null;
+  const tone =
+    run.status === "failed"
+      ? "err"
+      : isActiveRunStatus(run.status)
+        ? "ok"
+        : "mute";
+  const label = `Run status: ${run.status}`;
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      className="chat-attention-dot"
+      data-tone={tone}
+      data-testid="run-pane-status-dot"
+    />
+  );
 }
 
 export const RunPaneWindow = memo(function RunPaneWindow({
@@ -320,7 +339,7 @@ export const RunPaneWindow = memo(function RunPaneWindow({
               <span className="label" data-testid="run-pane-title">
                 {title}
               </span>
-              <span className={runDotClass(run)} />
+              <RunStatusDot run={run} />
             </div>
             <PaneControls
               leading={leading}

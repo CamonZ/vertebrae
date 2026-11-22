@@ -3063,10 +3063,12 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    // The chat header should have a muted dot for closed status.
+    // The chat header shows the hollow closed attention dot.
     screen.getByText("Test Task");
-    // Closed session indicator is a sibling of the header content
-    expect(screen.getByTestId("chat-closed-dot")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Closed" })).toHaveAttribute(
+      "data-attention",
+      "closed"
+    );
   });
 
   // --- A) User interaction flow ---
@@ -3436,7 +3438,27 @@ describe("ChatWindow", () => {
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
   });
 
-  it("shows active green dot when session has claude backend", () => {
+  it("shows the running dot only while the chat is working", () => {
+    const session = createSession({
+      backendSessionId: "claude-abc",
+      status: "open",
+      lifecycle: "streaming",
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(screen.getByRole("img", { name: "Running" })).toHaveAttribute(
+      "data-tone",
+      "ok"
+    );
+  });
+
+  it("does not show a running dot for an idle live runtime", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
       status: "open",
@@ -3449,20 +3471,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTestId("chat-active-dot")).toBeInTheDocument();
-  });
-
-  it("does not show active green dot when session has no claude backend", () => {
-    const session = createSession({ backendSessionId: null, status: "open" });
-    useChatStore.setState({
-      sessions: { "test-session": session },
-      activeSessionId: "test-session",
-      panelOpen: true,
-    });
-
-    render(<ChatWindow sessionId="test-session" />);
-
-    expect(screen.queryByTestId("chat-active-dot")).toBeNull();
+    expect(screen.queryByTestId("chat-attention-dot")).toBeNull();
   });
 
   it("does not show closed dot for open sessions", () => {
@@ -3475,7 +3484,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.queryByTestId("chat-closed-dot")).toBeNull();
+    expect(screen.queryByRole("img", { name: "Closed" })).toBeNull();
   });
 
   it("hides empty state when there are messages", () => {
@@ -3897,7 +3906,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTestId("chat-closed-dot")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Closed" })).toBeInTheDocument();
     expect(
       screen.queryByTestId("chat-lifecycle-label")
     ).not.toBeInTheDocument();
