@@ -604,21 +604,45 @@ body {
    card, a hover glow) set box-shadow too and must not hide keyboard focus.
    The inset edge stays visible when a scroll container clips the halo. */
 :root {
-  --focus-edge: color-mix(in oklch, var(--color-accent) 32%, var(--color-line-strong));
+  --focus-edge: color-mix(
+    in oklch,
+    var(--color-accent) 32%,
+    var(--color-line-strong)
+  );
   --focus-halo-opacity: 9%;
   --focus-depth: 0 6px 18px -8px rgb(0 0 0 / 45%);
-  --focus-halo: color-mix(in oklch, var(--color-accent) var(--focus-halo-opacity), transparent);
-  --focus-shadow: inset 0 0 0 1px var(--focus-edge), 0 0 0 3px var(--focus-halo), var(--focus-depth);
+  --focus-halo: color-mix(
+    in oklch,
+    var(--color-accent) var(--focus-halo-opacity),
+    transparent
+  );
+  --focus-shadow:
+    inset 0 0 0 1px var(--focus-edge), 0 0 0 3px var(--focus-halo),
+    var(--focus-depth);
 }
 .light {
   --focus-halo-opacity: 10%;
   --focus-depth: 0 6px 18px -10px rgb(68 52 31 / 25%);
 }
 :root [aria-invalid="true"] {
-  --focus-edge: color-mix(in oklch, var(--color-err) 55%, var(--color-line-strong));
+  --focus-edge: color-mix(
+    in oklch,
+    var(--color-err) 55%,
+    var(--color-line-strong)
+  );
   --focus-halo: color-mix(in oklch, var(--color-err) 14%, transparent);
 }
-:root :where(button, a, input, textarea, select, summary, [tabindex], [contenteditable]):not(:where([data-focus-halo="none"])):focus-visible {
+:root
+  :where(
+    button,
+    a,
+    input,
+    textarea,
+    select,
+    summary,
+    [tabindex],
+    [contenteditable]
+  ):not(:where([data-focus-halo="none"])):focus-visible {
   outline: 1px solid transparent !important;
   outline-offset: -1px !important;
   box-shadow: var(--focus-shadow) !important;
@@ -630,13 +654,19 @@ body {
 }
 :root [data-focus-halo="within"]:focus-within {
   border-color: var(--focus-edge) !important;
-  box-shadow: 0 0 0 3px var(--focus-halo), var(--focus-depth) !important;
+  box-shadow:
+    0 0 0 3px var(--focus-halo),
+    var(--focus-depth) !important;
 }
 :root [data-focus-halo="surface"] {
   border-color: var(--focus-edge);
-  box-shadow: 0 0 0 3px var(--focus-halo), var(--surface-shadow, var(--focus-depth));
+  box-shadow:
+    0 0 0 3px var(--focus-halo),
+    var(--surface-shadow, var(--focus-depth));
 }
-:root :is([data-focus-halo="within"], [data-focus-halo="surface"]) :where(textarea, input, [contenteditable]):focus-visible {
+:root
+  :is([data-focus-halo="within"], [data-focus-halo="surface"])
+  :where(textarea, input, [contenteditable]):focus-visible {
   box-shadow: none !important;
 }
 :root [data-focus-halo="overlay"] {
@@ -2710,6 +2740,7 @@ html.light ::selection {
   flex: 1;
   display: flex;
 }
+
 .hc-panel .hc-chat-pane {
   min-width: 0;
   min-height: 0;
@@ -2722,10 +2753,225 @@ html.light ::selection {
   min-width: 0;
   flex: 1;
 }
-.hc-panel[data-maximized] .hc-chat-panes {
+/* Chat workspace (ticket 736f94f3): the tab strip over the visible chats. */
+.hc-panel .hc-workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+.hc-panel[data-maximized] .hc-workspace {
   border-left: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
-  overflow-x: auto;
-  overflow-y: hidden;
+}
+/* Tonal strip, no borders; the accent is reserved for chats needing you. */
+.hc-panel .hc-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 var(--s-2);
+  background: color-mix(in oklch, var(--bg-1) 40%, transparent);
+  font-family: var(--font-sans);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.hc-panel .hc-tabs-main {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: var(--s-1);
+  min-width: 0;
+  flex: 1;
+}
+.hc-panel .hc-tablist {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 2px;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding-top: 4px;
+}
+.hc-panel .hc-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* An explicit width: WebKit sizes an auto-basis tablist by content. */
+  width: 200px;
+  min-width: 0;
+  flex: 0 1 auto;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  color: var(--fg-soft);
+  transition: background var(--t-fast) var(--ease);
+}
+.hc-panel .hc-tab:hover {
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+}
+.hc-panel .hc-tab[data-active] {
+  background: color-mix(in oklch, var(--bg-3) 70%, transparent);
+  color: var(--fg);
+}
+/* A bar under the active tab marks the chat shown. */
+.hc-panel .hc-tab[data-active]::after {
+  content: "";
+  position: absolute;
+  left: var(--s-2);
+  right: var(--s-2);
+  bottom: 0;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--fg-soft);
+}
+.hc-panel .hc-tab[data-drop-before]::before,
+.hc-panel .hc-tab[data-drop-after]::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--fg-mute);
+}
+.hc-panel .hc-tab[data-drop-before]::before {
+  left: -2px;
+}
+.hc-panel .hc-tab[data-drop-after]::before {
+  right: -2px;
+}
+.hc-panel .hc-tab-tip {
+  display: flex;
+  align-self: stretch;
+  min-width: 0;
+  flex: 1;
+}
+.hc-panel .hc-tab-button {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  padding: 0 var(--s-1) 0 var(--s-2);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  border-radius: inherit;
+}
+.hc-panel .hc-tab[data-active] .hc-tab-button {
+  font-weight: 500;
+}
+.hc-panel .hc-tab-dot-slot {
+  width: 6px;
+  flex-shrink: 0;
+}
+.hc-panel .hc-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-tab-kind,
+.hc-panel .hc-tab-project {
+  flex-shrink: 0;
+  font-size: var(--text-11);
+  color: var(--fg-mute);
+}
+.hc-panel .hc-tab-project {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 40%;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-right: var(--s-1);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-mute);
+  cursor: pointer;
+  opacity: 0;
+}
+.hc-panel .hc-tab:hover .hc-tab-close,
+.hc-panel .hc-tab[data-active] .hc-tab-close {
+  opacity: 1;
+}
+.hc-panel .hc-tab-close:hover {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.hc-panel .hc-tabs-fill {
+  flex: 1;
+  min-width: 0;
+}
+.hc-panel .hc-tabs-spacer {
+  min-width: 0;
+}
+.hc-panel .hc-tabs-overflow,
+.hc-panel .hc-tabs-switcher,
+.hc-panel .hc-tabs-counter {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+  height: 24px;
+  padding: 0 var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-soft);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.hc-panel .hc-tabs-overflow {
+  font-family: var(--mono);
+  font-size: var(--text-11);
+}
+.hc-panel .hc-tabs-overflow:hover,
+.hc-panel .hc-tabs-switcher:hover,
+.hc-panel .hc-tabs-counter:hover {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.hc-panel .hc-tabs-switcher {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--fg);
+  font-weight: 500;
+}
+.hc-panel .hc-tabs .ovf:has(.hc-tabs-switcher) {
+  min-width: 0;
+}
+.hc-panel .hc-tabs .ovf:has(.hc-tabs-switcher) .ovf-menu {
+  left: 0;
+  right: auto;
+}
+.hc-panel .hc-tabs-count {
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  font-weight: 400;
+  color: var(--fg-mute);
+}
+.hc-panel .hc-tabs-counter {
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  color: var(--fg);
+}
+.hc-panel .hc-tabs .hc-ctrl[aria-pressed="true"] {
+  color: var(--fg);
 }
 .hc-panel[data-maximized] .hc-chat-pane {
   flex-basis: 360px;
@@ -2736,27 +2982,6 @@ html.light ::selection {
   min-width: 0;
   min-height: 0;
   flex: 1;
-}
-.hc-panel .hc-pane-resize-handle {
-  flex: 0 0 8px;
-  position: relative;
-  cursor: ew-resize;
-  touch-action: none;
-  outline: none;
-}
-.hc-panel .hc-pane-resize-handle::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 3px;
-  width: 1px;
-  background: var(--line-strong);
-}
-.hc-panel .hc-pane-resize-handle:hover::after,
-.hc-panel .hc-pane-resize-handle[data-resizing]::after,
-.hc-panel .hc-pane-resize-handle:focus-visible::after {
-  background: var(--fg-mute);
 }
 
 /* Keep the composer surface neutral; its focus outline identifies the active
@@ -3409,10 +3634,14 @@ html.light ::selection {
   cursor: pointer;
 }
 .app-toggle {
-  transition: background-color 140ms ease, border-color 140ms ease;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
 }
 .app-toggle > span {
-  transition: transform 140ms ease, background-color 140ms ease;
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease;
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -4497,22 +4726,26 @@ html.light ::selection {
    clicked panel is never covered. */
 .hc-panel,
 .detail.detail-float {
-  --panel-lift: 0 1px 0 color-mix(in oklch, var(--fg) 7%, transparent) inset,
+  --panel-lift:
+    0 1px 0 color-mix(in oklch, var(--fg) 7%, transparent) inset,
     0 10px 28px -12px rgba(0, 0, 0, 0.5);
 }
 .hc-panel[data-focused],
 .detail.detail-float[data-focused] {
-  --panel-lift: 0 1px 0 color-mix(in oklch, var(--fg) 20%, transparent) inset,
+  --panel-lift:
+    0 1px 0 color-mix(in oklch, var(--fg) 20%, transparent) inset,
     0 22px 56px -16px rgba(0, 0, 0, 0.7);
 }
 .light .hc-panel,
 .light .detail.detail-float {
-  --panel-lift: 0 1px 0 rgba(255, 255, 255, 0.6) inset,
+  --panel-lift:
+    0 1px 0 rgba(255, 255, 255, 0.6) inset,
     0 10px 26px -14px rgba(68, 52, 31, 0.18);
 }
 .light .hc-panel[data-focused],
 .light .detail.detail-float[data-focused] {
-  --panel-lift: 0 1px 0 rgba(255, 255, 255, 0.95) inset,
+  --panel-lift:
+    0 1px 0 rgba(255, 255, 255, 0.95) inset,
     0 22px 52px -18px rgba(68, 52, 31, 0.32);
 }
 .hc-panel,
@@ -4909,8 +5142,12 @@ html.light ::selection {
 }
 
 @keyframes completed-conversation-appear {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .hc-panel .hc-mini-history-row[data-completed] {
   animation: completed-conversation-appear 140ms ease-out;
@@ -4929,12 +5166,24 @@ html.light ::selection {
   opacity: 0.5;
   cursor: not-allowed;
 }
-.app-toggle[data-active-color="primary"] { --toggle-color: var(--accent); }
-.app-toggle[data-active-color="warning"] { --toggle-color: var(--warn); }
-.app-toggle[data-active-color="success"] { --toggle-color: var(--ok); }
-.app-toggle[data-active-color="error"] { --toggle-color: var(--err); }
-.app-toggle[data-active-color="info"] { --toggle-color: var(--info); }
-.app-toggle[data-active-color]:not([data-active-color="neutral"])[aria-checked="true"] {
+.app-toggle[data-active-color="primary"] {
+  --toggle-color: var(--accent);
+}
+.app-toggle[data-active-color="warning"] {
+  --toggle-color: var(--warn);
+}
+.app-toggle[data-active-color="success"] {
+  --toggle-color: var(--ok);
+}
+.app-toggle[data-active-color="error"] {
+  --toggle-color: var(--err);
+}
+.app-toggle[data-active-color="info"] {
+  --toggle-color: var(--info);
+}
+.app-toggle[data-active-color]:not(
+    [data-active-color="neutral"]
+  )[aria-checked="true"] {
   background: color-mix(in oklch, var(--toggle-color) 22%, transparent);
   border-color: var(--toggle-color);
 }
@@ -5102,7 +5351,10 @@ html.light ::selection {
   font-family: var(--sans);
   font-size: var(--text-12);
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
 }
 .palette-search-btn:hover {
   color: var(--fg-soft);
@@ -5140,7 +5392,6 @@ html.light ::selection {
   color: var(--fg-mute);
   font-weight: 400;
 }
-
 
 /* ── Controls ────────────────────────────────────────────────────────────────
    One shape for every compact control: composer chips, toolbar selects and
@@ -5228,7 +5479,9 @@ select.ctl.ctl-field {
 .ctl[aria-expanded="true"] .ctl-caret {
   transform: rotate(180deg);
 }
-.ctl-caret { display: inline-block; }
+.ctl-caret {
+  display: inline-block;
+}
 
 /* ── Depth: content sheet on a canvas ───────────────────────────────────────
    The titlebar and rail sit on the darker canvas; the routed page is a sheet
@@ -5255,7 +5508,6 @@ select.ctl.ctl-field {
     0 1px 2px rgba(68, 52, 31, 0.08),
     0 18px 40px -26px rgba(68, 52, 31, 0.35);
 }
-
 
 /* ── Typeface pairings ──────────────────────────────────────────────────────
    Four roles, used the same way on every surface:
@@ -5294,7 +5546,8 @@ select.ctl.ctl-field {
   --display-tracking: -0.02em;
 }
 [data-type="humanist"] {
-  --pairing-font-sans: "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
+  --pairing-font-sans:
+    "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
   --pairing-font-prose: "Literata", Georgia, serif;
   --pairing-font-serif: "Fraunces", Georgia, serif;
   --pairing-font-mono: "Spline Sans Mono", ui-monospace, "SF Mono", monospace;
@@ -5521,7 +5774,11 @@ input.no-spin {
    tab, so the content pane reads as the surface in front. */
 .split-nav {
   position: relative;
-  background-color: color-mix(in oklch, var(--color-canvas) 80%, var(--color-bg));
+  background-color: color-mix(
+    in oklch,
+    var(--color-canvas) 80%,
+    var(--color-bg)
+  );
   box-shadow:
     inset -1px 0 0 color-mix(in oklch, var(--fg) 7%, transparent),
     inset -26px 0 30px -24px rgba(0, 0, 0, 0.75);
@@ -5975,7 +6232,9 @@ input.no-spin {
   color: var(--color-fg-soft);
   font-size: 13px;
   text-align: left;
-  transition: border-color 120ms ease, background-color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 .accent-swatch:hover {
   border-color: var(--color-line-strong);

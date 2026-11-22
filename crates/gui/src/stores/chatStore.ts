@@ -22,6 +22,26 @@ import {
 } from "./liveAssistantMessages";
 import { create } from "zustand";
 import {
+  EMPTY_WORKSPACE,
+  activateByOffset,
+  activateEntry,
+  activeEntry,
+  closeEntry,
+  findEntry,
+  insertEntryAfterActive,
+  isRunPane,
+  moveEntry,
+  moveEntryBefore,
+  normalizeWorkspace,
+  retargetEntry,
+  paneTarget,
+  showTarget,
+  type ChatPane,
+  type ChatWorkspaceLayout,
+  type RunChatPane,
+  type RunPaneTarget,
+} from "./chatWorkspace";
+import {
   applyBackgroundRoster,
   applyBackgroundUpdate,
   backgroundOutcomeMessages,
@@ -73,8 +93,13 @@ import type {
   PermissionMode,
   UserQuestion,
 } from "../bindings";
-import { commands, type AssociationWorktree, type LocalChatDiscussionBinding } from "../bindings";
+import {
+  commands,
+  type AssociationWorktree,
+  type LocalChatDiscussionBinding,
+} from "../bindings";
 import { emptyChatAssociation } from "../utils/chatAssociation/defaultWorktree";
+import { forgetChatView } from "./chatViewMemory";
 import { usePendingCommentsStore } from "./pendingCommentsStore";
 import { useComposerDraftStore } from "./composerDraftStore";
 import { useLocalChatDefaultsStore } from "../utils/localChatDefaults";
@@ -107,7 +132,13 @@ export { isLocalChatLifecycleBusy } from "../utils/localChatActivity";
  * Message types for the Claude chat
  */
 export type ChatMessage =
-  | { kind: "user"; text: string; timestamp: string; inputId?: string; turnId?: string }
+  | {
+      kind: "user";
+      text: string;
+      timestamp: string;
+      inputId?: string;
+      turnId?: string;
+    }
   | {
       kind: "gate_evaluation";
       attempt: number;
@@ -542,93 +573,22 @@ export interface GateSteeringState {
   resetAt: number | null;
 }
 
-/** A local harness chat session rendered in a pane. */
-export interface LocalChatPaneTarget {
-  kind?: "local";
-  /** Store session rendered in this pane */
-  sessionId: string;
-}
-
-/** Request to scroll a run pane to a thread; `nonce` makes repeats distinct. */
-export interface RunPaneScrollRequest {
-  threadId: string;
-  nonce: number;
-}
-
-/**
- * A durable TaskRun rendered read-only in a pane. Run panes own no
- * ChatSession, start no harness process and are never persisted.
- */
-export interface RunPaneTarget {
-  kind: "run";
-  taskId: string;
-  runId: string;
-  /** Render only this subagent thread of the run instead of the whole run. */
-  focusThreadId?: string | null;
-  scrollRequest?: RunPaneScrollRequest | null;
-  sessionId?: never;
-}
-
-export type ChatPaneTarget = LocalChatPaneTarget | RunPaneTarget;
-
-export type LocalChatPane = { id: string } & LocalChatPaneTarget;
-export type RunChatPane = { id: string } & RunPaneTarget;
-/** Stable pane identifier plus what the pane renders. */
-export type ChatPane = LocalChatPane | RunChatPane;
-
-/** Local sessions shown in panes; run panes own no session. */
-export function paneSessionIds(panes: readonly ChatPane[]): string[] {
-  return panes.flatMap((pane) => (isRunPane(pane) ? [] : [pane.sessionId]));
-}
-
-export function isRunPane(
-  pane: ChatPane | null | undefined
-): pane is RunChatPane {
-  return pane?.kind === "run";
-}
-
-/** Same run and the same (optional) focused subagent thread. */
-function sameRunTarget(
-  pane: ChatPane,
-  target: Pick<RunPaneTarget, "runId" | "focusThreadId">
-): boolean {
-  return (
-    isRunPane(pane) &&
-    pane.runId === target.runId &&
-    (pane.focusThreadId ?? null) === (target.focusThreadId ?? null)
-  );
-}
-
-function retargetPane(pane: ChatPane, target: ChatPaneTarget): ChatPane {
-  return { id: pane.id, ...target } as ChatPane;
-}
-
-function paneTarget(pane: ChatPane): ChatPaneTarget {
-  return isRunPane(pane)
-    ? {
-        kind: "run",
-        taskId: pane.taskId,
-        runId: pane.runId,
-        focusThreadId: pane.focusThreadId ?? null,
-        scrollRequest: pane.scrollRequest ?? null,
-      }
-    : { sessionId: pane.sessionId };
-}
+export type {
+  ChatPane,
+  ChatWorkspaceLayout,
+  LocalChatPane,
+  RunChatPane,
+  RunPaneTarget,
+} from "./chatWorkspace";
+export { isRunPane, paneSessionIds } from "./chatWorkspace";
 
 export interface OpenRunPaneOptions {
-  /** Add a split pane instead of replacing the active pane. */
-  split?: boolean;
-  /** Pane to replace; defaults to the active pane. */
+  /** Open as a new chat after the active one instead of replacing it. */
+  beside?: boolean;
+  /** Entry to replace; defaults to the active chat. */
   preferredPaneId?: string;
   /** Scroll the run pane to this thread once rendered. */
   scrollToThreadId?: string | null;
-}
-
-export interface ChatPaneLayout {
-  /** Visible chat panes in the maximized chat view */
-  panes: ChatPane[];
-  /** Pane receiving sidebar selections and pane-level controls */
-  activePaneId: string | null;
 }
 
 interface ChatStoreState {
@@ -636,8 +596,8 @@ interface ChatStoreState {
   sessions: Record<string, ChatSession>;
   /** Currently focused session ID */
   activeSessionId: string | null;
-  /** Pane-to-session bindings for maximized split chat */
-  paneLayout: ChatPaneLayout;
+  /** Open chats in strip order, shown as tabs (chatWorkspace.ts) */
+  paneLayout: ChatWorkspaceLayout;
   /** Whether the chat panel is visible */
   panelOpen: boolean;
   /**
@@ -679,20 +639,26 @@ interface ChatStoreActions {
   closeSession: (sessionId: string) => void;
   /** Focus a chat session tab */
   focusSession: (sessionId: string) => void;
-  /** Focus a maximized chat pane */
+  /** Activate an open chat (its tab). */
   focusPane: (paneId: string) => void;
-  /** Bind a pane to a session, focusing an existing pane if already visible */
+  /** Activate the chat `offset` places away in strip order, wrapping. */
+  focusPaneByOffset: (offset: number) => boolean;
+  /** Bind an entry to a session, activating the entry already showing it. */
   bindPaneToSession: (paneId: string, sessionId: string) => boolean;
-  /** Create a fresh local chat in a new split pane */
-  startFreshSessionInNewPane: (
+  /** Create a fresh local chat as a new tab after the active one. */
+  startFreshSessionInNewTab: (
     label: string,
     projectPath?: string | null,
     mainWorktree?: AssociationWorktree | null
   ) => string;
-  /** Close a split pane without closing its underlying chat session */
+  /** Open a known session as a new tab after the active one. */
+  openSessionInNewTab: (sessionId: string) => Promise<boolean>;
+  /** Close an open chat; its session stays in history. */
   closePane: (paneId: string) => void;
-  /** Collapse split panes back to a single visible pane */
-  unsplitPanes: (paneId?: string) => void;
+  /** Move an open chat `offset` places in strip order. */
+  moveChat: (paneId: string, offset: number) => void;
+  /** Drag reorder: move `paneId` before `beforeId` (null: to the end). */
+  moveChatBefore: (paneId: string, beforeId: string | null) => void;
   /**
    * Show a TaskRun read-only in a pane (focusing it if already visible) and
    * open the panel. Returns the pane id.
@@ -969,17 +935,10 @@ interface ChatStoreActions {
 
 export type ChatStore = ChatStoreState & ChatStoreActions;
 
-export const MAX_CHAT_PANES = 6;
-
-const emptyPaneLayout: ChatPaneLayout = {
-  panes: [],
-  activePaneId: null,
-};
-
 const emptyState: ChatStoreState = {
   sessions: {},
   activeSessionId: null,
-  paneLayout: emptyPaneLayout,
+  paneLayout: EMPTY_WORKSPACE,
   panelOpen: false,
   composerFocusRevision: 0,
   composerFocusHandledRevision: 0,
@@ -1351,195 +1310,108 @@ function latestSessionId(sessions: Record<string, ChatSession>): string | null {
   );
 }
 
+type LayoutState = Pick<
+  ChatStoreState,
+  "sessions" | "activeSessionId" | "paneLayout"
+>;
+type LayoutPatch = Pick<ChatStoreState, "activeSessionId" | "paneLayout">;
+
 function activeSessionIdFromPaneLayout(
-  paneLayout: ChatPaneLayout,
+  paneLayout: ChatWorkspaceLayout,
   fallback: string | null = null
 ): string | null {
-  const active = paneLayout.panes.find(
-    (pane) => pane.id === paneLayout.activePaneId
-  );
+  const active = activeEntry(paneLayout);
   if (active && !isRunPane(active)) return active.sessionId;
   // A focused run pane keeps the last local session as the active session.
   return (
     (active ? fallback : null) ??
-    paneLayout.panes.find((pane) => !isRunPane(pane))?.sessionId ??
+    paneLayout.order.find((pane) => !isRunPane(pane))?.sessionId ??
     fallback
   );
 }
 
+/** Entries stay open while their session is an open conversation. */
+function keepOpenEntries(sessions: Record<string, ChatSession>) {
+  return (pane: ChatPane) =>
+    isRunPane(pane) || isOpenLocalChatConversation(sessions[pane.sessionId]);
+}
+
 export function normalizePaneLayout(
-  paneLayout: ChatPaneLayout | undefined,
+  paneLayout: ChatWorkspaceLayout | undefined,
   sessions: Record<string, ChatSession>
-): ChatPaneLayout {
-  const panes = (paneLayout?.panes ?? []).filter((pane) => {
-    if (isRunPane(pane)) return true;
-    const session = sessions[pane.sessionId];
-    if (!isOpenLocalChatConversation(session)) {
-      return false;
-    }
-    return true;
-  });
-  const activePaneId =
-    paneLayout?.activePaneId &&
-    panes.some((pane) => pane.id === paneLayout.activePaneId)
-      ? paneLayout.activePaneId
-      : (panes[0]?.id ?? null);
-
-  return { panes, activePaneId };
-}
-
-function focusSessionInPaneLayout(
-  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
-  sessionId: string,
-  preferredPaneId?: string
-): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
-  const session = state.sessions[sessionId];
-  if (!isOpenLocalChatConversation(session)) {
-    return {
-      activeSessionId: state.activeSessionId,
-      paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
-    };
-  }
-
-  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
-  const preferredPane = preferredPaneId
-    ? paneLayout.panes.find((pane) => pane.id === preferredPaneId)
-    : undefined;
-  if (preferredPaneId && !preferredPane) {
-    return {
-      activeSessionId: state.activeSessionId,
-      paneLayout,
-    };
-  }
-  if (preferredPane) {
-    // Keep the requested pane active; swap a target already visible elsewhere.
-    return {
-      activeSessionId: sessionId,
-      paneLayout: {
-        panes: paneLayout.panes.map((pane) =>
-          pane.id === preferredPane.id
-            ? retargetPane(pane, { sessionId })
-            : pane.sessionId === sessionId
-              ? retargetPane(pane, paneTarget(preferredPane))
-              : pane
-        ),
-        activePaneId: preferredPane.id,
-      },
-    };
-  }
-  const existingPane = paneLayout.panes.find(
-    (pane) => pane.sessionId === sessionId
+): ChatWorkspaceLayout {
+  return normalizeWorkspace(
+    paneLayout ?? EMPTY_WORKSPACE,
+    keepOpenEntries(sessions)
   );
-  if (existingPane) {
-    return {
-      activeSessionId: sessionId,
-      paneLayout: {
-        panes: paneLayout.panes,
-        activePaneId: existingPane.id,
-      },
-    };
-  }
-  const activePaneId = paneLayout.activePaneId ?? paneLayout.panes[0]?.id;
-  if (activePaneId) {
-    return {
-      activeSessionId: sessionId,
-      paneLayout: {
-        panes: paneLayout.panes.map((pane) =>
-          pane.id === activePaneId ? retargetPane(pane, { sessionId }) : pane
-        ),
-        activePaneId,
-      },
-    };
-  }
-
-  const pane: ChatPane = { id: generatePaneId(), sessionId };
-  return {
-    activeSessionId: sessionId,
-    paneLayout: {
-      panes: [pane],
-      activePaneId: pane.id,
-    },
-  };
 }
 
-function addSessionPane(
-  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
-  sessionId: string
-): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
-  const session = state.sessions[sessionId];
-  if (!isOpenLocalChatConversation(session)) {
-    return {
-      activeSessionId: state.activeSessionId,
-      paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
-    };
-  }
-
-  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
-  const existingPane = paneLayout.panes.find(
-    (pane) => pane.sessionId === sessionId
-  );
-  if (existingPane) {
-    return {
-      activeSessionId: sessionId,
-      paneLayout: {
-        panes: paneLayout.panes,
-        activePaneId: existingPane.id,
-      },
-    };
-  }
-
-  if (paneLayout.panes.length >= MAX_CHAT_PANES) {
-    return focusSessionInPaneLayout(state, sessionId);
-  }
-
-  const pane: ChatPane = { id: generatePaneId(), sessionId };
-  return {
-    activeSessionId: sessionId,
-    paneLayout: {
-      panes: [...paneLayout.panes, pane],
-      activePaneId: pane.id,
-    },
-  };
-}
-
-function removePaneFromLayout(
-  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
-  paneId: string
-): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
-  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
-  if (paneLayout.panes.length <= 1) {
-    return {
-      activeSessionId: activeSessionIdFromPaneLayout(
-        paneLayout,
-        state.activeSessionId
-      ),
-      paneLayout,
-    };
-  }
-
-  const panes = paneLayout.panes.filter((pane) => pane.id !== paneId);
-  if (panes.length === paneLayout.panes.length) {
-    return {
-      activeSessionId: activeSessionIdFromPaneLayout(
-        paneLayout,
-        state.activeSessionId
-      ),
-      paneLayout,
-    };
-  }
-
-  const activePaneId =
-    paneLayout.activePaneId === paneId
-      ? (panes[0]?.id ?? null)
-      : paneLayout.activePaneId;
-  const nextLayout = { panes, activePaneId };
+/** Commit a layout and derive the active session from its active chat. */
+function withLayout(state: LayoutState, paneLayout: ChatWorkspaceLayout) {
   return {
     activeSessionId: activeSessionIdFromPaneLayout(
-      nextLayout,
+      paneLayout,
       state.activeSessionId
     ),
-    paneLayout: nextLayout,
-  };
+    paneLayout,
+  } satisfies LayoutPatch;
+}
+
+/**
+ * Show a session: activate its open chat, else replace the preferred entry
+ * (default: the active tab), else open the first chat.
+ */
+function focusSessionInPaneLayout(
+  state: LayoutState,
+  sessionId: string,
+  preferredPaneId?: string
+): LayoutPatch {
+  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
+  if (!isOpenLocalChatConversation(state.sessions[sessionId])) {
+    return { activeSessionId: state.activeSessionId, paneLayout };
+  }
+  return withLayout(
+    state,
+    showTarget(paneLayout, { sessionId }, generatePaneId(), preferredPaneId)
+  );
+}
+
+/** Show a session as a new chat after the active one (or activate it). */
+function addSessionPane(state: LayoutState, sessionId: string): LayoutPatch {
+  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
+  if (!isOpenLocalChatConversation(state.sessions[sessionId])) {
+    return { activeSessionId: state.activeSessionId, paneLayout };
+  }
+  const existing = findEntry(paneLayout, { sessionId });
+  return withLayout(
+    state,
+    existing
+      ? activateEntry(paneLayout, existing.id)
+      : insertEntryAfterActive(paneLayout, { id: generatePaneId(), sessionId })
+  );
+}
+
+/**
+ * An open active session always has a tab: when `paneLayout` has none
+ * showing it, the session opens in a new tab after the active one. Store
+ * actions that change the active session run their layout through this.
+ */
+function withActiveSessionTab(
+  paneLayout: ChatWorkspaceLayout,
+  activeSessionId: string | null,
+  sessions: Record<string, ChatSession>
+): ChatWorkspaceLayout {
+  if (
+    !activeSessionId ||
+    !isOpenLocalChatConversation(sessions[activeSessionId]) ||
+    findEntry(paneLayout, { sessionId: activeSessionId })
+  ) {
+    return paneLayout;
+  }
+  return insertEntryAfterActive(paneLayout, {
+    id: generatePaneId(),
+    sessionId: activeSessionId,
+  });
 }
 
 function removeSessionFromRuntimeState(
@@ -1558,106 +1430,55 @@ function removeSessionFromRuntimeState(
   const activeSessionStillOpen =
     state.activeSessionId !== null && !!remaining[state.activeSessionId];
   const sessionIds = Object.keys(remaining);
-  const hasRunPanes = normalizedPaneLayout.panes.some(isRunPane);
+  const hasRunPanes = normalizedPaneLayout.order.some(isRunPane);
+  const activeSessionId = activeSessionStillOpen
+    ? state.activeSessionId
+    : (activePaneSessionId ?? latestSessionId(remaining));
+  // Removing the last open chat shows the session that stays active in a
+  // tab of its own, so the panel never goes blank.
+  const paneLayout =
+    normalizedPaneLayout.order.length === 0
+      ? withActiveSessionTab(normalizedPaneLayout, activeSessionId, remaining)
+      : normalizedPaneLayout;
 
   return {
     sessions: remaining,
-    activeSessionId: activeSessionStillOpen
-      ? state.activeSessionId
-      : (activePaneSessionId ?? latestSessionId(remaining)),
-    paneLayout: normalizedPaneLayout,
+    activeSessionId,
+    paneLayout,
     panelOpen: sessionIds.length > 0 || hasRunPanes ? state.panelOpen : false,
   };
 }
 
-function collapsePaneLayout(
-  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
-  paneId?: string
-): Pick<ChatStoreState, "activeSessionId" | "paneLayout"> {
-  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
-  const keepPane =
-    (paneId && paneLayout.panes.find((pane) => pane.id === paneId)) ||
-    paneLayout.panes.find((pane) => pane.id === paneLayout.activePaneId) ||
-    (state.activeSessionId
-      ? paneLayout.panes.find(
-          (pane) => pane.sessionId === state.activeSessionId
-        )
-      : undefined) ||
-    paneLayout.panes[0];
-
-  if (!keepPane) {
-    return { activeSessionId: null, paneLayout: emptyPaneLayout };
-  }
-
-  return {
-    activeSessionId: isRunPane(keepPane)
-      ? state.activeSessionId
-      : keepPane.sessionId,
-    paneLayout: {
-      panes: [keepPane],
-      activePaneId: keepPane.id,
-    },
-  };
-}
-
 function openRunPaneInLayout(
-  state: Pick<ChatStoreState, "sessions" | "activeSessionId" | "paneLayout">,
+  state: LayoutState,
   target: RunPaneTarget,
   paneId: string,
   options: OpenRunPaneOptions
-): { paneId: string; paneLayout: ChatPaneLayout } {
-  const paneLayout = normalizePaneLayout(state.paneLayout, state.sessions);
-  const existing = paneLayout.panes.find((pane) => sameRunTarget(pane, target));
+): { paneId: string; paneLayout: ChatWorkspaceLayout } {
+  const normalized = normalizePaneLayout(state.paneLayout, state.sessions);
+  const existing = findEntry(normalized, target);
   if (existing) {
     return {
       paneId: existing.id,
-      paneLayout: {
-        panes: paneLayout.panes.map((pane) =>
-          pane.id === existing.id
-            ? { ...existing, scrollRequest: target.scrollRequest ?? null }
-            : pane
-        ),
-        activePaneId: existing.id,
-      },
+      paneLayout: retargetEntry(normalized, existing.id, target),
     };
   }
 
-  // Compact chat keeps no layout; preserve the shown session as a pane.
-  const panes: ChatPane[] =
-    paneLayout.panes.length === 0 &&
-    state.activeSessionId &&
-    state.sessions[state.activeSessionId]?.status === "open"
-      ? [{ id: generatePaneId(), sessionId: state.activeSessionId }]
-      : paneLayout.panes;
+  // Keep the shown session's tab beside the run.
+  const paneLayout = withActiveSessionTab(
+    normalized,
+    state.activeSessionId,
+    state.sessions
+  );
 
-  const replaceId = options.split
+  const into = options.beside
     ? null
-    : (options.preferredPaneId ?? paneLayout.activePaneId ?? panes[0]?.id);
-  const replace = replaceId
-    ? panes.find((pane) => pane.id === replaceId)
-    : undefined;
-
-  if (replace || (options.split && panes.length >= MAX_CHAT_PANES)) {
-    const into =
-      replace ??
-      panes.find((p) => p.id === paneLayout.activePaneId) ??
-      panes[0];
-    return {
-      paneId: into.id,
-      paneLayout: {
-        panes: panes.map((pane) =>
-          pane.id === into.id ? retargetPane(pane, target) : pane
-        ),
-        activePaneId: into.id,
-      },
-    };
-  }
-
-  const pane: ChatPane = { id: paneId, ...target };
-  return {
-    paneId,
-    paneLayout: { panes: [...panes, pane], activePaneId: paneId },
-  };
+    : (options.preferredPaneId ?? paneLayout.activeId);
+  const next =
+    into && paneLayout.order.some((pane) => pane.id === into)
+      ? retargetEntry(paneLayout, into, target)
+      : insertEntryAfterActive(paneLayout, { id: paneId, ...target });
+  return { paneId: next.activeId ?? paneId, paneLayout: next };
 }
 
 let runPaneScrollNonce = 0;
@@ -1748,7 +1569,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         session_id: session.id,
         harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
         provider_resume_id: session.providerResumeId,
-        project_path: session.discussion?.worktreePath ?? session.projectPath ?? null,
+        project_path:
+          session.discussion?.worktreePath ?? session.projectPath ?? null,
         created_at: session.createdAt ?? null,
         cursor,
         limit: 200,
@@ -2361,7 +2183,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return id;
     },
 
-    openDiscussionSession: ({ harness, providerId, projectPath, discussionBinding }) => {
+    openDiscussionSession: ({
+      harness,
+      providerId,
+      projectPath,
+      discussionBinding,
+    }) => {
       const session: ChatSession = {
         ...createLocalSession("Selection discussion", projectPath),
         harness,
@@ -2438,6 +2265,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     closeSession: (sessionId) => {
+      forgetChatView(sessionId);
       set((state) => {
         if (!state.sessions[sessionId]) return state;
         return removeSessionFromRuntimeState(state, sessionId);
@@ -2454,66 +2282,57 @@ export const useChatStore = create<ChatStore>((set, get) => {
           state.paneLayout,
           state.sessions
         );
-        const pane = paneLayout.panes.find((item) => item.id === paneId);
-        if (!pane) return { paneLayout };
+        if (!paneLayout.order.some((pane) => pane.id === paneId)) {
+          return { paneLayout };
+        }
         return {
-          activeSessionId: isRunPane(pane)
-            ? state.activeSessionId
-            : pane.sessionId,
-          paneLayout: {
-            panes: paneLayout.panes,
-            activePaneId: pane.id,
-          },
+          ...withLayout(state, activateEntry(paneLayout, paneId)),
           // Choosing a pane supersedes a composer focus request not yet taken.
           composerFocusHandledRevision: state.composerFocusRevision,
         };
       });
     },
 
+    focusPaneByOffset: (offset) => {
+      const before = get().paneLayout;
+      set((state) =>
+        withLayout(
+          state,
+          activateByOffset(
+            normalizePaneLayout(state.paneLayout, state.sessions),
+            offset
+          )
+        )
+      );
+      return get().paneLayout.activeId !== before.activeId;
+    },
+
     bindPaneToSession: (paneId, sessionId) => {
       let bound = false;
       set((state) => {
-        const session = state.sessions[sessionId];
-        if (!isOpenLocalChatConversation(session)) {
-          return {
-            paneLayout: normalizePaneLayout(state.paneLayout, state.sessions),
-          };
-        }
         const paneLayout = normalizePaneLayout(
           state.paneLayout,
           state.sessions
         );
-        const existingPane = paneLayout.panes.find(
-          (pane) => pane.sessionId === sessionId
-        );
-        if (existingPane) {
-          bound = true;
-          return {
-            activeSessionId: sessionId,
-            paneLayout: {
-              panes: paneLayout.panes,
-              activePaneId: existingPane.id,
-            },
-          };
+        if (!isOpenLocalChatConversation(state.sessions[sessionId])) {
+          return { paneLayout };
         }
-        if (!paneLayout.panes.some((pane) => pane.id === paneId)) {
+        const existing = findEntry(paneLayout, { sessionId });
+        if (!existing && !paneLayout.order.some((pane) => pane.id === paneId)) {
           return { paneLayout };
         }
         bound = true;
-        return {
-          activeSessionId: sessionId,
-          paneLayout: {
-            panes: paneLayout.panes.map((pane) =>
-              pane.id === paneId ? retargetPane(pane, { sessionId }) : pane
-            ),
-            activePaneId: paneId,
-          },
-        };
+        return withLayout(
+          state,
+          existing
+            ? activateEntry(paneLayout, existing.id)
+            : retargetEntry(paneLayout, paneId, { sessionId })
+        );
       });
       return bound;
     },
 
-    startFreshSessionInNewPane: (label, projectPath, mainWorktree) => {
+    startFreshSessionInNewTab: (label, projectPath, mainWorktree) => {
       const session = createLocalSession(label, projectPath, mainWorktree);
       persistLocalChatSession(session);
       set((state) => {
@@ -2532,12 +2351,52 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return session.id;
     },
 
-    closePane: (paneId) => {
-      set((state) => removePaneFromLayout(state, paneId));
+    openSessionInNewTab: async (sessionId) => {
+      let session: ChatSession | undefined = get().sessions[sessionId];
+      if (!session) {
+        const persisted = loadPersistedLocalChatSession(sessionId);
+        if (!persisted || persisted.status !== "open") return false;
+        session = hydrateLocalSession(persisted);
+      }
+      if (session.discussion) return false;
+      const shown = session;
+      set((state) => {
+        const nextSessions = state.sessions[shown.id]
+          ? state.sessions
+          : { ...state.sessions, [shown.id]: shown };
+        return {
+          sessions: nextSessions,
+          ...addSessionPane({ ...state, sessions: nextSessions }, shown.id),
+          panelOpen: true,
+          composerFocusRevision: state.composerFocusRevision + 1,
+        };
+      });
+      void hydrateProviderMessagesInPlace(shown.id, shown);
+      return true;
     },
 
-    unsplitPanes: (paneId) => {
-      set((state) => collapsePaneLayout(state, paneId));
+    closePane: (paneId) => {
+      set((state) =>
+        withLayout(
+          state,
+          closeEntry(
+            normalizePaneLayout(state.paneLayout, state.sessions),
+            paneId
+          )
+        )
+      );
+    },
+
+    moveChat: (paneId, offset) => {
+      set((state) => ({
+        paneLayout: moveEntry(state.paneLayout, paneId, offset),
+      }));
+    },
+
+    moveChatBefore: (paneId, beforeId) => {
+      set((state) => ({
+        paneLayout: moveEntryBefore(state.paneLayout, paneId, beforeId),
+      }));
     },
 
     openRunPane: (target, options = {}) => {
@@ -2559,14 +2418,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           options
         );
         openedPaneId = next.paneId;
-        return {
-          paneLayout: next.paneLayout,
-          activeSessionId: activeSessionIdFromPaneLayout(
-            next.paneLayout,
-            state.activeSessionId
-          ),
-          panelOpen: true,
-        };
+        return { ...withLayout(state, next.paneLayout), panelOpen: true };
       });
       return openedPaneId;
     },
@@ -2577,40 +2429,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
           state.paneLayout,
           state.sessions
         );
-        if (!state.sessions[sessionId]) return { paneLayout };
-        const anchorTarget = paneTarget(anchor);
-        let panes = paneLayout.panes;
-        const anchorPane = panes.find((pane) => pane.id === anchor.id);
-        // A session focus may have replaced the run pane; restore it.
-        if (anchorPane && anchorPane.sessionId === sessionId) {
-          if (panes.length >= MAX_CHAT_PANES) return { paneLayout };
-          panes = panes.map((pane) =>
-            pane.id === anchor.id ? retargetPane(pane, anchorTarget) : pane
-          );
-        } else if (!anchorPane) {
+        if (!isOpenLocalChatConversation(state.sessions[sessionId])) {
           return { paneLayout };
         }
-        const sessionPane = panes.find((pane) => pane.sessionId === sessionId);
-        if (sessionPane) {
-          return {
-            activeSessionId: sessionId,
-            paneLayout: { panes, activePaneId: sessionPane.id },
-          };
-        }
-        if (panes.length >= MAX_CHAT_PANES) return { paneLayout };
-        const index = panes.findIndex((pane) => pane.id === anchor.id);
-        const pane: ChatPane = { id: generatePaneId(), sessionId };
-        return {
-          activeSessionId: sessionId,
-          paneLayout: {
-            panes: [
-              ...panes.slice(0, index + 1),
-              pane,
-              ...panes.slice(index + 1),
-            ],
-            activePaneId: pane.id,
-          },
-        };
+        const anchorPane = paneLayout.order.find(
+          (pane) => pane.id === anchor.id
+        );
+        if (!anchorPane) return { paneLayout };
+        // A session focus may have replaced the run pane; restore it.
+        const restored =
+          !isRunPane(anchorPane) && anchorPane.sessionId === sessionId
+            ? retargetEntry(paneLayout, anchor.id, paneTarget(anchor))
+            : activateEntry(paneLayout, anchor.id);
+        const existing = findEntry(restored, { sessionId });
+        return withLayout(
+          state,
+          existing
+            ? activateEntry(restored, existing.id)
+            : insertEntryAfterActive(
+                restored,
+                { id: generatePaneId(), sessionId },
+                anchor.id
+              )
+        );
       });
     },
 
@@ -2635,7 +2476,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (isCurrent && !isCurrent()) return;
       set((state) => {
         const restored = include
-          ? Object.fromEntries(Object.entries(sessions).filter(([, session]) => include(session)))
+          ? Object.fromEntries(
+              Object.entries(sessions).filter(([, session]) => include(session))
+            )
           : sessions;
         const nextSessions = {
           ...restored,
@@ -2778,6 +2621,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       return true;
     },
 
+    // Gate chats open in their own tab so the run they gate stays open.
     openGateSession: (gate, projectPath) => {
       const runtime = Object.values(get().sessions).find(
         (session) => !!session.gate && isSameGate(session.gate, gate)
@@ -2787,7 +2631,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         void updateSession(runtime.id, (session) => ({ ...session, gate }));
 
         set((state) => ({
-          ...focusSessionInPaneLayout(state, runtime.id),
+          ...addSessionPane(state, runtime.id),
           panelOpen: true,
           composerFocusRevision: state.composerFocusRevision + 1,
         }));
@@ -2815,7 +2659,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           const nextSessions = { ...state.sessions, [hydrated.id]: hydrated };
           return {
             sessions: nextSessions,
-            ...focusSessionInPaneLayout(
+            ...addSessionPane(
               { ...state, sessions: nextSessions },
               hydrated.id
             ),
@@ -2844,10 +2688,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             state.localSessionSummaries,
             session
           ),
-          ...focusSessionInPaneLayout(
-            { ...state, sessions: nextSessions },
-            session.id
-          ),
+          ...addSessionPane({ ...state, sessions: nextSessions }, session.id),
           panelOpen: true,
           composerFocusRevision: state.composerFocusRevision + 1,
         };
@@ -3360,22 +3201,29 @@ export const useChatStore = create<ChatStore>((set, get) => {
         permissionMode: source.permissionMode,
       };
       persistLocalChatSession(fresh);
-      set((state) => ({
-        sessions: { ...state.sessions, [fresh.id]: fresh },
-        localSessionSummaries: upsertLocalSessionSummary(
-          state.localSessionSummaries,
-          fresh
-        ),
-        activeSessionId: fresh.id,
-        paneLayout: {
-          ...state.paneLayout,
-          panes: state.paneLayout.panes.map((pane) =>
-            pane.sessionId === sessionId
-              ? { ...pane, sessionId: fresh.id }
-              : pane
+      set((state) => {
+        const sessions = { ...state.sessions, [fresh.id]: fresh };
+        return {
+          sessions,
+          localSessionSummaries: upsertLocalSessionSummary(
+            state.localSessionSummaries,
+            fresh
           ),
-        },
-      }));
+          activeSessionId: fresh.id,
+          paneLayout: withActiveSessionTab(
+            {
+              ...state.paneLayout,
+              order: state.paneLayout.order.map((pane) =>
+                pane.sessionId === sessionId
+                  ? { ...pane, sessionId: fresh.id }
+                  : pane
+              ),
+            },
+            fresh.id,
+            sessions
+          ),
+        };
+      });
       return fresh.id;
     },
 
@@ -3397,6 +3245,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         if (deleted.has(id)) return;
         deleted.add(id);
         markLocalChatSessionCleared(id);
+        forgetChatView(id);
         usePendingCommentsStore.getState().clearSession(id);
         useComposerDraftStore.getState().setDraft(id, "");
         if (typeof commands.deleteLocalChatAnnotations === "function")
@@ -3592,7 +3441,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
               if (!turnId || session.steeringTurnIds?.[inputId]) return session;
               return {
                 ...session,
-                steeringTurnIds: { ...session.steeringTurnIds, [inputId]: turnId },
+                steeringTurnIds: {
+                  ...session.steeringTurnIds,
+                  [inputId]: turnId,
+                },
                 messages: session.messages.map((row) =>
                   row === existing ? { ...row, turnId } : row
                 ),
@@ -3726,9 +3578,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
             messages,
             hasUserMessage: nextHasUserMessage,
             updatedAt: message.timestamp,
-            ...(message.kind === "user" && message.inputId && message.turnId && {
-              steeringTurnIds: { ...session.steeringTurnIds, [message.inputId]: message.turnId },
-            }),
+            ...(message.kind === "user" &&
+              message.inputId &&
+              message.turnId && {
+                steeringTurnIds: {
+                  ...session.steeringTurnIds,
+                  [message.inputId]: message.turnId,
+                },
+              }),
           };
         },
         { persist: persistMessage }
@@ -4649,6 +4506,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     reset: () => {
       flushPendingLocalChatText();
+      forgetChatView();
 
       set(emptyState);
     },

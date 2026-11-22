@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../bindings";
@@ -43,11 +44,12 @@ describe("associationDriverSessionIds", () => {
       },
       activeSessionId: "active",
       paneLayout: {
-        panes: [
+        ...EMPTY_WORKSPACE,
+        order: [
           { id: "p1", sessionId: "pane" },
           { id: "p2", sessionId: "both" },
         ],
-        activePaneId: "p1",
+        activeId: "p1",
       },
     } as never);
 
@@ -92,7 +94,7 @@ describe("ChatAssociationDrivers", () => {
         }),
       },
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
     } as never);
     render(<ChatAssociationDrivers />);
 

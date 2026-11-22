@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -108,7 +109,7 @@ function resetChatStore(sessions: Record<string, ChatSession>) {
   useChatStore.setState({
     sessions,
     activeSessionId: Object.keys(sessions)[0] ?? null,
-    paneLayout: { panes: [], activePaneId: null },
+    paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
     panelOpen: false,
     localSessionSummaries: {},
   });
@@ -1372,30 +1373,47 @@ describe("useLocalChatEventRouter route functions", () => {
     type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
     let resolveReply!: (reply: Reply) => void;
     mockedCommands.steerLocalChatTurn.mockReturnValueOnce(
-      new Promise<Reply>((resolve) => { resolveReply = resolve; })
+      new Promise<Reply>((resolve) => {
+        resolveReply = resolve;
+      })
     );
 
     startTurn("backend-local", "original");
-    const steering = steerLocalChatTurn("local", "backend-local", "original", "steer");
+    const steering = steerLocalChatTurn(
+      "local",
+      "backend-local",
+      "original",
+      "steer"
+    );
     expect(routeLocalChatSessionEndEvent(end("original"))).toBe(true);
     expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
     // The reply may arrive before the independent TurnStarted listener.
     resolveReply({ status: "ok", data: "follow-up" });
     expect(await steering).toBe("follow-up");
-    expect(useChatStore.getState().sessions.local.activeTurn?.turnId).toBe("follow-up");
+    expect(useChatStore.getState().sessions.local.activeTurn?.turnId).toBe(
+      "follow-up"
+    );
     expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
 
-    expect(routeLocalChatTurnStartedEvent({
-      backend_session_id: "backend-local",
-      harness: "claude",
-      turn_id: "follow-up",
-      thread_id: "backend-local-thread",
-      is_root: true,
-    })).toBe(false);
+    expect(
+      routeLocalChatTurnStartedEvent({
+        backend_session_id: "backend-local",
+        harness: "claude",
+        turn_id: "follow-up",
+        thread_id: "backend-local-thread",
+        is_root: true,
+      })
+    ).toBe(false);
     expect(routeLocalChatSessionEndEvent(end("follow-up"))).toBe(true);
-    await waitFor(() => expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledExactlyOnceWith(
-      "backend-local", "queued", DEFAULT_TURN_SETTINGS
-    ));
+    await waitFor(() =>
+      expect(
+        mockedCommands.sendLocalChatMessage
+      ).toHaveBeenCalledExactlyOnceWith(
+        "backend-local",
+        "queued",
+        DEFAULT_TURN_SETTINGS
+      )
+    );
   });
 
   it("keeps sequential queued turns active when prior-turn events arrive late", async () => {

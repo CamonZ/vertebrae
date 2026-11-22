@@ -10,6 +10,18 @@ import {
 
 const NO_TASK_SELECTED_KEY = "__vertebrae_no_task_selected__";
 
+/** The task detail query, shared by single and batched readers. */
+export function taskDetailQueryOptions(generation: number, id: string) {
+  return {
+    queryKey: queryKeys.tasks.detail(generation, id),
+    queryFn: async () => {
+      const task = await unwrapCommand(commands.getTask(id));
+      hydrateActiveTaskRunsFromTasks([task], generation);
+      return task;
+    },
+  };
+}
+
 /**
  * Hook for fetching a single task.
  *
@@ -20,12 +32,7 @@ export function useTask(id: string | null | undefined) {
   const taskId = id ?? NO_TASK_SELECTED_KEY;
 
   const query = useQuery({
-    queryKey: queryKeys.tasks.detail(projectScopeGeneration, taskId),
-    queryFn: async () => {
-      const task = await unwrapCommand(commands.getTask(id!));
-      hydrateActiveTaskRunsFromTasks([task], projectScopeGeneration);
-      return task;
-    },
+    ...taskDetailQueryOptions(projectScopeGeneration, taskId),
     enabled: Boolean(id),
   });
 

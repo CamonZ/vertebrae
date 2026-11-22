@@ -38,18 +38,8 @@ import { findThread, countThreadMessages } from "./runThreads";
 
 export interface RunPaneWindowProps {
   pane: RunChatPane;
-  paneIsActive: boolean;
-  paneCount: number;
-  index: number;
-  isMaximized: boolean;
-  canAddSplitPane: boolean;
   focusPane: (paneId: string) => void;
-  closePane: (paneId: string) => void;
-  unsplitPanes: (paneId?: string) => void;
   closeChatPanel: () => void;
-  toggleHistorySelector: () => boolean;
-  toggleMaximized: () => void;
-  splitWithFreshSession: () => Promise<boolean>;
   /** Registers this pane's find opener for ⌘F. */
   registerFind?: (paneId: string, openFind: (() => boolean) | null) => void;
 }
@@ -85,18 +75,8 @@ function RunStatusDot({ run }: { run: TaskRun | null }) {
 
 export const RunPaneWindow = memo(function RunPaneWindow({
   pane,
-  paneIsActive,
-  paneCount,
-  index,
-  isMaximized,
-  canAddSplitPane,
   focusPane,
-  closePane,
-  unsplitPanes,
   closeChatPanel,
-  toggleHistorySelector,
-  toggleMaximized,
-  splitWithFreshSession,
   registerFind,
 }: RunPaneWindowProps) {
   const { taskId, runId, focusThreadId, scrollRequest } = pane;
@@ -167,7 +147,7 @@ export const RunPaneWindow = memo(function RunPaneWindow({
         .getState()
         .openRunPane(
           { taskId, runId, focusThreadId: thread.id },
-          { split: true }
+          { beside: true }
         );
     },
     [taskId, runId]
@@ -237,23 +217,6 @@ export const RunPaneWindow = memo(function RunPaneWindow({
         </SvgIcon>
       ),
     },
-    {
-      key: "history",
-      title: "Toggle chat history",
-      ariaLabel: "Toggle chat history",
-      onClick: () => void toggleHistorySelector(),
-      show: !isMaximized,
-      icon: (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M4 6h16M4 12h16M4 18h10"
-          />
-        </SvgIcon>
-      ),
-    },
   ];
 
   const mode = showTimestamps ? "timed" : "bare";
@@ -315,9 +278,7 @@ export const RunPaneWindow = memo(function RunPaneWindow({
       className="hc-chat-pane"
       data-testid="chat-pane"
       data-pane-kind="run"
-      data-pane-active={paneIsActive || undefined}
-      aria-label={`Chat pane ${index + 1}: ${title}`}
-      aria-selected={paneIsActive}
+      aria-label={title}
       tabIndex={0}
       onMouseDownCapture={() => focusPane(pane.id)}
       onKeyDown={(event) => {
@@ -341,26 +302,7 @@ export const RunPaneWindow = memo(function RunPaneWindow({
               </span>
               <RunStatusDot run={run} />
             </div>
-            <PaneControls
-              leading={leading}
-              onClosePanel={closeChatPanel}
-              onToggleWide={toggleMaximized}
-              isWide={isMaximized}
-              onSplitPane={
-                isMaximized ? () => void splitWithFreshSession() : undefined
-              }
-              canSplitPane={canAddSplitPane}
-              onUnsplitPanes={
-                isMaximized && paneCount > 1
-                  ? () => unsplitPanes(pane.id)
-                  : undefined
-              }
-              onClosePane={
-                isMaximized && paneCount > 1
-                  ? () => closePane(pane.id)
-                  : undefined
-              }
-            />
+            <PaneControls leading={leading} onClosePanel={closeChatPanel} />
           </div>
           <div
             className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 pt-1 font-mono text-2xs text-[var(--color-fg-mute)]"

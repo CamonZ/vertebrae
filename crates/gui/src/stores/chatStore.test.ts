@@ -1,7 +1,9 @@
+import { EMPTY_WORKSPACE } from "./chatWorkspace";
 import { materializeLiveAssistantMessages } from "./liveAssistantMessages";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { doStartSession } from "../hooks/useLocalChat";
 import { usePendingCommentsStore } from "./pendingCommentsStore";
+import { chatFocusArea, saveChatFocusArea } from "./chatViewMemory";
 import { useChatStore, type ChatMessage } from "./chatStore";
 import {
   clearPersistedLocalChatSessions,
@@ -31,7 +33,7 @@ describe("chatStore", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
       localSessionSummaries: {},
       spawnOutlineRevisions: {},
@@ -443,7 +445,9 @@ describe("chatStore", () => {
     it.each(["fast", "default"])(
       "hydrates a persisted session with %s tier for the same project path",
       (tier) => {
-        const id = useChatStore.getState().openSession("Task One", "/repo/root");
+        const id = useChatStore
+          .getState()
+          .openSession("Task One", "/repo/root");
         useChatStore.getState().addMessage(id, {
           kind: "user",
           text: "remember this",
@@ -540,7 +544,9 @@ describe("chatStore", () => {
           });
         useChatStore.getState().openSession("Recover tier", "/repo/tier");
         await vi.waitFor(() =>
-          expect(useChatStore.getState().sessions[id].selectedSpeedTier).toBe(tier)
+          expect(useChatStore.getState().sessions[id].selectedSpeedTier).toBe(
+            tier
+          )
         );
         expect(replay).toHaveBeenCalledTimes(2);
         expect(
@@ -600,9 +606,9 @@ describe("chatStore", () => {
         },
       });
       await vi.waitFor(() =>
-        expect(useChatStore.getState().sessions[id].providerReplay?.loaded).toBe(
-          true
-        )
+        expect(
+          useChatStore.getState().sessions[id].providerReplay?.loaded
+        ).toBe(true)
       );
       expect(useChatStore.getState().sessions[id].selectedSpeedTier).toBe(
         "default"
@@ -1006,36 +1012,66 @@ describe("chatStore", () => {
     });
 
     it("reopens steering messages by input identity, including identical text", async () => {
-      const id = useChatStore.getState().openSession("Steering Replay", "/repo/steering");
+      const id = useChatStore
+        .getState()
+        .openSession("Steering Replay", "/repo/steering");
       const turnId = "existing-turn";
       const timestamp = "2026-01-01T00:00:05Z";
       const inputIds = ["steer:first", "steer:second"];
       useChatStore.getState().setProviderResumeId(id, "steering-conversation");
       for (const inputId of inputIds) {
         useChatStore.getState().addMessage(id, {
-          kind: "user", text: "same text", inputId, turnId, timestamp,
+          kind: "user",
+          text: "same text",
+          inputId,
+          turnId,
+          timestamp,
         });
       }
       useChatStore.setState({ sessions: {}, activeSessionId: null });
       const replayed = [inputIds[0], ...inputIds].map((inputId, sequence) =>
         JSON.stringify({
-          version: 1, event_id: `steering-${sequence}`, stream_id: "steering-stream",
-          sequence, timestamp, semantics: "snapshot", type: "turn_input",
+          version: 1,
+          event_id: `steering-${sequence}`,
+          stream_id: "steering-stream",
+          sequence,
+          timestamp,
+          semantics: "snapshot",
+          type: "turn_input",
           correlation: { item_id: inputId, turn_id: "provider-turn" },
-          data: { thread_id: "steering-conversation", content: "same text", provenance: "human" },
+          data: {
+            thread_id: "steering-conversation",
+            content: "same text",
+            provenance: "human",
+          },
         })
       );
-      const load = vi.spyOn(commands, "loadLocalChatSessionReplay").mockResolvedValue({
-        status: "ok",
-        data: { events: replayed, cache_key: "steering-v1", next_cursor: null, has_more: false },
-      });
+      const load = vi
+        .spyOn(commands, "loadLocalChatSessionReplay")
+        .mockResolvedValue({
+          status: "ok",
+          data: {
+            events: replayed,
+            cache_key: "steering-v1",
+            next_cursor: null,
+            has_more: false,
+          },
+        });
       useChatStore.getState().openSession("Steering Replay", "/repo/steering");
       await vi.waitFor(() => {
         expect(load).toHaveBeenCalled();
-        expect(useChatStore.getState().sessions[id].providerReplay?.loading).not.toBe("initial");
+        expect(
+          useChatStore.getState().sessions[id].providerReplay?.loading
+        ).not.toBe("initial");
       });
       expect(useChatStore.getState().sessions[id].messages).toEqual(
-        inputIds.map((inputId) => ({ kind: "user", text: "same text", inputId, turnId, timestamp }))
+        inputIds.map((inputId) => ({
+          kind: "user",
+          text: "same text",
+          inputId,
+          turnId,
+          timestamp,
+        }))
       );
     });
 
@@ -1976,7 +2012,11 @@ describe("chatStore", () => {
         harness: "codex",
         providerId: "custom",
         projectPath: "/repo",
-        discussionBinding: { parentChatId: "main", reviewThreadId: "thread", worktreePath: "/repo" },
+        discussionBinding: {
+          parentChatId: "main",
+          reviewThreadId: "thread",
+          worktreePath: "/repo",
+        },
       });
 
     it("adds a hidden discussion that is never listed or reused", () => {
@@ -1984,13 +2024,17 @@ describe("chatStore", () => {
       const store = useChatStore.getState();
 
       expect(store.sessions[id]).toMatchObject({
-        discussion: { parentChatId: "main", reviewThreadId: "thread", worktreePath: "/repo" },
+        discussion: {
+          parentChatId: "main",
+          reviewThreadId: "thread",
+          worktreePath: "/repo",
+        },
         harness: "codex",
         providerId: "custom",
         projectPath: "/repo",
       });
       expect(store.activeSessionId).toBeNull();
-      expect(store.paneLayout.panes).toEqual([]);
+      expect(store.paneLayout.order).toEqual([]);
 
       store.addMessage(id, {
         kind: "user",
@@ -2014,10 +2058,17 @@ describe("chatStore", () => {
       const id = store.openDiscussionSession({
         harness: "claude",
         projectPath: "/repo",
-        discussionBinding: { parentChatId: "main", reviewThreadId: "thread", worktreePath: "/checkout" },
+        discussionBinding: {
+          parentChatId: "main",
+          reviewThreadId: "thread",
+          worktreePath: "/checkout",
+        },
       });
       const before = useChatStore.getState().sessions[id].association;
-      store.setSessionAssociation(id, { ticketId: "ticket", entityLevel: "task" });
+      store.setSessionAssociation(id, {
+        ticketId: "ticket",
+        entityLevel: "task",
+      });
       expect(useChatStore.getState().sessions[id].association).toBe(before);
       expect(useChatStore.getState().listLocalSessions("/repo")).toEqual([]);
     });
@@ -2106,7 +2157,7 @@ describe("chatStore", () => {
         providerResumeId: null,
       });
       expect(useChatStore.getState().activeSessionId).toBe(opened);
-      expect(useChatStore.getState().paneLayout.panes).toEqual([
+      expect(useChatStore.getState().paneLayout.order).toEqual([
         expect.objectContaining({ sessionId: opened }),
       ]);
       expect(useChatStore.getState().sessions[existing]).toBeDefined();
@@ -2179,13 +2230,13 @@ describe("chatStore", () => {
         .openSession("Preserved", "/preserved/project");
       const durableTarget = useChatStore
         .getState()
-        .startFreshSessionInNewPane("Durable target", "/target/project");
+        .startFreshSessionInNewTab("Durable target", "/target/project");
       useChatStore.getState().addMessage(durableTarget, {
         kind: "user",
         text: "Do not replace this conversation",
         timestamp: "2026-01-01T00:00:00Z",
       });
-      const preservedPane = useChatStore.getState().paneLayout.panes[0];
+      const preservedPane = useChatStore.getState().paneLayout.order[0];
       expect(preservedPane.sessionId).toBe(preserved);
 
       useChatStore.getState().focusPane(preservedPane.id);
@@ -2198,7 +2249,7 @@ describe("chatStore", () => {
 
       const state = useChatStore.getState();
       expect(repeated).toBe(opened);
-      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+      expect(state.paneLayout.order.map((pane) => pane.sessionId)).toEqual([
         opened,
         durableTarget,
       ]);
@@ -2302,7 +2353,7 @@ describe("chatStore", () => {
       const second = useChatStore.getState().startFreshSession("Second");
 
       expect(useChatStore.getState().activeSessionId).toBe(second);
-      expect(useChatStore.getState().paneLayout.panes).toMatchObject([
+      expect(useChatStore.getState().paneLayout.order).toMatchObject([
         { sessionId: second },
       ]);
 
@@ -2310,40 +2361,40 @@ describe("chatStore", () => {
 
       const state = useChatStore.getState();
       expect(state.activeSessionId).toBe(first);
-      expect(state.paneLayout.panes).toHaveLength(1);
-      expect(state.paneLayout.panes[0].sessionId).toBe(first);
-      expect(state.paneLayout.activePaneId).toBe(state.paneLayout.panes[0].id);
+      expect(state.paneLayout.order).toHaveLength(1);
+      expect(state.paneLayout.order[0].sessionId).toBe(first);
+      expect(state.paneLayout.activeId).toBe(state.paneLayout.order[0].id);
     });
 
-    it("adds a fresh chat as a distinct split pane", () => {
+    it("adds a fresh chat as a distinct tab", () => {
       const first = useChatStore.getState().openSession("First");
       const second = useChatStore
         .getState()
-        .startFreshSessionInNewPane("Second");
+        .startFreshSessionInNewTab("Second");
 
       const state = useChatStore.getState();
       expect(state.activeSessionId).toBe(second);
-      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+      expect(state.paneLayout.order.map((pane) => pane.sessionId)).toEqual([
         first,
         second,
       ]);
       expect(
-        new Set(state.paneLayout.panes.map((pane) => pane.sessionId)).size
+        new Set(state.paneLayout.order.map((pane) => pane.sessionId)).size
       ).toBe(2);
     });
 
-    it("splits an automatic empty chat into a new empty session", () => {
+    it("opens a new empty session beside an automatic empty chat", () => {
       const first = useChatStore
         .getState()
         .startFreshSession("New Chat", "/test/project");
       const second = useChatStore
         .getState()
-        .startFreshSessionInNewPane("New Chat", "/test/project");
+        .startFreshSessionInNewTab("New Chat", "/test/project");
 
       const state = useChatStore.getState();
       expect(second).not.toBe(first);
       expect(Object.keys(state.sessions)).toHaveLength(2);
-      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+      expect(state.paneLayout.order.map((pane) => pane.sessionId)).toEqual([
         first,
         second,
       ]);
@@ -2351,22 +2402,22 @@ describe("chatStore", () => {
       expect(state.sessions[second].hasUserMessage).toBe(false);
     });
 
-    it("supports more than two distinct split panes", () => {
+    it("supports more than two distinct tabs", () => {
       const first = useChatStore.getState().openSession("First");
       const second = useChatStore
         .getState()
-        .startFreshSessionInNewPane("Second");
-      const third = useChatStore.getState().startFreshSessionInNewPane("Third");
+        .startFreshSessionInNewTab("Second");
+      const third = useChatStore.getState().startFreshSessionInNewTab("Third");
 
       const state = useChatStore.getState();
       expect(state.activeSessionId).toBe(third);
-      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+      expect(state.paneLayout.order.map((pane) => pane.sessionId)).toEqual([
         first,
         second,
         third,
       ]);
       expect(
-        new Set(state.paneLayout.panes.map((pane) => pane.sessionId)).size
+        new Set(state.paneLayout.order.map((pane) => pane.sessionId)).size
       ).toBe(3);
     });
 
@@ -2374,19 +2425,19 @@ describe("chatStore", () => {
       const first = useChatStore.getState().openSession("First");
       const second = useChatStore
         .getState()
-        .startFreshSessionInNewPane("Second");
-      const [firstPane, secondPane] = useChatStore.getState().paneLayout.panes;
+        .startFreshSessionInNewTab("Second");
+      const [firstPane, secondPane] = useChatStore.getState().paneLayout.order;
 
       expect(
         useChatStore.getState().bindPaneToSession(firstPane.id, second)
       ).toBe(true);
 
       const state = useChatStore.getState();
-      expect(state.paneLayout.panes.map((pane) => pane.sessionId)).toEqual([
+      expect(state.paneLayout.order.map((pane) => pane.sessionId)).toEqual([
         first,
         second,
       ]);
-      expect(state.paneLayout.activePaneId).toBe(secondPane.id);
+      expect(state.paneLayout.activeId).toBe(secondPane.id);
       expect(state.activeSessionId).toBe(second);
     });
 
@@ -2394,14 +2445,14 @@ describe("chatStore", () => {
       const first = useChatStore.getState().openSession("First");
       const second = useChatStore
         .getState()
-        .startFreshSessionInNewPane("Second");
-      const secondPane = useChatStore.getState().paneLayout.panes[1];
+        .startFreshSessionInNewTab("Second");
+      const secondPane = useChatStore.getState().paneLayout.order[1];
 
       useChatStore.getState().closePane(secondPane.id);
 
       const state = useChatStore.getState();
       expect(state.sessions[second]).toBeDefined();
-      expect(state.paneLayout.panes).toEqual([
+      expect(state.paneLayout.order).toEqual([
         expect.objectContaining({ sessionId: first }),
       ]);
       expect(state.activeSessionId).toBe(first);
@@ -2648,8 +2699,9 @@ describe("chatStore", () => {
         panelOpen: true,
         activeSessionId: grandchild,
         paneLayout: {
-          activePaneId: "child-pane",
-          panes: [
+          ...EMPTY_WORKSPACE,
+          activeId: "child-pane",
+          order: [
             { id: "root-pane", sessionId: root },
             { id: "child-pane", sessionId: grandchild },
           ],
@@ -2664,7 +2716,7 @@ describe("chatStore", () => {
       expect(
         useChatStore
           .getState()
-          .paneLayout.panes.every((p) => p.sessionId !== grandchild)
+          .paneLayout.order.every((p) => p.sessionId !== grandchild)
       ).toBe(true);
       useChatStore.getState().ensureProviderThreadSession({
         harness: "claude",
@@ -2682,7 +2734,7 @@ describe("chatStore", () => {
       await useChatStore.getState().deleteLocalSession(root);
       expect(useChatStore.getState().panelOpen).toBe(false);
       expect(useChatStore.getState().activeSessionId).toBeNull();
-      expect(useChatStore.getState().paneLayout.panes).toEqual([]);
+      expect(useChatStore.getState().paneLayout.order).toEqual([]);
     });
 
     it("drops a late replay response and streamed child text after subtree deletion", async () => {
@@ -2858,7 +2910,7 @@ describe("chatStore", () => {
       useChatStore.setState({
         sessions: {},
         activeSessionId: null,
-        paneLayout: { panes: [], activePaneId: null },
+        paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
         panelOpen: false,
         localSessionSummaries: {},
       });
@@ -4366,7 +4418,7 @@ describe("chatStore", () => {
       useChatStore.setState({
         sessions: {},
         activeSessionId: null,
-        paneLayout: { panes: [], activePaneId: null },
+        paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
         localSessionSummaries: {},
       });
 
@@ -4610,6 +4662,42 @@ describe("chatStore", () => {
     });
   });
 
+  describe("closing chats", () => {
+    it("forgets a closed chat's saved view", () => {
+      const id = useChatStore.getState().openSession("Chat", "/repo");
+      saveChatFocusArea(id, "transcript");
+      useChatStore.getState().closeSession(id);
+      expect(chatFocusArea(id)).toBe("composer");
+    });
+
+    it("forgets every saved view on reset", () => {
+      const id = useChatStore.getState().openSession("Chat", "/repo");
+      saveChatFocusArea(id, "changes");
+      useChatStore.getState().reset();
+      expect(chatFocusArea(id)).toBe("composer");
+    });
+
+    it("shows the session left active in a tab when the last tab's session goes", () => {
+      const kept = useChatStore.getState().openSession("Kept", "/kept");
+      const shown = useChatStore.getState().openSession("Shown", "/shown");
+      useChatStore.setState({
+        paneLayout: {
+          order: [{ id: "only", sessionId: shown }],
+          activeId: "only",
+        },
+        activeSessionId: shown,
+      });
+
+      useChatStore.getState().closeSession(shown);
+
+      const state = useChatStore.getState();
+      expect(state.activeSessionId).toBe(kept);
+      expect(state.paneLayout.order).toEqual([
+        { id: state.paneLayout.activeId, sessionId: kept },
+      ]);
+    });
+  });
+
   describe("openGateSession", () => {
     const gate = {
       task_run_id: "run-1",
@@ -4668,6 +4756,50 @@ describe("chatStore", () => {
         gateChanged: false,
       });
       expect(useChatStore.getState().activeSessionId).toBe(first.sessionId);
+    });
+
+    it("opens a gate chat in its own tab, keeping the active one open", () => {
+      useChatStore.getState().openSession("Other", "/elsewhere");
+      const before = useChatStore.getState().paneLayout.order;
+
+      const { sessionId } = useChatStore
+        .getState()
+        .openGateSession(gate, "/repo");
+
+      const { paneLayout } = useChatStore.getState();
+      expect(paneLayout.order).toHaveLength(before.length + 1);
+      expect(paneLayout.order.slice(0, before.length)).toEqual(before);
+      expect(
+        paneLayout.order.find((pane) => pane.id === paneLayout.activeId)
+      ).toMatchObject({ sessionId });
+    });
+
+    it("adds one tab for a gate chat however many are open", () => {
+      const ids = Array.from({ length: 20 }, (_, index) =>
+        useChatStore.getState().openSession(`Chat ${index}`, `/repo-${index}`)
+      );
+      useChatStore.setState({
+        paneLayout: {
+          order: ids.map((id) => ({ id: `tab-${id}`, sessionId: id })),
+          activeId: `tab-${ids[5]}`,
+        },
+        activeSessionId: ids[5],
+      });
+      const before = useChatStore.getState().paneLayout.order;
+      expect(before).toHaveLength(20);
+
+      const { sessionId } = useChatStore
+        .getState()
+        .openGateSession(gate, "/repo");
+
+      const { paneLayout } = useChatStore.getState();
+      expect(paneLayout.order).toHaveLength(21);
+      expect(paneLayout.order.filter((pane) => before.includes(pane))).toEqual(
+        before
+      );
+      expect(
+        paneLayout.order.find((pane) => pane.id === paneLayout.activeId)
+      ).toMatchObject({ sessionId });
     });
 
     it("keeps separate chats for different gates", () => {

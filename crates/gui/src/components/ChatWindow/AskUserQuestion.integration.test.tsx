@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../../stores/chatWorkspace";
 import { invoke } from "@tauri-apps/api/core";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -38,7 +39,7 @@ describe("AskUserQuestion frontend integration", () => {
     useChatStore.setState({
       sessions: { session },
       activeSessionId: "session",
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: true,
       localSessionSummaries: {},
     });

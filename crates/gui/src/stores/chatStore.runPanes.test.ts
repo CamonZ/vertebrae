@@ -1,5 +1,6 @@
+import { EMPTY_WORKSPACE } from "./chatWorkspace";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_CHAT_PANES, isRunPane, useChatStore } from "./chatStore";
+import { isRunPane, useChatStore } from "./chatStore";
 import { clearPersistedLocalChatSessions } from "../utils/localChatPersistence";
 import { commands } from "../bindings";
 
@@ -20,7 +21,7 @@ describe("chatStore run panes", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
       localSessionSummaries: {},
       spawnOutlineRevisions: {},
@@ -37,8 +38,8 @@ describe("chatStore run panes", () => {
     expect(state.sessions).toEqual({});
     expect(state.localSessionSummaries).toEqual({});
     expect(state.panelOpen).toBe(true);
-    expect(state.paneLayout.activePaneId).toBe(paneId);
-    expect(state.paneLayout.panes).toEqual([
+    expect(state.paneLayout.activeId).toBe(paneId);
+    expect(state.paneLayout.order).toEqual([
       {
         id: paneId,
         kind: "run",
@@ -52,97 +53,104 @@ describe("chatStore run panes", () => {
 
   it("replaces the active local pane but keeps the last local session active", () => {
     const sessionId = useChatStore.getState().openSession("Chat", "/repo");
-    const paneId = layout().activePaneId;
+    const paneId = layout().activeId;
 
     const runPaneId = useChatStore.getState().openRunPane(run);
 
     expect(runPaneId).toBe(paneId);
-    expect(layout().panes).toHaveLength(1);
-    expect(isRunPane(layout().panes[0])).toBe(true);
+    expect(layout().order).toHaveLength(1);
+    expect(isRunPane(layout().order[0])).toBe(true);
     expect(useChatStore.getState().activeSessionId).toBe(sessionId);
   });
 
-  it("preserves the compact session as a pane when splitting a run beside it", () => {
+  it("preserves the compact session as a chat when opening a run beside it", () => {
     const sessionId = useChatStore.getState().openSession("Chat", "/repo");
-    useChatStore.setState({ paneLayout: { panes: [], activePaneId: null } });
+    useChatStore.setState({
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
+    });
 
-    useChatStore.getState().openRunPane(run, { split: true });
+    useChatStore.getState().openRunPane(run, { beside: true });
 
-    expect(layout().panes.map((pane) => pane.sessionId ?? pane.kind)).toEqual([
-      sessionId,
-      "run",
-    ]);
+    expect(
+      layout().order.map((pane) =>
+        isRunPane(pane) ? pane.kind : pane.sessionId
+      )
+    ).toEqual([sessionId, "run"]);
   });
 
   it("focuses an already visible run pane and renews its scroll request", () => {
     const first = useChatStore.getState().openRunPane(run);
     useChatStore.getState().openSession("Chat", "/repo");
-    useChatStore.getState().openRunPane(run, { split: true });
+    useChatStore.getState().openRunPane(run, { beside: true });
 
     const again = useChatStore
       .getState()
       .openRunPane(run, { scrollToThreadId: "exec-2" });
-    const nonce = layout().panes.find(isRunPane)?.scrollRequest?.nonce;
+    const nonce = layout().order.find(isRunPane)?.scrollRequest?.nonce;
     useChatStore.getState().openRunPane(run, { scrollToThreadId: "exec-2" });
 
-    const pane = layout().panes.find(isRunPane);
+    const pane = layout().order.find(isRunPane);
     expect(again).toBe(pane?.id);
-    expect(layout().panes.filter(isRunPane)).toHaveLength(1);
+    expect(layout().order.filter(isRunPane)).toHaveLength(1);
     expect(pane?.scrollRequest?.threadId).toBe("exec-2");
     expect(pane?.scrollRequest?.nonce).not.toBe(nonce);
     expect(first).toBeTruthy();
   });
 
-  it("opens a subagent of the same run as a separate split pane", () => {
+  it("opens a subagent of the same run as a separate chat", () => {
     useChatStore.getState().openRunPane(run);
     useChatStore
       .getState()
-      .openRunPane({ ...run, focusThreadId: "sub-1" }, { split: true });
+      .openRunPane({ ...run, focusThreadId: "sub-1" }, { beside: true });
 
     expect(
       layout()
-        .panes.filter(isRunPane)
+        .order.filter(isRunPane)
         .map((pane) => pane.focusThreadId)
     ).toEqual([null, "sub-1"]);
   });
 
-  it("replaces the active pane when split would exceed the pane limit", () => {
-    for (let i = 0; i < MAX_CHAT_PANES; i++)
+  it("opens a run beside as a new tab however many are open", () => {
+    for (let i = 0; i < 20; i++)
       useChatStore
         .getState()
-        .openRunPane({ taskId: "t", runId: `r-${i}` }, { split: true });
+        .openRunPane({ taskId: "t", runId: `r-${i}` }, { beside: true });
+    const before = layout().order;
 
-    useChatStore.getState().openRunPane(run, { split: true });
+    useChatStore.getState().openRunPane(run, { beside: true });
 
-    expect(layout().panes).toHaveLength(MAX_CHAT_PANES);
+    expect(layout().order).toHaveLength(21);
+    expect(layout().order.filter((pane) => before.includes(pane))).toEqual(
+      before
+    );
     expect(
-      layout().panes.some((pane) => isRunPane(pane) && pane.runId === "run-1")
+      layout().order.some((pane) => isRunPane(pane) && pane.runId === "run-1")
     ).toBe(true);
   });
 
   it("keeps run panes when the last local session closes", () => {
     const sessionId = useChatStore.getState().openSession("Chat", "/repo");
-    useChatStore.getState().openRunPane(run, { split: true });
+    useChatStore.getState().openRunPane(run, { beside: true });
 
     useChatStore.getState().closeSession(sessionId);
 
     const state = useChatStore.getState();
     expect(state.panelOpen).toBe(true);
-    expect(state.paneLayout.panes).toHaveLength(1);
-    expect(isRunPane(state.paneLayout.panes[0])).toBe(true);
+    expect(state.paneLayout.order).toHaveLength(1);
+    expect(isRunPane(state.paneLayout.order[0])).toBe(true);
   });
 
   it("restores a run pane replaced by a session focus and shows the session beside it", () => {
     useChatStore.getState().openRunPane(run);
-    const anchor = layout().panes.find(isRunPane)!;
+    const anchor = layout().order.find(isRunPane)!;
     // Gate chats open through the session focus path, which replaces the
     // active pane.
     const sessionId = useChatStore.getState().openSession("Gate", "/repo");
-    expect(isRunPane(layout().panes[0])).toBe(false);
+    expect(isRunPane(layout().order[0])).toBe(false);
 
     useChatStore.getState().showSessionBesideRunPane(sessionId, anchor);
 
-    expect(layout().panes).toEqual([
+    expect(layout().order).toEqual([
       anchor,
       expect.objectContaining({ sessionId }),
     ]);
@@ -151,23 +159,25 @@ describe("chatStore run panes", () => {
 
   it("does not duplicate a session already beside the run pane", () => {
     const sessionId = useChatStore.getState().openSession("Gate", "/repo");
-    useChatStore.getState().openRunPane(run, { split: true });
-    const anchor = layout().panes.find(isRunPane)!;
+    useChatStore.getState().openRunPane(run, { beside: true });
+    const anchor = layout().order.find(isRunPane)!;
 
     useChatStore.getState().showSessionBesideRunPane(sessionId, anchor);
 
-    expect(layout().panes).toHaveLength(2);
-    expect(layout().activePaneId).toBe(layout().panes[0].id);
+    expect(layout().order).toHaveLength(2);
+    expect(layout().activeId).toBe(layout().order[0].id);
   });
 
   it("focusing a run pane keeps the active local session", () => {
     const sessionId = useChatStore.getState().openSession("Chat", "/repo");
-    const runPaneId = useChatStore.getState().openRunPane(run, { split: true });
-    useChatStore.getState().focusPane(layout().panes[0].id);
+    const runPaneId = useChatStore
+      .getState()
+      .openRunPane(run, { beside: true });
+    useChatStore.getState().focusPane(layout().order[0].id);
 
     useChatStore.getState().focusPane(runPaneId);
 
-    expect(layout().activePaneId).toBe(runPaneId);
+    expect(layout().activeId).toBe(runPaneId);
     expect(useChatStore.getState().activeSessionId).toBe(sessionId);
   });
 });

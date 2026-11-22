@@ -60,6 +60,8 @@ interface LocalChatMiniPanelProps {
   /** Current user-selected waiting indicator style. */
   thinkingIndicatorStyle?: ThinkingIndicatorStyle;
   onSelect: (sessionId: string) => void | Promise<void>;
+  /** ⌘-click or ⌥↵: open the session as a new tab after the active one. */
+  onOpenInNewTab?: (sessionId: string) => void | Promise<void>;
   onSelectAgent?: (
     parentSessionId: string,
     agent: SpawnOutlineItem
@@ -73,7 +75,7 @@ interface LocalChatMiniPanelProps {
 }
 
 /**
- * Compact session-list column shown alongside split panes in maximized mode.
+ * Compact session-list column shown beside the chat in maximized mode.
  * Owns its own keyboard navigation (up/down/home/end/enter) over the flattened
  * session list.
  */
@@ -95,6 +97,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   activityBySessionId,
   thinkingIndicatorStyle = "shimmer",
   onSelect,
+  onOpenInNewTab,
   onSelectAgent,
   onStartProjectChat,
   onDelete,
@@ -413,12 +416,17 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
         sessionItems.find((session) => session.id === activeSessionId)?.id ??
         sessionItems[0].id;
 
+      if (event.key === "Enter" && event.altKey && onOpenInNewTab) {
+        void onOpenInNewTab(selectedSessionId);
+        return;
+      }
       onSelect(selectedSessionId);
     },
     [
       activeSessionId,
       focusHistorySession,
       keyboardSessionId,
+      onOpenInNewTab,
       onSelect,
       ticketGroups,
       hasSearchQuery,
@@ -789,8 +797,14 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                               }
                             }}
                             onFocus={() => setKeyboardSessionId(session.id)}
-                            onClick={() => onSelect(session.id)}
-                            title={`Open local chat ${title}`}
+                            onClick={(event) => {
+                              if (event.metaKey && onOpenInNewTab) {
+                                void onOpenInNewTab(session.id);
+                                return;
+                              }
+                              void onSelect(session.id);
+                            }}
+                            title={`Open local chat ${title} (⌘-click: new tab)`}
                             aria-label={`Load local chat ${title} into active pane`}
                             aria-current={isActive ? "true" : undefined}
                           >

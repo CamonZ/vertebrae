@@ -25,6 +25,10 @@ interface OverflowMenuProps {
   /** Accessible name of the trigger button. */
   label?: string;
   triggerClassName?: string;
+  /** Trigger content; defaults to the `⋯` glyph plus the badge total. */
+  trigger?: React.ReactNode;
+  /** Trigger tooltip; defaults to `label`. */
+  triggerTitle?: string;
   testId?: string;
 }
 
@@ -38,6 +42,8 @@ export function OverflowMenu({
   items,
   label = "More actions",
   triggerClassName = "hc-ctrl",
+  trigger,
+  triggerTitle,
   testId,
 }: OverflowMenuProps) {
   const [open, setOpen] = useState(false);
@@ -98,27 +104,31 @@ export function OverflowMenu({
         type="button"
         className={triggerClassName}
         aria-label={label}
-        title={label}
+        title={triggerTitle ?? label}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         data-testid={testId}
         onClick={() => setOpen((value) => !value)}
       >
-        <svg
-          className="h-3.5 w-3.5"
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          aria-hidden
-        >
-          <circle cx="5" cy="12" r="1.6" />
-          <circle cx="12" cy="12" r="1.6" />
-          <circle cx="19" cy="12" r="1.6" />
-        </svg>
-        {badgeTotal > 0 && (
-          <span className="hc-ctrl-badge" aria-hidden>
-            {badgeTotal}
-          </span>
+        {trigger ?? (
+          <>
+            <svg
+              className="h-3.5 w-3.5"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden
+            >
+              <circle cx="5" cy="12" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="19" cy="12" r="1.6" />
+            </svg>
+            {badgeTotal > 0 && (
+              <span className="hc-ctrl-badge" aria-hidden>
+                {badgeTotal}
+              </span>
+            )}
+          </>
         )}
       </button>
       {open && (
@@ -137,7 +147,9 @@ export function OverflowMenu({
               )}
               <button
                 type="button"
-                role={item.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+                role={
+                  item.checked === undefined ? "menuitem" : "menuitemcheckbox"
+                }
                 aria-checked={item.checked}
                 className={`ovf-item${item.danger ? " danger" : ""}`}
                 aria-label={item.ariaLabel ?? item.label}

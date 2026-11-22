@@ -46,6 +46,7 @@ import { useCommentHover } from "./useCommentHover";
 import { TranscriptCommentCard } from "./TranscriptCommentCard";
 import { VIEWPORT_GUTTER_PX } from "./commentCardPlacement";
 import { useScrollFollow } from "./useScrollFollow";
+import { restoreChatScroll, saveChatScroll } from "../../stores/chatViewMemory";
 import { hasInlineScrollFollow } from "./useInlineScrollFollow";
 import { useTranscriptCursor } from "./useTranscriptCursor";
 import { focusBelowTranscript, focusPaneComposer } from "./chatAreas";
@@ -879,11 +880,23 @@ export function ChatMessages({
   useLayoutEffect(() => {
     resetBottomFollow();
     prependAnchorRef.current = null;
+    // A chat returning to view (tab switch) resumes where it was read; the
+    // live tail keeps following.
+    const container = messagesContainerRef.current;
+    // One Map for the component's life, filled by the row ref callbacks.
+    const anchors = messageRefs.current;
+    if (container && restoreChatScroll(sessionId, container, anchors)) {
+      keepAtBottomRef.current = false;
+      lastScrollTopRef.current = container.scrollTop;
+    }
 
     return () => {
       prependAnchorRef.current = null;
+      if (container) {
+        saveChatScroll(sessionId, container, keepAtBottomRef.current, anchors);
+      }
     };
-  }, [sessionId, resetBottomFollow]);
+  }, [sessionId, resetBottomFollow, keepAtBottomRef, lastScrollTopRef]);
 
   // Keep streaming updates inside this scroll container. Calling
   // scrollIntoView on every delta also scrolls ancestor containers and queues

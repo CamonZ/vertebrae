@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StepExecution, TaskRun, TaskRunTrace } from "../bindings";
@@ -118,7 +119,7 @@ describe("syncGateChatsForRun", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
       localSessionSummaries: {},
     });
@@ -205,7 +206,7 @@ describe("useGateChatSync", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
       localSessionSummaries: {},
     });

@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockStepExecution, createMockTaskRun } from "../test/test-utils";
 import type { TaskRun } from "../bindings";
@@ -26,7 +27,7 @@ describe("openRunInChat", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
     });
   });
@@ -35,7 +36,7 @@ describe("openRunInChat", () => {
     openRunInChat({ taskId: "t1", runId: "r1", threadId: "exec-1" });
 
     expect(useShellStore.getState().chatPanelPresentation).toBe("expanded");
-    const pane = useChatStore.getState().paneLayout.panes[0];
+    const pane = useChatStore.getState().paneLayout.order[0];
     expect(isRunPane(pane) && pane.scrollRequest?.threadId).toBe("exec-1");
     expect(useChatStore.getState().panelOpen).toBe(true);
   });

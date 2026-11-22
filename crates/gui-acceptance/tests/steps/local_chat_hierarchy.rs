@@ -228,7 +228,7 @@ async fn open_browser(world: &mut GuiWorld) {
 
     gui_acceptance::click_pane_action(
         &client,
-        "[title='Toggle chat history']",
+        "[data-testid='chat-tabs-history']",
         "conversation history",
     )
     .await;

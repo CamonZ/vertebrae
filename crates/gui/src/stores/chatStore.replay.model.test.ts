@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "./chatWorkspace";
 import { expect, it, vi } from "vitest";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
@@ -50,7 +51,7 @@ it(
         useChatStore.setState({
           sessions: {},
           activeSessionId: null,
-          paneLayout: { panes: [], activePaneId: null },
+          paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
           panelOpen: false,
         });
         let count = 12,

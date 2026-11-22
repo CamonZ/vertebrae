@@ -336,6 +336,31 @@ async fn gui_should_show_element_with_title_within(
         .await;
 }
 
+/// Icon buttons with a styled tooltip carry an accessible name, not a title.
+#[then(expr = "the GUI should show a button labelled {string} within {int} seconds")]
+async fn gui_should_show_button_labelled_within(world: &mut GuiWorld, label: String, timeout: u64) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    gui_acceptance::wait_for_js(
+        &client,
+        &format!("button labelled '{label}'"),
+        r#"const [label] = arguments;
+        return [...document.querySelectorAll('button[aria-label]')]
+            .some((button) => button.getAttribute('aria-label') === label &&
+                button.getClientRects().length > 0);"#,
+        vec![label.clone().into()],
+        std::time::Duration::from_secs(timeout),
+    )
+    .await;
+    world
+        .screenshot(&client, &format!("after-assert-label-{label}"))
+        .await;
+}
+
 #[then(
     expr = "the pipeline step {string} should show an element with title {string} within {int} seconds"
 )]
@@ -1058,7 +1083,7 @@ async fn click_local_chat_row_with_title(world: &mut GuiWorld, title: &str, acti
     let locator = Locator::XPath(&format!(
         "//*[@data-testid='local-chat-history-drawer']\
          //*[contains(concat(' ', normalize-space(@class), ' '), ' hc-mini-history-row ') and {active_predicate}]\
-         //*[@title={title_literal}]"
+         //*[@title={title_literal} or starts-with(@title, concat({title_literal}, ' ('))]"
     ));
 
     let element = client

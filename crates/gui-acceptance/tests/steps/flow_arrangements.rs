@@ -143,7 +143,7 @@ async fn three_options_switch(world: &mut GuiWorld) {
 
     client.set_window_size(1280, 1024).await.unwrap();
     if let Ok(widen) = client
-        .find(Locator::Css("button[aria-label='Widen chat panel']"))
+        .find(Locator::Css("button[aria-label='Expand chat workspace']"))
         .await
     {
         gui_acceptance::wait_actionable(&widen).await;

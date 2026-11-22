@@ -1,22 +1,19 @@
 import {
-  Fragment,
   memo,
+  type ComponentPropsWithoutRef,
   useCallback,
   useLayoutEffect,
   useRef,
-  useState,
-  useId,
 } from "react";
 import { isRunPane, useChatStore } from "../../stores/chatStore";
 import type { ChatPane, LocalChatPane } from "../../stores/chatStore";
 import { RunPaneWindow } from "./run/RunChatPane";
 import { ChatWindow } from "./ChatWindow";
+import { chatTabId, chatTabPanelId } from "./chatTabs";
 import {
-  allocatePaneWidths,
-  resizePanePair,
-  type PaneWidths,
-} from "./chatPaneWidths";
-import { ChatPaneResizeHandle } from "./ChatPaneResizeHandle";
+  chatFocusAreaOf,
+  saveChatFocusArea,
+} from "../../stores/chatViewMemory";
 
 export type RegisterChangesToggle = (
   paneId: string,
@@ -31,191 +28,101 @@ export type RegisterPaneFind = (
 interface ChatPaneListProps {
   registerChangesToggle?: RegisterChangesToggle;
   registerPaneFind?: RegisterPaneFind;
-  visiblePanes: ChatPane[];
-  activePaneId: string | null;
-  isMaximized: boolean;
-  canAddSplitPane: boolean;
+  /** The active tab's chat; null before any chat opens. */
+  shownPane: ChatPane | null;
+  /** The strip is a tablist: the slot is the tabpanel of the active tab. */
+  tabPanels: boolean;
   focusPane: (paneId: string) => void;
-  closePane: (paneId: string) => void;
-  unsplitPanes: (paneId?: string) => void;
   closeChatPanel: () => void;
-  toggleHistorySelector: () => boolean;
-  toggleMaximized: () => void;
   startFreshActiveSession: (paneId: string) => Promise<boolean>;
-  splitWithFreshSession: () => Promise<boolean>;
+  /** Visible chats span projects: name each pane's project in its header. */
+  showProjectContext: boolean;
   projectLabelBySessionId?: ReadonlyMap<string, string>;
   renderObserver?: (paneId: string, part: "transcript" | "composer") => void;
 }
 
 /**
- * Renders the visible chat panes side-by-side (maximized) or as a single pane.
- * Each pane wraps a ChatWindow in a focusable section that drives pane
- * selection on interaction.
+ * Renders the shown chat (the active tab). Hidden chats unmount; their
+ * drafts, scroll and focus are restored on return.
  */
 export const ChatPaneList = memo(function ChatPaneList({
   registerChangesToggle,
   registerPaneFind,
-  visiblePanes,
-  activePaneId,
-  isMaximized,
-  canAddSplitPane,
+  shownPane: pane,
+  tabPanels,
   focusPane,
-  closePane,
-  unsplitPanes,
   closeChatPanel,
-  toggleHistorySelector,
-  toggleMaximized,
   startFreshActiveSession,
-  splitWithFreshSession,
+  showProjectContext,
   projectLabelBySessionId,
   renderObserver,
 }: ChatPaneListProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const domId = useId();
-
-  const paneCount = visiblePanes.length;
-  const ids = visiblePanes.map((pane) => pane.id);
-  const split = isMaximized && paneCount > 1;
-  const configuration = split ? JSON.stringify(ids) : "single";
-
-  const [allocation, setAllocation] = useState<{
-    configuration: string;
-    preferred: PaneWidths;
-  }>({ configuration, preferred: {} });
-  const [containerWidth, setContainerWidth] = useState(0);
-
-  // A new split configuration starts equal; session/title/focus changes retain it.
-  if (allocation.configuration !== configuration) {
-    setAllocation({ configuration, preferred: {} });
-  }
-
-  useLayoutEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const measure = () => setContainerWidth(container.clientWidth);
-    measure();
-
-    const observer = new ResizeObserver(measure);
-    observer.observe(container);
-
-    return () => observer.disconnect();
-  }, []);
-
-  const preferred =
-    allocation.configuration === configuration ? allocation.preferred : {};
-  const widths = allocatePaneWidths(ids, containerWidth, preferred);
-  const layoutKey = `${configuration}:${containerWidth}`;
-
   return (
-    <div className="hc-chat-panes" ref={containerRef}>
-      {visiblePanes.map((pane, index) => {
-        const paneIsActive = pane.id === activePaneId;
-        const paneWidth = widths[pane.id];
-        const paneStyle = split ? { flex: `0 0 ${paneWidth}px` } : undefined;
-
-        const previousIndex = index - 1;
-        const previousPaneId = ids[previousIndex];
-        const leftWidth = widths[previousPaneId];
-        const separatorLabel = `Resize chat panes ${index} and ${index + 1}`;
-        const separatorControls = `${domId}-${previousIndex} ${domId}-${index}`;
-
-        const resizePair = (delta: number) => {
-          const nextPreferred = resizePanePair(
-            widths,
-            previousPaneId,
-            pane.id,
-            delta
-          );
-
-          if (nextPreferred !== widths) {
-            setAllocation({ configuration, preferred: nextPreferred });
-          }
-        };
-
-        return (
-          <Fragment key={pane.id}>
-            {split && index > 0 && (
-              <ChatPaneResizeHandle
-                label={separatorLabel}
-                controls={separatorControls}
-                leftWidth={leftWidth}
-                rightWidth={paneWidth}
-                layoutKey={layoutKey}
-                onResize={resizePair}
-              />
-            )}
-            <div
-              className="hc-chat-pane-slot"
-              id={`${domId}-${index}`}
-              data-pane-id={pane.id}
-              style={paneStyle}
-            >
-              {isRunPane(pane) ? (
-                <RunPaneWindow
-                  pane={pane}
-                  paneIsActive={paneIsActive}
-                  paneCount={paneCount}
-                  index={index}
-                  isMaximized={isMaximized}
-                  canAddSplitPane={canAddSplitPane}
-                  focusPane={focusPane}
-                  closePane={closePane}
-                  unsplitPanes={unsplitPanes}
-                  closeChatPanel={closeChatPanel}
-                  toggleHistorySelector={toggleHistorySelector}
-                  toggleMaximized={toggleMaximized}
-                  splitWithFreshSession={splitWithFreshSession}
-                  registerFind={registerPaneFind}
-                />
-              ) : (
-                <ChatPaneWindow
-                  pane={pane}
-                  paneIsActive={paneIsActive}
-                  paneCount={paneCount}
-                  sessionId={pane.sessionId}
-                  index={index}
-                  focusPane={focusPane}
-                  closePane={closePane}
-                  closeChatPanel={closeChatPanel}
-                  toggleHistorySelector={toggleHistorySelector}
-                  toggleMaximized={toggleMaximized}
-                  startFreshActiveSession={startFreshActiveSession}
-                  splitWithFreshSession={splitWithFreshSession}
-                  isMaximized={isMaximized}
-                  canAddSplitPane={canAddSplitPane}
-                  unsplitPanes={unsplitPanes}
-                  projectLabelBySessionId={projectLabelBySessionId}
-                  renderObserver={renderObserver}
-                  registerChangesToggle={registerChangesToggle}
-                  registerPaneFind={registerPaneFind}
-                />
-              )}
-            </div>
-          </Fragment>
-        );
-      })}
+    // Focus parks here while a focused chat unmounts (see ChatPaneSlot).
+    <div className="hc-chat-panes" tabIndex={-1} data-focus-halo="none">
+      {pane && (
+        <ChatPaneSlot
+          key={pane.id}
+          id={tabPanels ? chatTabPanelId(pane.id) : undefined}
+          role={tabPanels ? "tabpanel" : undefined}
+          aria-labelledby={tabPanels ? chatTabId(pane.id) : undefined}
+          data-pane-id={pane.id}
+        >
+          {isRunPane(pane) ? (
+            <RunPaneWindow
+              pane={pane}
+              focusPane={focusPane}
+              closeChatPanel={closeChatPanel}
+              registerFind={registerPaneFind}
+            />
+          ) : (
+            <ChatPaneWindow
+              pane={pane}
+              sessionId={pane.sessionId}
+              focusPane={focusPane}
+              closeChatPanel={closeChatPanel}
+              startFreshActiveSession={startFreshActiveSession}
+              showProjectContext={showProjectContext}
+              projectLabelBySessionId={projectLabelBySessionId}
+              renderObserver={renderObserver}
+              registerChangesToggle={registerChangesToggle}
+              registerPaneFind={registerPaneFind}
+            />
+          )}
+        </ChatPaneSlot>
+      )}
     </div>
   );
 });
+
+/**
+ * A visible chat's slot. When it unmounts holding focus (its tab was left),
+ * focus moves to the pane list first: WebKit stops delivering typing to an
+ * input focused by script after the focused element was removed, so focus
+ * must never fall through to the body on the way to the next chat.
+ */
+function ChatPaneSlot(props: ComponentPropsWithoutRef<"div">) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const slot = ref.current;
+    return () => {
+      if (!slot?.contains(document.activeElement)) return;
+      slot
+        .closest<HTMLElement>(".hc-chat-panes")
+        ?.focus({ preventScroll: true });
+    };
+  }, []);
+  return <div {...props} ref={ref} className="hc-chat-pane-slot" />;
+}
 
 interface ChatPaneWindowProps {
   registerChangesToggle?: RegisterChangesToggle;
   registerPaneFind?: RegisterPaneFind;
   pane: LocalChatPane;
-  paneIsActive: boolean;
-  paneCount: number;
-  index: number;
   sessionId: string;
-  isMaximized: boolean;
-  canAddSplitPane: boolean;
-  closePane: (paneId: string) => void;
-  unsplitPanes: (paneId?: string) => void;
   closeChatPanel: () => void;
-  toggleHistorySelector: () => boolean;
-  toggleMaximized: () => void;
   startFreshActiveSession: (paneId: string) => Promise<boolean>;
-  splitWithFreshSession: () => Promise<boolean>;
+  showProjectContext: boolean;
   projectLabelBySessionId?: ReadonlyMap<string, string>;
   focusPane: (paneId: string) => void;
   renderObserver?: (paneId: string, part: "transcript" | "composer") => void;
@@ -225,19 +132,10 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
   registerChangesToggle,
   registerPaneFind,
   pane,
-  paneIsActive,
-  paneCount,
-  index,
   sessionId,
-  isMaximized,
-  canAddSplitPane,
-  closePane,
-  unsplitPanes,
   closeChatPanel,
-  toggleHistorySelector,
-  toggleMaximized,
   startFreshActiveSession,
-  splitWithFreshSession,
+  showProjectContext,
   projectLabelBySessionId,
   focusPane,
   renderObserver,
@@ -248,11 +146,9 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
     const session = state.sessions[sessionId];
     return session ? session.title?.trim() || session.label : undefined;
   });
-  const isForeground = !isMaximized || paneIsActive;
-  // Only the active pane takes a pending composer focus request, once.
+  // The shown chat takes a pending composer focus request, once.
   const composerFocusRevision = useChatStore((state) =>
     state.panelOpen &&
-    paneIsActive &&
     state.composerFocusRevision > state.composerFocusHandledRevision
       ? state.composerFocusRevision
       : null
@@ -261,19 +157,6 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
     () => void startFreshActiveSession(pane.id),
     [pane.id, startFreshActiveSession]
   );
-  const onSplitPane = useCallback(
-    () => void splitWithFreshSession(),
-    [splitWithFreshSession]
-  );
-  const onUnsplitPanes = useCallback(
-    () => unsplitPanes(pane.id),
-    [pane.id, unsplitPanes]
-  );
-  const onClosePane = useCallback(
-    () => closePane(pane.id),
-    [closePane, pane.id]
-  );
-
   const registerToggle = useCallback(
     (toggle: (() => void) | null) => registerChangesToggle?.(pane.id, toggle),
     [pane.id, registerChangesToggle]
@@ -288,10 +171,12 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
     <section
       className="hc-chat-pane"
       data-testid="chat-pane"
-      data-pane-active={paneIsActive || undefined}
-      aria-label={`Chat pane ${index + 1}: ${label}`}
-      aria-selected={paneIsActive}
+      aria-label={label}
       tabIndex={0}
+      onFocusCapture={(event) => {
+        const area = chatFocusAreaOf(event.target);
+        if (area) saveChatFocusArea(sessionId, area);
+      }}
       onMouseDownCapture={(event) => {
         focusPane(pane.id);
         const target = event.target as HTMLElement;
@@ -321,18 +206,8 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
         registerFind={registerFind}
         onClosePanel={closeChatPanel}
         onStartFresh={onStartFresh}
-        onToggleHistory={toggleHistorySelector}
-        onToggleWide={toggleMaximized}
-        isWide={isMaximized}
-        onSplitPane={isMaximized ? onSplitPane : undefined}
-        canSplitPane={canAddSplitPane}
-        onUnsplitPanes={
-          isMaximized && paneCount > 1 ? onUnsplitPanes : undefined
-        }
-        onClosePane={isMaximized && paneCount > 1 ? onClosePane : undefined}
-        isForegroundPane={isForeground}
         composerFocusRevision={composerFocusRevision}
-        showProjectContext={paneCount > 1}
+        showProjectContext={showProjectContext}
         projectLabel={projectLabelBySessionId?.get(sessionId)}
         renderObserver={(part) => renderObserver?.(pane.id, part)}
       />

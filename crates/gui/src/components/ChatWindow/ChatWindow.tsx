@@ -51,6 +51,8 @@ import {
   saveDocuments,
 } from "./workspace/documentStore";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
+import { chatFocusArea } from "../../stores/chatViewMemory";
+import { focusPaneTranscript } from "./chatAreas";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
@@ -106,18 +108,6 @@ interface ChatWindowProps {
   onClosePanel?: () => void;
   /** Starts a fresh local chat for the current project. */
   onStartFresh?: () => void;
-  /** Opens/focuses the local chat history drawer. */
-  onToggleHistory?: () => void;
-  /** Expands/collapses the project chat panel session view. */
-  onToggleWide?: () => void;
-  isWide?: boolean;
-  /** Adds another visible chat pane in the maximized view. */
-  onSplitPane?: () => void;
-  canSplitPane?: boolean;
-  /** Collapses the maximized view back to this pane only. */
-  onUnsplitPanes?: () => void;
-  /** Closes this pane without closing the underlying chat session. */
-  onClosePane?: () => void;
   /** Whether this pane is visible in front (not behind a maximized pane). */
   isForegroundPane?: boolean;
   /** A pending composer focus request this pane should take. */
@@ -137,13 +127,6 @@ export function ChatWindow({
   sessionId,
   onClosePanel,
   onStartFresh,
-  onToggleHistory,
-  onToggleWide,
-  isWide = false,
-  onSplitPane,
-  canSplitPane = true,
-  onUnsplitPanes,
-  onClosePane,
   isForegroundPane = true,
   composerFocusRevision = null,
   projectLabel,
@@ -374,16 +357,19 @@ export function ChatWindow({
       handleRemoveComment,
     ]
   );
-  const [sourceRequest, setSourceRequest] = useState<(
-    | {
-        kind: "turn";
-        target: TurnDocumentTarget;
-        nonce: number;
-        version: TurnDocumentVersion;
-      }
-    | { kind: "working"; worktreePath: string; target: JumpTarget }
-    | { kind: "checkout"; worktreePath: string }
-  ) & { sessionId: string } | null>(null);
+  const [sourceRequest, setSourceRequest] = useState<
+    | ((
+        | {
+            kind: "turn";
+            target: TurnDocumentTarget;
+            nonce: number;
+            version: TurnDocumentVersion;
+          }
+        | { kind: "working"; worktreePath: string; target: JumpTarget }
+        | { kind: "checkout"; worktreePath: string }
+      ) & { sessionId: string })
+    | null
+  >(null);
   const nextSourceNonce = useRef(0);
   const ownWorktreePath = association.record?.worktreePath;
   const evidenceCheckout =
@@ -404,14 +390,19 @@ export function ChatWindow({
       setBackgroundSession(null);
       const nonce = ++nextSourceNonce.current;
       const { path, line, endLine, column } = location;
-      const revision = location.commit !== undefined
-        ? { kind: "commit" as const, commit: location.commit }
-        : location.base !== undefined
-          ? { kind: "range" as const, base: location.base, head: location.head }
-          : null;
+      const revision =
+        location.commit !== undefined
+          ? { kind: "commit" as const, commit: location.commit }
+          : location.base !== undefined
+            ? {
+                kind: "range" as const,
+                base: location.base,
+                head: location.head,
+              }
+            : null;
       if (revision) {
         const checkout = fileReference
-          ? reference?.root ?? evidenceCheckout
+          ? (reference?.root ?? evidenceCheckout)
           : evidenceCheckout;
         if (!checkout) return;
         setSourceRequest(null);
@@ -482,18 +473,26 @@ export function ChatWindow({
     ? JSON.stringify(["turn", turn.history.turnId])
     : null;
   const origin = useToolAnnotation(
-    turn?.history.sessionId, annotationKey, "worktree_origin"
+    turn?.history.sessionId,
+    annotationKey,
+    "worktree_origin"
   );
   const capture = useToolAnnotation(
-    turn?.history.sessionId, annotationKey, "worktree_history"
+    turn?.history.sessionId,
+    annotationKey,
+    "worktree_history"
   );
   const turnRoot =
-    annotationWorktree(origin) ?? annotationWorktree(capture) ?? turn?.root ?? null;
-  const worktreePath = changesSession === sessionId
-    ? source?.kind === "checkout"
-      ? source.worktreePath
-      : turnRoot ?? evidenceCheckout
-    : ownWorktreePath;
+    annotationWorktree(origin) ??
+    annotationWorktree(capture) ??
+    turn?.root ??
+    null;
+  const worktreePath =
+    changesSession === sessionId
+      ? source?.kind === "checkout"
+        ? source.worktreePath
+        : (turnRoot ?? evidenceCheckout)
+      : ownWorktreePath;
 
   const attachSelection = (
     anchor: CodeSelection,
@@ -504,7 +503,9 @@ export function ChatWindow({
     const comment = anchor.fullFile
       ? {
           kind: "diff" as const,
-          id, body, outdated,
+          id,
+          body,
+          outdated,
           home: anchor.home,
           path: anchor.path,
           side: anchor.side,
@@ -512,7 +513,13 @@ export function ChatWindow({
           endLine: anchor.endLine,
           hunk: anchor.code,
         }
-      : createDiffComment({ home: anchor.home, file: anchor.file, span: anchor, body, id });
+      : createDiffComment({
+          home: anchor.home,
+          file: anchor.file,
+          span: anchor,
+          body,
+          id,
+        });
     if (comment) {
       const attachment = { ...comment, selectionCode: anchor.code, outdated };
       updatePendingComments((comments) => [...comments, attachment]);
@@ -566,9 +573,26 @@ export function ChatWindow({
   );
   useEffect(() => {
     if (composerFocusRevision === null) return;
-    inputRef.current?.focus();
+    // Returning to a chat puts the keyboard back in the area it left.
+    const area = chatFocusArea(sessionId);
+    const composer = inputRef.current;
+    const pane = composer?.closest("[data-pane-id]");
+    const changes =
+      area === "changes"
+        ? pane?.querySelector<HTMLElement>('[data-chat-area="changes"]')
+        : null;
+    if (changes) changes.focus({ preventScroll: true });
+    else if (
+      composer &&
+      !(area === "transcript" && focusPaneTranscript(composer))
+    ) {
+      composer.focus();
+      // Script focus puts the caret at the start; continue the draft.
+      const end = composer.value.length;
+      composer.setSelectionRange(end, end);
+    }
     markComposerFocusHandled(composerFocusRevision);
-  }, [composerFocusRevision, markComposerFocusHandled]);
+  }, [composerFocusRevision, markComposerFocusHandled, sessionId]);
 
   const showChanges = !!worktreePath && changesSession === sessionId;
   const shownEvidence =
@@ -588,7 +612,9 @@ export function ChatWindow({
       const dirty = dirtyPaths(worktreePath);
       if (dirty.length) setLeaving(dirty);
       else {
-        setSourceRequest((current) => current?.kind === "working" ? current : null);
+        setSourceRequest((current) =>
+          current?.kind === "working" ? current : null
+        );
         setChangesSession(null);
       }
     }
@@ -724,7 +750,6 @@ export function ChatWindow({
         canStopGeneration={chat.canStopGeneration}
         onClosePanel={onClosePanel}
         onStartFresh={onStartFresh}
-        onToggleHistory={onToggleHistory}
         changesOpen={showChanges}
         onToggleChanges={worktreePath ? toggleChanges : undefined}
         backgroundOpen={showBackground}
@@ -732,12 +757,6 @@ export function ChatWindow({
         onToggleBackground={
           hasBackgroundWork || showBackground ? toggleBackground : undefined
         }
-        onToggleWide={onToggleWide}
-        isWide={isWide}
-        onSplitPane={onSplitPane}
-        canSplitPane={canSplitPane}
-        onUnsplitPanes={onUnsplitPanes}
-        onClosePane={onClosePane}
         onClearMessages={() => void chat.handleClearMessages()}
         onStopGeneration={() => void chat.handleStopGeneration()}
         onTitleSave={chat.handleTitleSave}
@@ -773,7 +792,8 @@ export function ChatWindow({
               }
               onExit={() => inputRef.current?.focus()}
               sourceJump={
-                source?.kind === "working" && source.worktreePath === worktreePath
+                source?.kind === "working" &&
+                source.worktreePath === worktreePath
                   ? source.target
                   : null
               }
@@ -1003,7 +1023,11 @@ export function ChatWindow({
     >
       <DiffReviewContext.Provider value={diffReview}>
         <SelectionDiscussionProvider
-          key={JSON.stringify([chat.session.projectPath, sessionId, ownWorktreePath])}
+          key={JSON.stringify([
+            chat.session.projectPath,
+            sessionId,
+            ownWorktreePath,
+          ])}
           worktreePath={ownWorktreePath ?? worktreePath ?? ""}
           parentChatId={sessionId}
           projectPath={chat.session.projectPath}

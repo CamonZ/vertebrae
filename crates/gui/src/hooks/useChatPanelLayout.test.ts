@@ -2,12 +2,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useChatPanelLayout } from "./useChatPanelLayout";
 import { useShellStore } from "../stores/shellStore";
+import { useChatStore } from "../stores/chatStore";
+import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 
 const WIDTH_STORAGE_KEY = "chat-window-manager-width";
 
-function renderPanelHook(overrides: { unsplitPanes?: () => void } = {}) {
-  const unsplitPanes = overrides.unsplitPanes ?? vi.fn();
-  return renderHook(() => useChatPanelLayout({ unsplitPanes }));
+function renderPanelHook() {
+  return renderHook(() => useChatPanelLayout());
+}
+
+/** A workspace with two open chats; collapsing must leave it intact. */
+function seedWorkspace() {
+  const layout = {
+    ...EMPTY_WORKSPACE,
+    order: [
+      { id: "a", sessionId: "s-a" },
+      { id: "b", sessionId: "s-b" },
+    ],
+    activeId: "b",
+  };
+  useChatStore.setState({ paneLayout: layout });
+  return layout;
 }
 
 describe("useChatPanelLayout", () => {
@@ -85,14 +100,12 @@ describe("useChatPanelLayout", () => {
       expect(result.current.renderedPanelWidth).toBe(widthBefore);
     });
 
-    it("calls unsplitPanes when entering maximize", () => {
-      const unsplitPanes = vi.fn();
-      const { result } = renderPanelHook({ unsplitPanes });
+    it("keeps the workspace layout when collapsing", () => {
+      const layout = seedWorkspace();
+      const { result } = renderPanelHook();
       act(() => result.current.toggleMaximized());
-      // unsplitPanes is called on exit-maximize, not enter
-      // Let's verify exit behavior
       act(() => result.current.toggleMaximized());
-      expect(unsplitPanes).toHaveBeenCalled();
+      expect(useChatStore.getState().paneLayout).toBe(layout);
     });
   });
 
@@ -116,11 +129,11 @@ describe("useChatPanelLayout", () => {
       expect(result.current.panelWidth).toBe(500);
     });
 
-    it("calls unsplitPanes", () => {
-      const unsplitPanes = vi.fn();
-      const { result } = renderPanelHook({ unsplitPanes });
+    it("keeps the workspace layout", () => {
+      const layout = seedWorkspace();
+      const { result } = renderPanelHook();
       act(() => result.current.resizePanel(500));
-      expect(unsplitPanes).toHaveBeenCalled();
+      expect(useChatStore.getState().paneLayout).toBe(layout);
     });
   });
 
@@ -150,23 +163,23 @@ describe("useChatPanelLayout", () => {
   });
 
   describe("collapseMaximized", () => {
-    it("unsplitPanes and restores width when maximized", () => {
-      const unsplitPanes = vi.fn();
-      const { result } = renderPanelHook({ unsplitPanes });
+    it("restores width when maximized and keeps the workspace layout", () => {
+      const layout = seedWorkspace();
+      const { result } = renderPanelHook();
       const widthBefore = result.current.panelWidth;
       act(() => result.current.toggleMaximized());
       act(() => result.current.collapseMaximized());
       expect(result.current.isMaximized).toBe(false);
       expect(result.current.panelWidth).toBe(widthBefore);
-      expect(unsplitPanes).toHaveBeenCalled();
+      expect(useChatStore.getState().paneLayout).toBe(layout);
     });
 
     it("is a no-op when not maximized", () => {
-      const unsplitPanes = vi.fn();
-      const { result } = renderPanelHook({ unsplitPanes });
+      const layout = seedWorkspace();
+      const { result } = renderPanelHook();
       act(() => result.current.collapseMaximized());
       expect(result.current.isMaximized).toBe(false);
-      expect(unsplitPanes).not.toHaveBeenCalled();
+      expect(useChatStore.getState().paneLayout).toBe(layout);
     });
   });
 

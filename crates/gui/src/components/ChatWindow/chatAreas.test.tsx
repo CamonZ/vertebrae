@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../../stores/chatWorkspace";
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useChatStore } from "../../stores/chatStore";
@@ -32,7 +33,7 @@ describe("moveChatArea", () => {
     const focusPane = vi.fn();
     vi.spyOn(useChatStore, "getState").mockReturnValue({
       ...useChatStore.getState(),
-      paneLayout: { panes: [], activePaneId: "p0" },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: "p0" },
       focusPane,
     });
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {

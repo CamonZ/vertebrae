@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useLocalChatHistory } from "./useLocalChatHistory";
@@ -40,7 +41,7 @@ describe("useLocalChatHistory", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
     });
     useChatStore.getState().listLocalSessions = vi.fn(() => []);

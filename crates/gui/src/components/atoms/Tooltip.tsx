@@ -21,6 +21,11 @@ interface TooltipProps {
   delay?: number;
   /** Disable the tooltip entirely (e.g., when label is empty in a dynamic context). */
   disabled?: boolean;
+  /**
+   * Classes for the wrapper, which is `relative inline-flex` by default; pass
+   * sizing (e.g. `min-w-0 flex-1`) when the child is a flex-sized item.
+   */
+  className?: string;
   children: ReactElement;
 }
 
@@ -41,6 +46,7 @@ export function Tooltip({
   placement = "top",
   delay = 400,
   disabled,
+  className = "inline-flex",
   children,
 }: TooltipProps) {
   const id = useId();
@@ -171,7 +177,7 @@ export function Tooltip({
     </span>
   );
   return (
-    <span className="relative inline-flex">
+    <span className={`relative ${className}`}>
       {child}
       {portal ? open && createPortal(tooltip, document.body) : tooltip}
     </span>

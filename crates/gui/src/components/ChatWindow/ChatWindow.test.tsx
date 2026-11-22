@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../../stores/chatWorkspace";
 import { useUIStore } from "../../stores/uiStore";
 import {
   getComposerPicker,
@@ -52,11 +53,19 @@ import {
 } from "../../test/dropdown";
 
 vi.mock("./workspace/SourceEvidenceCode", () => ({
-  default: ({ source, line, endLine }: {
+  default: ({
+    source,
+    line,
+    endLine,
+  }: {
     source: { contents: string };
     line?: number;
     endLine?: number;
-  }) => <pre data-line={line} data-end-line={endLine}>{source.contents}</pre>,
+  }) => (
+    <pre data-line={line} data-end-line={endLine}>
+      {source.contents}
+    </pre>
+  ),
 }));
 
 // Mock scrollIntoView
@@ -245,107 +254,144 @@ describe("ChatWindow", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
     });
   });
 
   it.each([
     { name: "main checkout", original: "/test/project", current: null },
-    { name: "association worktree", original: "/saved-feature", current: "/current" },
-  ])("opens recorded files in Changes for a $name", async ({ original, current }) => {
-    const association = {
-      ticketId: null,
-      ticketTitle: null,
-      worktreePath: current,
-      branch: null,
-      lastProcessedAt: null,
-      processedAtCount: 0,
-      awaitingWorktree: null,
-      recentWorktrees: [],
-    };
-    useChatStore.setState({
-      sessions: {
-        "test-session": createSession({
-          projectPath: "/test/project",
-          ...(current ? { association } : {}),
-          toolAnnotations: {
-            '["turn","saved-turn"]': {
-              worktree_origin: {
-                session_id: "test-session",
-                tool_id: "",
-                subject: { kind: "turn", id: "saved-turn" },
-                kind: "worktree_origin",
-                recorded_at: "2026-11-16T00:00:00Z",
-                payload: { worktree: original, epoch: "original" },
+    {
+      name: "association worktree",
+      original: "/saved-feature",
+      current: "/current",
+    },
+  ])(
+    "opens recorded files in Changes for a $name",
+    async ({ original, current }) => {
+      const association = {
+        ticketId: null,
+        ticketTitle: null,
+        worktreePath: current,
+        branch: null,
+        lastProcessedAt: null,
+        processedAtCount: 0,
+        awaitingWorktree: null,
+        recentWorktrees: [],
+      };
+      useChatStore.setState({
+        sessions: {
+          "test-session": createSession({
+            projectPath: "/test/project",
+            ...(current ? { association } : {}),
+            toolAnnotations: {
+              '["turn","saved-turn"]': {
+                worktree_origin: {
+                  session_id: "test-session",
+                  tool_id: "",
+                  subject: { kind: "turn", id: "saved-turn" },
+                  kind: "worktree_origin",
+                  recorded_at: "2026-11-16T00:00:00Z",
+                  payload: { worktree: original, epoch: "original" },
+                },
               },
             },
-          },
-          messages: [{
-            kind: "assistant",
-            turnId: "saved-turn",
-            itemId: "saved-source",
-            text: "[source](src/a.ts:12:3)",
-            timestamp: "2026-11-16T00:00:00Z",
-          }],
-        }),
-      },
-    });
-    render(<ChatWindow sessionId="test-session" />);
-    await userEvent.click(screen.getByTestId("local-file-reference-link"));
+            messages: [
+              {
+                kind: "assistant",
+                turnId: "saved-turn",
+                itemId: "saved-source",
+                text: "[source](src/a.ts:12:3)",
+                timestamp: "2026-11-16T00:00:00Z",
+              },
+            ],
+          }),
+        },
+      });
+      render(<ChatWindow sessionId="test-session" />);
+      await userEvent.click(screen.getByTestId("local-file-reference-link"));
 
-    const changes = () =>
-      within(screen.getByRole("complementary", { name: "Changes panel" }));
-    const file = () => within(changes().getByRole("region", { name: "File src/a.ts" }));
-    expect(await file().findByText("recorded file")).toHaveAttribute("data-line", "12");
-    expect(commands.readChatHistoryFile).toHaveBeenCalledExactlyOnceWith(
-      "test-session", "saved-turn", "src/a.ts"
-    );
-    expect(commands.readWorktreeFile).not.toHaveBeenCalled();
-    expect(useDocumentStore.getState().workspaces[original]?.documents["src/a.ts"]).toBeUndefined();
+      const changes = () =>
+        within(screen.getByRole("complementary", { name: "Changes panel" }));
+      const file = () =>
+        within(changes().getByRole("region", { name: "File src/a.ts" }));
+      expect(await file().findByText("recorded file")).toHaveAttribute(
+        "data-line",
+        "12"
+      );
+      expect(commands.readChatHistoryFile).toHaveBeenCalledExactlyOnceWith(
+        "test-session",
+        "saved-turn",
+        "src/a.ts"
+      );
+      expect(commands.readWorktreeFile).not.toHaveBeenCalled();
+      expect(
+        useDocumentStore.getState().workspaces[original]?.documents["src/a.ts"]
+      ).toBeUndefined();
 
-    act(() =>
-      useChatStore.getState().setSessionAssociation("test-session", {
-        ...association,
-        worktreePath: "/replacement",
-      })
-    );
-    await userEvent.click(file().getByRole("radio", { name: "Latest file" }));
-    expect(await file().findByText("file")).toHaveAttribute("data-line", "12");
-    expect(commands.readWorktreeFile).toHaveBeenCalledExactlyOnceWith(original, "src/a.ts");
+      act(() =>
+        useChatStore.getState().setSessionAssociation("test-session", {
+          ...association,
+          worktreePath: "/replacement",
+        })
+      );
+      await userEvent.click(file().getByRole("radio", { name: "Latest file" }));
+      expect(await file().findByText("file")).toHaveAttribute(
+        "data-line",
+        "12"
+      );
+      expect(commands.readWorktreeFile).toHaveBeenCalledExactlyOnceWith(
+        original,
+        "src/a.ts"
+      );
 
-    await userEvent.click(file().getByRole("button", { name: "Close file reference" }));
-    expect(changes().queryByRole("region", { name: "File src/a.ts" })).not.toBeInTheDocument();
-  });
+      await userEvent.click(
+        file().getByRole("button", { name: "Close file reference" })
+      );
+      expect(
+        changes().queryByRole("region", { name: "File src/a.ts" })
+      ).not.toBeInTheDocument();
+    }
+  );
 
   it("keeps a missing capture explicit and a dismissed reference closed", async () => {
     mockedCommands.readChatHistoryFile.mockResolvedValueOnce({
       status: "ok",
       data: {
-        error: { kind: "not_captured", message: "Capture pending", retryable: true },
+        error: {
+          kind: "not_captured",
+          message: "Capture pending",
+          retryable: true,
+        },
       },
     });
     useChatStore.setState({
       sessions: {
         "test-session": createSession({
           projectPath: "/test/project",
-          messages: [{
-            kind: "assistant",
-            turnId: "pending-turn",
-            itemId: "reply",
-            text: "[source](src/pending.ts:12)",
-            timestamp: "2026-11-16T00:00:00Z",
-          }],
+          messages: [
+            {
+              kind: "assistant",
+              turnId: "pending-turn",
+              itemId: "reply",
+              text: "[source](src/pending.ts:12)",
+              timestamp: "2026-11-16T00:00:00Z",
+            },
+          ],
         }),
       },
     });
     render(<ChatWindow sessionId="test-session" />);
     await userEvent.click(screen.getByTestId("local-file-reference-link"));
 
-    const changes = within(screen.getByRole("complementary", { name: "Changes panel" }));
+    const changes = within(
+      screen.getByRole("complementary", { name: "Changes panel" })
+    );
     expect(await changes.findByText("Capture pending")).toBeVisible();
     expect(mockedCommands.readWorktreeFile).not.toHaveBeenCalled();
-    await userEvent.click(changes.getByRole("button", { name: "Close file reference" }));
+    await userEvent.click(
+      changes.getByRole("button", { name: "Close file reference" })
+    );
 
     act(() =>
       useChatStore.getState().applyToolAnnotation("test-session", {
@@ -357,8 +403,12 @@ describe("ChatWindow", () => {
         payload: { worktree: "/original", epoch: "pending" },
       })
     );
-    expect(screen.getByRole("complementary", { name: "Changes panel" })).toBeVisible();
-    expect(screen.queryByRole("region", { name: "File src/pending.ts" })).toBeNull();
+    expect(
+      screen.getByRole("complementary", { name: "Changes panel" })
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("region", { name: "File src/pending.ts" })
+    ).toBeNull();
     expect(mockedCommands.readChatHistoryFile).toHaveBeenCalledTimes(1);
   });
 
@@ -1043,48 +1093,30 @@ describe("ChatWindow", () => {
     expect(container.querySelector(".hc-foot-meta")).toBeInTheDocument();
   });
 
-  it("shows a scope-neutral widening control when the panel can expand", async () => {
+  it("keeps workspace controls off the chat header (they live on the tab strip)", async () => {
     const user = userEvent.setup();
-    const onToggleWide = vi.fn();
-    const session = createSession({
-      label: "New Chat",
-    });
+    const onClosePanel = vi.fn();
+    const session = createSession({ label: "New Chat" });
     useChatStore.setState({
       sessions: { "test-session": session },
       activeSessionId: "test-session",
       panelOpen: true,
     });
 
-    render(<ChatWindow sessionId="test-session" onToggleWide={onToggleWide} />);
+    render(<ChatWindow sessionId="test-session" onClosePanel={onClosePanel} />);
 
-    expect(screen.queryByTitle(/Widen scope/)).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Widen chat panel" }));
-
-    expect(onToggleWide).toHaveBeenCalledTimes(1);
-  });
-
-  it("labels the widening control as collapse while the panel is wide", () => {
-    const session = createSession({
-      label: "New Chat",
-    });
-    useChatStore.setState({
-      sessions: { "test-session": session },
-      activeSessionId: "test-session",
-      panelOpen: true,
-    });
-
-    render(
-      <ChatWindow
-        sessionId="test-session"
-        onToggleWide={() => {}}
-        isWide={true}
-      />
-    );
-
-    expect(
-      screen.getByRole("button", { name: "Collapse chat panel" })
-    ).toBeInTheDocument();
+    for (const name of [
+      /Widen chat panel/,
+      /Collapse chat panel/,
+      /Split chat pane/,
+      /Keep only this pane/,
+      /Close this pane/,
+      /Toggle chat history/,
+    ]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+    await user.click(screen.getByRole("button", { name: "Close chat panel" }));
+    expect(onClosePanel).toHaveBeenCalledTimes(1);
   });
 
   it("shows empty state message when no messages", () => {
@@ -3693,82 +3725,127 @@ describe("ChatWindow", () => {
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
 
-  it.each(["Control+click", "Control+Enter"])("steers with %s while Enter queues", async (action) => {
-    const turnId = "steering-turn";
-    const session = createSession({
-      backendSessionId: "steer-backend",
-      lifecycle: "streaming",
-      activeTurn: { localId: "steering-local", turnId, phase: "active" },
-    });
-    useChatStore.setState({ sessions: { "test-session": session }, activeSessionId: "test-session" });
-    type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
-    let resolveReply!: (value: Reply) => void;
-    const reply = new Promise<Reply>((resolve) => { resolveReply = resolve; });
-    mockedCommands.steerLocalChatTurn.mockReturnValueOnce(reply);
-    render(<ChatWindow sessionId="test-session" />);
-    const composer = screen.getByTestId("local-chat-composer");
-    fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
-    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
-    fireEvent.keyUp(composer, { key: "Control" });
-    fireEvent.change(composer, { target: { value: "Change course" } });
-    const arrow = screen.getByRole("button", { name: "Queue message" });
-    const straightPath = arrow.querySelector("path")?.getAttribute("d");
-    expect(arrow).toHaveAttribute("aria-keyshortcuts", "Control+Enter");
-    fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
-    fireEvent.keyDown(composer, { key: "Enter", altKey: true });
-    expect(mockedCommands.steerLocalChatTurn).not.toHaveBeenCalled();
-    expect(composer).toHaveValue("Change course");
-    fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
-    expect(arrow).toHaveAccessibleName("Steer active turn");
-    expect(arrow.querySelector("path")).not.toHaveAttribute("d", straightPath);
-    fireEvent.keyUp(composer, { key: "Control" });
-    expect(arrow).toHaveAccessibleName("Queue message");
-    expect(arrow.querySelector("path")).toHaveAttribute("d", straightPath);
-    fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
-    fireEvent.blur(composer);
-    expect(arrow).toHaveAccessibleName("Queue message");
-    fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
-    if (action === "Control+click") fireEvent.click(arrow, { ctrlKey: true });
-    else fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true });
-    expect(mockedCommands.steerLocalChatTurn).toHaveBeenCalledWith("steer-backend", turnId, "Change course");
-    expect(composer).toHaveValue("Change course");
-    expect(arrow).toBeDisabled();
+  it.each(["Control+click", "Control+Enter"])(
+    "steers with %s while Enter queues",
+    async (action) => {
+      const turnId = "steering-turn";
+      const session = createSession({
+        backendSessionId: "steer-backend",
+        lifecycle: "streaming",
+        activeTurn: { localId: "steering-local", turnId, phase: "active" },
+      });
+      useChatStore.setState({
+        sessions: { "test-session": session },
+        activeSessionId: "test-session",
+      });
+      type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
+      let resolveReply!: (value: Reply) => void;
+      const reply = new Promise<Reply>((resolve) => {
+        resolveReply = resolve;
+      });
+      mockedCommands.steerLocalChatTurn.mockReturnValueOnce(reply);
+      render(<ChatWindow sessionId="test-session" />);
+      const composer = screen.getByTestId("local-chat-composer");
+      fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
+      expect(
+        screen.getByRole("button", { name: "Queue message" })
+      ).toBeDisabled();
+      fireEvent.keyUp(composer, { key: "Control" });
+      fireEvent.change(composer, { target: { value: "Change course" } });
+      const arrow = screen.getByRole("button", { name: "Queue message" });
+      const straightPath = arrow.querySelector("path")?.getAttribute("d");
+      expect(arrow).toHaveAttribute("aria-keyshortcuts", "Control+Enter");
+      fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+      fireEvent.keyDown(composer, { key: "Enter", altKey: true });
+      expect(mockedCommands.steerLocalChatTurn).not.toHaveBeenCalled();
+      expect(composer).toHaveValue("Change course");
+      fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
+      expect(arrow).toHaveAccessibleName("Steer active turn");
+      expect(arrow.querySelector("path")).not.toHaveAttribute(
+        "d",
+        straightPath
+      );
+      fireEvent.keyUp(composer, { key: "Control" });
+      expect(arrow).toHaveAccessibleName("Queue message");
+      expect(arrow.querySelector("path")).toHaveAttribute("d", straightPath);
+      fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
+      fireEvent.blur(composer);
+      expect(arrow).toHaveAccessibleName("Queue message");
+      fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
+      if (action === "Control+click") fireEvent.click(arrow, { ctrlKey: true });
+      else fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true });
+      expect(mockedCommands.steerLocalChatTurn).toHaveBeenCalledWith(
+        "steer-backend",
+        turnId,
+        "Change course"
+      );
+      expect(composer).toHaveValue("Change course");
+      expect(arrow).toBeDisabled();
 
-    await act(async () => {
-      const input = {
-        backend_session_id: "steer-backend", turn_id: turnId, input_id: "steer:input-1",
-        content: "Change course", observed_at: "2026-01-01T00:00:00Z",
-      };
-      routeLocalChatSteeringInputEvent(input);
-      routeLocalChatSteeringInputEvent(input);
-      resolveReply({ status: "ok", data: turnId });
-    });
-    expect(composer).toHaveValue("");
-    expect(screen.getByText("Sent to the active turn")).toBeInTheDocument();
-    expect(useChatStore.getState().sessions["test-session"].messages.filter(
-      (message) => message.kind === "user" && message.text === "Change course"
-    )).toEqual([{ kind: "user", text: "Change course", inputId: "steer:input-1", turnId, timestamp: "2026-01-01T00:00:00Z" }]);
+      await act(async () => {
+        const input = {
+          backend_session_id: "steer-backend",
+          turn_id: turnId,
+          input_id: "steer:input-1",
+          content: "Change course",
+          observed_at: "2026-01-01T00:00:00Z",
+        };
+        routeLocalChatSteeringInputEvent(input);
+        routeLocalChatSteeringInputEvent(input);
+        resolveReply({ status: "ok", data: turnId });
+      });
+      expect(composer).toHaveValue("");
+      expect(screen.getByText("Sent to the active turn")).toBeInTheDocument();
+      expect(
+        useChatStore
+          .getState()
+          .sessions[
+            "test-session"
+          ].messages.filter((message) => message.kind === "user" && message.text === "Change course")
+      ).toEqual([
+        {
+          kind: "user",
+          text: "Change course",
+          inputId: "steer:input-1",
+          turnId,
+          timestamp: "2026-01-01T00:00:00Z",
+        },
+      ]);
 
-    fireEvent.change(composer, { target: { value: "Afterward" } });
-    if (action === "Control+click") fireEvent.click(arrow);
-    else fireEvent.keyDown(composer, { key: "Enter" });
-    await waitFor(() => expect(useChatStore.getState().sessions["test-session"].queuedMessages).toEqual(["Afterward"]));
-    expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
-  });
+      fireEvent.change(composer, { target: { value: "Afterward" } });
+      if (action === "Control+click") fireEvent.click(arrow);
+      else fireEvent.keyDown(composer, { key: "Enter" });
+      await waitFor(() =>
+        expect(
+          useChatStore.getState().sessions["test-session"].queuedMessages
+        ).toEqual(["Afterward"])
+      );
+      expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
+    }
+  );
 
   it("expires follow-up confirmation without clearing a newer draft", async () => {
     const session = createSession({
       harness: "claude",
       backendSessionId: "steer-backend",
       lifecycle: "streaming",
-      activeTurn: { localId: "local-turn", turnId: "original", phase: "active" },
+      activeTurn: {
+        localId: "local-turn",
+        turnId: "original",
+        phase: "active",
+      },
     });
-    useChatStore.setState({ sessions: { "test-session": session }, activeSessionId: "test-session" });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+    });
     type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
     let resolveReply!: (value: Reply) => void;
-    mockedCommands.steerLocalChatTurn.mockReturnValueOnce(new Promise((resolve) => {
-      resolveReply = resolve;
-    }));
+    mockedCommands.steerLocalChatTurn.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveReply = resolve;
+      })
+    );
     render(<ChatWindow sessionId="test-session" />);
     const composer = screen.getByTestId("local-chat-composer");
     fireEvent.change(composer, { target: { value: "Change course" } });
@@ -3779,16 +3856,22 @@ describe("ChatWindow", () => {
     vi.useFakeTimers();
     try {
       await act(async () => {
-        useChatStore.setState({ sessions: {
-          "test-session": { ...session, lifecycle: "idle", activeTurn: null },
-        } });
+        useChatStore.setState({
+          sessions: {
+            "test-session": { ...session, lifecycle: "idle", activeTurn: null },
+          },
+        });
         resolveReply({ status: "ok", data: "follow-up" });
       });
       expect(screen.getByText("Delivered as a follow-up turn")).toBeVisible();
       expect(composer).toHaveValue("A new draft");
-      expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+      expect(
+        screen.getByRole("button", { name: "Send message" })
+      ).toBeEnabled();
       act(() => vi.advanceTimersByTime(3000));
-      expect(screen.queryByText("Delivered as a follow-up turn")).not.toBeInTheDocument();
+      expect(
+        screen.queryByText("Delivered as a follow-up turn")
+      ).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -3802,38 +3885,68 @@ describe("ChatWindow", () => {
         backendSessionId: "steer-backend",
         hasUserMessage: true,
         lifecycle: "streaming",
-        activeTurn: { localId: "local-turn", turnId: "original", phase: "active" },
+        activeTurn: {
+          localId: "local-turn",
+          turnId: "original",
+          phase: "active",
+        },
       });
-      useChatStore.setState({ sessions: { "test-session": session }, activeSessionId: "test-session" });
+      useChatStore.setState({
+        sessions: { "test-session": session },
+        activeSessionId: "test-session",
+      });
       type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
       let resolveReply!: (value: Reply) => void;
       let rejectReply!: (error: Error) => void;
-      mockedCommands.steerLocalChatTurn.mockReturnValueOnce(new Promise((resolve, reject) => {
-        resolveReply = resolve;
-        rejectReply = reject;
-      }));
+      mockedCommands.steerLocalChatTurn.mockReturnValueOnce(
+        new Promise((resolve, reject) => {
+          resolveReply = resolve;
+          rejectReply = reject;
+        })
+      );
       render(<ChatWindow sessionId="test-session" />);
       const composer = screen.getByTestId("local-chat-composer");
       fireEvent.change(composer, { target: { value: "Unconfirmed draft" } });
       fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true });
       expect(screen.getByText("Sending steering message…")).toBeVisible();
       if (failure === "session close") {
-        act(() => useChatStore.setState({ sessions: {
-          "test-session": { ...session, backendSessionId: null, lifecycle: "closed", activeTurn: null },
-        } }));
-        expect(screen.queryByText("Sending steering message…")).not.toBeInTheDocument();
+        act(() =>
+          useChatStore.setState({
+            sessions: {
+              "test-session": {
+                ...session,
+                backendSessionId: null,
+                lifecycle: "closed",
+                activeTurn: null,
+              },
+            },
+          })
+        );
+        expect(
+          screen.queryByText("Sending steering message…")
+        ).not.toBeInTheDocument();
       }
       await act(async () => {
         if (failure === "transport rejection") {
           rejectReply(new Error("IPC disconnected"));
         } else {
-          resolveReply({ status: "error", error: { SendFailed: "Delivery was not confirmed" } });
+          resolveReply({
+            status: "error",
+            error: { SendFailed: "Delivery was not confirmed" },
+          });
         }
       });
-      expect(screen.getByText(/Steering.*(IPC disconnected|Delivery was not confirmed)/)).toBeVisible();
-      expect(screen.queryByText("Sending steering message…")).not.toBeInTheDocument();
+      expect(
+        screen.getByText(
+          /Steering.*(IPC disconnected|Delivery was not confirmed)/
+        )
+      ).toBeVisible();
+      expect(
+        screen.queryByText("Sending steering message…")
+      ).not.toBeInTheDocument();
       expect(composer).toHaveValue("Unconfirmed draft");
-      const submit = failure === "session close" ? "Resume session" : "Steer active turn";
+      const submit =
+        failure === "session close" ? "Resume session" : "Steer active turn";
       expect(screen.getByRole("button", { name: submit })).toBeEnabled();
     }
   );
@@ -3846,12 +3959,21 @@ describe("ChatWindow", () => {
         projectPath: "/old",
         backendSessionId: "old-steer-backend",
         lifecycle: "streaming",
-        activeTurn: { localId: "old-local", turnId: "old-turn", phase: "active" },
+        activeTurn: {
+          localId: "old-local",
+          turnId: "old-turn",
+          phase: "active",
+        },
       });
-      useChatStore.setState({ sessions: { "test-session": session }, activeSessionId: "test-session" });
+      useChatStore.setState({
+        sessions: { "test-session": session },
+        activeSessionId: "test-session",
+      });
       type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
       let resolveReply!: (value: Reply) => void;
-      const reply = new Promise<Reply>((resolve) => { resolveReply = resolve; });
+      const reply = new Promise<Reply>((resolve) => {
+        resolveReply = resolve;
+      });
       mockedCommands.steerLocalChatTurn.mockReturnValueOnce(reply);
       const { rerender } = render(<ChatWindow sessionId="test-session" />);
       const composer = screen.getByTestId("local-chat-composer");
@@ -3861,31 +3983,58 @@ describe("ChatWindow", () => {
       if (replacement === "different chat") {
         let otherSessionId!: string;
         act(() => {
-          otherSessionId = useChatStore.getState().openSession("Other chat", "/other-chat");
-          useComposerDraftStore.getState().setDraft(otherSessionId, "Other chat draft");
+          otherSessionId = useChatStore
+            .getState()
+            .openSession("Other chat", "/other-chat");
+          useComposerDraftStore
+            .getState()
+            .setDraft(otherSessionId, "Other chat draft");
         });
         rerender(<ChatWindow sessionId={otherSessionId} />);
         await act(async () => resolveReply({ status: "ok", data: "old-turn" }));
-        expect(screen.getByTestId("local-chat-composer")).toHaveValue("Other chat draft");
-        expect(screen.queryByText("Sent to the active turn")).not.toBeInTheDocument();
+        expect(screen.getByTestId("local-chat-composer")).toHaveValue(
+          "Other chat draft"
+        );
+        expect(
+          screen.queryByText("Sent to the active turn")
+        ).not.toBeInTheDocument();
         rerender(<ChatWindow sessionId="test-session" />);
-        expect(screen.getByTestId("local-chat-composer")).toHaveValue("Old instruction");
-        expect(screen.queryByText("Sending steering message…")).not.toBeInTheDocument();
+        expect(screen.getByTestId("local-chat-composer")).toHaveValue(
+          "Old instruction"
+        );
+        expect(
+          screen.queryByText("Sending steering message…")
+        ).not.toBeInTheDocument();
         return;
       }
 
       await act(async () => {
-        useChatStore.setState({ sessions: {
-          "test-session": {
-            ...session,
-            projectPath: projectChanged ? "/replacement" : session.projectPath,
-            backendSessionId: projectChanged ? "replacement" : session.backendSessionId,
-            activeTurn: { localId: "old-local", turnId: "new-turn", phase: "active" },
+        useChatStore.setState({
+          sessions: {
+            "test-session": {
+              ...session,
+              projectPath: projectChanged
+                ? "/replacement"
+                : session.projectPath,
+              backendSessionId: projectChanged
+                ? "replacement"
+                : session.backendSessionId,
+              activeTurn: {
+                localId: "old-local",
+                turnId: "new-turn",
+                phase: "active",
+              },
+            },
           },
-        } });
+        });
         if (projectChanged) {
-          useComposerDraftStore.getState().setDraft("test-session", "New draft");
-          resolveReply({ status: "error", error: { SendFailed: "Old turn finished" } });
+          useComposerDraftStore
+            .getState()
+            .setDraft("test-session", "New draft");
+          resolveReply({
+            status: "error",
+            error: { SendFailed: "Old turn finished" },
+          });
         } else {
           resolveReply({ status: "ok", data: "old-turn" });
         }
@@ -3893,8 +4042,12 @@ describe("ChatWindow", () => {
       expect(screen.getByTestId("local-chat-composer")).toHaveValue(
         projectChanged ? "New draft" : "Old instruction"
       );
-      expect(screen.queryByText(/Old turn finished|Sent to the active turn/)).not.toBeInTheDocument();
-      expect(useChatStore.getState().sessions["test-session"].activeTurn?.turnId).toBe("new-turn");
+      expect(
+        screen.queryByText(/Old turn finished|Sent to the active turn/)
+      ).not.toBeInTheDocument();
+      expect(
+        useChatStore.getState().sessions["test-session"].activeTurn?.turnId
+      ).toBe("new-turn");
     }
   );
 
@@ -4352,7 +4505,7 @@ describe("ChatWindow composer focus", () => {
         [OTHER]: createSession({ id: OTHER, label: "Other" }),
       },
       activeSessionId: SESSION,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: true,
       composerFocusRevision: 0,
       composerFocusHandledRevision: 0,
@@ -4550,9 +4703,14 @@ describe("ChatWindow composer focus", () => {
           const view = render(<ChatWindow sessionId={SESSION} />);
           try {
             composer().focus();
-            hegel.stateful.run(tc, machine, { typed: "", phase: "idle" }, {
-              stepCount: 30,
-            });
+            hegel.stateful.run(
+              tc,
+              machine,
+              { typed: "", phase: "idle" },
+              {
+                stepCount: 30,
+              }
+            );
           } finally {
             view.unmount();
           }

@@ -361,8 +361,12 @@ async fn gate_offers_resolve(world: &mut GuiWorld, timeout: u64) {
         .screenshot(&client, "after-assert-gate-resolvable")
         .await;
     drop(client);
-    // Resolve can replace the run pane with the chat before the next step.
-    world.resolvable_gate_ids = Some(waiting_gate_ids(world).await);
+    // Resolve moves the gate chat to the front before the next step.
+    world.resolvable_gate_ids = Some(
+        rendered_gate_ids(world)
+            .await
+            .expect("resolvable human_input gate rendered"),
+    );
 }
 
 #[then("the local chat should show no user messages")]
@@ -439,8 +443,36 @@ async fn local_chat_ready_for_message(world: &mut GuiWorld, timeout: u64) {
     world.screenshot(&client, "after-assert-chat-ready").await;
 }
 
-/// The waiting gate's TaskRun and execution IDs, as the GUI renders them.
-async fn waiting_gate_ids(world: &GuiWorld) -> (String, String) {
+/// The waiting gate's TaskRun and execution IDs. Resolving opens the gate
+/// chat in its own tab, which leaves the run's tab (and its gate) in the
+/// background; the backend then names the run's current step execution,
+/// which changes with every attempt.
+async fn waiting_gate_ids(world: &mut GuiWorld) -> (String, String) {
+    if let Some(ids) = rendered_gate_ids(world).await {
+        return ids;
+    }
+    let (run_id, _) = world
+        .resolvable_gate_ids
+        .clone()
+        .expect("no human_input gate rendered or recorded");
+    let task_id = world.task_id.clone().expect("gate task id");
+    world.run_vtb(&["--json", "show", &task_id]).await;
+    assert_eq!(
+        world.last_exit_code, 0,
+        "vtb show failed: {}{}",
+        world.last_stdout, world.last_stderr
+    );
+    let task: Value = serde_json::from_str(&world.last_stdout).expect("vtb show JSON");
+    let execution_id = task["run_history"]
+        .as_array()
+        .and_then(|runs| runs.iter().find(|run| run["id"] == run_id.as_str()))
+        .and_then(|run| run["latest_step_execution_id"].as_str())
+        .unwrap_or_else(|| panic!("run {run_id} has no current step execution: {task}"))
+        .to_string();
+    (run_id, execution_id)
+}
+
+async fn rendered_gate_ids(world: &GuiWorld) -> Option<(String, String)> {
     let wd = world
         .webdriver
         .as_ref()
@@ -459,14 +491,13 @@ async fn waiting_gate_ids(world: &GuiWorld) -> (String, String) {
         .expect("read human_input gate IDs");
     let [run, execution] = ids
         .as_array()
-        .map(|ids| [ids[0].as_str(), ids[1].as_str()])
-        .unwrap_or_else(|| panic!("no human_input gate rendered: {ids}"));
+        .map(|ids| [ids[0].as_str(), ids[1].as_str()])?;
     let (run, execution) = (run.unwrap_or_default(), execution.unwrap_or_default());
     assert!(
         !run.is_empty() && !execution.is_empty(),
         "gate IDs missing: {ids}"
     );
-    (run.to_string(), execution.to_string())
+    Some((run.to_string(), execution.to_string()))
 }
 
 fn capture_lines(file: &str) -> Vec<Value> {

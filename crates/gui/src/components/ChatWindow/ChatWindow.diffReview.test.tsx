@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../../stores/chatWorkspace";
 import { useDocumentStore } from "./workspace/documentStore";
 import { firePaneControl } from "../../test/paneControls";
 import { describe, it, expect, beforeEach, vi } from "vitest";
@@ -213,7 +214,11 @@ vi.mock("../../bindings", async () => {
         .mockResolvedValue({ status: "ok", data: true }),
       readChatHistoryFile: vi.fn().mockResolvedValue({
         status: "ok",
-        data: { kind: "text", contents: "Captured flow source", revision: "turn" },
+        data: {
+          kind: "text",
+          contents: "Captured flow source",
+          revision: "turn",
+        },
       }),
       readWorktreeFile: vi
         .fn()
@@ -482,7 +487,7 @@ describe("ChatWindow diff review comments", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
     });
   });
@@ -735,7 +740,9 @@ describe("ChatWindow diff review comments", () => {
 
     const scrolled = seen.scroll.mock.calls.length;
     await openReference("f.ts:6–8");
-    await waitFor(() => expect(seen.scroll).toHaveBeenCalledTimes(scrolled + 1));
+    await waitFor(() =>
+      expect(seen.scroll).toHaveBeenCalledTimes(scrolled + 1)
+    );
 
     panel = await openReference("g.ts:2–3");
     expect(await within(panel).findByTestId("document-file")).toBeVisible();
@@ -743,7 +750,10 @@ describe("ChatWindow diff review comments", () => {
       name: "g.ts",
       selectedLines: { start: 2, end: 3 },
     });
-    expect(mockedCommands.readWorktreeFile).toHaveBeenCalledWith("/project", "g.ts");
+    expect(mockedCommands.readWorktreeFile).toHaveBeenCalledWith(
+      "/project",
+      "g.ts"
+    );
 
     const openRevision = async (location: string) => {
       fireEvent.click(screen.getByRole("button", { name: location }));
@@ -789,28 +799,34 @@ describe("ChatWindow diff review comments", () => {
     ).toBeNull();
 
     panel = await openReference("missing.ts:1");
-    expect(await within(panel).findByText("This file no longer exists.")).toBeVisible();
+    expect(
+      await within(panel).findByText("This file no longer exists.")
+    ).toBeVisible();
   });
 
   it("reveals a recorded flow range in a main-checkout conversation", async () => {
     const flow = {
       version: 1,
-      parts: [{
-        id: "client",
-        kind: "client",
-        attachments: [{ kind: "ref", path: "f.ts", line: 6, endLine: 8 }],
-      }],
+      parts: [
+        {
+          id: "client",
+          kind: "client",
+          attachments: [{ kind: "ref", path: "f.ts", line: 6, endLine: 8 }],
+        },
+      ],
     };
     flowSession([], {
       projectPath: "/project",
       association: { ...association, worktreePath: null },
-      messages: [{
-        kind: "assistant",
-        itemId: "reply",
-        turnId: "recorded",
-        text: "```flow\n" + JSON.stringify(flow) + "\n```",
-        timestamp: "2024-01-01T12:00:00Z",
-      }],
+      messages: [
+        {
+          kind: "assistant",
+          itemId: "reply",
+          turnId: "recorded",
+          text: "```flow\n" + JSON.stringify(flow) + "\n```",
+          timestamp: "2024-01-01T12:00:00Z",
+        },
+      ],
       toolAnnotations: {
         '["turn","recorded"]': {
           worktree_origin: {
@@ -828,9 +844,13 @@ describe("ChatWindow diff review comments", () => {
     await inspectClient();
 
     const panel = await openReference("f.ts:6–8");
-    expect(await within(panel).findByText("Recorded turn contents · Read-only")).toBeVisible();
+    expect(
+      await within(panel).findByText("Recorded turn contents · Read-only")
+    ).toBeVisible();
     expect(mockedCommands.readChatHistoryFile).toHaveBeenCalledExactlyOnceWith(
-      "test-session", "recorded", "f.ts"
+      "test-session",
+      "recorded",
+      "f.ts"
     );
     expect(mockedCommands.readWorktreeFile).not.toHaveBeenCalled();
     await waitFor(() =>
