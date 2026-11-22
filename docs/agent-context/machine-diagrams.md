@@ -21,9 +21,12 @@ kind names, ports, props, arguments and attachment fields. Read the
 3. Give parts, rails and cards stable IDs. Connect real port names, then write
    a few beats: one event or consequence per caption, with steps underneath.
 4. Leave positions absent for ELK layout. Give evidence its honest status.
-   Keep chat fences at most 240 lines; split a large explanation into levels
-   or artifacts. The chat renderer leaves longer fences as code.
-5. Run `vtb flow validate <file>` and fix every `path: message` line until it
+5. For systems with complex subsystems, split the explanation into levels.
+   Per-level abstraction lets users view the system at different levels and
+   drill down as they explore.
+6. For branching logic, let users explore scenarios separately. The player
+   can represent each scenario and let users choose which one to visualize.
+7. Run `vtb flow validate <file>` and fix every `path: message` line until it
    exits 0; it runs the viewer's own compiler offline. Replay the story,
    inspect payloads, and for a change toggle both arrangements at the same
    beat. Check that captions describe the compiled result, not invent it.
