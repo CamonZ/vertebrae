@@ -26,16 +26,9 @@ pub(super) async fn sacrum(responder: impl Respond + 'static) -> MockServer {
     server
 }
 
-/// Run `script` with `task.id` bound to `task_id`. Each `$NAME` in the script
-/// is replaced by its quoted value from `ids`.
-pub(super) async fn run(
-    server: &MockServer,
-    task_id: &str,
-    ids: &[(&str, &str)],
-    script: &str,
-) -> StepResult {
+pub(super) fn scope_for(server: &MockServer, task_id: &str) -> ScriptScope {
     use vertebrae_sacrum_client::{GraphqlClient, SacrumConfig};
-    let scope = ScriptScope {
+    ScriptScope {
         project_id: PROJECT.into(),
         execution_id: EXECUTION.into(),
         task_id: task_id.into(),
@@ -48,7 +41,17 @@ pub(super) async fn run(
         ))),
         working_dir: std::env::temp_dir(),
         search_path: std::env::var("PATH").unwrap_or_default(),
-    };
+    }
+}
+
+/// Run `script` with `task.id` bound to `task_id`. Each `$NAME` in the script
+/// is replaced by its quoted value from `ids`.
+pub(super) async fn run(
+    server: &MockServer,
+    task_id: &str,
+    ids: &[(&str, &str)],
+    script: &str,
+) -> StepResult {
     let script = ids.iter().fold(script.to_string(), |script, (name, id)| {
         script.replace(&format!("${name}"), &format!("\"{id}\""))
     });
@@ -62,7 +65,7 @@ pub(super) async fn run(
         output_schema: json!({}),
     };
     ScriptWorker::default()
-        .admit(config, scope, |_| {})
+        .admit(config, scope_for(server, task_id), |_| {})
         .unwrap()
         .settle()
         .await

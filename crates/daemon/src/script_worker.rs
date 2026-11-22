@@ -80,6 +80,7 @@ pub struct HostContext {
     cancellation: watch::Receiver<bool>,
     scope: ScriptScope,
     task_run_id: Arc<OnceLock<Option<String>>>,
+    pub(crate) log: Arc<crate::script_host::log::ScriptLog>,
 }
 
 impl HostContext {
@@ -361,26 +362,38 @@ impl ScriptWorker {
         let worker_cancel = Arc::clone(&cancellation);
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let settlement = tokio::spawn(async move {
-            let queue_cancel = cancel_rx.clone();
+            let mut queue_cancel = cancel_rx.clone();
             let result = if *queue_cancel.borrow() {
                 StepResult::failed(None, "Cancelled".to_string())
             } else {
                 let host = HostContext {
                     runtime: Handle::current(),
                     cancellation: cancel_rx,
+                    log: Arc::new(crate::script_host::log::ScriptLog::new(
+                        &scope.execution_id,
+                        scope.services.executions_arc(),
+                    )),
                     scope,
                     task_run_id: Arc::default(),
                 };
                 // No timeout/abort races this join: the closure cooperates
                 // with its cancellation flag, and host calls race the same
                 // signal, so settlement runs only after the worker settles.
-                match tokio::task::spawn_blocking(move || evaluation(config, worker_cancel, host))
-                    .await
+                let log = Arc::clone(&host.log);
+                let result = match tokio::task::spawn_blocking(move || {
+                    evaluation(config, worker_cancel, host)
+                })
+                .await
                 {
                     Ok(result) => result,
                     Err(error) => {
                         StepResult::failed(None, format!("Rhai worker panicked: {error}"))
                     }
+                };
+                tokio::select! {
+                    biased;
+                    () = cancelled(&mut queue_cancel) => StepResult::failed(None, "Cancelled"),
+                    () = log.flush() => result,
                 }
             };
             settled(result.clone());

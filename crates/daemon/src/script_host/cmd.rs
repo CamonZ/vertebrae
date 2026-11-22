@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
+use std::sync::Arc;
 use std::time::Duration;
 
 use rhai::{Dynamic, Map, Module};
@@ -22,6 +23,7 @@ use tokio::process::{Child, Command};
 use tokio::task::JoinHandle;
 use vertebrae_harness_core::{ReapMode, reap_process_tree, signal_process_group};
 
+use super::log::{MAX_LOG_BYTES, ScriptLog};
 use super::{map_argument, set_host_fn3, string_argument};
 use crate::script_worker::{CancelSignal, HostContext, HostError, HostErrorKind};
 
@@ -59,7 +61,7 @@ fn run(
     opts: Dynamic,
 ) -> Result<Dynamic, HostError> {
     let spec = Spec::parse(host.working_dir(), host.search_path(), program, args, opts)?;
-    let finished = host.block_on_owned(|cancel| supervise(spec, cancel))?;
+    let finished = host.block_on_owned(|cancel| supervise(spec, cancel, Arc::clone(&host.log)))?;
     let mut result = Map::new();
     result.insert(
         "exit_code".into(),
@@ -149,7 +151,11 @@ impl Spec {
 
 /// Run the command to completion or cancellation. On cancel the group is
 /// terminated and the leader reaped before `cancelled` is returned.
-async fn supervise(spec: Spec, mut cancel: CancelSignal) -> Result<Finished, HostError> {
+async fn supervise(
+    spec: Spec,
+    mut cancel: CancelSignal,
+    log: Arc<ScriptLog>,
+) -> Result<Finished, HostError> {
     // A cancel that lands after the engine's last progress check must not
     // still launch the command.
     if cancel.is_cancelled() {
@@ -174,7 +180,7 @@ async fn supervise(spec: Spec, mut cancel: CancelSignal) -> Result<Finished, Hos
     // Tokio forgets the pid once the leader is reaped; the group outlives it.
     let group = child.id();
     let stdin = feed(&mut child, spec.stdin);
-    let stdout = drain(child.stdout.take());
+    let stdout = tokio::spawn(drain_stdout(child.stdout.take(), log));
     let stderr = drain(child.stderr.take());
     let aborts = [
         stdin.abort_handle(),
@@ -252,6 +258,57 @@ fn drain(
     })
 }
 
+/// Captures exactly the same bytes as the ordinary drain and independently
+/// offers a bounded preview for each LF-delimited line (or EOF remainder).
+async fn drain_stdout(
+    pipe: Option<impl AsyncRead + Unpin>,
+    log: Arc<ScriptLog>,
+) -> std::io::Result<Vec<u8>> {
+    let mut output = Vec::new();
+    let Some(mut pipe) = pipe else {
+        return Ok(output);
+    };
+    let mut chunk = [0; MAX_LOG_BYTES];
+    let mut line_start = 0;
+    let mut dropped = 0;
+    loop {
+        let read = pipe.read(&mut chunk).await?;
+        if read == 0 {
+            if line_start < output.len() {
+                dropped += usize::from(!offer_line(&log, &output[line_start..]));
+            }
+            break;
+        }
+        let offset = output.len();
+        output.extend_from_slice(&chunk[..read]);
+        for (index, _) in chunk[..read]
+            .iter()
+            .enumerate()
+            .filter(|(_, byte)| **byte == b'\n')
+        {
+            let end = offset + index;
+            dropped += usize::from(!offer_line(&log, &output[line_start..end]));
+            line_start = end + 1;
+        }
+    }
+    if dropped > 0 {
+        tracing::warn!(
+            dropped,
+            "Skipped command stdout session logs while the queue was full"
+        );
+    }
+    Ok(output)
+}
+
+fn offer_line(log: &ScriptLog, line: &[u8]) -> bool {
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let mut text = String::from_utf8_lossy(&line[..line.len().min(MAX_LOG_BYTES)]).into_owned();
+    if line.len() > MAX_LOG_BYTES {
+        text.push_str(" … [stdout line truncated]");
+    }
+    log.offer_stdout(text)
+}
+
 fn joined(
     stream: Result<std::io::Result<Vec<u8>>, tokio::task::JoinError>,
 ) -> Result<Vec<u8>, HostError> {
@@ -318,7 +375,7 @@ mod tests {
     use vertebrae_core::models::ExecuteConfig;
 
     use crate::actors::step_executor::StepResult;
-    use crate::script_host::test_support::completed;
+    use crate::script_host::test_support::{EXECUTION, completed, sacrum, scope_for};
     use crate::script_worker::test_support::scope;
     use crate::script_worker::{CancelSignal, ScriptAttempt, ScriptWorker};
 
@@ -436,6 +493,82 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+    }
+
+    async fn log_server() -> (
+        wiremock::MockServer,
+        tokio::sync::mpsc::UnboundedReceiver<Value>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let server = sacrum(move |request: &wiremock::Request| {
+            let body: Value = request.body_json().unwrap();
+            let variables = &body["variables"];
+            assert_eq!(variables["step_execution_id"], EXECUTION);
+            assert_eq!(variables["format"], "harness");
+            let record: Value =
+                serde_json::from_str(variables["content"].as_str().unwrap()).unwrap();
+            assert_eq!(
+                variables["logicalKey"],
+                format!("harness:{}", record["event_id"].as_str().unwrap())
+            );
+            let _ = tx.send(record);
+            wiremock::ResponseTemplate::new(200).set_body_json(json!({
+                "data": {"create_session_log": {"id": "log-id"}}
+            }))
+        })
+        .await;
+        (server, rx)
+    }
+
+    #[tokio::test]
+    async fn streams_split_stdout_with_noisy_stderr_and_keeps_the_complete_result() {
+        let dir = TempDir::new().unwrap();
+        let (server, mut records) = log_server().await;
+        let mut scope = scope_for(&server, "script-task");
+        scope.working_dir = dir.path().to_path_buf();
+        // Write more than a pipe can hold before the first complete stdout line.
+        let script = r#"
+            vtb::log::info("same");
+            vtb::log::info("same");
+            vtb::cmd::run("sh", ["-c", "printf spl; dd if=/dev/zero bs=1024 count=256 >&2 2>/dev/null; printf 'it\n'; for i in $(seq 100); do test -f release && break; sleep 0.05; done; test -f release || exit 99; printf '%09000d\nfinal' 0; exit 3"], #{})
+        "#;
+        let attempt = admit_in(&ScriptWorker::default(), scope, script, |_| {});
+        let first = bounded(records.recv()).await.unwrap();
+        let second = bounded(records.recv()).await.unwrap();
+        let stdout = bounded(records.recv()).await.unwrap();
+        assert_eq!(first["data"]["text"], "same");
+        assert_eq!(second["data"]["text"], "same");
+        assert_ne!(first["event_id"], second["event_id"]);
+        assert_eq!(stdout["data"]["text"], "split");
+        assert_eq!(
+            [
+                first["sequence"].as_u64(),
+                second["sequence"].as_u64(),
+                stdout["sequence"].as_u64()
+            ],
+            [Some(1), Some(2), Some(3)]
+        );
+
+        std::fs::write(dir.path().join("release"), "").unwrap();
+        let result = completed(bounded(attempt.settle()).await, script);
+        assert_eq!(result["exit_code"], 3);
+        assert_eq!(
+            result["stdout"],
+            format!("split\n{}\nfinal", "0".repeat(9000))
+        );
+        assert_eq!(result["stderr"], "\0".repeat(256 * 1024));
+        let oversized = bounded(records.recv()).await.unwrap();
+        assert_eq!(
+            oversized["data"]["text"],
+            format!(
+                "{} … [stdout line truncated]",
+                "0".repeat(super::MAX_LOG_BYTES)
+            )
+        );
+        assert_eq!(
+            bounded(records.recv()).await.unwrap()["data"]["text"],
+            "final"
+        );
     }
 
     #[tokio::test]
@@ -575,12 +708,15 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let worker = ScriptWorker::default();
         let (terminal_tx, mut terminal_rx) = tokio::sync::mpsc::unbounded_channel();
-        let attempt = admit(
+        let (server, mut records) = log_server().await;
+        let mut scope = scope_for(&server, "script-task");
+        scope.working_dir = dir.path().to_path_buf();
+        let attempt = admit_in(
             &worker,
-            dir.path(),
+            scope,
             r#"let kind = ();
                try {
-                   vtb::cmd::run("sh", ["-c", "sleep 60 & echo $! > child; echo $$ > leader; wait"], #{});
+                   vtb::cmd::run("sh", ["-c", "sleep 60 & echo $! > child; echo $$ > leader; echo child-ready; wait"], #{});
                } catch (error) { kind = error.kind; }
                kind"#,
             move |result| {
@@ -590,6 +726,10 @@ mod tests {
         let mut survivors = Survivors::default();
         let leader = survivors.own(&read_when_written(&dir.path().join("leader")).await);
         let child = survivors.own(&read_when_written(&dir.path().join("child")).await);
+        assert_eq!(
+            bounded(records.recv()).await.unwrap()["data"]["text"],
+            "child-ready"
+        );
         let (concurrent_tx, mut concurrent_rx) = tokio::sync::mpsc::unbounded_channel();
         let concurrent = admit(&worker, dir.path(), "5", move |result| {
             let _ = concurrent_tx.send(result);
@@ -663,7 +803,9 @@ mod tests {
             stdin: None,
         };
         let (_cancel, cancelled) = tokio::sync::watch::channel(true);
-        let error = super::supervise(spec, CancelSignal::new(cancelled))
+        let scope = scope();
+        let log = super::ScriptLog::new(&scope.execution_id, scope.services.executions_arc());
+        let error = super::supervise(spec, CancelSignal::new(cancelled), std::sync::Arc::new(log))
             .await
             .err()
             .expect("an already-cancelled call fails");
