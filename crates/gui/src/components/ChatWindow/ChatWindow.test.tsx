@@ -3756,7 +3756,89 @@ describe("ChatWindow", () => {
     expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
   });
 
-  it.each(["new project", "rebound turn"])(
+  it("expires follow-up confirmation without clearing a newer draft", async () => {
+    const session = createSession({
+      harness: "claude",
+      backendSessionId: "steer-backend",
+      lifecycle: "streaming",
+      activeTurn: { localId: "local-turn", turnId: "original", phase: "active" },
+    });
+    useChatStore.setState({ sessions: { "test-session": session }, activeSessionId: "test-session" });
+    type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
+    let resolveReply!: (value: Reply) => void;
+    mockedCommands.steerLocalChatTurn.mockReturnValueOnce(new Promise((resolve) => {
+      resolveReply = resolve;
+    }));
+    render(<ChatWindow sessionId="test-session" />);
+    const composer = screen.getByTestId("local-chat-composer");
+    fireEvent.change(composer, { target: { value: "Change course" } });
+    fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true });
+    expect(screen.getByText("Sending steering message…")).toBeVisible();
+    fireEvent.change(composer, { target: { value: "A new draft" } });
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        useChatStore.setState({ sessions: {
+          "test-session": { ...session, lifecycle: "idle", activeTurn: null },
+        } });
+        resolveReply({ status: "ok", data: "follow-up" });
+      });
+      expect(screen.getByText("Delivered as a follow-up turn")).toBeVisible();
+      expect(composer).toHaveValue("A new draft");
+      expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+      act(() => vi.advanceTimersByTime(3000));
+      expect(screen.queryByText("Delivered as a follow-up turn")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["transport rejection", "command error", "session close"])(
+    "releases steering controls after %s and keeps the unsent draft",
+    async (failure) => {
+      const session = createSession({
+        harness: "claude",
+        backendSessionId: "steer-backend",
+        hasUserMessage: true,
+        lifecycle: "streaming",
+        activeTurn: { localId: "local-turn", turnId: "original", phase: "active" },
+      });
+      useChatStore.setState({ sessions: { "test-session": session }, activeSessionId: "test-session" });
+      type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
+      let resolveReply!: (value: Reply) => void;
+      let rejectReply!: (error: Error) => void;
+      mockedCommands.steerLocalChatTurn.mockReturnValueOnce(new Promise((resolve, reject) => {
+        resolveReply = resolve;
+        rejectReply = reject;
+      }));
+      render(<ChatWindow sessionId="test-session" />);
+      const composer = screen.getByTestId("local-chat-composer");
+      fireEvent.change(composer, { target: { value: "Unconfirmed draft" } });
+      fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true });
+      expect(screen.getByText("Sending steering message…")).toBeVisible();
+      if (failure === "session close") {
+        act(() => useChatStore.setState({ sessions: {
+          "test-session": { ...session, backendSessionId: null, lifecycle: "closed", activeTurn: null },
+        } }));
+        expect(screen.queryByText("Sending steering message…")).not.toBeInTheDocument();
+      }
+      await act(async () => {
+        if (failure === "transport rejection") {
+          rejectReply(new Error("IPC disconnected"));
+        } else {
+          resolveReply({ status: "error", error: { SendFailed: "Delivery was not confirmed" } });
+        }
+      });
+      expect(screen.getByText(/Steering.*(IPC disconnected|Delivery was not confirmed)/)).toBeVisible();
+      expect(screen.queryByText("Sending steering message…")).not.toBeInTheDocument();
+      expect(composer).toHaveValue("Unconfirmed draft");
+      const submit = failure === "session close" ? "Resume session" : "Steer active turn";
+      expect(screen.getByRole("button", { name: submit })).toBeEnabled();
+    }
+  );
+
+  it.each(["new project", "rebound turn", "different chat"])(
     "leaves a %s draft alone when a steering reply is late",
     async (replacement) => {
       const projectChanged = replacement === "new project";
@@ -3771,10 +3853,26 @@ describe("ChatWindow", () => {
       let resolveReply!: (value: Reply) => void;
       const reply = new Promise<Reply>((resolve) => { resolveReply = resolve; });
       mockedCommands.steerLocalChatTurn.mockReturnValueOnce(reply);
-      render(<ChatWindow sessionId="test-session" />);
+      const { rerender } = render(<ChatWindow sessionId="test-session" />);
       const composer = screen.getByTestId("local-chat-composer");
       fireEvent.change(composer, { target: { value: "Old instruction" } });
       fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true });
+
+      if (replacement === "different chat") {
+        let otherSessionId!: string;
+        act(() => {
+          otherSessionId = useChatStore.getState().openSession("Other chat", "/other-chat");
+          useComposerDraftStore.getState().setDraft(otherSessionId, "Other chat draft");
+        });
+        rerender(<ChatWindow sessionId={otherSessionId} />);
+        await act(async () => resolveReply({ status: "ok", data: "old-turn" }));
+        expect(screen.getByTestId("local-chat-composer")).toHaveValue("Other chat draft");
+        expect(screen.queryByText("Sent to the active turn")).not.toBeInTheDocument();
+        rerender(<ChatWindow sessionId="test-session" />);
+        expect(screen.getByTestId("local-chat-composer")).toHaveValue("Old instruction");
+        expect(screen.queryByText("Sending steering message…")).not.toBeInTheDocument();
+        return;
+      }
 
       await act(async () => {
         useChatStore.setState({ sessions: {

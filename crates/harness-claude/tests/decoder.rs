@@ -803,6 +803,23 @@ fn result_cost_is_preserved_without_a_usage_object() {
 }
 
 #[test]
+fn command_lifecycle_records_are_silent_during_replay() {
+    let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
+        RunId::from("run"),
+        StreamId::from("stream"),
+    ));
+    for status in ["queued", "started", "completed"] {
+        let frame = serde_json::json!({
+            "type": "command_lifecycle",
+            "subtype": status,
+            "uuid": "steering-command",
+            "session_id": "provider-session",
+        });
+        assert!(decoder.decode_line(&frame.to_string()).unwrap().is_empty());
+    }
+}
+
+#[test]
 fn unknown_records_are_contained_but_malformed_records_fail_without_ids() {
     let mut decoder = configured_decoder(ClaudeDecodeContext::one_shot(
         RunId::from("run"),

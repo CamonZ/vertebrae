@@ -2345,6 +2345,9 @@ IFS= read -r initial || exit 1
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-session","model":"sonnet","transcript_path":"opaque://steer.jsonl"}'
 IFS= read -r steering || exit 1
 printf '%s\n' "$steering" >> "$CAPTURE"
+for status in queued started completed; do
+    printf '{"type":"command_lifecycle","subtype":"%s","uuid":"steering-command","session_id":"provider-session"}\n' "$status"
+done
 result='{"type":"result","subtype":"success","result":"answer"}'
 if [ "$FOLLOW_UP" = yes ]; then printf '%s\n' "$result"; fi
 printf '%s\n' "$steering" "$steering" "$result"
@@ -2391,17 +2394,25 @@ while IFS= read -r line; do printf '%s\n' "$line" >> "$CAPTURE"; done
             let events = sink.0.lock().unwrap();
             assert_balanced_turn(&events, turn_id.as_str(), &outcome);
             assert_balanced_turn(&events, delivered.as_str(), &outcome);
+            assert!(!events.iter().any(|event| matches!(&event.payload,
+                HarnessEventPayloadV1::Warning(warning)
+                    if warning.code.as_deref() == Some("claude_unknown_record"))));
+            let finish = events.iter().find(|event|
+                event.correlation.turn_id.as_ref() == Some(&turn_id)
+                    && matches!(event.payload, HarnessEventPayloadV1::TurnFinished(_))
+            ).unwrap();
             let inputs: Vec<_> = events.iter().filter(|event|
                 matches!(&event.payload, HarnessEventPayloadV1::TurnInput(input) if input.content == "exact\nsteer")
             ).collect();
             assert_eq!(inputs.len(), 1);
+            assert_eq!(finish.sequence < inputs[0].sequence, follow_up);
             assert_eq!(inputs[0].correlation.turn_id.as_ref(), Some(&delivered));
         }).await.unwrap();
     }
 }
 
 #[tokio::test]
-async fn stopping_claude_before_the_echo_retires_steering_without_a_second_turn() {
+async fn missing_steering_echo_retires_delivery_without_a_second_turn() {
     struct StopProbe {
         sink: CollectSink,
         written: tokio::sync::Notify,
@@ -2420,46 +2431,63 @@ async fn stopping_claude_before_the_echo_retires_steering_without_a_second_turn(
         }
     }
 
-    tokio::time::timeout(Duration::from_secs(5), async {
-        let temp = TempDir::new().unwrap();
-        let executable = script(&temp, "stop-steering", r#"#!/bin/sh
+    for finish_turn in [false, true] {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let temp = TempDir::new().unwrap();
+            let executable = script(&temp, "stop-steering", r#"#!/bin/sh
 IFS= read -r initial || exit 1
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"provider-session","model":"sonnet","transcript_path":"opaque://steer.jsonl"}'
 IFS= read -r steering || exit 1
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"steer frame received"}]}}'
+if [ "$FINISH_TURN" = yes ]; then
+    printf '%s\n' '{"type":"command_lifecycle","subtype":"completed","uuid":"steering-command"}'
+    printf '%s\n' '{"type":"result","subtype":"success","result":"answer"}'
+fi
 while IFS= read -r line; do :; done
 "#);
-        let sink = Arc::new(StopProbe { sink: CollectSink::default(), written: tokio::sync::Notify::new() });
-        let session = ClaudeRuntime::new(ClaudeProviderConfig { executable: Some(executable), ..Default::default() })
-            .start_session(StartSessionRequest {
-                session_id: SessionId::new("local-session"),
-                stream_id: StreamId::new("stream"),
-                mode: SessionMode::New,
-                config: RequestConfig::default(),
-            }, sink.clone(), Arc::new(ResolvingControls::default())).await.unwrap();
-        let turn_id = TurnId::new("local-turn");
-        let turn = session.send(SendTurnRequest {
-            turn_id: turn_id.clone(),
-            content: "root".into(),
-            output_schema: None,
-            settings: Default::default(),
+            let sink = Arc::new(StopProbe { sink: CollectSink::default(), written: tokio::sync::Notify::new() });
+            let mut provider = ClaudeProviderConfig {
+                executable: Some(executable),
+                initialization_timeout: Duration::from_secs(1),
+                ..Default::default()
+            };
+            provider.environment.insert("FINISH_TURN".into(), if finish_turn { "yes" } else { "no" }.into());
+            let session = ClaudeRuntime::new(provider)
+                .start_session(StartSessionRequest {
+                    session_id: SessionId::new("local-session"),
+                    stream_id: StreamId::new("stream"),
+                    mode: SessionMode::New,
+                    config: RequestConfig::default(),
+                }, sink.clone(), Arc::new(ResolvingControls::default())).await.unwrap();
+            let turn_id = TurnId::new("local-turn");
+            let turn = session.send(SendTurnRequest {
+                turn_id: turn_id.clone(),
+                content: "root".into(),
+                output_schema: None,
+                settings: Default::default(),
+            }).await.unwrap();
+            let send = {
+                let session = session.clone();
+                let turn_id = turn_id.clone();
+                tokio::spawn(async move { session.steer(&turn_id, "unconfirmed".into()).await })
+            };
+            sink.written.notified().await;
+            let (status, diagnostic) = if finish_turn {
+                (CompletionStatus::Completed, "ended the turn without confirming")
+            } else {
+                turn.interrupt().await.unwrap();
+                (CompletionStatus::Interrupted, "before confirming")
+            };
+            assert!(send.await.unwrap().unwrap_err().to_string().contains(diagnostic));
+            let outcome = turn.await_outcome().await.unwrap();
+            assert_eq!(outcome.status, status);
+            assert!(session.steer(&turn_id, "too late".into()).await.is_err());
+            session.close().await.unwrap();
+            let events = sink.sink.0.lock().unwrap();
+            assert_balanced_turn(&events, turn_id.as_str(), &outcome);
+            assert!(!events.iter().any(|event| matches!(&event.payload,
+                HarnessEventPayloadV1::TurnInput(input) if input.content == "unconfirmed")));
+            assert_eq!(events.iter().filter(|event| matches!(event.payload, HarnessEventPayloadV1::TurnStarted(_))).count(), 1);
         }).await.unwrap();
-        let send = {
-            let session = session.clone();
-            let turn_id = turn_id.clone();
-            tokio::spawn(async move { session.steer(&turn_id, "unconfirmed".into()).await })
-        };
-        sink.written.notified().await;
-        turn.interrupt().await.unwrap();
-        assert!(send.await.unwrap().unwrap_err().to_string().contains("before confirming"));
-        let outcome = turn.await_outcome().await.unwrap();
-        assert_eq!(outcome.status, CompletionStatus::Interrupted);
-        assert!(session.steer(&turn_id, "too late".into()).await.is_err());
-        session.close().await.unwrap();
-        let events = sink.sink.0.lock().unwrap();
-        assert_balanced_turn(&events, turn_id.as_str(), &outcome);
-        assert!(!events.iter().any(|event| matches!(&event.payload,
-            HarnessEventPayloadV1::TurnInput(input) if input.content == "unconfirmed")));
-        assert_eq!(events.iter().filter(|event| matches!(event.payload, HarnessEventPayloadV1::TurnStarted(_))).count(), 1);
-    }).await.unwrap();
+    }
 }

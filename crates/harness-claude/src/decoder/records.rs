@@ -370,6 +370,9 @@ impl ClaudeStreamDecoder {
                     ));
                 }
             }
+            // Input-queue telemetry. Only the UUID-matched user echo confirms
+            // steering and establishes which turn received the input.
+            "command_lifecycle" => {}
             "content_block_start" | "content_block_stop" | "message_start" | "message_stop" => {}
             unknown => drafts.push(self.draft(
                 stream_id,

@@ -53,12 +53,10 @@ export function useChatSession(sessionId: string) {
   const hasLoadedCatalog = useRef(false);
   const projectGeneration = useProjectScopeGeneration();
   const [steering, setSteering] = useState<{
-    sessionId: string;
+    scope: object;
     backendSessionId: string;
-    projectGeneration: number;
-    projectPath: string | null | undefined;
     turnId: string;
-    pending: boolean;
+    phase: "pending" | "confirmed" | "failed";
     message: string;
   }>();
   // The draft outlives a remount of this chat's window (split, maximize).
@@ -504,15 +502,33 @@ export function useChatSession(sessionId: string) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [canStopGeneration, handleStopGeneration]);
 
+  const projectPath = session?.projectPath;
+  const steeringScope = useMemo(
+    () => ({ sessionId, projectGeneration, projectPath }),
+    [sessionId, projectGeneration, projectPath]
+  );
+  const steeringRequest = useRef<typeof steering>(undefined);
+  useEffect(() => () => {
+    steeringRequest.current = undefined;
+  }, [steeringScope]);
+
   const steeringForSession =
-    steering?.sessionId === sessionId &&
-    steering.projectGeneration === projectGeneration &&
-    steering.projectPath === session?.projectPath &&
+    steering?.scope === steeringScope &&
     (steering.backendSessionId === session?.backendSessionId ||
-      (!session?.backendSessionId && session?.hasUserMessage))
+      (steering.phase === "failed" && !session?.backendSessionId && session?.hasUserMessage))
       ? steering
       : undefined;
-  const isSteering = steeringForSession?.pending ?? false;
+  const isSteering = steeringForSession?.phase === "pending";
+  const visibleSteering = steeringForSession && (
+    isSteering || !session?.activeTurn || session.activeTurn.turnId === steeringForSession.turnId
+  ) ? steeringForSession : undefined;
+  useEffect(() => {
+    if (steeringForSession?.phase !== "confirmed") return;
+    const timer = window.setTimeout(() => {
+      setSteering((current) => current === steeringForSession ? undefined : current);
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [steeringForSession]);
   const canSteer =
     canSendMessage &&
     lifecycle === "streaming" &&
@@ -524,35 +540,39 @@ export function useChatSession(sessionId: string) {
     const backendSessionId = session?.backendSessionId;
     const turnId = session?.activeTurn?.turnId;
     const content = inputValue.trim();
-    if (!canSteer || isSteering || !backendSessionId || !turnId || !content) {
+    if (!canSteer || !backendSessionId || !turnId || !content ||
+        steeringRequest.current?.backendSessionId === backendSessionId) {
       return;
     }
 
     const request = {
-      sessionId,
+      scope: steeringScope,
       backendSessionId,
-      projectGeneration,
-      projectPath: session?.projectPath,
       turnId,
-      pending: true,
+      phase: "pending" as const,
       message: "Sending steering message…",
     };
+    steeringRequest.current = request;
     setSteering(request);
     const matchesChat = (allowClosed = false) => {
       const latest = useChatStore.getState().sessions[sessionId];
       return (
         isCurrentProjectScopeGeneration(projectGeneration) &&
-        latest?.projectPath === request.projectPath &&
+        latest?.projectPath === projectPath &&
         (latest?.backendSessionId === backendSessionId ||
           (allowClosed && !latest?.backendSessionId && latest?.hasUserMessage))
       );
     };
-    const showResult = (message: string, deliveredTurnId = turnId) => {
+    const showResult = (
+      phase: "confirmed" | "failed", message: string, deliveredTurnId = turnId
+    ) => {
+      if (steeringRequest.current !== request) return;
+      steeringRequest.current = undefined;
       const activeTurn = useChatStore.getState().sessions[sessionId]?.activeTurn;
       setSteering((current) =>
         current !== request ? current :
-          matchesChat(true) && (!activeTurn || activeTurn.turnId === deliveredTurnId)
-            ? { ...request, turnId: deliveredTurnId, pending: false, message }
+          matchesChat(phase === "failed") && (!activeTurn || activeTurn.turnId === deliveredTurnId)
+            ? { ...request, turnId: deliveredTurnId, phase, message }
             : undefined
       );
     };
@@ -562,6 +582,7 @@ export function useChatSession(sessionId: string) {
       );
       const active = useChatStore.getState().sessions[sessionId]?.activeTurn;
       if (
+        steeringRequest.current === request &&
         matchesChat() &&
         (!active || active.turnId === turnId || active.turnId === deliveredTurn) &&
         useComposerDraftStore.getState().bySession[sessionId] === inputValue
@@ -569,43 +590,34 @@ export function useChatSession(sessionId: string) {
         setInputValue("");
       }
       showResult(
+        "confirmed",
         deliveredTurn === turnId ? "Sent to the active turn" : "Delivered as a follow-up turn",
         deliveredTurn
       );
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Delivery could not be confirmed";
-      showResult(`Steering: ${detail}`);
+      showResult("failed", `Steering failed: ${detail}. Check the conversation before retrying.`);
     }
-  }, [canSteer, inputValue, isSteering, projectGeneration, session, sessionId, setInputValue]);
+  }, [canSteer, inputValue, projectGeneration, projectPath, session, sessionId, setInputValue, steeringScope]);
 
   // --- Action callbacks ---
   const handleSend = useCallback((message?: string): boolean => {
     const trimmed = (message ?? inputValue).trim();
     if (!trimmed || !canSendMessage || isSteering) return false;
     void sendMessage(trimmed);
+    setSteering(undefined);
     setInputValue("");
     return true;
-  }, [
-    canQueueMessage,
-    canSendMessage,
-    isSteering,
-    hasPendingUserQuestion,
-    inputValue,
-    isActive,
-    isBusy,
-    lifecycle,
-    sendMessage,
-    session?.backendSessionId,
-    sessionId,
-  ]);
+  }, [canSendMessage, inputValue, isSteering, sendMessage, setInputValue]);
 
   const handleStartSession = useCallback((message?: string): boolean => {
     if (!canUseComposer) return false;
     const initialPrompt = (message ?? inputValue).trim();
     void startSession(initialPrompt || undefined);
+    setSteering(undefined);
     setInputValue("");
     return true;
-  }, [canUseComposer, inputValue, lifecycle, session?.backendSessionId, sessionId, startSession]);
+  }, [canUseComposer, inputValue, setInputValue, startSession]);
 
   const handleClearMessages = useCallback(async () => {
     if (session?.backendSessionId) {
@@ -766,11 +778,7 @@ export function useChatSession(sessionId: string) {
     handleSteer,
     canSteer,
     isSteering,
-    steeringStatus: steeringForSession && (
-      steeringForSession.pending ||
-      !session?.activeTurn ||
-      session.activeTurn.turnId === steeringForSession.turnId
-    ) ? steeringForSession.message : undefined,
+    steeringStatus: visibleSteering?.message,
     handleStartSession,
     handleClearMessages,
     handleStopGeneration,
