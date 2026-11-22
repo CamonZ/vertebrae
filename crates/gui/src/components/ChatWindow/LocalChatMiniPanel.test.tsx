@@ -22,6 +22,7 @@ import {
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import type { LocalChatSessionActivity } from "./LocalChatMiniPanel";
 import type { SpawnOutlineItem } from "./sessionListUtils";
+import type { ThinkingIndicatorStyle } from "../../stores/uiStore";
 
 const { completionState } = vi.hoisted(() => ({
   completionState: { ids: new Set<string>(), tasks: new Map<string, Task>() },
@@ -79,7 +80,7 @@ interface ControlledPanelProps {
   activeProviderThreadId?: string | null;
   spawnOutlineBySessionId?: Map<string, SpawnOutlineItem[]>;
   activityBySessionId?: ReadonlyMap<string, LocalChatSessionActivity>;
-  thinkingIndicatorStyle?: "classic" | "futuristic";
+  thinkingIndicatorStyle?: ThinkingIndicatorStyle;
   width?: number;
   onQueryChange?: (query: string) => void;
   onSelect?: (sessionId: string) => void;
@@ -96,7 +97,7 @@ function ControlledPanel({
   activeProviderThreadId = null,
   spawnOutlineBySessionId = new Map(),
   activityBySessionId = new Map(),
-  thinkingIndicatorStyle = "classic",
+  thinkingIndicatorStyle = "shimmer",
   width = DEFAULT_HISTORY_WIDTH,
   onQueryChange,
   onSelect = vi.fn(),
@@ -779,7 +780,7 @@ describe("LocalChatMiniPanel search", () => {
       <ControlledPanel
         {...props}
         spawnOutlineBySessionId={new Map([[parent.id, [worker]]])}
-        thinkingIndicatorStyle="futuristic"
+        thinkingIndicatorStyle="uplink"
       />
     );
     fireEvent.click(
@@ -792,7 +793,7 @@ describe("LocalChatMiniPanel search", () => {
 
     expect(within(row).getByTestId("thinking-indicator")).toHaveAttribute(
       "data-style",
-      "futuristic"
+      "uplink"
     );
     fireEvent.click(row);
 
@@ -840,7 +841,7 @@ describe("LocalChatMiniPanel search", () => {
       <ControlledPanel
         sessionGroups={[makeGroup("current", "Current project", sessions)]}
         activityBySessionId={activityBySessionId}
-        thinkingIndicatorStyle="futuristic"
+        thinkingIndicatorStyle="uplink"
       />
     );
 
@@ -866,16 +867,15 @@ describe("LocalChatMiniPanel search", () => {
 
     expect(
       within(thinkingRow).getByTestId("thinking-indicator")
-    ).toHaveAttribute("data-style", "futuristic");
+    ).toHaveAttribute("data-style", "uplink");
 
-    expect(within(thinkingRow).getByTestId("thinking-matrix")).toHaveAttribute(
-      "data-animation-direction",
-      "outward"
-    );
-
-    expect(
-      within(compactingRow).getByTestId("thinking-matrix")
-    ).toHaveAttribute("data-animation-direction", "inward");
+    const lineMode = (row: HTMLElement) =>
+      within(row)
+        .getByTestId("thinking-indicator")
+        .querySelector("[data-mode]")
+        ?.getAttribute("data-mode");
+    expect(lineMode(thinkingRow)).toBe("thinking");
+    expect(lineMode(compactingRow)).toBe("compacting");
 
     expect(within(idleRow).getByRole("img")).toHaveAccessibleName(
       "Claude harness"
@@ -887,7 +887,7 @@ describe("LocalChatMiniPanel search", () => {
     rerender(
       <ControlledPanel
         sessionGroups={[makeGroup("current", "Current project", sessions)]}
-        thinkingIndicatorStyle="futuristic"
+        thinkingIndicatorStyle="uplink"
       />
     );
 

@@ -50,6 +50,7 @@ import {
   useUIStore,
   type ThinkingIndicatorStyle,
 } from "../stores/uiStore";
+import { THINKING_LINE_VARIANTS } from "../components/ThinkingLine/shaders";
 import {
   isReadingPercent,
   MAX_READING_PERCENT,
@@ -2816,7 +2817,7 @@ export function SettingsPage({
                 </p>
                 <SettingRow
                   label="Thinking indicator"
-                  description="Choose the classic three-dot indicator or a futuristic matrix of blinkenlights."
+                  description="Shimmer is a calm sweep of light; Uplink and Assembler animate a sci-fi status phrase."
                 >
                   <Select
                     aria-label="Thinking indicator"
@@ -2828,13 +2829,10 @@ export function SettingsPage({
                       );
                       setSavedFeedback(true);
                     }}
-                    options={[
-                      { value: "classic", label: "Classic dots" },
-                      {
-                        value: "futuristic",
-                        label: "Futuristic blinkenlights",
-                      },
-                    ]}
+                    options={THINKING_LINE_VARIANTS.map((variant) => ({
+                      value: variant.id,
+                      label: variant.name,
+                    }))}
                   />
                 </SettingRow>
               </div>

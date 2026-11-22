@@ -5,6 +5,10 @@ import * as gs from "@hegeldev/hegel/generators";
 import { ChatMessages } from "./ChatMessages";
 import type { ChatMessage } from "../../stores/chatStore";
 
+// The thinking line sizes its canvas with its own ResizeObserver; keep it out
+// of the observer list these tests drive.
+vi.mock("../ThinkingLine", () => ({ ThinkingLine: () => null }));
+
 // Browser geometry is independent of jsdom layout. Writes clamp immediately;
 // scroll and ResizeObserver deliveries are separately delayed/coalesced.
 function browser(height = 1200, viewport = 100) {

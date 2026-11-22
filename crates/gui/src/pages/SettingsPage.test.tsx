@@ -180,7 +180,7 @@ describe("SettingsPage", () => {
       customTypefaces: {},
       useCustomTypeface: false,
       customTypefaceBase: null,
-      thinkingIndicatorStyle: "classic",
+      thinkingIndicatorStyle: "shimmer",
       externalEditor: "",
       codeThemeDark: "pierre-dark",
       codeThemeLight: "pierre-light",
@@ -1237,14 +1237,14 @@ describe("SettingsPage", () => {
     );
 
     const selector = await screen.findByTestId("settings-thinking-indicator");
-    expect(selector).toHaveAttribute("data-value", "classic");
+    expect(selector).toHaveAttribute("data-value", "shimmer");
 
-    chooseDropdownValue(selector, "futuristic");
-    expect(useUIStore.getState().thinkingIndicatorStyle).toBe("futuristic");
+    chooseDropdownValue(selector, "assembler");
+    expect(useUIStore.getState().thinkingIndicatorStyle).toBe("assembler");
     expect(
       JSON.parse(localStorage.getItem("vertebrae-ui-storage") ?? "{}").state
         .thinkingIndicatorStyle
-    ).toBe("futuristic");
+    ).toBe("assembler");
 
     unmount();
     render(
@@ -1254,7 +1254,7 @@ describe("SettingsPage", () => {
     );
     expect(
       await screen.findByTestId("settings-thinking-indicator")
-    ).toHaveAttribute("data-value", "futuristic");
+    ).toHaveAttribute("data-value", "assembler");
   });
 
   it("persists when stalled gate chats are steered", async () => {

@@ -9,6 +9,10 @@ import {
   type InlineDiscussionPreference,
 } from "../utils/inlineDiscussionModel";
 import { create } from "zustand";
+import {
+  THINKING_LINE_VARIANTS,
+  type ThinkingLineVariant,
+} from "../components/ThinkingLine/shaders";
 import { persist } from "zustand/middleware";
 import {
   DEFAULT_GATE_STEERING_THRESHOLDS,
@@ -90,8 +94,23 @@ export const TYPE_PAIRINGS: ReadonlyArray<{
   },
 ];
 
-/** Visual treatment for the assistant waiting-state indicator. */
-export type ThinkingIndicatorStyle = "classic" | "futuristic";
+/**
+ * Visual treatment for the assistant waiting-state indicator: one of the
+ * shader thinking lines (components/ThinkingLine). Shimmer is the default.
+ */
+export type ThinkingIndicatorStyle = ThinkingLineVariant;
+
+export const DEFAULT_THINKING_INDICATOR_STYLE: ThinkingIndicatorStyle =
+  "shimmer";
+
+/** Stored style, or the default when it is missing or no longer offered. */
+export function resolveThinkingIndicatorStyle(
+  value: unknown
+): ThinkingIndicatorStyle {
+  return THINKING_LINE_VARIANTS.some((variant) => variant.id === value)
+    ? (value as ThinkingIndicatorStyle)
+    : DEFAULT_THINKING_INDICATOR_STYLE;
+}
 
 /**
  * Density preference for the typography scale.
@@ -184,7 +203,7 @@ export const useUIStore = create<UIStore>()(
       setTypePairing: (typePairing) => set({ typePairing, useCustomTypeface: false }),
       accent: "orchid",
       setAccent: (accent) => set({ accent }),
-      thinkingIndicatorStyle: "classic",
+      thinkingIndicatorStyle: DEFAULT_THINKING_INDICATOR_STYLE,
       setThinkingIndicatorStyle: (thinkingIndicatorStyle) =>
         set({ thinkingIndicatorStyle }),
       readingTextSize: "default",
@@ -264,6 +283,9 @@ export const useUIStore = create<UIStore>()(
           ...current,
           ...stored,
           inlineDiscussionPreference,
+          thinkingIndicatorStyle: resolveThinkingIndicatorStyle(
+            stored.thinkingIndicatorStyle
+          ),
           readingTextSize: resolveReadingTextSize(stored.readingTextSize),
           customTypefaces,
           useCustomTypeface: typeof stored.useCustomTypeface === "boolean"

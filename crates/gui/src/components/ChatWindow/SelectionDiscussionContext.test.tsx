@@ -278,7 +278,7 @@ beforeEach(() => {
 
   useUIStore.setState({
     inlineDiscussionPreference: { mode: "follow" },
-    thinkingIndicatorStyle: "classic",
+    thinkingIndicatorStyle: "shimmer",
   });
 
   const catalogCommand = vi.mocked(commands.getSupportedLocalChatHarnesses);
@@ -1988,10 +1988,10 @@ it.each(["dark", "light"])(
 );
 
 it.each([
-  ["classic", false],
-  ["classic", true],
-  ["futuristic", false],
-  ["futuristic", true],
+  ["shimmer", false],
+  ["shimmer", true],
+  ["uplink", false],
+  ["uplink", true],
 ] as const)(
   "shows %s thinking for the whole turn with previous history=%s",
   async (style, history) => {

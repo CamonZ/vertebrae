@@ -17,12 +17,17 @@ import {
   DaemonsPage,
   MachinePartsGalleryPage,
   FlowPlayerDevPage,
+  ThinkingLinesGalleryPage,
 } from "./pages";
 import { WorkflowAtlas } from "./components/WorkflowAtlas";
 import { commands } from "./bindings";
 import { SplashScreen } from "./components";
 import { hasAllRequiredBinaries } from "./utils/installation";
-import { DEV_FLOWS_PATH, DEV_MACHINE_PARTS_PATH } from "./devRoutes";
+import {
+  DEV_FLOWS_PATH,
+  MACHINE_PARTS_GALLERY_PATH,
+  THINKING_LINES_GALLERY_PATH,
+} from "./devRoutes";
 import { useRunChatDeepLink } from "./hooks/useRunChatDeepLink";
 
 function RootLayout() {
@@ -223,15 +228,18 @@ export const appRoutes: RouteObject[] = [
           </InstallationGuard>
         ),
       },
-      // Dev-only review pages: the machine-part gallery and the flow player.
+      // Review galleries, in every build (sidebar icons behind ⌃⌥⌘⇧G).
+      {
+        path: MACHINE_PARTS_GALLERY_PATH.slice(1),
+        element: <MachinePartsGalleryPage />,
+      },
+      {
+        path: THINKING_LINES_GALLERY_PATH.slice(1),
+        element: <ThinkingLinesGalleryPage />,
+      },
+      // Dev-only review page: the flow player.
       ...(import.meta.env.DEV
-        ? [
-            {
-              path: DEV_MACHINE_PARTS_PATH.slice(1),
-              element: <MachinePartsGalleryPage />,
-            },
-            { path: DEV_FLOWS_PATH.slice(1), element: <FlowPlayerDevPage /> },
-          ]
+        ? [{ path: DEV_FLOWS_PATH.slice(1), element: <FlowPlayerDevPage /> }]
         : []),
     ],
   },

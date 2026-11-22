@@ -8,7 +8,7 @@ describe("uiStore", () => {
     useUIStore.setState({
       inlineDiscussionPreference: { mode: "follow" },
       theme: "system",
-      thinkingIndicatorStyle: "classic",
+      thinkingIndicatorStyle: "shimmer",
       readingTextSize: "default",
       customTypefaces: {},
       useCustomTypeface: false,
@@ -29,9 +29,9 @@ describe("uiStore", () => {
       expect(state.theme).toBe("system");
     });
 
-    it("uses the classic thinking indicator by default", () => {
+    it("uses the shimmer thinking indicator by default", () => {
       const state = useUIStore.getState();
-      expect(state.thinkingIndicatorStyle).toBe("classic");
+      expect(state.thinkingIndicatorStyle).toBe("shimmer");
     });
 
     it("has auto density by default", () => {
@@ -68,10 +68,45 @@ describe("uiStore", () => {
   });
 
   describe("setThinkingIndicatorStyle", () => {
-    it("sets the futuristic style", () => {
-      useUIStore.getState().setThinkingIndicatorStyle("futuristic");
+    it.each(["shimmer", "uplink", "assembler"] as const)(
+      "sets the %s style",
+      (style) => {
+        useUIStore.getState().setThinkingIndicatorStyle(style);
 
-      expect(useUIStore.getState().thinkingIndicatorStyle).toBe("futuristic");
+        expect(useUIStore.getState().thinkingIndicatorStyle).toBe(style);
+      }
+    );
+
+    it.each(["classic", "futuristic", undefined])(
+      "rehydrates the retired %s style as shimmer",
+      async (stored) => {
+        useUIStore.setState({ thinkingIndicatorStyle: "uplink" });
+        localStorage.setItem(
+          "vertebrae-ui-storage",
+          JSON.stringify({
+            state: { thinkingIndicatorStyle: stored },
+            version: 0,
+          })
+        );
+
+        await useUIStore.persist.rehydrate();
+
+        expect(useUIStore.getState().thinkingIndicatorStyle).toBe("shimmer");
+      }
+    );
+
+    it("keeps a stored line style on rehydrate", async () => {
+      localStorage.setItem(
+        "vertebrae-ui-storage",
+        JSON.stringify({
+          state: { thinkingIndicatorStyle: "assembler" },
+          version: 0,
+        })
+      );
+
+      await useUIStore.persist.rehydrate();
+
+      expect(useUIStore.getState().thinkingIndicatorStyle).toBe("assembler");
     });
   });
 
@@ -158,7 +193,7 @@ describe("uiStore", () => {
     it("partializes thinking indicator style into persisted state", () => {
       const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
 
-      useUIStore.getState().setThinkingIndicatorStyle("futuristic");
+      useUIStore.getState().setThinkingIndicatorStyle("uplink");
 
       const persistCall = setItemSpy.mock.calls.find(
         ([key]) => key === "vertebrae-ui-storage"
@@ -170,7 +205,7 @@ describe("uiStore", () => {
         theme: "system",
         typePairing: "editorial",
         accent: "orchid",
-        thinkingIndicatorStyle: "futuristic",
+        thinkingIndicatorStyle: "uplink",
         readingTextSize: "default",
         customTypefaces: {},
         useCustomTypeface: false,
