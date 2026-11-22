@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../../../stores/chatWorkspace";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
@@ -142,7 +143,6 @@ const pane: RunChatPane = {
 function renderPane(overrides: Partial<RunChatPane> = {}) {
   const props = {
     pane: { ...pane, ...overrides },
-    paneIsActive: true,
     paneCount: 1,
     index: 0,
     isMaximized: true,
@@ -171,7 +171,7 @@ describe("RunPaneWindow", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [pane], activePaneId: pane.id },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [pane], activeId: pane.id },
       panelOpen: true,
     });
   });
@@ -223,7 +223,7 @@ describe("RunPaneWindow", () => {
 
     fireEvent.click(screen.getByTitle("Open in focus"));
 
-    const panes = useChatStore.getState().paneLayout.panes;
+    const panes = useChatStore.getState().paneLayout.order;
     expect(panes).toHaveLength(2);
     expect(panes[1]).toMatchObject({
       kind: "run",

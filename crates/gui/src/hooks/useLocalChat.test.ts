@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
 import {
@@ -1245,7 +1246,14 @@ describe("doStartSession", () => {
 
     await doStartSession(
       // An automatic label would otherwise infer a title.
-      makeSession({ label: "New Chat", discussion: { parentChatId: "main", reviewThreadId: "thread", worktreePath: null } }),
+      makeSession({
+        label: "New Chat",
+        discussion: {
+          parentChatId: "main",
+          reviewThreadId: "thread",
+          worktreePath: null,
+        },
+      }),
       SESSION_ID,
       deps,
       "Why is this here?"
@@ -2549,7 +2557,7 @@ describe("doSendMessage", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
       localSessionSummaries: {},
     });
@@ -2636,7 +2644,7 @@ describe("doSendMessage", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
       localSessionSummaries: {},
     });
@@ -3024,8 +3032,9 @@ describe("Codex local chat commands", () => {
       sessions: { [SESSION_ID]: session },
       activeSessionId: SESSION_ID,
       paneLayout: {
-        activePaneId: "pane",
-        panes: [{ id: "pane", sessionId: SESSION_ID }],
+        ...EMPTY_WORKSPACE,
+        activeId: "pane",
+        order: [{ id: "pane", sessionId: SESSION_ID }],
       },
     });
   });
@@ -3116,7 +3125,7 @@ describe("Codex local chat commands", () => {
       backendSessionId: null,
     });
     expect(fresh.queuedMessages).toBeUndefined();
-    expect(state.paneLayout.panes).toEqual([
+    expect(state.paneLayout.order).toEqual([
       { id: "pane", sessionId: fresh.id },
     ]);
     expect(state.sessions[SESSION_ID]).toMatchObject({

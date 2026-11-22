@@ -69,7 +69,7 @@ export function useChildChatSessions(
             : `${session.id}:${session.providerChildrenStopped ?? false}:${getLocalChatLifecycle(session)}:${session.providerResumeId}`
         )
         .join("\0") +
-      `:${state.activeSessionId}:${paneSessionIds(state.paneLayout.panes).join(",")}`
+      `:${state.activeSessionId}:${paneSessionIds(state.paneLayout.order).join(",")}`
   );
 
   useEffect(() => {
@@ -101,9 +101,7 @@ export function useChildChatSessions(
 
       try {
         const stateAtStart = useChatStore.getState();
-        const selected = new Set(
-          paneSessionIds(stateAtStart.paneLayout.panes)
-        );
+        const selected = new Set(paneSessionIds(stateAtStart.paneLayout.order));
         if (stateAtStart.activeSessionId)
           selected.add(stateAtStart.activeSessionId);
         // Selecting a child also refreshes its owner so sibling/terminal evidence
@@ -337,7 +335,7 @@ export function useChildChatSessions(
 
         const state = useChatStore.getState();
 
-        for (const paneSessionId of paneSessionIds(state.paneLayout.panes)) {
+        for (const paneSessionId of paneSessionIds(state.paneLayout.order)) {
           const selected = state.sessions[paneSessionId];
           if (!selected?.providerResumeId) continue;
 

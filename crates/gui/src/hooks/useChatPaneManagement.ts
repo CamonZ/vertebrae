@@ -1,142 +1,119 @@
-import { useCallback, useMemo } from "react";
-import { MAX_CHAT_PANES, isRunPane, useChatStore } from "../stores/chatStore";
-import type { ChatPane, ChatPaneLayout } from "../stores/chatStore";
-
-/** Pane split requires a minimum width per pane plus the history column. */
-export const MIN_SPLIT_PANE_WIDTH = 360;
-/** Width of the mini-history column that runs alongside split panes. */
-export const MINI_HISTORY_WIDTH = 272;
-/** Shared separator hit target, included in split and history constraints. */
-export const PANE_SEPARATOR_WIDTH = 8;
-
-export function minSplitLayoutWidth(paneCount: number): number {
-  const paneWidth = MIN_SPLIT_PANE_WIDTH * paneCount;
-  const separatorCount = Math.max(0, paneCount - 1);
-  const separatorWidth = separatorCount * PANE_SEPARATOR_WIDTH;
-
-  return MINI_HISTORY_WIDTH + paneWidth + separatorWidth;
-}
+import { useCallback } from "react";
+import { useChatStore } from "../stores/chatStore";
+import {
+  activeEntry,
+  type ChatPane,
+  type ChatWorkspaceLayout,
+} from "../stores/chatWorkspace";
 
 interface UseChatPaneManagementOptions {
-  /** Whether maximize is currently active (splits only render maximized). */
-  isMaximized: boolean;
-  /** The currently rendered panel width (used for split eligibility). */
-  renderedPanelWidth: number;
-  /** The active chat session ID, if any. */
-  activeSessionId: string | null;
+  /** Open chats needing the user (entry ids, jump order). */
+  needingYou: readonly string[];
 }
 
-interface UseChatPaneManagementResult {
-  normalizedPaneLayout: ChatPaneLayout;
-  visiblePanes: ChatPane[];
-  activePaneId: string | null;
-  canAddSplitPane: boolean;
+export interface UseChatPaneManagementResult {
+  layout: ChatWorkspaceLayout;
+  /** The chat shown: the active tab (null before any chat opens). */
+  shownPane: ChatPane | null;
+  /** ⌘⌥1–8 chat N, ⌘⌥9 the last chat. */
   focusPaneByIndex: (index: number) => boolean;
+  /** ⌃Tab / ⌃⇧Tab: next / previous chat in strip order. */
   focusPaneByOffset: (offset: number) => boolean;
+  /** ⌘⌥J / ⌘⌥⇧J: next / previous open chat needing the user. */
+  focusNeedingYou: (offset: 1 | -1) => boolean;
+  activatePane: (paneId: string) => void;
   closeActivePane: () => boolean;
-  keepOnlyActivePane: () => boolean;
+  moveActivePane: (offset: number) => boolean;
 }
 
 /**
- * Pane layout derivation + management actions. In maximized mode the panes
- * render side-by-side; otherwise the active session renders as a single pane.
- * Focus moves and pane close/keep-only are inert outside maximize.
+ * Derives the shown chat from the open-chat list and exposes the
+ * chat-addressing actions, which all address the strip order.
  */
 export function useChatPaneManagement({
-  isMaximized,
-  renderedPanelWidth,
-  activeSessionId,
+  needingYou,
 }: UseChatPaneManagementOptions): UseChatPaneManagementResult {
-  const paneLayout = useChatStore((s) => s.paneLayout);
+  // Store actions keep entries synchronized with open sessions. Avoid
+  // subscribing to the sessions map here: text deltas replace that map while
+  // leaving the layout unchanged.
+  const layout = useChatStore((s) => s.paneLayout);
   const focusPane = useChatStore((s) => s.focusPane);
+  const focusStoreByOffset = useChatStore((s) => s.focusPaneByOffset);
   const requestComposerFocus = useChatStore((s) => s.requestComposerFocus);
   const closePane = useChatStore((s) => s.closePane);
-  const unsplitPanes = useChatStore((s) => s.unsplitPanes);
+  const moveChat = useChatStore((s) => s.moveChat);
+  const shownPane = activeEntry(layout) ?? layout.order[0] ?? null;
 
-  // Store actions keep pane bindings synchronized with open sessions. Avoid
-  // subscribing to the sessions map here: text deltas replace that map while
-  // leaving the pane layout unchanged.
-  const normalizedPaneLayout = paneLayout;
-  const normalizedPanes = normalizedPaneLayout.panes;
-  // Compact chat shows the active pane: a focused run, else the active session.
-  const activeRunPane = normalizedPanes.find(
-    (pane) => pane.id === paneLayout.activePaneId && isRunPane(pane)
+  const activatePane = useCallback(
+    (paneId: string) => {
+      focusPane(paneId);
+      // Chat shortcuts move the keyboard into the chat they select.
+      requestComposerFocus();
+    },
+    [focusPane, requestComposerFocus]
   );
-  const fallbackPane = useMemo<ChatPane | null>(
-    () =>
-      activeRunPane
-        ? activeRunPane
-        : activeSessionId
-          ? {
-              id: paneLayout.activePaneId ?? `single-${activeSessionId}`,
-              sessionId: activeSessionId,
-            }
-          : null,
-    [activeRunPane, activeSessionId, paneLayout.activePaneId]
-  );
-  const visiblePanes = useMemo<ChatPane[]>(() => {
-    if (isMaximized && normalizedPanes.length > 0) return normalizedPanes;
-    return fallbackPane ? [fallbackPane] : [];
-  }, [fallbackPane, isMaximized, normalizedPanes]);
-  const activePaneId =
-    normalizedPaneLayout.activePaneId &&
-    visiblePanes.some((pane) => pane.id === normalizedPaneLayout.activePaneId)
-      ? normalizedPaneLayout.activePaneId
-      : (visiblePanes[0]?.id ?? null);
-
-  const canAddSplitPane =
-    isMaximized &&
-    visiblePanes.length < MAX_CHAT_PANES &&
-    renderedPanelWidth >= minSplitLayoutWidth(visiblePanes.length + 1);
 
   const focusPaneByIndex = useCallback(
     (index: number) => {
-      const pane = visiblePanes[index];
+      const { order } = useChatStore.getState().paneLayout;
+      // ⌘⌥9 is always the last chat, however many are open.
+      const pane = index >= 8 ? order[order.length - 1] : order[index];
       if (!pane) return false;
-      focusPane(pane.id);
-      // Pane shortcuts move the keyboard into the pane they select.
-      requestComposerFocus();
+      activatePane(pane.id);
       return true;
     },
-    [focusPane, requestComposerFocus, visiblePanes]
+    [activatePane]
   );
 
   const focusPaneByOffset = useCallback(
     (offset: number) => {
-      if (visiblePanes.length <= 1) return false;
-      const currentIndex = Math.max(
-        0,
-        visiblePanes.findIndex((pane) => pane.id === activePaneId)
-      );
-      const nextIndex =
-        (currentIndex + offset + visiblePanes.length) % visiblePanes.length;
-      focusPane(visiblePanes[nextIndex].id);
+      if (!focusStoreByOffset(offset)) return false;
       requestComposerFocus();
       return true;
     },
-    [activePaneId, focusPane, requestComposerFocus, visiblePanes]
+    [focusStoreByOffset, requestComposerFocus]
+  );
+
+  const focusNeedingYou = useCallback(
+    (offset: 1 | -1) => {
+      if (needingYou.length === 0) return false;
+      const at = needingYou.indexOf(layout.activeId ?? "");
+      const next =
+        at < 0
+          ? offset === 1
+            ? needingYou[0]
+            : needingYou[needingYou.length - 1]
+          : needingYou[(at + offset + needingYou.length) % needingYou.length];
+      activatePane(next);
+      return true;
+    },
+    [activatePane, layout.activeId, needingYou]
   );
 
   const closeActivePane = useCallback(() => {
-    if (!isMaximized || visiblePanes.length <= 1 || !activePaneId) return false;
-    closePane(activePaneId);
+    if (layout.order.length <= 1 || !layout.activeId) return false;
+    closePane(layout.activeId);
+    requestComposerFocus();
     return true;
-  }, [activePaneId, closePane, isMaximized, visiblePanes.length]);
+  }, [closePane, layout.activeId, layout.order.length, requestComposerFocus]);
 
-  const keepOnlyActivePane = useCallback(() => {
-    if (!isMaximized || visiblePanes.length <= 1 || !activePaneId) return false;
-    unsplitPanes(activePaneId);
-    return true;
-  }, [activePaneId, isMaximized, unsplitPanes, visiblePanes.length]);
+  const moveActivePane = useCallback(
+    (offset: number) => {
+      if (!layout.activeId || layout.order.length <= 1) return false;
+      moveChat(layout.activeId, offset);
+      return true;
+    },
+    [layout.activeId, layout.order.length, moveChat]
+  );
 
   return {
-    normalizedPaneLayout,
-    visiblePanes,
-    activePaneId,
-    canAddSplitPane,
+    layout,
+    shownPane,
     focusPaneByIndex,
     focusPaneByOffset,
+    focusNeedingYou,
+    activatePane,
     closeActivePane,
-    keepOnlyActivePane,
+    moveActivePane,
   };
 }

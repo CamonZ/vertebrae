@@ -3,10 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { StopIcon } from "../panels";
 import { OverflowMenu } from "../molecules/OverflowMenu";
 import { FALLBACK_CHAT_PROJECT_LABEL } from "../../utils/localChatSessionGroups";
-import {
-  CHAT_ATTENTION,
-  type ChatAttention,
-} from "../../utils/chatAttention";
+import { CHAT_ATTENTION, type ChatAttention } from "../../utils/chatAttention";
 import { ChatAttentionDot } from "./ChatAttentionDot";
 
 interface ChatHeaderProps {
@@ -17,18 +14,11 @@ interface ChatHeaderProps {
   canStopGeneration: boolean;
   onClosePanel?: () => void;
   onStartFresh?: () => void;
-  onToggleHistory?: () => void;
   onToggleChanges?: () => void;
   changesOpen?: boolean;
   onToggleBackground?: () => void;
   backgroundOpen?: boolean;
   backgroundRunning?: number;
-  onToggleWide?: () => void;
-  isWide?: boolean;
-  onSplitPane?: () => void;
-  canSplitPane?: boolean;
-  onUnsplitPanes?: () => void;
-  onClosePane?: () => void;
   onClearMessages: () => void;
   onStopGeneration: () => void;
   onTitleSave?: (title: string) => void | Promise<void>;
@@ -82,108 +72,14 @@ export function SvgIcon({
 
 interface PaneControlProps {
   onClosePanel?: () => void;
-  onToggleWide?: () => void;
-  isWide?: boolean;
-  onSplitPane?: () => void;
-  canSplitPane?: boolean;
-  onUnsplitPanes?: () => void;
-  onClosePane?: () => void;
 }
 
-/** Window controls shared by local chat and run pane headers; closePanel last. */
-function buildPaneActions({
-  onClosePanel,
-  onToggleWide,
-  isWide = false,
-  onSplitPane,
-  canSplitPane = true,
-  onUnsplitPanes,
-  onClosePane,
-}: PaneControlProps): HeaderAction[] {
+/**
+ * The trailing panel control shared by local chat and run pane headers.
+ * Layout, reveal and close-chat controls live on the tab strip (736f94f3).
+ */
+function buildPaneActions({ onClosePanel }: PaneControlProps): HeaderAction[] {
   return [
-    {
-      key: "wide",
-      title: isWide ? "Collapse chat panel" : "Widen chat panel",
-      ariaLabel: isWide ? "Collapse chat panel" : "Widen chat panel",
-      onClick: onToggleWide!,
-      show: !!onToggleWide,
-      icon: isWide ? (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M9 9H4V4m0 5 5-5m6 5h5V4m0 5-5-5M9 15H4v5m0-5 5 5m6-5h5v5m0-5-5 5"
-          />
-        </SvgIcon>
-      ) : (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M4 9V4h5M4 4l6 6m10-1V4h-5m5 0-6 6M4 15v5h5m-5 0 6-6m10 1v5h-5m5 0-6-6"
-          />
-        </SvgIcon>
-      ),
-    },
-    {
-      key: "split",
-      title: canSplitPane ? "Split chat pane" : "No more chat panes fit",
-      ariaLabel: "Split chat pane",
-      onClick: onSplitPane!,
-      show: !!onSplitPane,
-      disabled: !canSplitPane,
-      menu: true,
-      menuLabel: "Split pane",
-      menuGroupStart: true,
-      icon: (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M4 5h7v14H4zM13 5h7v14h-7z"
-          />
-        </SvgIcon>
-      ),
-    },
-    {
-      key: "unsplit",
-      title: "Keep only this pane",
-      ariaLabel: "Keep only this pane",
-      onClick: onUnsplitPanes!,
-      show: !!onUnsplitPanes,
-      menu: true,
-      icon: (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M5 5h14v14H5zM9 9l3 3m0 0 3-3m-3 3v6"
-          />
-        </SvgIcon>
-      ),
-    },
-    {
-      key: "closePane",
-      title: "Close this pane",
-      ariaLabel: "Close this pane",
-      onClick: onClosePane!,
-      show: !!onClosePane,
-      menu: true,
-      icon: (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M6 18L18 6M6 6l12 12"
-          />
-        </SvgIcon>
-      ),
-    },
     {
       key: "closePanel",
       title: "Close chat panel",
@@ -267,7 +163,7 @@ export function HeaderActionButtons({ actions }: { actions: HeaderAction[] }) {
   );
 }
 
-/** Window controls (widen, split, close pane, close panel) for non-chat panes. */
+/** Header controls for non-chat panes: their own actions, then close panel. */
 export function PaneControls({
   leading = [],
   ...props
@@ -284,18 +180,11 @@ export function ChatHeader({
   canStopGeneration,
   onClosePanel,
   onStartFresh,
-  onToggleHistory,
   onToggleChanges,
   changesOpen = false,
   onToggleBackground,
   backgroundOpen = false,
   backgroundRunning = 0,
-  onToggleWide,
-  isWide = false,
-  onSplitPane,
-  canSplitPane = true,
-  onUnsplitPanes,
-  onClosePane,
   onClearMessages,
   onStopGeneration,
   onTitleSave,
@@ -389,15 +278,7 @@ export function ChatHeader({
     [cancelTitleEdit, saveTitle]
   );
 
-  const paneActions = buildPaneActions({
-    onClosePanel,
-    onToggleWide,
-    isWide,
-    onSplitPane,
-    canSplitPane,
-    onUnsplitPanes,
-    onClosePane,
-  });
+  const paneActions = buildPaneActions({ onClosePanel });
 
   const actions: HeaderAction[] = [
     {
@@ -462,26 +343,6 @@ export function ChatHeader({
       ),
     },
     {
-      key: "history",
-      title: "Toggle chat history",
-      ariaLabel: "Toggle chat history",
-      onClick: onToggleHistory!,
-      show: !!onToggleHistory && !isWide,
-      menu: true,
-      menuLabel: "Chat history",
-      icon: (
-        <SvgIcon size="h-3.5 w-3.5">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M4 6h16M4 12h16M4 18h10"
-          />
-        </SvgIcon>
-      ),
-    },
-    ...paneActions.slice(0, -1),
-    {
       key: "regenerateTitle",
       title: "Regenerate chat title",
       ariaLabel: isTitleRegenerating
@@ -537,7 +398,7 @@ export function ChatHeader({
       testId: "local-chat-stop-generation",
       icon: <StopIcon />,
     },
-    ...paneActions.slice(-1),
+    ...paneActions,
   ];
 
   return (

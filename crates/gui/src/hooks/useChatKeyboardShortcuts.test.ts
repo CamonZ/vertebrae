@@ -3,7 +3,6 @@ import { renderHook } from "@testing-library/react";
 import {
   useChatKeyboardShortcuts,
   isShortcutHintsKey,
-  isBackslashShortcutKey,
   historyShortcutOffset,
   isLetterShortcutKey,
   paneNumberShortcutIndex,
@@ -15,10 +14,12 @@ function makeDispatch(
 ): ShortcutDispatchState {
   return {
     shortcutsOpen: false,
-    canAddSplitPane: true,
     hasActiveSession: true,
+    toggleExpanded: vi.fn(),
     focusPaneByIndex: vi.fn(() => true),
     focusPaneByOffset: vi.fn(() => true),
+    focusNeedingYou: vi.fn(() => true),
+    moveActivePane: vi.fn(() => true),
     focusAreaByOffset: vi.fn(() => true),
     historyNavigationEnabled: true,
     focusHistorySearch: vi.fn(() => true),
@@ -26,12 +27,10 @@ function makeDispatch(
     selectHistoryProjectByOffset: vi.fn(() => true),
     selectHistorySessionByOffset: vi.fn(async () => true),
     closeActivePane: vi.fn(() => true),
-    keepOnlyActivePane: vi.fn(() => true),
-    splitWithFreshSession: vi.fn(async () => true),
+    openFreshChat: vi.fn(async () => true),
     startFreshActiveSession: vi.fn(async () => true),
     toggleHistorySelector: vi.fn(() => true),
     toggleHistoryVisibility: vi.fn(),
-    toggleMaximized: vi.fn(),
     toggleChangesPanel: vi.fn(() => true),
     ...overrides,
   };
@@ -75,7 +74,7 @@ describe("useChatKeyboardShortcuts", () => {
       { initialProps: { open: false } }
     );
     fireKey({ key: "\\", metaKey: true });
-    expect(dispatch.toggleMaximized).not.toHaveBeenCalled();
+    expect(dispatch.toggleExpanded).not.toHaveBeenCalled();
   });
 
   it("toggles shortcuts on cmd+shift+?", () => {
@@ -116,34 +115,86 @@ describe("useChatKeyboardShortcuts", () => {
     const dispatch = makeDispatch({ shortcutsOpen: true });
     renderShortcutHook(dispatch);
     fireKey({ key: "\\", metaKey: true });
-    expect(dispatch.toggleMaximized).not.toHaveBeenCalled();
+    expect(dispatch.toggleExpanded).not.toHaveBeenCalled();
   });
 
-  it("toggles maximize on cmd+backslash (no shift)", () => {
+  it("expands or collapses on cmd+backslash", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
-    fireKey({ key: "\\", metaKey: true });
-    expect(dispatch.toggleMaximized).toHaveBeenCalled();
+    fireKey({ key: "\\", code: "Backslash", metaKey: true });
+    expect(dispatch.toggleExpanded).toHaveBeenCalled();
   });
 
-  it("splits pane on cmd+alt+backslash", () => {
+  it("leaves cmd+shift+backslash unbound", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
-    fireKey({ key: "\\", metaKey: true, altKey: true });
-    expect(dispatch.splitWithFreshSession).toHaveBeenCalled();
+    // Shift turns the key into "|"; the code still names the key.
+    fireKey({ key: "|", code: "Backslash", metaKey: true, shiftKey: true });
+    expect(dispatch.toggleExpanded).not.toHaveBeenCalled();
   });
 
-  it("does not split when canAddSplitPane is false", () => {
-    const dispatch = makeDispatch({ canAddSplitPane: false });
+  it("opens a fresh chat on cmd+alt+backslash", () => {
+    const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
-    fireKey({ key: "\\", metaKey: true, altKey: true });
-    expect(dispatch.splitWithFreshSession).not.toHaveBeenCalled();
+    fireKey({ key: "\\", code: "Backslash", metaKey: true, altKey: true });
+    expect(dispatch.openFreshChat).toHaveBeenCalled();
+  });
+
+  it("leaves a workspace key alone when its action does nothing", () => {
+    const dispatch = makeDispatch({ closeActivePane: vi.fn(() => false) });
+    renderShortcutHook(dispatch);
+    const event = fireKey({
+      key: "|",
+      code: "Backslash",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
+    expect(dispatch.closeActivePane).toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+
+  it.each([
+    [{ shiftKey: false }, 1],
+    [{ shiftKey: true }, -1],
+  ] as const)(
+    "jumps to the chats needing you on cmd+alt+J %j",
+    (extra, offset) => {
+      const dispatch = makeDispatch();
+      renderShortcutHook(dispatch);
+      // Option turns J into "∆" on macOS; the code still names the key.
+      fireKey({
+        key: "∆",
+        code: "KeyJ",
+        metaKey: true,
+        altKey: true,
+        ...extra,
+      });
+      expect(dispatch.focusNeedingYou).toHaveBeenCalledWith(offset);
+    }
+  );
+
+  it.each([
+    ["ArrowLeft", -1],
+    ["ArrowRight", 1],
+  ] as const)("moves the active chat on cmd+alt+shift+%s", (key, offset) => {
+    const dispatch = makeDispatch();
+    renderShortcutHook(dispatch);
+    fireKey({ key, code: key, metaKey: true, altKey: true, shiftKey: true });
+    expect(dispatch.moveActivePane).toHaveBeenCalledWith(offset);
+    expect(dispatch.focusAreaByOffset).not.toHaveBeenCalled();
   });
 
   it("closes active pane on cmd+shift+alt+backslash", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
-    fireKey({ key: "\\", metaKey: true, altKey: true, shiftKey: true });
+    fireKey({
+      key: "|",
+      code: "Backslash",
+      metaKey: true,
+      altKey: true,
+      shiftKey: true,
+    });
     expect(dispatch.closeActivePane).toHaveBeenCalled();
   });
 
@@ -278,18 +329,18 @@ describe("useChatKeyboardShortcuts", () => {
     unmount();
   });
 
-  it("focuses pane by number on cmd+alt+1", () => {
+  it("focuses chat by number on cmd+alt+1", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
-    fireKey({ key: "1", metaKey: true, altKey: true });
+    fireKey({ key: "¡", code: "Digit1", metaKey: true, altKey: true });
     expect(dispatch.focusPaneByIndex).toHaveBeenCalledWith(0);
   });
 
-  it("keeps only active pane on cmd+alt+M", () => {
+  it("passes index 8 for cmd+alt+9 (the last chat)", () => {
     const dispatch = makeDispatch();
     renderShortcutHook(dispatch);
-    fireKey({ key: "m", code: "KeyM", metaKey: true, altKey: true });
-    expect(dispatch.keepOnlyActivePane).toHaveBeenCalled();
+    fireKey({ key: "ª", code: "Digit9", metaKey: true, altKey: true });
+    expect(dispatch.focusPaneByIndex).toHaveBeenCalledWith(8);
   });
 
   it("starts fresh session on cmd+shift+alt+N", () => {
@@ -353,7 +404,7 @@ describe("useChatKeyboardShortcuts", () => {
     const { unmount } = renderShortcutHook(dispatch);
     unmount();
     fireKey({ key: "\\", metaKey: true });
-    expect(dispatch.toggleMaximized).not.toHaveBeenCalled();
+    expect(dispatch.toggleExpanded).not.toHaveBeenCalled();
   });
 });
 
@@ -381,28 +432,6 @@ describe("isShortcutHintsKey", () => {
   it("returns false for other keys", () => {
     const event = { metaKey: true, shiftKey: true, key: "a" } as KeyboardEvent;
     expect(isShortcutHintsKey(event)).toBe(false);
-  });
-});
-
-describe("isBackslashShortcutKey", () => {
-  it("returns true for code=Backslash", () => {
-    const event = { code: "Backslash", key: "a" } as KeyboardEvent;
-    expect(isBackslashShortcutKey(event)).toBe(true);
-  });
-
-  it("returns true for key=\\", () => {
-    const event = { code: "", key: "\\" } as KeyboardEvent;
-    expect(isBackslashShortcutKey(event)).toBe(true);
-  });
-
-  it("returns true for key=|", () => {
-    const event = { code: "", key: "|" } as KeyboardEvent;
-    expect(isBackslashShortcutKey(event)).toBe(true);
-  });
-
-  it("returns false for unrelated keys", () => {
-    const event = { code: "KeyA", key: "a" } as KeyboardEvent;
-    expect(isBackslashShortcutKey(event)).toBe(false);
   });
 });
 
@@ -467,9 +496,15 @@ describe("paneNumberShortcutIndex", () => {
     ).toBe(0);
   });
 
-  it("returns null for Digit7 (out of range)", () => {
+  it("returns 8 for Digit9 (the last chat)", () => {
+    expect(paneNumberShortcutIndex({ code: "Digit9" } as KeyboardEvent)).toBe(
+      8
+    );
+  });
+
+  it("returns null for Digit0", () => {
     expect(
-      paneNumberShortcutIndex({ code: "Digit7" } as KeyboardEvent)
+      paneNumberShortcutIndex({ code: "Digit0", key: "0" } as KeyboardEvent)
     ).toBeNull();
   });
 

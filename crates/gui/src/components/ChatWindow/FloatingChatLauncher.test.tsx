@@ -1,5 +1,12 @@
+import { EMPTY_WORKSPACE } from "../../stores/chatWorkspace";
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FloatingChatLauncher } from "./FloatingChatLauncher";
 import { useChatStore, type ChatSession } from "../../stores/chatStore";
@@ -125,7 +132,7 @@ describe("FloatingChatLauncher", () => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       localSessionSummaries: {},
       panelOpen: false,
     });

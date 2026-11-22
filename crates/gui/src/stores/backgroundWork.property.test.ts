@@ -3,6 +3,7 @@
  * every status has a rank (running < unknown < definitive outcome) and the
  * model decides each transition by rank alone.
  */
+import { EMPTY_WORKSPACE } from "./chatWorkspace";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
@@ -417,7 +418,7 @@ describe("store ownership and isolation", () => {
         b: { ...session("b", "backend-b"), projectPath: "/two" },
       },
       activeSessionId: "a",
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
       panelOpen: false,
       localSessionSummaries: {},
     });

@@ -31,7 +31,7 @@ describe("ChatShortcutHints", () => {
     expect(screen.getByText("Panel")).toBeInTheDocument();
     expect(screen.getByText("Changes")).toBeInTheDocument();
     expect(screen.getByText("Previous file")).toBeInTheDocument();
-    expect(screen.getByText("Panes")).toBeInTheDocument();
+    expect(screen.getByText("Chats")).toBeInTheDocument();
     expect(screen.getByText("Sessions")).toBeInTheDocument();
   });
 
@@ -56,7 +56,9 @@ describe("ChatShortcutHints", () => {
     const section = screen
       .getByRole("heading", { name: "Changes · inline discussion" })
       .closest("section")!;
-    const labels = [...section.querySelectorAll("dd")].map((dd) => dd.textContent);
+    const labels = [...section.querySelectorAll("dd")].map(
+      (dd) => dd.textContent
+    );
     expect(labels).toEqual(
       CHANGES_HINT_GROUPS.find(
         ({ title }) => title === "Changes · inline discussion"
@@ -67,9 +69,17 @@ describe("ChatShortcutHints", () => {
   it("renders known shortcut labels", () => {
     render(<ChatShortcutHints onClose={vi.fn()} />);
     expect(screen.getByText("Toggle chat")).toBeInTheDocument();
-    expect(screen.getByText("Split pane")).toBeInTheDocument();
-    expect(screen.getByText("Send or queue during an active turn")).toBeInTheDocument();
-    expect(screen.getByText("Steer the active turn from the composer")).toBeInTheDocument();
+    expect(
+      screen.getByText("Expand or collapse chat workspace")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Split/)).not.toBeInTheDocument();
+    expect(screen.getByText("Next chat needing you")).toBeInTheDocument();
+    expect(
+      screen.getByText("Send or queue during an active turn")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Steer the active turn from the composer")
+    ).toBeInTheDocument();
   });
 });
 

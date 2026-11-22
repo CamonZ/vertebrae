@@ -13,22 +13,22 @@ interface ChatArea {
  * that pane's Changes when it is open.
  */
 export function chatAreas(root: ParentNode): ChatArea[] {
-  return Array.from(root.querySelectorAll<HTMLElement>("[data-pane-id]")).flatMap(
-    (pane) => {
-      const paneId = pane.dataset.paneId ?? "";
-      const chat =
-        pane.querySelector<HTMLElement>('[data-testid="local-chat-composer"]') ??
-        pane.querySelector<HTMLElement>("[tabindex]") ??
-        pane;
-      const changes = pane.querySelector<HTMLElement>(
-        `[${CHAT_AREA_ATTRIBUTE}="changes"]`
-      );
-      return [
-        { paneId, element: chat },
-        ...(changes ? [{ paneId, element: changes }] : []),
-      ];
-    }
-  );
+  return Array.from(
+    root.querySelectorAll<HTMLElement>("[data-pane-id]")
+  ).flatMap((pane) => {
+    const paneId = pane.dataset.paneId ?? "";
+    const chat =
+      pane.querySelector<HTMLElement>('[data-testid="local-chat-composer"]') ??
+      pane.querySelector<HTMLElement>("[tabindex]") ??
+      pane;
+    const changes = pane.querySelector<HTMLElement>(
+      `[${CHAT_AREA_ATTRIBUTE}="changes"]`
+    );
+    return [
+      { paneId, element: chat },
+      ...(changes ? [{ paneId, element: changes }] : []),
+    ];
+  });
 }
 
 /** Index of the area holding `focused`: its Changes, else its pane's chat. */
@@ -64,7 +64,7 @@ export function moveChatArea(from: Element | null, offset: -1 | 1): boolean {
         : (at + offset + areas.length) % areas.length
     ];
   const store = useChatStore.getState();
-  if (store.paneLayout.activePaneId !== next.paneId) {
+  if (store.paneLayout.activeId !== next.paneId) {
     store.focusPane(next.paneId);
     // A maximized layout shows the pane once it is active; focus after that.
     requestAnimationFrame(() => next.element.focus({ preventScroll: true }));

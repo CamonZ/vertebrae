@@ -2,6 +2,7 @@
  * Drives the bridge goldens (produced from real adapter output by the Rust
  * bridge test) through the event router, the chat store and the panel.
  */
+import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 import { act, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -78,7 +79,7 @@ function reset(harness: "claude" | "codex") {
   useChatStore.setState({
     sessions: { session: session(harness) },
     activeSessionId: "session",
-    paneLayout: { panes: [], activePaneId: null },
+    paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
     panelOpen: false,
     localSessionSummaries: {},
   });

@@ -341,7 +341,7 @@ fn retryable_click(error: &fantoccini::error::CmdError) -> bool {
         | ErrorStatus::StaleElementReference | ErrorStatus::NoSuchElement))
 }
 
-/// Chat panes keep secondary actions (history, split, Changes…) in a `⋯`
+/// Chat panes keep secondary actions (Changes, start fresh…) in a `⋯`
 /// overflow menu. Click the action matched by `css`: directly when it is on
 /// the header, otherwise after opening the pane overflow menu that holds it.
 pub async fn click_pane_action(client: &Client, css: &str, description: &str) {

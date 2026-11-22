@@ -1,3 +1,4 @@
+import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../bindings";
@@ -167,7 +168,7 @@ describe("child chat sessions", () => {
     useChatStore.setState({
       sessions: { root },
       activeSessionId: "root",
-      paneLayout: { panes: [], activePaneId: null },
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
     });
   });
   afterEach(() => {
@@ -443,8 +444,9 @@ describe("child chat sessions", () => {
         },
       },
       paneLayout: {
-        panes: [{ id: "pane", sessionId: id }],
-        activePaneId: "pane",
+        ...EMPTY_WORKSPACE,
+        order: [{ id: "pane", sessionId: id }],
+        activeId: "pane",
       },
     }));
     vi.spyOn(commands, "discoverLocalChatChildSessions").mockImplementation(

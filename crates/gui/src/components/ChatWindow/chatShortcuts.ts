@@ -1,8 +1,13 @@
-export type ChatShortcutModifier = "meta" | "alt" | "shift";
+export type ChatShortcutModifier = "ctrl" | "meta" | "alt" | "shift";
 
 export interface ChatShortcutDefinition {
   readonly modifiers: readonly ChatShortcutModifier[];
   readonly keys: readonly string[];
+  /**
+   * Physical key codes, matched before `keys`: ⌥ changes the character a key
+   * types (⌥J types ∆), so letter, digit and backslash bindings use codes.
+   */
+  readonly codes?: readonly string[];
   readonly displayKey: string;
   readonly label: string;
 }
@@ -20,21 +25,45 @@ export const CHAT_HELP_SHORTCUT = {
 } as const satisfies ChatShortcutDefinition;
 
 type ShortcutEvent = Pick<KeyboardEvent, "metaKey" | "shiftKey" | "key"> &
-  Partial<Pick<KeyboardEvent, "altKey">>;
+  Partial<Pick<KeyboardEvent, "altKey" | "ctrlKey" | "code">>;
 
 export function matchesChatShortcut(
   event: ShortcutEvent,
   shortcut: ChatShortcutDefinition
 ): boolean {
-  const modifierState: Record<ChatShortcutModifier, boolean> = {
+  const state = modifierState(event);
+  return (
+    shortcut.modifiers.every((modifier) => state[modifier]) &&
+    shortcut.keys.includes(event.key)
+  );
+}
+
+function modifierState(
+  event: ShortcutEvent
+): Record<ChatShortcutModifier, boolean> {
+  return {
+    ctrl: event.ctrlKey ?? false,
     meta: event.metaKey,
     alt: event.altKey ?? false,
     shift: event.shiftKey,
   };
-  return (
-    shortcut.modifiers.every((modifier) => modifierState[modifier]) &&
-    shortcut.keys.includes(event.key)
+}
+
+/**
+ * Exactly these modifiers and this key (code first, then character), so
+ * ⌘⌥\ never fires for ⌘⌥⇧\. Workspace bindings use this matcher.
+ */
+export function matchesExactChatShortcut(
+  event: ShortcutEvent,
+  shortcut: ChatShortcutDefinition
+): boolean {
+  const state = modifierState(event);
+  const modifiersMatch = (Object.keys(state) as ChatShortcutModifier[]).every(
+    (modifier) => state[modifier] === shortcut.modifiers.includes(modifier)
   );
+  if (!modifiersMatch) return false;
+  if (event.code && shortcut.codes?.includes(event.code)) return true;
+  return shortcut.keys.includes(event.key);
 }
 
 function isApplePlatform(platform: string): boolean {
@@ -66,6 +95,7 @@ export function presentChatShortcut(
 
   const apple = isApplePlatform(platform);
   const keys: string[] = shortcut.modifiers.map((modifier) => {
+    if (modifier === "ctrl") return apple ? "⌃" : "Ctrl";
     if (modifier === "meta") return apple ? "⌘" : "Meta";
     if (modifier === "alt") return apple ? "⌥" : "Alt";
     return apple ? "⇧" : "Shift";
@@ -73,6 +103,7 @@ export function presentChatShortcut(
   keys.push(shortcut.displayKey);
 
   const accessibleModifiers = shortcut.modifiers.map((modifier) => {
+    if (modifier === "ctrl") return "Control";
     if (modifier === "meta") return apple ? "Command" : "Meta";
     if (modifier === "alt") return apple ? "Option" : "Alt";
     return "Shift";
@@ -97,6 +128,96 @@ export const CHAT_AREA_SHORTCUT = {
   label: "Move between chats and Changes",
 } as const satisfies ChatShortcutDefinition;
 
+/** ⌘B shows or hides chat history; from the compact panel it expands. */
+export const CHAT_HISTORY_SHORTCUT = {
+  modifiers: ["meta"],
+  keys: ["b", "B"],
+  codes: ["KeyB"],
+  displayKey: "B",
+  label: "Show or hide chat history",
+} as const satisfies ChatShortcutDefinition;
+
+const BACKSLASH = { keys: ["\\", "|"], codes: ["Backslash"], displayKey: "\\" };
+
+/**
+ * Chat workspace bindings (decision 49d12c2c §4). Each addresses the ordered
+ * list of open chats (the tab strip). The dispatcher, tooltips and the ⌘⇧/
+ * sheet all read these definitions.
+ */
+export const WORKSPACE_SHORTCUTS = {
+  toggleExpanded: {
+    modifiers: ["meta"],
+    ...BACKSLASH,
+    label: "Expand or collapse chat workspace",
+  },
+  nextChat: {
+    modifiers: ["ctrl"],
+    keys: ["Tab"],
+    displayKey: "Tab",
+    label: "Next chat",
+  },
+  previousChat: {
+    modifiers: ["ctrl", "shift"],
+    keys: ["Tab"],
+    displayKey: "Tab",
+    label: "Previous chat",
+  },
+  chatByNumber: {
+    modifiers: ["meta", "alt"],
+    keys: ["1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    codes: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((digit) => `Digit${digit}`),
+    displayKey: "1–9",
+    label: "Go to chat N (9: last)",
+  },
+  nextNeedingYou: {
+    modifiers: ["meta", "alt"],
+    keys: ["j", "J"],
+    codes: ["KeyJ"],
+    displayKey: "J",
+    label: "Next chat needing you",
+  },
+  previousNeedingYou: {
+    modifiers: ["meta", "alt", "shift"],
+    keys: ["j", "J"],
+    codes: ["KeyJ"],
+    displayKey: "J",
+    label: "Previous chat needing you",
+  },
+  moveChatLeft: {
+    modifiers: ["meta", "alt", "shift"],
+    keys: ["ArrowLeft"],
+    displayKey: "←",
+    label: "Move chat left",
+  },
+  moveChatRight: {
+    modifiers: ["meta", "alt", "shift"],
+    keys: ["ArrowRight"],
+    displayKey: "→",
+    label: "Move chat right",
+  },
+  freshChat: {
+    modifiers: ["meta", "alt"],
+    ...BACKSLASH,
+    label: "New chat after the active one",
+  },
+  closeChat: {
+    modifiers: ["meta", "alt", "shift"],
+    ...BACKSLASH,
+    label: "Close chat",
+  },
+} as const satisfies Record<string, ChatShortcutDefinition>;
+
+export type WorkspaceShortcutId = keyof typeof WORKSPACE_SHORTCUTS;
+
+/** Tooltip text: `Label · ⌘⌥J`. */
+export function shortcutTooltip(
+  label: string,
+  shortcut: ChatShortcutDefinition
+): string {
+  const keys = shortcutText(shortcut);
+  return keys ? `${label} · ${keys}` : label;
+}
+
 /** Changes actions that live in the ⌘K palette rather than on single keys. */
 export const CHANGES_COMMANDS = {
   base: "Choose base",
@@ -113,7 +234,6 @@ export const CHANGES_COMMANDS = {
 
 /** Toggle a file's viewed mark (folds it; the cursor skips it). */
 export const CHANGES_VIEWED_KEY = "v";
-
 
 export const CHANGED_FILE_LIST_KEYS = {
   keys: ["↑", "↓"],
@@ -243,7 +363,10 @@ export const CHANGES_HINT_GROUPS: readonly {
   {
     title: "Changes · file list",
     hints: [
-      { keys: CHANGED_FILE_LIST_KEYS.keys, label: CHANGED_FILE_LIST_KEYS.label },
+      {
+        keys: CHANGED_FILE_LIST_KEYS.keys,
+        label: CHANGED_FILE_LIST_KEYS.label,
+      },
       { keys: ["↵"], label: "Show file" },
       ...FILE_JUMP_HINTS,
       ...PALETTE_HINTS,
@@ -262,7 +385,10 @@ export const CHANGES_HINT_GROUPS: readonly {
       ...FILE_JUMP_HINTS,
       { keys: ["←", "→"], label: "Switch side", splitOnly: true },
       { keys: ["← / →"], label: "Past the edge: chat / next area" },
-      { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: DIFF_COPY_SHORTCUT.label },
+      {
+        keys: modifierKeys(DIFF_COPY_SHORTCUT),
+        label: DIFF_COPY_SHORTCUT.label,
+      },
       { keys: ["c / ↵"], label: "Discuss selection" },
       { keys: [DISCUSSION_OPEN_KEY], label: "Open discussion at line" },
       {
@@ -334,7 +460,10 @@ export const TRANSCRIPT_COMMENT_SHORTCUT = {
 
 /** The transcript caret's bindings, listed in the ⌘⇧/ overlay. */
 export const TRANSCRIPT_HINTS: readonly KeyHint[] = [
-  { keys: ["⌘", "⌥", "↑"], label: "Into the transcript (from input or comments)" },
+  {
+    keys: ["⌘", "⌥", "↑"],
+    label: "Into the transcript (from input or comments)",
+  },
   { keys: ["← / →"], label: "Move by character" },
   { keys: ["↑ / ↓"], label: "Move by line" },
   { keys: ["⌥", "← / →"], label: "Move by word" },

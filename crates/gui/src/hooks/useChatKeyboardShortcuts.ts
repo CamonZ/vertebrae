@@ -1,32 +1,67 @@
 import { useEffect, useRef } from "react";
 import {
   CHAT_HELP_SHORTCUT,
+  WORKSPACE_SHORTCUTS,
   matchesChatShortcut,
+  matchesExactChatShortcut,
+  type WorkspaceShortcutId,
 } from "../components/ChatWindow/chatShortcuts";
 
 export type ShortcutDispatchState = {
   shortcutsOpen: boolean;
-  canAddSplitPane: boolean;
   hasActiveSession: boolean;
+  /** ⌘\: expand or collapse the chat workspace. */
+  toggleExpanded: () => void;
+  /** ⌘⌥1–9: chat N in strip order (index 8 = last). */
   focusPaneByIndex: (index: number) => boolean;
+  /** ⌃Tab / ⌃⇧Tab: next / previous chat in strip order. */
   focusPaneByOffset: (offset: number) => boolean;
-  /** ⌘⌥←/→: chat 1 · its Changes · chat 2 … */
+  /** ⌘⌥J / ⌘⌥⇧J: next / previous chat needing you. */
+  focusNeedingYou: (offset: 1 | -1) => boolean;
+  /** ⌘⌥⇧← / →: move the active chat in the strip. */
+  moveActivePane: (offset: number) => boolean;
+  /** ⌘⌥←/→: move between the chat's areas (composer, Changes). */
   focusAreaByOffset: (offset: -1 | 1) => boolean;
+  /** ⌘⌥\: fresh chat after the active one. */
+  openFreshChat: () => Promise<boolean>;
+  /** ⌘⌥⇧\: close the active chat (its session stays in history). */
+  closeActivePane: () => boolean;
   historyNavigationEnabled: boolean;
   focusHistorySearch: () => boolean;
   /** Open the focused pane's in-transcript find bar. */
   openPaneFind: () => boolean;
   selectHistoryProjectByOffset: (offset: number) => boolean;
   selectHistorySessionByOffset: (offset: number) => Promise<boolean>;
-  closeActivePane: () => boolean;
-  keepOnlyActivePane: () => boolean;
-  splitWithFreshSession: () => Promise<boolean>;
   startFreshActiveSession: () => Promise<boolean>;
   toggleHistorySelector: () => boolean;
   toggleHistoryVisibility: () => void;
-  toggleMaximized: () => void;
   toggleChangesPanel: () => boolean;
 };
+
+type WorkspaceHandler = (
+  dispatch: ShortcutDispatchState,
+  event: KeyboardEvent
+) => boolean | void | Promise<boolean>;
+
+/**
+ * Workspace bindings in dispatch order. A handler returning false leaves the
+ * event alone; void and promises always claim it.
+ */
+const WORKSPACE_BINDINGS: readonly [WorkspaceShortcutId, WorkspaceHandler][] = [
+  ["toggleExpanded", (d) => d.toggleExpanded()],
+  ["nextChat", (d) => d.focusPaneByOffset(1)],
+  ["previousChat", (d) => d.focusPaneByOffset(-1)],
+  [
+    "chatByNumber",
+    (d, event) => d.focusPaneByIndex(paneNumberShortcutIndex(event) ?? -1),
+  ],
+  ["nextNeedingYou", (d) => d.focusNeedingYou(1)],
+  ["previousNeedingYou", (d) => d.focusNeedingYou(-1)],
+  ["moveChatLeft", (d) => d.moveActivePane(-1)],
+  ["moveChatRight", (d) => d.moveActivePane(1)],
+  ["freshChat", (d) => d.openFreshChat()],
+  ["closeChat", (d) => d.closeActivePane()],
+];
 
 interface UseChatKeyboardShortcutsOptions {
   /** Whether the chat panel is currently open. Shortcuts are inert when closed. */
@@ -39,10 +74,6 @@ interface UseChatKeyboardShortcutsOptions {
 
 export function isShortcutHintsKey(event: KeyboardEvent): boolean {
   return matchesChatShortcut(event, CHAT_HELP_SHORTCUT);
-}
-
-export function isBackslashShortcutKey(event: KeyboardEvent): boolean {
-  return event.code === "Backslash" || event.key === "\\" || event.key === "|";
 }
 
 export function historyShortcutOffset(event: KeyboardEvent): number | null {
@@ -60,16 +91,17 @@ export function isLetterShortcutKey(
 }
 
 export function paneNumberShortcutIndex(event: KeyboardEvent): number | null {
-  const codeMatch = /^Digit([1-6])$/.exec(event.code);
+  const codeMatch = /^Digit([1-9])$/.exec(event.code);
   if (codeMatch) return Number(codeMatch[1]) - 1;
-  const keyMatch = /^[1-6]$/.exec(event.key);
+  const keyMatch = /^[1-9]$/.exec(event.key);
   return keyMatch ? Number(keyMatch[0]) - 1 : null;
 }
 
 /**
- * Global keyboard-shortcut dispatch for the chat panel. ~15 bindings covering
- * panel toggles, pane management, focus moves, fresh sessions, and history.
- * The listener is capture-phase and inert when `open` is false.
+ * Global keyboard-shortcut dispatch for the chat panel: the workspace
+ * bindings in WORKSPACE_SHORTCUTS (exact modifiers, matched on key codes),
+ * then history, find, Changes and focus moves. The listener is capture-phase
+ * and inert when `open` is false.
  */
 export function useChatKeyboardShortcuts({
   open,
@@ -102,11 +134,15 @@ export function useChatKeyboardShortcuts({
 
       if (current.shortcutsOpen) return;
 
-      if (event.ctrlKey && key === "tab") {
-        if (current.focusPaneByOffset(event.shiftKey ? -1 : 1)) {
-          event.preventDefault();
+      if (!event.isComposing) {
+        const binding = WORKSPACE_BINDINGS.find(([id]) =>
+          matchesExactChatShortcut(event, WORKSPACE_SHORTCUTS[id])
+        );
+        if (binding) {
+          const handled = binding[1](current, event);
+          if (handled !== false) event.preventDefault();
+          return;
         }
-        return;
       }
 
       if (!event.metaKey) return;
@@ -164,43 +200,10 @@ export function useChatKeyboardShortcuts({
         }
       }
 
-      if (isBackslashShortcutKey(event) && event.altKey && event.shiftKey) {
-        if (current.closeActivePane()) {
-          event.preventDefault();
-        }
-        return;
-      }
-
-      if (isBackslashShortcutKey(event) && event.altKey) {
-        if (!current.canAddSplitPane) return;
-        event.preventDefault();
-        void current.splitWithFreshSession();
-        return;
-      }
-
-      if (isBackslashShortcutKey(event) && !event.shiftKey) {
-        event.preventDefault();
-        current.toggleMaximized();
-        return;
-      }
-
       if (!event.altKey) return;
 
       if (key === "arrowright" || key === "arrowleft") {
         if (current.focusAreaByOffset(key === "arrowright" ? 1 : -1)) {
-          event.preventDefault();
-        }
-        return;
-      }
-      const paneNumberIndex = paneNumberShortcutIndex(event);
-      if (paneNumberIndex !== null) {
-        if (current.focusPaneByIndex(paneNumberIndex)) {
-          event.preventDefault();
-        }
-        return;
-      }
-      if (isLetterShortcutKey(event, "KeyM", "m")) {
-        if (current.keepOnlyActivePane()) {
           event.preventDefault();
         }
         return;

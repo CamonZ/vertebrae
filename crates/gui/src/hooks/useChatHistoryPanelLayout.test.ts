@@ -1,10 +1,10 @@
-import { MIN_SPLIT_PANE_WIDTH } from "./useChatPaneManagement";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_HISTORY_WIDTH,
   HISTORY_WIDTH_STORAGE_KEY,
   MAX_HISTORY_WIDTH,
+  MIN_CHAT_PANE_WIDTH,
   MIN_HISTORY_WIDTH,
   clampHistoryWidth,
   clampHistoryWidthForLayout,
@@ -71,24 +71,15 @@ describe("useChatHistoryPanelLayout", () => {
     expect(localStorage.getItem(HISTORY_WIDTH_STORAGE_KEY)).toBe("400");
   });
 
-  it("limits the sidebar by the number of visible 360px chat panes", () => {
-    const singlePaneLimit = maxHistoryWidthForLayout(1040, 1);
-    const twoPaneLimit = maxHistoryWidthForLayout(1040, 2);
-    const threePaneLimit = maxHistoryWidthForLayout(1040, 3);
-
-    expect(singlePaneLimit).toBe(MAX_HISTORY_WIDTH);
-    expect(twoPaneLimit).toBe(312);
-    expect(threePaneLimit).toBe(MIN_HISTORY_WIDTH);
+  it("limits the sidebar so the 360px chat keeps its minimum width", () => {
+    expect(maxHistoryWidthForLayout(1040)).toBe(MAX_HISTORY_WIDTH);
+    expect(maxHistoryWidthForLayout(672)).toBe(312);
+    expect(maxHistoryWidthForLayout(500)).toBe(MIN_HISTORY_WIDTH);
   });
 
-  it("clamps the effective width when the viewport or split layout shrinks", () => {
-    const singlePaneWidth = clampHistoryWidthForLayout(400, 700, 1);
-    const twoPaneWidth = clampHistoryWidthForLayout(400, 1000, 2);
-    const minimumWidth = clampHistoryWidthForLayout(200, 1200, 1);
-
-    expect(singlePaneWidth).toBe(340);
-    expect(twoPaneWidth).toBe(272);
-    expect(minimumWidth).toBe(MIN_HISTORY_WIDTH);
+  it("clamps the effective width when the viewport shrinks", () => {
+    expect(clampHistoryWidthForLayout(400, 700)).toBe(340);
+    expect(clampHistoryWidthForLayout(200, 1200)).toBe(MIN_HISTORY_WIDTH);
   });
 });
 
@@ -124,69 +115,59 @@ describe("history width invariants", () => {
     }
   });
 
-  it.each([1, 2, 3, 4, 5, 6])(
-    "respects available space with %i panes across generated layouts",
-    (paneCount) => {
-      const paneSpace = paneCount * MIN_SPLIT_PANE_WIDTH;
-      const panelWidths = [
-        0,
-        paneSpace - 1,
-        ...[MIN_HISTORY_WIDTH, MAX_HISTORY_WIDTH].flatMap((boundary) => [
-          paneSpace + boundary - 0.5,
-          paneSpace + boundary,
-          paneSpace + boundary + 0.5,
-        ]),
-        ...Array.from({ length: 17 }, (_, index) => index * 173.5),
-        Number.MAX_VALUE,
-      ].sort((left, right) => left - right);
-      const finiteRequests = requestedWidths
-        .filter(Number.isFinite)
-        .sort((left, right) => left - right);
+  it("respects the chat's space across generated layouts", () => {
+    const paneSpace = MIN_CHAT_PANE_WIDTH;
+    const panelWidths = [
+      0,
+      paneSpace - 1,
+      ...[MIN_HISTORY_WIDTH, MAX_HISTORY_WIDTH].flatMap((boundary) => [
+        paneSpace + boundary - 0.5,
+        paneSpace + boundary,
+        paneSpace + boundary + 0.5,
+      ]),
+      ...Array.from({ length: 17 }, (_, index) => index * 173.5),
+      Number.MAX_VALUE,
+    ].sort((left, right) => left - right);
+    const finiteRequests = requestedWidths
+      .filter(Number.isFinite)
+      .sort((left, right) => left - right);
 
-      for (const panelWidth of panelWidths) {
-        let previousWidth = MIN_HISTORY_WIDTH;
+    for (const panelWidth of panelWidths) {
+      let previousWidth = MIN_HISTORY_WIDTH;
 
-        for (const requested of finiteRequests) {
-          const width = clampHistoryWidthForLayout(
-            requested,
-            panelWidth,
-            paneCount
-          );
-          const context = `requested=${requested}, panel=${panelWidth}, panes=${paneCount}`;
+      for (const requested of finiteRequests) {
+        const width = clampHistoryWidthForLayout(requested, panelWidth);
+        const context = `requested=${requested}, panel=${panelWidth}`;
 
-          expect(Number.isFinite(width), context).toBe(true);
-          expect(width, context).toBeGreaterThanOrEqual(MIN_HISTORY_WIDTH);
-          expect(width, context).toBeLessThanOrEqual(MAX_HISTORY_WIDTH);
-          expect(width, context).toBeLessThanOrEqual(
-            clampHistoryWidth(requested)
-          );
-          expect(width, context).toBeGreaterThanOrEqual(previousWidth);
-          expect(
-            clampHistoryWidthForLayout(width, panelWidth, paneCount),
-            context
-          ).toBe(width);
-
-          if (panelWidth >= paneSpace + MIN_HISTORY_WIDTH) {
-            expect(panelWidth - width, context).toBeGreaterThanOrEqual(
-              paneSpace
-            );
-          }
-
-          previousWidth = width;
-        }
-      }
-
-      for (const requested of requestedWidths) {
-        const widths = panelWidths.map((panelWidth) =>
-          clampHistoryWidthForLayout(requested, panelWidth, paneCount)
+        expect(Number.isFinite(width), context).toBe(true);
+        expect(width, context).toBeGreaterThanOrEqual(MIN_HISTORY_WIDTH);
+        expect(width, context).toBeLessThanOrEqual(MAX_HISTORY_WIDTH);
+        expect(width, context).toBeLessThanOrEqual(
+          clampHistoryWidth(requested)
+        );
+        expect(width, context).toBeGreaterThanOrEqual(previousWidth);
+        expect(clampHistoryWidthForLayout(width, panelWidth), context).toBe(
+          width
         );
 
-        for (let index = 1; index < widths.length; index += 1) {
-          expect(widths[index]).toBeGreaterThanOrEqual(widths[index - 1]);
+        if (panelWidth >= paneSpace + MIN_HISTORY_WIDTH) {
+          expect(panelWidth - width, context).toBeGreaterThanOrEqual(paneSpace);
         }
+
+        previousWidth = width;
       }
     }
-  );
+
+    for (const requested of requestedWidths) {
+      const widths = panelWidths.map((panelWidth) =>
+        clampHistoryWidthForLayout(requested, panelWidth)
+      );
+
+      for (let index = 1; index < widths.length; index += 1) {
+        expect(widths[index]).toBeGreaterThanOrEqual(widths[index - 1]);
+      }
+    }
+  });
 
   it("handles malformed layout dimensions without leaking non-finite widths", () => {
     for (const panelWidth of [
@@ -195,24 +176,12 @@ describe("history width invariants", () => {
       Number.POSITIVE_INFINITY,
       -1,
     ]) {
-      for (const paneCount of [
-        Number.NaN,
-        Number.POSITIVE_INFINITY,
-        -2,
-        0,
-        1.5,
-      ]) {
-        for (const requested of requestedWidths) {
-          const width = clampHistoryWidthForLayout(
-            requested,
-            panelWidth,
-            paneCount
-          );
+      for (const requested of requestedWidths) {
+        const width = clampHistoryWidthForLayout(requested, panelWidth);
 
-          expect(Number.isFinite(width)).toBe(true);
-          expect(width).toBeGreaterThanOrEqual(MIN_HISTORY_WIDTH);
-          expect(width).toBeLessThanOrEqual(MAX_HISTORY_WIDTH);
-        }
+        expect(Number.isFinite(width)).toBe(true);
+        expect(width).toBeGreaterThanOrEqual(MIN_HISTORY_WIDTH);
+        expect(width).toBeLessThanOrEqual(MAX_HISTORY_WIDTH);
       }
     }
   });

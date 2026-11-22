@@ -10,12 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  isRunPane,
-  MAX_CHAT_PANES,
-  useChatStore,
-  type RunChatPane,
-} from "../../stores/chatStore";
+import { isRunPane, useChatStore } from "../../stores/chatStore";
 import { useGlassPanel } from "../../hooks/useGlassPanel";
 import { usePanelExitTransition } from "../../hooks/usePanelExitTransition";
 import { doCloseSession } from "../../hooks/useLocalChat";
@@ -38,6 +33,8 @@ import {
 } from "../../utils/localChatSessionGroups";
 import { normalizeProjectPath } from "../../utils/localChatPersistence";
 import { ChatPaneList } from "./ChatPaneList";
+import { ChatTabStrip } from "./ChatTabStrip";
+import { chatsNeedingYou, useChatTabs } from "./useChatTabs";
 import { ChatResizeHandle } from "./ChatResizeHandle";
 import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
@@ -56,10 +53,31 @@ import { useNotificationStore } from "../../stores/notificationStore";
 const EXIT_MS = 180;
 
 /**
- * ChatWindowManager manages multiple chat session tabs in a floating-glass side
- * panel anchored on the right (design reference `.hc-panel`, opened by the
- * FloatingChatLauncher pill). Renders the active session's ChatWindow, which
- * owns the single header band (title + status) and the composer.
+ * The main worktree for a fresh chat in `projectPath`, or null when the
+ * project scope changed while it loaded (the chat would land in the wrong
+ * project). Shared by every fresh-chat entry point.
+ */
+async function loadFreshChatWorktree(
+  projectPath: string | null,
+  generation = getProjectScopeGeneration()
+) {
+  const mainWorktree = await loadMainChatWorktree(projectPath);
+  return generation === getProjectScopeGeneration() ? { mainWorktree } : null;
+}
+
+/** Whether workspace entry `paneId` is still open. */
+function isOpenEntry(paneId: string) {
+  return useChatStore
+    .getState()
+    .paneLayout.order.some((pane) => pane.id === paneId);
+}
+
+/**
+ * ChatWindowManager hosts the chat workspace in a floating-glass side panel
+ * anchored on the right (design reference `.hc-panel`, opened by the
+ * FloatingChatLauncher pill): the tab strip over the open chats with the
+ * active one below it, plus the mini history when expanded. Each chat's
+ * ChatWindow owns its header band and composer.
  */
 export function ChatWindowManager({
   renderObserver,
@@ -90,13 +108,14 @@ export function ChatWindowManager({
   const startFreshSession = useChatStore((s) => s.startFreshSession);
   const bindPaneToSession = useChatStore((s) => s.bindPaneToSession);
   const openProjectSession = useChatStore((s) => s.openProjectSession);
-  const startFreshSessionInNewPane = useChatStore(
-    (s) => s.startFreshSessionInNewPane
+  const startFreshSessionInNewTab = useChatStore(
+    (s) => s.startFreshSessionInNewTab
   );
+  const openSessionInNewTab = useChatStore((s) => s.openSessionInNewTab);
   const focusPane = useChatStore((s) => s.focusPane);
   const openRunPane = useChatStore((s) => s.openRunPane);
   const closePane = useChatStore((s) => s.closePane);
-  const unsplitPanes = useChatStore((s) => s.unsplitPanes);
+  const moveChatBefore = useChatStore((s) => s.moveChatBefore);
   const markSessionClosed = useChatStore((s) => s.markSessionClosed);
   const setSessionLifecycle = useChatStore((s) => s.setSessionLifecycle);
   const setBackendSessionId = useChatStore((s) => s.setBackendSessionId);
@@ -255,7 +274,7 @@ export function ChatWindowManager({
     resizePanel,
     startResizeDrag,
     collapseMaximized,
-  } = useChatPanelLayout({ unsplitPanes });
+  } = useChatPanelLayout();
   const { historyWidth, resizeHistoryWidth } = useChatHistoryPanelLayout();
 
   const {
@@ -365,31 +384,28 @@ export function ChatWindowManager({
     [historyProjectGroups, isMaximized, selectedProject, selectHistoryProject]
   );
 
+  const workspaceOrder = useChatStore((s) => s.paneLayout.order);
+  const tabs = useChatTabs(workspaceOrder, projectLabelBySessionId);
+  const needingYou = useMemo(() => chatsNeedingYou(tabs), [tabs]);
   const {
-    normalizedPaneLayout,
-    visiblePanes,
-    activePaneId,
-    canAddSplitPane,
+    shownPane,
     focusPaneByIndex,
     focusPaneByOffset,
+    focusNeedingYou,
+    activatePane,
     closeActivePane,
-    keepOnlyActivePane,
-  } = useChatPaneManagement({
-    isMaximized,
-    renderedPanelWidth,
-    activeSessionId,
-  });
-  const activeRunPane = visiblePanes.find(
-    (pane): pane is RunChatPane => pane.id === activePaneId && isRunPane(pane)
-  );
-  const historyMaxWidth = maxHistoryWidthForLayout(
-    renderedPanelWidth,
-    visiblePanes.length
-  );
+    moveActivePane,
+  } = useChatPaneManagement({ needingYou });
+  const shownPaneId = shownPane?.id ?? null;
+  // Name the chat's project in its header once the open chats span more
+  // than one project.
+  const openChatsSpanProjects =
+    new Set(tabs.flatMap((tab) => (tab.project ? [tab.project] : []))).size > 1;
+  const activeRunPane = isRunPane(shownPane) ? shownPane : null;
+  const historyMaxWidth = maxHistoryWidthForLayout(renderedPanelWidth);
   const effectiveHistoryWidth = clampHistoryWidthForLayout(
     historyWidth,
-    renderedPanelWidth,
-    visiblePanes.length
+    renderedPanelWidth
   );
   // The panel can be open briefly before the launcher finishes checking
   // durable history, and it can show a resume choice without any runtime
@@ -407,51 +423,48 @@ export function ChatWindowManager({
     togglePanel();
   }, [dismissMaximized, togglePanel]);
 
-  const startFreshActiveSession = useCallback(
-    async (paneId: string) => {
+  /**
+   * The current project and its main worktree for a fresh chat, or null when
+   * the project scope changed (or `paneId` closed) while they loaded.
+   */
+  const loadFreshChatTarget = useCallback(
+    async (paneId: string | null) => {
       const generation = getProjectScopeGeneration();
       const projectPath = await loadCurrentProjectPath();
-      const mainWorktree = await loadMainChatWorktree(projectPath);
-      const paneStillVisible = useChatStore
-        .getState()
-        .paneLayout.panes.some((pane) => pane.id === paneId);
-      if (!paneStillVisible || generation !== getProjectScopeGeneration()) {
-        return false;
-      }
+      const loaded = await loadFreshChatWorktree(projectPath, generation);
+      if (!loaded) return null;
+      if (paneId !== null && !isOpenEntry(paneId)) return null;
       commitCurrentProjectPath(projectPath);
+      return { projectPath, mainWorktree: loaded.mainWorktree };
+    },
+    [commitCurrentProjectPath, loadCurrentProjectPath]
+  );
+
+  const startFreshActiveSession = useCallback(
+    async (paneId: string) => {
+      const target = await loadFreshChatTarget(paneId);
+      if (!target) return false;
       const sessionId = startFreshSession(
         "New Chat",
-        projectPath,
-        mainWorktree
+        target.projectPath,
+        target.mainWorktree
       );
       return bindPaneToSession(paneId, sessionId);
     },
-    [
-      bindPaneToSession,
-      commitCurrentProjectPath,
-      loadCurrentProjectPath,
-      startFreshSession,
-    ]
+    [bindPaneToSession, loadFreshChatTarget, startFreshSession]
   );
 
-  const splitWithFreshSession = useCallback(async () => {
-    if (!canAddSplitPane) return false;
-    const generation = getProjectScopeGeneration();
-    const projectPath = await loadCurrentProjectPath();
-    const mainWorktree = await loadMainChatWorktree(projectPath);
-    if (
-      generation !== getProjectScopeGeneration() ||
-      useChatStore.getState().paneLayout.panes.length >= MAX_CHAT_PANES
-    ) return false;
-    commitCurrentProjectPath(projectPath);
-    startFreshSessionInNewPane("New Chat", projectPath, mainWorktree);
+  /** ⌘⌥\ and the strip's "+": a fresh chat right after the active one. */
+  const openFreshChat = useCallback(async () => {
+    const target = await loadFreshChatTarget(null);
+    if (!target) return false;
+    startFreshSessionInNewTab(
+      "New Chat",
+      target.projectPath,
+      target.mainWorktree
+    );
     return true;
-  }, [
-    canAddSplitPane,
-    commitCurrentProjectPath,
-    loadCurrentProjectPath,
-    startFreshSessionInNewPane,
-  ]);
+  }, [loadFreshChatTarget, startFreshSessionInNewTab]);
 
   const startProjectChat = useCallback(
     async (group: LocalChatSessionGroup) => {
@@ -461,11 +474,10 @@ export function ChatWindowManager({
         );
         return;
       }
-      const generation = getProjectScopeGeneration();
       try {
-        const mainWorktree = await loadMainChatWorktree(group.projectPath);
-        if (generation !== getProjectScopeGeneration()) return;
-        openProjectSession("New Chat", group.projectPath, mainWorktree);
+        const loaded = await loadFreshChatWorktree(group.projectPath);
+        if (!loaded) return;
+        openProjectSession("New Chat", group.projectPath, loaded.mainWorktree);
         setDeleteError(null);
       } catch (error) {
         setDeleteError(
@@ -509,7 +521,7 @@ export function ChatWindowManager({
       )
     ) {
       panelRef.current
-        ?.querySelector<HTMLElement>('[data-pane-active="true"]')
+        ?.querySelector<HTMLElement>('[data-testid="chat-pane"]')
         ?.focus();
     }
 
@@ -576,16 +588,13 @@ export function ChatWindowManager({
 
       return selectHistorySessionForActivePane(
         sessionId,
-        normalizedPaneLayout.panes.some((pane) => pane.id === activePaneId)
-          ? (activePaneId ?? undefined)
-          : undefined
+        shownPaneId ?? undefined
       );
     },
     [
       activeSessionId,
-      activePaneId,
+      shownPaneId,
       isMaximized,
-      normalizedPaneLayout,
       selectHistorySessionForActivePane,
       matchingHistorySessions,
     ]
@@ -599,7 +608,7 @@ export function ChatWindowManager({
     ) => {
       const targetPaneId =
         preferredPaneId ??
-        useChatStore.getState().paneLayout.activePaneId ??
+        useChatStore.getState().paneLayout.activeId ??
         undefined;
       const parent = useChatStore.getState().sessions[parentSessionId];
 
@@ -675,7 +684,7 @@ export function ChatWindowManager({
   );
 
   const startFreshActiveSessionForKeyboard = useCallback(async () => {
-    const paneId = activePaneId ?? normalizedPaneLayout.panes[0]?.id;
+    const paneId = shownPaneId;
     if (!paneId) return false;
 
     // Capture the browsed project and pane before validating its directory.
@@ -693,35 +702,21 @@ export function ChatWindowManager({
       const roots = await commands.getLocalFileRoots(projectPath);
       if (generation !== getProjectScopeGeneration()) return false;
       if (roots.status !== "ok") throw new Error(unavailable);
-      const mainWorktree = await loadMainChatWorktree(projectPath);
-      if (generation !== getProjectScopeGeneration()) return false;
-      if (
-        !useChatStore
-          .getState()
-          .paneLayout.panes.some((pane) => pane.id === paneId)
-      ) {
-        return false;
-      }
+      const loaded = await loadFreshChatWorktree(projectPath, generation);
+      if (!loaded || !isOpenEntry(paneId)) return false;
       const sessionId = openProjectSession(
         "New Chat",
         projectPath,
-        mainWorktree
+        loaded.mainWorktree
       );
       setDeleteError(null);
       return bindPaneToSession(paneId, sessionId);
     } catch {
-      if (
-        useChatStore
-          .getState()
-          .paneLayout.panes.some((pane) => pane.id === paneId)
-      ) {
-        setDeleteError(unavailable);
-      }
+      if (isOpenEntry(paneId)) setDeleteError(unavailable);
       return false;
     }
   }, [
-    activePaneId,
-    normalizedPaneLayout.panes,
+    shownPaneId,
     isMaximized,
     selectedProjectId,
     hasBrowsedProject,
@@ -753,36 +748,37 @@ export function ChatWindowManager({
     open,
     dispatch: {
       shortcutsOpen,
-      canAddSplitPane,
       hasActiveSession: !!activeSessionId,
+      toggleExpanded: toggleFromShortcut,
       focusPaneByIndex,
       focusPaneByOffset,
+      focusNeedingYou,
+      moveActivePane,
       focusAreaByOffset: (offset) =>
-        moveChatArea(document.activeElement, offset) ||
-        focusPaneByOffset(offset),
+        moveChatArea(document.activeElement, offset),
+      openFreshChat,
+      closeActivePane,
       historyNavigationEnabled: isMaximized,
       focusHistorySearch,
       openPaneFind: () => {
-        const paneId = activePaneId ?? visiblePanes[0]?.id;
-        const openFind = paneId ? paneFinds.current.get(paneId) : undefined;
+        const openFind = shownPaneId
+          ? paneFinds.current.get(shownPaneId)
+          : undefined;
         return openFind ? openFind() : false;
       },
       selectHistorySessionByOffset,
       selectHistoryProjectByOffset,
-      closeActivePane,
-      keepOnlyActivePane,
-      splitWithFreshSession,
       startFreshActiveSession: startFreshActiveSessionForKeyboard,
       toggleHistorySelector,
       toggleHistoryVisibility,
       toggleChangesPanel: () => {
-        const paneId = activePaneId ?? normalizedPaneLayout.panes[0]?.id;
-        const toggle = paneId ? changesToggles.current.get(paneId) : undefined;
+        const toggle = shownPaneId
+          ? changesToggles.current.get(shownPaneId)
+          : undefined;
         if (!toggle) return false;
         toggle();
         return true;
       },
-      toggleMaximized: toggleFromShortcut,
     },
     setShortcutsOpen,
   });
@@ -863,15 +859,15 @@ export function ChatWindowManager({
         startResizeDrag={startResizeDrag}
         resizePanel={resizePanel}
       />
-      {visiblePanes.length > 0 && (
+      {shownPane && (
         <div className="hc-panel-main">
           {isMaximized && historyVisible && (
             <LocalChatMiniPanel
               width={effectiveHistoryWidth}
               activeSessionId={
-                activeRunPane
+                isRunPane(shownPane)
                   ? ""
-                  : (activeSessionId ?? visiblePanes[0].sessionId ?? "")
+                  : (activeSessionId ?? shownPane.sessionId)
               }
               activeRunId={activeRunPane?.runId ?? null}
               activeProviderThreadId={activeProviderThreadId}
@@ -888,6 +884,12 @@ export function ChatWindowManager({
               projectWarning={projectGroupingWarning}
               onSelect={(sessionId) => {
                 selectHistorySessionForActivePane(sessionId);
+              }}
+              onOpenInNewTab={(sessionId) => {
+                setDeleteError(null);
+                void openSessionInNewTab(sessionId).then((opened) => {
+                  if (!opened) bumpHistoryRevision();
+                });
               }}
               onSelectAgent={(sessionId, agent) => {
                 void selectAgentThreadForActivePane(sessionId, agent);
@@ -913,24 +915,35 @@ export function ChatWindowManager({
               onResize={resizeHistoryWidth}
             />
           )}
-          <ChatPaneList
-            registerChangesToggle={registerChangesToggle}
-            registerPaneFind={registerPaneFind}
-            visiblePanes={visiblePanes}
-            activePaneId={activePaneId}
-            isMaximized={isMaximized}
-            canAddSplitPane={canAddSplitPane}
-            focusPane={focusPane}
-            closePane={closePane}
-            unsplitPanes={unsplitPanes}
-            closeChatPanel={closeChatPanel}
-            toggleHistorySelector={toggleHistorySelector}
-            toggleMaximized={toggleMaximized}
-            startFreshActiveSession={startFreshActiveSession}
-            splitWithFreshSession={splitWithFreshSession}
-            projectLabelBySessionId={projectLabelBySessionId}
-            renderObserver={renderObserver}
-          />
+          <div className="hc-workspace">
+            <ChatTabStrip
+              tabs={tabs}
+              activeId={shownPaneId}
+              expanded={isMaximized}
+              needingYou={needingYou}
+              historyVisible={historyVisible}
+              onSelect={focusPane}
+              onEnterChat={activatePane}
+              onClose={closePane}
+              onMoveBefore={moveChatBefore}
+              onFreshChat={() => void openFreshChat()}
+              onToggleExpanded={toggleMaximized}
+              onToggleHistory={toggleHistoryVisibility}
+              onNextNeedingYou={() => focusNeedingYou(1)}
+            />
+            <ChatPaneList
+              registerChangesToggle={registerChangesToggle}
+              registerPaneFind={registerPaneFind}
+              shownPane={shownPane}
+              tabPanels={isMaximized}
+              focusPane={focusPane}
+              closeChatPanel={closeChatPanel}
+              startFreshActiveSession={startFreshActiveSession}
+              showProjectContext={openChatsSpanProjects}
+              projectLabelBySessionId={projectLabelBySessionId}
+              renderObserver={renderObserver}
+            />
+          </div>
         </div>
       )}
       {shortcutsOpen && (

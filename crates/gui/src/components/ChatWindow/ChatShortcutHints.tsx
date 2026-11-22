@@ -1,12 +1,22 @@
 import {
   CHAT_AREA_SHORTCUT,
   CHAT_HELP_SHORTCUT,
+  CHAT_HISTORY_SHORTCUT,
   CHANGES_HINT_GROUPS,
   TRANSCRIPT_HINTS,
+  WORKSPACE_SHORTCUTS,
   presentChatShortcut,
+  type ChatShortcutDefinition,
 } from "./chatShortcuts";
 
 const chatHelpKeys = presentChatShortcut(CHAT_HELP_SHORTCUT)?.keys ?? [];
+
+function hint(shortcut: ChatShortcutDefinition) {
+  return {
+    keys: presentChatShortcut(shortcut)?.keys ?? [],
+    label: shortcut.label,
+  };
+}
 
 /** Changes bindings by situation, each listed once (in its first group). */
 function changesSections() {
@@ -32,12 +42,12 @@ export const CHAT_SHORTCUT_SECTIONS = [
     title: "Panel",
     shortcuts: [
       { keys: ["⌥", "⌥"], label: "Toggle chat" },
-      { keys: ["⌘", "\\"], label: "Maximize or collapse" },
+      hint(WORKSPACE_SHORTCUTS.toggleExpanded),
       { keys: chatHelpKeys, label: CHAT_HELP_SHORTCUT.label },
       { keys: ["⌘", "⌥", "[ / ]"], label: "Previous/next project" },
       { keys: ["⌘", "F"], label: "Find in conversation" },
       { keys: ["⌘", "⇧", "F"], label: "Search chats" },
-      { keys: ["⌘", "B"], label: "Show/hide chat sidebar" },
+      hint(CHAT_HISTORY_SHORTCUT),
       {
         keys: ["⌘", "⇧", "B"],
         label: "Show/hide Changes (worktree has changes)",
@@ -51,17 +61,18 @@ export const CHAT_SHORTCUT_SECTIONS = [
   },
   ...changesSections(),
   {
-    title: "Panes",
+    title: "Chats",
     shortcuts: [
-      { keys: ["⌘", "⌥", "\\"], label: "Split pane" },
-      { keys: ["⌘", "⇧", "⌥", "\\"], label: "Close active pane" },
-      { keys: ["⌘", "⌥", "M"], label: "Keep only active pane" },
-      {
-        keys: presentChatShortcut(CHAT_AREA_SHORTCUT)?.keys ?? [],
-        label: CHAT_AREA_SHORTCUT.label,
-      },
-      { keys: ["⌃", "Tab"], label: "Focus next pane" },
-      { keys: ["⌘", "⌥", "1-6"], label: "Focus pane by number" },
+      hint(WORKSPACE_SHORTCUTS.nextChat),
+      hint(WORKSPACE_SHORTCUTS.previousChat),
+      hint(WORKSPACE_SHORTCUTS.chatByNumber),
+      hint(WORKSPACE_SHORTCUTS.nextNeedingYou),
+      hint(WORKSPACE_SHORTCUTS.previousNeedingYou),
+      hint(WORKSPACE_SHORTCUTS.moveChatLeft),
+      hint(WORKSPACE_SHORTCUTS.moveChatRight),
+      hint(WORKSPACE_SHORTCUTS.freshChat),
+      hint(WORKSPACE_SHORTCUTS.closeChat),
+      hint(CHAT_AREA_SHORTCUT),
     ],
   },
   {
@@ -77,7 +88,10 @@ export const CHAT_SHORTCUT_SECTIONS = [
       },
       { keys: ["⌘", "⇧", "⌥", "H"], label: "History for active pane" },
       { keys: ["Enter"], label: "Send or queue during an active turn" },
-      { keys: ["⌃", "Enter"], label: "Steer the active turn from the composer" },
+      {
+        keys: ["⌃", "Enter"],
+        label: "Steer the active turn from the composer",
+      },
       {
         keys: ["⌘", "⌥", "↑ / ↓"],
         label: "Up to pending comments, then the transcript / back down",

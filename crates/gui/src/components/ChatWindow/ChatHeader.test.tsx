@@ -306,72 +306,20 @@ describe("ChatHeader", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows chat history button when not wide", () => {
-    const onToggleHistory = vi.fn();
-    renderHeader({ onToggleHistory, isWide: false });
-
+  // Workspace controls (history, expand, new/close/show-only chat) moved to
+  // the tab strip; the header keeps the chat's own actions only.
+  it.each([
+    "Toggle chat history",
+    "Widen chat panel",
+    "Collapse chat panel",
+    "Split chat pane",
+    "Keep only this pane",
+    "Close this pane",
+  ])("does not offer the workspace control %s", (name) => {
+    renderHeader({ onClosePanel: vi.fn(), onStartFresh: vi.fn() });
+    expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     openPaneMenu();
-    fireEvent.click(menuItem("Toggle chat history"));
-    expect(onToggleHistory).toHaveBeenCalledTimes(1);
-  });
-
-  it("hides chat history button when wide", () => {
-    renderHeader({ onToggleHistory: vi.fn(), isWide: true });
-
-    expect(
-      screen.queryByRole("button", { name: "Toggle chat history" })
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows widen button with 'Widen' label when not wide", () => {
-    const onToggleWide = vi.fn();
-    renderHeader({ onToggleWide, isWide: false });
-
-    const btn = screen.getByRole("button", { name: "Widen chat panel" });
-    fireEvent.click(btn);
-    expect(onToggleWide).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows widen button with 'Collapse' label when wide", () => {
-    const onToggleWide = vi.fn();
-    renderHeader({ onToggleWide, isWide: true });
-
-    expect(
-      screen.getByRole("button", { name: "Collapse chat panel" })
-    ).toBeInTheDocument();
-  });
-
-  it("shows split pane button when onSplitPane is provided and canSplitPane", () => {
-    const onSplitPane = vi.fn();
-    renderHeader({ onSplitPane, canSplitPane: true });
-
-    openPaneMenu();
-    fireEvent.click(menuItem("Split chat pane"));
-    expect(onSplitPane).toHaveBeenCalledTimes(1);
-  });
-
-  it("disables split pane button when canSplitPane is false", () => {
-    renderHeader({ onSplitPane: vi.fn(), canSplitPane: false });
-    openPaneMenu();
-    expect(menuItem("Split chat pane")).toBeDisabled();
-  });
-
-  it("shows unsplit panes button when onUnsplitPanes is provided", () => {
-    const onUnsplitPanes = vi.fn();
-    renderHeader({ onUnsplitPanes });
-
-    openPaneMenu();
-    fireEvent.click(menuItem("Keep only this pane"));
-    expect(onUnsplitPanes).toHaveBeenCalledTimes(1);
-  });
-
-  it("shows close pane button when onClosePane is provided", () => {
-    const onClosePane = vi.fn();
-    renderHeader({ onClosePane });
-
-    openPaneMenu();
-    fireEvent.click(menuItem("Close this pane"));
-    expect(onClosePane).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menuitem", { name })).not.toBeInTheDocument();
   });
 
   it("shows close panel button when onClosePanel is provided", () => {
@@ -420,20 +368,12 @@ describe("ChatHeader", () => {
   });
 
   it("renders all optional buttons when all callbacks are provided", () => {
-    renderHeader({
-      onStartFresh: vi.fn(),
-      onToggleHistory: vi.fn(),
-      onToggleWide: vi.fn(),
-      onSplitPane: vi.fn(),
-      onUnsplitPanes: vi.fn(),
-      onClosePane: vi.fn(),
-      onClosePanel: vi.fn(),
-    });
-    // Inline: title + widen + stop + overflow + close panel.
-    expect(screen.getAllByRole("button")).toHaveLength(5);
+    renderHeader({ onStartFresh: vi.fn(), onClosePanel: vi.fn() });
+    // Inline: title + stop + overflow + close panel.
+    expect(screen.getAllByRole("button")).toHaveLength(4);
     openPaneMenu();
-    // Menu: start fresh, history, split, keep only, close pane, clear.
-    expect(screen.getAllByRole("menuitem")).toHaveLength(6);
+    // Menu: start fresh, clear.
+    expect(screen.getAllByRole("menuitem")).toHaveLength(2);
   });
 
   it("applies danger class to stop generation button", () => {

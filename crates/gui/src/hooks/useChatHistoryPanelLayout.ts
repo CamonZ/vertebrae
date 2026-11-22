@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  MIN_SPLIT_PANE_WIDTH,
-  PANE_SEPARATOR_WIDTH,
-} from "./useChatPaneManagement";
 
+/** The narrowest chat the expanded workspace keeps beside the history. */
+export const MIN_CHAT_PANE_WIDTH = 360;
 export const HISTORY_WIDTH_STORAGE_KEY = "chat-window-manager-history-width";
 export const MIN_HISTORY_WIDTH = 272;
 export const MAX_HISTORY_WIDTH = 640;
@@ -17,21 +15,12 @@ export function clampHistoryWidth(width: number): number {
 }
 
 /**
- * Returns the largest history width that leaves every visible chat pane at
- * least its supported minimum width.
+ * Returns the largest history width that leaves the chat at least its
+ * supported minimum width.
  */
-export function maxHistoryWidthForLayout(
-  renderedPanelWidth: number,
-  paneCount: number
-): number {
-  const integralPaneCount = Number.isFinite(paneCount)
-    ? Math.floor(paneCount)
-    : 1;
-  const safePaneCount = Math.max(1, integralPaneCount);
-  const paneWidth = safePaneCount * MIN_SPLIT_PANE_WIDTH;
-  const separatorWidth = (safePaneCount - 1) * PANE_SEPARATOR_WIDTH;
+export function maxHistoryWidthForLayout(renderedPanelWidth: number): number {
   const availableWidth = Number.isFinite(renderedPanelWidth)
-    ? renderedPanelWidth - paneWidth - separatorWidth
+    ? renderedPanelWidth - MIN_CHAT_PANE_WIDTH
     : Number.NaN;
 
   return clampHistoryWidth(availableWidth);
@@ -39,11 +28,10 @@ export function maxHistoryWidthForLayout(
 
 export function clampHistoryWidthForLayout(
   width: number,
-  renderedPanelWidth: number,
-  paneCount: number
+  renderedPanelWidth: number
 ): number {
   return Math.min(
-    maxHistoryWidthForLayout(renderedPanelWidth, paneCount),
+    maxHistoryWidthForLayout(renderedPanelWidth),
     clampHistoryWidth(width)
   );
 }

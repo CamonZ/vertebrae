@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ChatPaneList } from "./ChatPaneList";
 import { useChatStore } from "../../stores/chatStore";
 import type { ChatSession, LocalChatPane } from "../../stores/chatStore";
+import { EMPTY_WORKSPACE } from "../../stores/chatWorkspace";
 
 const windowRenders = vi.hoisted(() => ({ count: 0 }));
 
@@ -42,7 +43,11 @@ function createSession(id: string): ChatSession {
   };
 }
 
-function renderPaneList(count = 1, maximized = false) {
+beforeEach(() => {
+  useChatStore.setState({ paneLayout: EMPTY_WORKSPACE });
+});
+
+function renderPaneList(count = 1, showProjectContext = false) {
   const panes: LocalChatPane[] = Array.from({ length: count }, (_, index) => ({
     id: `pane-${index + 1}`,
     sessionId: `session-${index + 1}`,
@@ -58,23 +63,17 @@ function renderPaneList(count = 1, maximized = false) {
 
   const focusPane = vi.fn();
   const props = {
-    visiblePanes: panes,
-    activePaneId: null,
-    isMaximized: maximized,
-    canAddSplitPane: false,
+    shownPane: panes[0],
+    tabPanels: false,
     focusPane,
-    closePane: vi.fn(),
-    unsplitPanes: vi.fn(),
     closeChatPanel: vi.fn(),
-    toggleHistorySelector: vi.fn(),
-    toggleMaximized: vi.fn(),
     startFreshActiveSession: vi.fn(),
-    splitWithFreshSession: vi.fn(),
+    showProjectContext,
   };
 
   const view = render(<ChatPaneList {...props} />);
 
-  return { ...view, props, focusPane };
+  return { ...view, props, panes, focusPane };
 }
 
 describe("ChatPaneList", () => {
@@ -114,25 +113,29 @@ describe("ChatPaneList", () => {
     });
 
     const pane = screen.getByTestId("chat-pane");
-    expect(pane).toHaveAttribute("aria-label", "Chat pane 1: Renamed");
+    expect(pane).toHaveAttribute("aria-label", "Renamed");
   });
 
-  it.each([1, 2])(
-    "shows project context only with multiple visible panes (%s)",
-    (count) => {
-      renderPaneList(count);
-
-      const panes = screen.getAllByTestId("mock-chat-window");
-      const expectedVisibility = String(count > 1);
-
-      for (const pane of panes) {
-        expect(pane).toHaveAttribute(
-          "data-project-visible",
-          expectedVisibility
-        );
-      }
+  it.each([false, true])(
+    "passes the project-context flag to the chat (%s)",
+    (showProjectContext) => {
+      renderPaneList(1, showProjectContext);
+      expect(screen.getByTestId("mock-chat-window")).toHaveAttribute(
+        "data-project-visible",
+        String(showProjectContext)
+      );
     }
   );
+
+  it("renders only the shown chat, as the active tab's panel", () => {
+    const { props, panes, rerender } = renderPaneList(2);
+    rerender(<ChatPaneList {...props} shownPane={panes[1]} tabPanels />);
+    const slots = document.querySelectorAll(".hc-chat-pane-slot");
+    expect(slots).toHaveLength(1);
+    expect(slots[0]).toHaveAttribute("role", "tabpanel");
+    expect(slots[0]).toHaveAttribute("id", "chat-tabpanel-pane-2");
+    expect(slots[0]).toHaveAttribute("data-pane-id", "pane-2");
+  });
 
   it("focuses the clicked pane input after selecting the pane", () => {
     const { focusPane } = renderPaneList();
@@ -146,206 +149,37 @@ describe("ChatPaneList", () => {
   });
 });
 
-describe("split pane allocation integration", () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
+describe("leaving a focused chat", () => {
+  it("parks focus on the pane list instead of the body", () => {
+    const { props, panes, rerender, container } = renderPaneList(2);
+    const first = screen.getByTestId("local-chat-composer");
+    first.focus();
 
-  it("resizes just a pair, retains drafts/focus/instances and does not rerender chats", () => {
-    const widthSpy = vi.spyOn(HTMLElement.prototype, "clientWidth", "get");
-    widthSpy.mockReturnValue(1516);
+    // The second tab is chosen: the focused first chat unmounts.
+    rerender(<ChatPaneList {...props} shownPane={panes[1]} />);
 
-    const { focusPane, props, rerender } = renderPaneList(3, true);
-    const handles = screen.getAllByRole("separator");
-    const panes = screen.getAllByTestId("chat-pane");
-    const slots = panes.map((pane) => pane.parentElement!);
-    const inputs = screen.getAllByTestId("local-chat-composer");
-
-    expect(handles).toHaveLength(2);
-
-    fireEvent.change(inputs[0], { target: { value: "draft" } });
-    inputs[0].focus();
-    const renders = windowRenders.count;
-
-    fireEvent.keyDown(handles[0], { key: "ArrowRight" });
-
-    const expectedWidths = [516, 484, 500];
-
-    slots.forEach((slot, index) => {
-      const width = parseFloat(slot.style.flexBasis);
-      const expectedWidth = expectedWidths[index];
-
-      expect(width).toBeCloseTo(expectedWidth, 6);
-    });
-
-    const resizedInputs = screen.getAllByTestId("local-chat-composer");
-
-    expect(handles[0]).toHaveAttribute("aria-valuenow", "516");
-    expect(resizedInputs[0]).toBe(inputs[0]);
-    expect(inputs[0]).toHaveValue("draft");
-    expect(inputs[0]).toHaveFocus();
-    expect(windowRenders.count).toBe(renders);
-    expect(focusPane).not.toHaveBeenCalled();
-
-    const unrelatedCallbacks = [
-      props.closePane,
-      props.unsplitPanes,
-      props.closeChatPanel,
-      props.toggleHistorySelector,
-      props.toggleMaximized,
-    ];
-
-    for (const callback of unrelatedCallbacks) {
-      expect(callback).not.toHaveBeenCalled();
-    }
-
-    act(() => {
-      const store = useChatStore.getState();
-
-      store.addMessage("session-1", {
-        kind: "assistant",
-        text: "streamed",
-        timestamp: "2026-11-08T12:00:00Z",
-      });
-    });
-
-    expect(slots[0].style.flexBasis).toBe("516px");
-
-    const remainingPanes = props.visiblePanes.slice(1);
-    const replacementPane = {
-      id: props.visiblePanes[0].id,
-      sessionId: "session-2",
-    };
-    const replacementPanes = [replacementPane, ...remainingPanes];
-
-    rerender(<ChatPaneList {...props} visiblePanes={replacementPanes} />);
-
-    expect(slots[0].style.flexBasis).toBe("516px");
-
-    rerender(<ChatPaneList {...props} visiblePanes={remainingPanes} />);
-
-    const survivingHandles = screen.getAllByRole("separator");
-    const survivingPanes = screen.getAllByTestId("chat-pane");
-    const firstSurvivingSlot = survivingPanes[0].parentElement;
-
-    expect(survivingHandles).toHaveLength(1);
-    expect(firstSurvivingSlot?.dataset.paneId).toBe("pane-2");
-    expect(firstSurvivingSlot?.style.flexBasis).toBe("754px");
-
-    const compactPanes = props.visiblePanes.slice(0, 1);
-
-    rerender(
-      <ChatPaneList
-        {...props}
-        isMaximized={false}
-        visiblePanes={compactPanes}
-      />
+    expect(first.isConnected).toBe(false);
+    expect(document.activeElement).toBe(
+      container.querySelector(".hc-chat-panes")
     );
-
-    const compactSeparator = screen.queryByRole("separator");
-    expect(compactSeparator).not.toBeInTheDocument();
-
-    rerender(<ChatPaneList {...props} />);
-
-    const expandedPanes = screen.getAllByTestId("chat-pane");
-    const firstExpandedSlot = expandedPanes[0].parentElement;
-
-    expect(firstExpandedSlot?.style.flexBasis).toBe("500px");
   });
 
-  it("retains preferred proportions through measured viewport and history changes", () => {
-    let width = 1516;
-    let measure = () => {};
+  it("leaves focus alone when the chat unmounts without it", () => {
+    const { props, panes, rerender } = renderPaneList(2);
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
 
-    const widthSpy = vi.spyOn(HTMLElement.prototype, "clientWidth", "get");
-    widthSpy.mockImplementation(() => width);
+    rerender(<ChatPaneList {...props} shownPane={panes[1]} />);
 
-    class TestResizeObserver {
-      constructor(callback: () => void) {
-        measure = callback;
-      }
-
-      observe() {}
-      disconnect() {}
-    }
-
-    vi.stubGlobal("ResizeObserver", TestResizeObserver);
-
-    const { props, rerender } = renderPaneList(3, true);
-    const handles = screen.getAllByRole("separator");
-    const firstHandle = handles[0];
-    const sizes = () => {
-      const panes = screen.getAllByTestId("chat-pane");
-
-      return panes.map((pane) => {
-        const basis = pane.parentElement!.style.flexBasis;
-
-        return parseFloat(basis);
-      });
-    };
-
-    fireEvent.keyDown(firstHandle, { key: "ArrowRight" });
-    const preferred = sizes();
-
-    act(() => {
-      width = 800;
-      measure();
-    });
-
-    const minimumSizes = sizes();
-    expect(minimumSizes).toEqual([360, 360, 360]);
-
-    fireEvent.keyDown(firstHandle, { key: "ArrowLeft" });
-
-    act(() => {
-      width = 1816;
-      measure();
-    });
-
-    const expandedSizes = sizes();
-
-    expandedSizes.forEach((value, index) => {
-      const expectedWidth = preferred[index] * 1.2;
-
-      expect(value).toBeCloseTo(expectedWidth, 6);
-    });
-
-    act(() => {
-      width = 1516;
-      measure();
-    });
-
-    const restoredSizes = sizes();
-
-    restoredSizes.forEach((value, index) => {
-      expect(value).toBeCloseTo(preferred[index], 6);
-    });
-
-    const singlePane = props.visiblePanes.slice(0, 1);
-
-    rerender(<ChatPaneList {...props} visiblePanes={singlePane} />);
-
-    const singlePaneSeparator = screen.queryByRole("separator");
-    expect(singlePaneSeparator).not.toBeInTheDocument();
-
-    rerender(<ChatPaneList {...props} />);
-
-    const normalizedSizes = sizes();
-    expect(normalizedSizes).toEqual([500, 500, 500]);
-
-    vi.unstubAllGlobals();
+    expect(outside).toHaveFocus();
+    outside.remove();
   });
+});
 
-  it("omits separators for a single expanded pane and compact layouts", () => {
-    const { props, rerender } = renderPaneList(1, true);
-    const expandedSeparator = screen.queryByRole("separator");
-
-    expect(expandedSeparator).not.toBeInTheDocument();
-
-    rerender(<ChatPaneList {...props} isMaximized={false} />);
-
-    const compactSeparator = screen.queryByRole("separator");
-    expect(compactSeparator).not.toBeInTheDocument();
+describe("single chat layout", () => {
+  it("renders no pane resize separators", () => {
+    renderPaneList(2);
+    expect(screen.queryByRole("separator")).not.toBeInTheDocument();
   });
 });

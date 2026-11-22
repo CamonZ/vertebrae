@@ -1250,7 +1250,7 @@ async fn verify_resume_after_restart(world: &mut GuiWorld, outdated: bool) {
     {
         gui_acceptance::click_pane_action(
             &client,
-            "[title='Toggle chat history']",
+            "[data-testid='chat-tabs-history']",
             "open conversation history",
         )
         .await;
@@ -1822,7 +1822,7 @@ async fn themed_layout(world: &mut GuiWorld) {
 
     client.set_window_rect(0, 0, 1280, 1024).await.unwrap();
 
-    let widen_button = Locator::Css("[aria-label='Widen chat panel']");
+    let widen_button = Locator::Css("[aria-label='Expand chat workspace']");
 
     if let Ok(button) = client.find(widen_button).await {
         gui_acceptance::wait_actionable(&button).await;
@@ -2512,7 +2512,7 @@ async fn ask_restored_tool_thread(world: &mut GuiWorld) {
     {
         gui_acceptance::click_pane_action(
             &client,
-            "[title='Toggle chat history']",
+            "[data-testid='chat-tabs-history']",
             "open conversation history",
         )
         .await;

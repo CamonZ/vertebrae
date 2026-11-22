@@ -1,12 +1,16 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useChatPaneManagement } from "./useChatPaneManagement";
 import {
-  useChatStore,
-  type ChatSession,
+  chatsNeedingYou,
+  useChatTabs,
+} from "../components/ChatWindow/useChatTabs";
+import { useChatStore, type ChatSession } from "../stores/chatStore";
+import {
+  EMPTY_WORKSPACE,
   type ChatPane,
-  type ChatPaneLayout,
-} from "../stores/chatStore";
+  type ChatWorkspaceLayout,
+} from "../stores/chatWorkspace";
 
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return {
@@ -21,228 +25,172 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   };
 }
 
-function setStoreState(
-  sessions: Record<string, ChatSession>,
-  paneLayout: ChatPaneLayout,
-  activeSessionId: string | null = "s1"
+const pane1: ChatPane = { id: "p1", sessionId: "s1" };
+const pane2: ChatPane = { id: "p2", sessionId: "s2" };
+const pane3: ChatPane = { id: "p3", sessionId: "s3" };
+
+function seed(
+  order: ChatPane[],
+  layout: Partial<ChatWorkspaceLayout> = {},
+  extraSessions: ChatSession[] = []
 ) {
+  const sessions: Record<string, ChatSession> = {};
+  for (const pane of order) {
+    if ("sessionId" in pane && pane.sessionId) {
+      sessions[pane.sessionId] = makeSession({
+        id: pane.sessionId,
+        label: pane.sessionId,
+      });
+    }
+  }
+  for (const session of extraSessions) sessions[session.id] = session;
   useChatStore.setState({
     sessions,
-    paneLayout,
-    activeSessionId,
+    activeSessionId:
+      order[0] && "sessionId" in order[0] ? order[0].sessionId : null,
+    paneLayout: {
+      ...EMPTY_WORKSPACE,
+      order,
+      activeId: order[0]?.id ?? null,
+      ...layout,
+    },
   });
 }
 
-function renderPaneHook(opts: {
-  isMaximized?: boolean;
-  renderedPanelWidth?: number;
-  activeSession?: ChatSession | null;
-}) {
-  return renderHook(
-    ({ isMaximized, renderedPanelWidth, activeSession }) =>
-      useChatPaneManagement({
-        isMaximized,
-        renderedPanelWidth,
-        activeSessionId: activeSession?.id ?? null,
-      }),
-    {
-      initialProps: {
-        isMaximized: opts.isMaximized ?? false,
-        renderedPanelWidth: opts.renderedPanelWidth ?? 400,
-        activeSession: opts.activeSession ?? null,
-      },
-    }
-  );
+/** Composes the hook with the strip's needing-you list, as the manager does. */
+function renderPaneHook() {
+  return renderHook(() => {
+    const order = useChatStore((state) => state.paneLayout.order);
+    const tabs = useChatTabs(order, undefined);
+    return useChatPaneManagement({ needingYou: chatsNeedingYou(tabs) });
+  });
 }
+
+const layout = () => useChatStore.getState().paneLayout;
 
 describe("useChatPaneManagement", () => {
   beforeEach(() => {
     useChatStore.setState({
       sessions: {},
       activeSessionId: null,
-      paneLayout: { panes: [], activePaneId: null },
-      panelOpen: false,
+      paneLayout: EMPTY_WORKSPACE,
+      panelOpen: true,
     });
   });
 
-  describe("non-maximized mode", () => {
-    it("renders a single fallback pane from the active session", () => {
-      const session = makeSession({ id: "s1" });
-      setStoreState({ s1: session }, { panes: [], activePaneId: null });
-      const { result } = renderPaneHook({
-        isMaximized: false,
-        activeSession: session,
-      });
-      expect(result.current.visiblePanes).toHaveLength(1);
-      expect(result.current.visiblePanes[0].sessionId).toBe("s1");
+  describe("shown chat", () => {
+    it("shows nothing before any chat opens", () => {
+      const { result } = renderPaneHook();
+      expect(result.current.shownPane).toBeNull();
     });
 
-    it("renders no panes when there is no active session", () => {
-      const { result } = renderPaneHook({
-        isMaximized: false,
-        activeSession: null,
-      });
-      expect(result.current.visiblePanes).toHaveLength(0);
-      expect(result.current.activePaneId).toBeNull();
+    it("shows only the active chat", () => {
+      seed([pane1, pane2, pane3], { activeId: "p2" });
+      const { result } = renderPaneHook();
+      expect(result.current.shownPane?.id).toBe("p2");
     });
 
-    it("canAddSplitPane is false when not maximized", () => {
-      const session = makeSession();
-      setStoreState({ s1: session }, { panes: [], activePaneId: null });
-      const { result } = renderPaneHook({
-        isMaximized: false,
-        activeSession: session,
-      });
-      expect(result.current.canAddSplitPane).toBe(false);
+    it("falls back to the first chat without an active id", () => {
+      seed([pane1, pane2], { activeId: null });
+      const { result } = renderPaneHook();
+      expect(result.current.shownPane?.id).toBe("p1");
     });
   });
 
-  describe("maximized mode", () => {
-    const pane1: ChatPane = { id: "p1", sessionId: "s1" };
-    const pane2: ChatPane = { id: "p2", sessionId: "s2" };
-
-    function setupMaximized(
-      panes: ChatPane[],
-      activePaneId: string | null,
-      activeSession: ChatSession | null = null,
-      renderedPanelWidth: number = 1000
-    ) {
-      const sessions: Record<string, ChatSession> = {};
-      for (const pane of panes) {
-        if (pane.sessionId && !sessions[pane.sessionId]) {
-          sessions[pane.sessionId] = makeSession({ id: pane.sessionId });
-        }
-      }
-      setStoreState(sessions, { panes, activePaneId });
-      return renderPaneHook({
-        isMaximized: true,
-        renderedPanelWidth,
-        activeSession,
+  describe("actions", () => {
+    it("focusPaneByIndex activates chat N and asks for its composer", () => {
+      seed([pane1, pane2, pane3]);
+      const { result } = renderPaneHook();
+      const revision = useChatStore.getState().composerFocusRevision;
+      act(() => {
+        expect(result.current.focusPaneByIndex(1)).toBe(true);
       });
-    }
-
-    it("renders store panes when maximized", () => {
-      const { result } = setupMaximized([pane1, pane2], "p1");
-      expect(result.current.visiblePanes).toHaveLength(2);
-      expect(result.current.activePaneId).toBe("p1");
+      expect(layout().activeId).toBe("p2");
+      expect(useChatStore.getState().composerFocusRevision).toBe(revision + 1);
     });
 
-    it("falls back to first pane when activePaneId is null", () => {
-      const { result } = setupMaximized([pane1, pane2], null);
-      expect(result.current.activePaneId).toBe("p1");
+    it("focusPaneByIndex(8) is the last chat however many are open", () => {
+      seed([pane1, pane2, pane3]);
+      const { result } = renderPaneHook();
+      act(() => {
+        result.current.focusPaneByIndex(8);
+      });
+      expect(layout().activeId).toBe("p3");
     });
 
-    it("canAddSplitPane is true when width is sufficient and panes < MAX", () => {
-      const { result } = setupMaximized([pane1], "p1");
-      // History (272) + two panes (720) + separator (8) = 1000.
-      // Exact minimum geometry is eligible.
-      expect(result.current.canAddSplitPane).toBe(true);
-    });
-
-    it("canAddSplitPane is false when width is insufficient", () => {
-      const { result } = setupMaximized([pane1], "p1", null, 400);
-      expect(result.current.canAddSplitPane).toBe(false);
-    });
-
-    it("canAddSplitPane is false when at MAX_CHAT_PANES", () => {
-      const panes: ChatPane[] = Array.from({ length: 6 }, (_, i) => ({
-        id: `p${i + 1}`,
-        sessionId: `s${i + 1}`,
-      }));
-      const { result } = setupMaximized(panes, "p1");
-      expect(result.current.canAddSplitPane).toBe(false);
-    });
-
-    it("focusPaneByIndex focuses the pane at the given index", () => {
-      const focusPane = vi.fn();
-      const store = useChatStore.getState();
-      useChatStore.setState({ ...store, focusPane });
-      const { result } = setupMaximized([pane1, pane2], "p1");
-      act(() => result.current.focusPaneByIndex(1));
-      expect(focusPane).toHaveBeenCalledWith("p2");
-    });
-
-    it("focusPaneByIndex returns false for out-of-range index", () => {
-      const { result } = setupMaximized([pane1], "p1");
+    it("focusPaneByIndex returns false for an index past the open chats", () => {
+      seed([pane1]);
+      const { result } = renderPaneHook();
       expect(result.current.focusPaneByIndex(5)).toBe(false);
     });
 
-    it("focusPaneByIndex returns true for valid index", () => {
-      const { result } = setupMaximized([pane1], "p1");
-      expect(result.current.focusPaneByIndex(0)).toBe(true);
+    it.each([
+      ["p1", 1, "p2"],
+      ["p2", 1, "p1"],
+      ["p1", -1, "p2"],
+    ])("focusPaneByOffset from %s by %i wraps to %s", (from, offset, to) => {
+      seed([pane1, pane2], { activeId: from });
+      const { result } = renderPaneHook();
+      act(() => {
+        expect(result.current.focusPaneByOffset(offset)).toBe(true);
+      });
+      expect(layout().activeId).toBe(to);
     });
 
-    it("focusPaneByOffset wraps around with modulo", () => {
-      const focusPane = vi.fn();
-      const store = useChatStore.getState();
-      useChatStore.setState({ ...store, focusPane });
-      // Start with p1 as the active pane
-      const { result } = setupMaximized([pane1, pane2], "p1");
-      // Offset +1 from p1 (index 0) → p2 (index 1)
-      expect(result.current.focusPaneByOffset(1)).toBe(true);
-      expect(focusPane).toHaveBeenLastCalledWith("p2");
-    });
-
-    it("focusPaneByOffset computes correct index from different active pane", () => {
-      const focusPane = vi.fn();
-      const store = useChatStore.getState();
-      useChatStore.setState({ ...store, focusPane });
-      // Start with p2 as the active pane
-      const { result } = setupMaximized([pane1, pane2], "p2");
-      // Offset +1 from p2 (index 1) → wraps to p1 (index 0)
-      expect(result.current.focusPaneByOffset(1)).toBe(true);
-      expect(focusPane).toHaveBeenLastCalledWith("p1");
-    });
-
-    it("focusPaneByOffset handles negative offset wrap", () => {
-      const focusPane = vi.fn();
-      const store = useChatStore.getState();
-      useChatStore.setState({ ...store, focusPane });
-      const { result } = setupMaximized([pane1, pane2], "p1");
-      // Offset -1 from p1 (index 0) → wraps to p2 (index 1)
-      expect(result.current.focusPaneByOffset(-1)).toBe(true);
-      expect(focusPane).toHaveBeenLastCalledWith("p2");
-    });
-
-    it("focusPaneByOffset returns false with single pane", () => {
-      const { result } = setupMaximized([pane1], "p1");
+    it("focusPaneByOffset returns false with a single chat", () => {
+      seed([pane1]);
+      const { result } = renderPaneHook();
       expect(result.current.focusPaneByOffset(1)).toBe(false);
     });
 
-    it("closeActivePane calls closePane with the active pane", () => {
-      const closePane = vi.fn();
-      const store = useChatStore.getState();
-      useChatStore.setState({ ...store, closePane });
-      const { result } = setupMaximized([pane1, pane2], "p1");
-      expect(result.current.closeActivePane()).toBe(true);
-      expect(closePane).toHaveBeenCalledWith("p1");
-    });
-
-    it("closeActivePane returns false with single pane", () => {
-      const { result } = setupMaximized([pane1], "p1");
-      expect(result.current.closeActivePane()).toBe(false);
-    });
-
-    it("closeActivePane returns false when not maximized", () => {
-      const { result } = renderPaneHook({
-        isMaximized: false,
-        activeSession: makeSession({ id: "s1" }),
+    it("focusNeedingYou cycles through chats needing the user", () => {
+      seed([pane1, pane2, pane3], {}, [
+        makeSession({ id: "s2", label: "s2", lifecycle: "error" }),
+        makeSession({ id: "s3", label: "s3", lifecycle: "error" }),
+      ]);
+      const { result, rerender } = renderPaneHook();
+      act(() => {
+        expect(result.current.focusNeedingYou(1)).toBe(true);
       });
+      const first = layout().activeId;
+      expect(["p2", "p3"]).toContain(first);
+      rerender();
+      act(() => {
+        result.current.focusNeedingYou(1);
+      });
+      expect(layout().activeId).not.toBe(first);
+      expect(["p2", "p3"]).toContain(layout().activeId);
+    });
+
+    it("focusNeedingYou returns false when no chat needs the user", () => {
+      seed([pane1, pane2]);
+      const { result } = renderPaneHook();
+      expect(result.current.focusNeedingYou(1)).toBe(false);
+    });
+
+    it("closeActivePane closes the active chat", () => {
+      seed([pane1, pane2], { activeId: "p1" });
+      const { result } = renderPaneHook();
+      act(() => {
+        expect(result.current.closeActivePane()).toBe(true);
+      });
+      expect(layout().order.map((pane) => pane.id)).toEqual(["p2"]);
+    });
+
+    it("closeActivePane keeps the last open chat", () => {
+      seed([pane1]);
+      const { result } = renderPaneHook();
       expect(result.current.closeActivePane()).toBe(false);
+      expect(layout().order).toHaveLength(1);
     });
 
-    it("keepOnlyActivePane calls unsplitPanes with the active pane id", () => {
-      const unsplitPanes = vi.fn();
-      const store = useChatStore.getState();
-      useChatStore.setState({ ...store, unsplitPanes });
-      const { result } = setupMaximized([pane1, pane2], "p1");
-      expect(result.current.keepOnlyActivePane()).toBe(true);
-      expect(unsplitPanes).toHaveBeenCalledWith("p1");
-    });
-
-    it("keepOnlyActivePane returns false with single pane", () => {
-      const { result } = setupMaximized([pane1], "p1");
-      expect(result.current.keepOnlyActivePane()).toBe(false);
+    it("moveActivePane moves the active chat in strip order", () => {
+      seed([pane1, pane2, pane3], { activeId: "p1" });
+      const { result } = renderPaneHook();
+      act(() => {
+        expect(result.current.moveActivePane(1)).toBe(true);
+      });
+      expect(layout().order.map((pane) => pane.id)).toEqual(["p2", "p1", "p3"]);
     });
   });
 });
