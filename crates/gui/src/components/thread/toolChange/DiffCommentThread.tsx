@@ -206,7 +206,7 @@ export function DiffCommentThread({
   onDiscussionClosed,
 }: {
   annotation: ReviewAnnotation;
-  onSaveDraft(body: string): void;
+  onSaveDraft?(body: string): void;
   onCancelDraft(): void;
   onDiscussDraft?(body: string): void;
   onAttachDraft?(body: string): void;
@@ -223,7 +223,7 @@ export function DiffCommentThread({
     const body = draft.trim();
     const submit = onDiscussDraft ?? onSaveDraft;
 
-    submit(body);
+    submit?.(body);
   };
   const sendDraftToMain = () => onAttachDraft?.(draft.trim());
 
@@ -244,11 +244,11 @@ export function DiffCommentThread({
         />
       ))}
       {annotation.draft ? (
-        <div role="dialog" aria-label="Comment on selected code">
+        <div role="dialog" aria-label={onSaveDraft ? "Comment on selected code" : "Discuss selected code"}>
           {onDiscussDraft && <DiscussionModelNotice />}
           <CommentEditor
             disabled={!!onDiscussDraft && !!choice?.error}
-            label="New diff comment"
+            label={onSaveDraft ? "New diff comment" : "New selection discussion"}
             placeholder={onDiscussDraft ? "Ask about selected code…" : "Write a comment…"}
             value={draft}
             onChange={setDraft}

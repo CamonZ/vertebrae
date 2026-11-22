@@ -170,6 +170,15 @@ fn association_changes_and_duplicate_terminals_do_not_rewrite_earlier_turns() {
         text(read(&store, "chat", "new", "a.txt").unwrap()),
         "new checkout\n"
     );
+    fs::remove_file(first.join("a.txt")).unwrap();
+    assert!(matches!(
+        read_for_checkout(&store, "chat", "old", "a.txt", Some(&first)),
+        HistoryRead::File(FileBody::Text { contents, .. }) if contents == "base\n"
+    ));
+    assert!(matches!(
+        read_for_checkout(&store, "chat", "new", "a.txt", Some(&first)),
+        HistoryRead::Failure { .. }
+    ));
     assert_ne!(first_recorder.capture.epoch, second_recorder.capture.epoch);
 }
 

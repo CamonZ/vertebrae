@@ -34,6 +34,7 @@ export function TurnDocument({
   onClose(): void;
 }) {
   const { path, root, history, reveal } = target;
+  const turnId = history.turnId;
   const capture = useToolAnnotation(
     history.sessionId,
     history.turnId ? JSON.stringify(["turn", history.turnId]) : null,
@@ -133,7 +134,25 @@ export function TurnDocument({
           <div className="changes-viewport">
             <Suspense fallback={<p role="status">Loading viewer…</p>}>
               <SourceEvidenceCode
+                key={JSON.stringify([
+                  root,
+                  history.sessionId,
+                  history.turnId,
+                  version,
+                  path,
+                  retry,
+                ])}
                 source={source}
+                discussionSource={
+                  root && latest
+                    ? { checkout: root, turn: null }
+                    : root && turnId
+                      ? {
+                          checkout: root,
+                          turn: { sessionId: history.sessionId, turnId },
+                        }
+                      : undefined
+                }
                 line={reveal?.line}
                 endLine={reveal?.endLine}
                 nonce={reveal?.nonce ?? 0}

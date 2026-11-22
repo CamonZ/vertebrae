@@ -10,11 +10,22 @@ import {
 } from "../thread/toolChange/diffLineMapper";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 
+export interface FullFileSource {
+  checkout: string;
+  turn: { sessionId: string; turnId: string } | null;
+}
+
+export function sameFullFile(a: FullFileSource | undefined, b: FullFileSource | undefined) {
+  return a?.checkout === b?.checkout &&
+    a?.turn?.sessionId === b?.turn?.sessionId && a?.turn?.turnId === b?.turn?.turnId;
+}
+
 export interface CodeSelection extends LineSpan {
   path: string;
   code: string;
   file: FilePatch;
   home: DiffCommentHome;
+  fullFile?: FullFileSource;
 }
 
 export interface SelectionThread {
@@ -79,7 +90,8 @@ function sameSelection(left: CodeSelection | null, right: CodeSelection | null) 
   if (left === right) return true;
   if (!left || !right || left.file !== right.file || left.path !== right.path ||
       left.side !== right.side || left.startLine !== right.startLine ||
-      left.endLine !== right.endLine || left.code !== right.code) return false;
+      left.endLine !== right.endLine || left.code !== right.code ||
+      !sameFullFile(left.fullFile, right.fullFile)) return false;
   const a = left.home;
   const b = right.home;
   return a.kind === "worktree"
@@ -90,7 +102,7 @@ function sameSelection(left: CodeSelection | null, right: CodeSelection | null) 
 export function selectionLabel(anchor: CodeSelection): string {
   const end = anchor.endLine === anchor.startLine ? "" : `-${anchor.endLine}`;
 
-  return `${anchor.path}:${anchor.startLine}${end} (${anchor.side})`;
+  return `${anchor.path}:${anchor.startLine}${end}${anchor.fullFile ? "" : ` (${anchor.side})`}`;
 }
 
 /** Note sent once, with the first follow-up after the selection changed. */
@@ -277,7 +289,7 @@ export class SelectionDiscussions {
   }
 
   applyMappings(
-    snapshot: WorktreeSnapshot,
+    snapshot: WorktreeSnapshot | null,
     mappings: readonly MappedReviewThread[]
   ) {
     if (this.snapshot !== snapshot) return;
@@ -286,7 +298,7 @@ export class SelectionDiscussions {
       const position = positions.get(thread.id);
       if (!position || thread.status.kind === "unreadable" || thread.git.original.home.kind !== "worktree") return thread;
       const original = thread.git.original;
-      const file = snapshot.files.find((file) =>
+      const file = original.fullFile ? undefined : snapshot?.files.find((file) =>
         original.side === "old"
           ? file.oldPath === original.file.oldPath
           : file.newPath === original.path
@@ -307,7 +319,7 @@ export class SelectionDiscussions {
       return {
         ...thread,
         anchor,
-        status: { kind: outdated ? "outdated" : file && spanRows(file, anchor) ? "inline" : "detached" },
+        status: { kind: outdated ? "outdated" : (original.fullFile || (file && spanRows(file, anchor))) ? "inline" : "detached" },
       } satisfies SelectionThread;
     });
 
@@ -318,7 +330,7 @@ export class SelectionDiscussions {
     this.snapshot = snapshot;
 
     const selection = this.state.selection;
-    if (selection?.home.kind !== "worktree") return;
+    if (selection?.home.kind !== "worktree" || selection.fullFile) return;
 
     const file = snapshot.files.find((file) => canonicalPath(file) === selection.path);
     if (!file || spanRows(file, selection)?.map((row) => row.text).join("\n") !== selection.code)

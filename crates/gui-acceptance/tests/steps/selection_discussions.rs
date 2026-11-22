@@ -97,15 +97,15 @@ fn flag_values<'a>(args: &'a [String], flag: &str) -> Vec<&'a str> {
 
 #[given("a Changes selection fixture is open beside a drafted main conversation")]
 async fn fixture(world: &mut GuiWorld) {
-    selection_fixture(world, false).await;
+    selection_fixture(world, false, "").await;
 }
 
 #[given("an unborn Git checkout is open with a recorded tool patch")]
 async fn unborn_fixture(world: &mut GuiWorld) {
-    selection_fixture(world, true).await;
+    selection_fixture(world, true, "").await;
 }
 
-async fn selection_fixture(world: &mut GuiWorld, unborn: bool) {
+async fn selection_fixture(world: &mut GuiWorld, unborn: bool, source_link: &str) {
     let path = world.temp_dir.as_ref().expect("fixture project").clone();
     let selection_path = path.join("selection.ts");
 
@@ -149,8 +149,16 @@ async fn selection_fixture(world: &mut GuiWorld, unborn: bool) {
         .unwrap();
     }
 
+    if !source_link.is_empty() {
+        extend_fixture_file(world);
+    }
+
     let mock_response = "Fixture answer.\n\n".repeat(80);
-    std::fs::write(gui_acceptance::MOCK_CHAT_RESPONSE_FILE, mock_response).unwrap();
+    if source_link.is_empty() {
+        std::fs::write(gui_acceptance::MOCK_CHAT_RESPONSE_FILE, mock_response).unwrap();
+    } else {
+        mock_recorded_reply("msg_recorded_first", &(mock_response + source_link));
+    }
 
     super::navigation::navigate_to(world, "/tasks", "selection-fixture").await;
 
@@ -2554,4 +2562,427 @@ async fn ask_restored_tool_thread(world: &mut GuiWorld) {
     )
     .await
     .unwrap();
+}
+
+fn extend_fixture_file(world: &GuiWorld) {
+    let path = world.temp_dir.as_ref().unwrap().join("selection.ts");
+    let mut file = std::fs::OpenOptions::new().append(true).open(path).unwrap();
+    for line in 4..=80 {
+        writeln!(file, "// Fixture line {line}").unwrap();
+    }
+}
+
+async fn verify_file_cursor_scroll(
+    client: &fantoccini::Client,
+    viewport_selector: &str,
+    start: u32,
+) {
+    let visible_line = format!(
+        r#"{DEEP}
+        const viewport = document.querySelector(arguments[0]);
+        const row = viewport && deep(viewport, `[data-line="${{arguments[1]}}"][data-selected-line]`);
+        if (!row) return false;
+        const bounds = row.getBoundingClientRect();
+        const area = viewport.getBoundingClientRect();
+        const cursor = viewport.closest('[data-diff-cursor-host="file"]');
+        const halo = cursor && getComputedStyle(cursor, '::after');
+        return document.activeElement === cursor &&
+            getComputedStyle(cursor).boxShadow === 'none' &&
+            halo?.position === 'absolute' && halo.boxShadow !== 'none' &&
+            bounds.top >= area.top - 1 &&
+            bounds.bottom <= Math.min(area.bottom, window.innerHeight) + 1;"#
+    );
+    let down = if start == 1 { 45 } else { 45 - start };
+    for (key, count, line) in [('\u{e015}', down, 45), ('\u{e013}', 45 - start, start)] {
+        let mut navigation = KeyActions::new("file-scroll-cursor".into());
+        for _ in 0..count {
+            navigation = navigation
+                .then(KeyAction::Down { value: key })
+                .then(KeyAction::Up { value: key });
+        }
+        client.perform_actions(navigation).await.unwrap();
+        gui_acceptance::wait_for_js(
+            client,
+            "keyboard cursor is visible inside the file viewport",
+            &visible_line,
+            vec![json!(viewport_selector), json!(line)],
+            Duration::from_secs(5),
+        )
+        .await;
+    }
+}
+
+#[when("I discuss unchanged lines in the full file")]
+async fn discuss_full_file(world: &mut GuiWorld) {
+    extend_fixture_file(world);
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    let client = wd.lock().await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[aria-label='Open selection.ts']"),
+        "open selection.ts",
+    )
+    .await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath(
+            "//section[@aria-label='Document selection.ts']//button[normalize-space(.)='File']",
+        ),
+        "show the full file",
+    )
+    .await;
+    let cursor_focused =
+        r#"return document.activeElement?.getAttribute('aria-label')?.startsWith('File lines.');"#;
+    gui_acceptance::wait_for_js(
+        &client,
+        "File view puts focus on the line cursor",
+        cursor_focused,
+        vec![],
+        Duration::from_secs(5),
+    )
+    .await;
+    for tab in [
+        Locator::XPath(
+            "//nav[@aria-label='Open documents']//button[normalize-space(.)='All changes']",
+        ),
+        Locator::Css("nav[aria-label='Open documents'] button[title='selection.ts']"),
+    ] {
+        let button = client.find(tab).await.unwrap();
+        button.send_keys("\u{e007}").await.unwrap();
+    }
+    gui_acceptance::wait_for_js(
+        &client,
+        "opening the tab immediately restores line-navigation focus",
+        cursor_focused,
+        vec![],
+        Duration::from_secs(5),
+    )
+    .await;
+    verify_file_cursor_scroll(
+        &client,
+        "[aria-label='Document selection.ts'] .document-file-scroll",
+        1,
+    )
+    .await;
+    world.screenshot(&client, "full-file-keyboard-focus").await;
+    let discuss = KeyActions::new("file-line-cursor".into())
+        .then(KeyAction::Down { value: 'c' })
+        .then(KeyAction::Up { value: 'c' });
+    client.perform_actions(discuss).await.unwrap();
+    submit_full_file_question(&client, "Why the first line?").await;
+    gui_acceptance::wait_until(
+        "saved first line reached the provider",
+        Duration::from_secs(20),
+        || async {
+            Ok(discussion_prompts().iter().any(|prompt| {
+                prompt.contains("\"startLine\":1,\"endLine\":1,\"code\":\"const first = 1;\"")
+                    && prompt.contains("Question: Why the first line?")
+            }))
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[then("the full-file discussion reopens at its saved range")]
+async fn reopen_full_file(world: &mut GuiWorld) {
+    reopen(world).await;
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    let client = wd.lock().await;
+    gui_acceptance::wait_for_js(
+        &client,
+        "reopened inline thread is under the first full-file line",
+        r#"const thread = document.querySelector('[aria-label="Document selection.ts"] [data-testid="selection-mini-thread"]');
+           return thread?.textContent.includes("selection.ts:1") &&
+                  thread.textContent.includes("Why the first line?");"#,
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+    world.screenshot(&client, "full-file-live-reopened").await;
+}
+
+#[then("I can still type and save edits in the full file")]
+async fn edit_full_file(world: &mut GuiWorld) {
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[aria-label='Close discussion']"),
+        "close discussion before editing",
+    )
+    .await;
+    let focus = format!(
+        r#"{DEEP}
+        const view = document.querySelector('[aria-label="Document selection.ts"]');
+        const editor = deep(view, '[contenteditable=true]');
+        editor.focus();
+        return editor.matches(':focus');"#
+    );
+    assert_eq!(client.execute(&focus, vec![]).await.unwrap(), json!(true));
+
+    // Send separate input events so React can render between edits. A render
+    // that drops the native editor focus loses the later keystrokes.
+    for key in ['x', 'y', 'z'] {
+        let typing = KeyActions::new("full-file-typing".into())
+            .then(KeyAction::Down { value: key })
+            .then(KeyAction::Up { value: key });
+        client.perform_actions(typing).await.unwrap();
+    }
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath(
+            "//section[@aria-label='Document selection.ts']//button[normalize-space(.)='Save']",
+        ),
+        "save edited full file",
+    )
+    .await;
+    let path = world.temp_dir.as_ref().unwrap().join("selection.ts");
+    gui_acceptance::wait_until(
+        "all three typed characters are saved",
+        Duration::from_secs(5),
+        || async { Ok(std::fs::read_to_string(&path).is_ok_and(|text| text.contains("xyz"))) },
+    )
+    .await
+    .unwrap();
+}
+
+async fn submit_full_file_question(client: &fantoccini::Client, question: &str) {
+    let input = client
+        .wait()
+        .for_element(Locator::Css("[aria-label='New selection discussion']"))
+        .await
+        .unwrap();
+    input.send_keys(question).await.unwrap();
+    gui_acceptance::click_when_ready(
+        client,
+        Locator::XPath("//button[normalize-space(.)='Discuss inline']"),
+        "send full-file question",
+    )
+    .await;
+}
+
+// File references take their turn identity from a completed provider item.
+fn mock_recorded_reply(item: &str, text: &str) {
+    let assistant = json!({
+        "type": "assistant", "session_id": "fixture",
+        "message": {
+            "id": item, "role": "assistant", "model": "claude-sonnet-4",
+            "usage": {"input_tokens": 42, "output_tokens": 7},
+            "content": [{"type": "text", "text": text}],
+        }
+    });
+    let terminal = json!({
+        "type": "result", "subtype": "success", "session_id": "fixture",
+        "duration_ms": 25, "total_cost_usd": 0.0, "is_error": false,
+        "result": "done", "num_turns": 1,
+    });
+    std::fs::write(
+        gui_acceptance::MOCK_CHAT_TURN_FIXTURE_FILE,
+        format!("{assistant}\n{terminal}\n"),
+    )
+    .unwrap();
+}
+
+#[given("two turns link to different recorded versions of the same file")]
+async fn full_file_turns(world: &mut GuiWorld) {
+    selection_fixture(world, false, "[First recorded source](selection.ts:2)").await;
+    let path = world.temp_dir.as_ref().unwrap().join("selection.ts");
+    std::fs::write(
+        path,
+        "const first = 1;\nconst later = 99;\nconst third = 3;\n",
+    )
+    .unwrap();
+    extend_fixture_file(world);
+    mock_recorded_reply(
+        "msg_recorded_second",
+        "[Second recorded source](selection.ts:2)",
+    );
+    main_send(world).await;
+    let client = world.webdriver.as_ref().unwrap().lock().await;
+    gui_acceptance::wait_for_js(
+        &client,
+        "both recorded file links are visible in chat",
+        "return document.querySelectorAll('[data-testid=local-file-reference-link]').length === 2;",
+        vec![],
+        Duration::from_secs(20),
+    )
+    .await;
+    std::fs::remove_file(gui_acceptance::MOCK_CHAT_TURN_FIXTURE_FILE).unwrap();
+    std::fs::write(gui_acceptance::MOCK_CHAT_RESPONSE_FILE, "Fixture answer.").unwrap();
+}
+
+async fn open_recorded_file(client: &fantoccini::Client, label: &str, code: &str) {
+    let xpath = format!("//*[@data-testid='local-file-reference-link' and contains(., '{label}')]");
+    gui_acceptance::click_when_ready(client, Locator::XPath(&xpath), label).await;
+    gui_acceptance::wait_for_js(
+        client,
+        label,
+        &format!(
+            r#"{DEEP}
+           const file = document.querySelector('[aria-label="File selection.ts"]');
+           return !!file && deep(file, '[data-line="2"]')?.textContent.includes(arguments[0]);"#
+        ),
+        vec![json!(code)],
+        Duration::from_secs(20),
+    )
+    .await;
+}
+
+#[when("I discuss the first recorded version")]
+async fn discuss_recorded_file(world: &mut GuiWorld) {
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    let client = wd.lock().await;
+    open_recorded_file(&client, "First recorded source", "const selected = 42;").await;
+    let file = client
+        .find(Locator::Css("[aria-label^='File lines.']"))
+        .await
+        .unwrap();
+    file.send_keys("\u{e000}").await.unwrap();
+    verify_file_cursor_scroll(
+        &client,
+        "[aria-label='File selection.ts'] .changes-code-view",
+        2,
+    )
+    .await;
+    file.send_keys("c").await.unwrap();
+    submit_full_file_question(&client, "Why the recorded value?").await;
+    gui_acceptance::wait_until(
+        "the first snapshot's selected bytes reached the provider",
+        Duration::from_secs(20),
+        || async {
+            Ok(discussion_prompts().iter().any(|prompt| {
+                prompt.contains("\"startLine\":2,\"endLine\":2,\"code\":\"const selected = 42;\"")
+                    && prompt.contains("Question: Why the recorded value?")
+            }))
+        },
+    )
+    .await
+    .unwrap();
+    world
+        .screenshot(&client, "full-file-recorded-discussion")
+        .await;
+}
+
+#[then("the recorded discussion reopens on its own turn after the live file is deleted")]
+async fn recorded_file_isolation(world: &mut GuiWorld) {
+    let wd = world.webdriver.as_ref().unwrap().clone();
+    let client = wd.lock().await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[aria-label='Close discussion']"),
+        "close the recorded discussion",
+    )
+    .await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath("//*[@role='radio' and normalize-space(.)='Latest file']"),
+        "show Latest file",
+    )
+    .await;
+    let snippet = format!(
+        r#"{DEEP}
+        const file = document.querySelector('[aria-label="File selection.ts"]');
+        return !!file && deep(file, '[data-line="2"]')?.textContent.includes("const later = 99;")
+          && !file.querySelector('[aria-label="Reopen selection discussion"]');"#
+    );
+    gui_acceptance::wait_for_js(
+        &client,
+        "latest file without the historical thread",
+        &snippet,
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+    let file = client
+        .find(Locator::Css("[aria-label^='File lines.']"))
+        .await
+        .unwrap();
+    file.send_keys("\u{e000}").await.unwrap();
+    verify_file_cursor_scroll(
+        &client,
+        "[aria-label='File selection.ts'] .changes-code-view",
+        2,
+    )
+    .await;
+    file.send_keys("c").await.unwrap();
+    submit_full_file_question(&client, "Why the latest value?").await;
+    gui_acceptance::wait_until(
+        "the Latest file discussion uses the saved working copy",
+        Duration::from_secs(20),
+        || async {
+            Ok(discussion_prompts().iter().any(|prompt| {
+                prompt.contains("\"startLine\":2,\"endLine\":2,\"code\":\"const later = 99;\"")
+                    && prompt.contains("Question: Why the latest value?")
+            }))
+        },
+    )
+    .await
+    .unwrap();
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[aria-label='Close discussion']"),
+        "close the Latest file discussion",
+    )
+    .await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[aria-label='Reopen selection discussion']"),
+        "reopen the Latest file discussion",
+    )
+    .await;
+    gui_acceptance::wait_for_js(
+        &client, "Latest file discussion restored at line 2",
+        r#"const thread = document.querySelector('[aria-label="File selection.ts"] [data-testid="selection-mini-thread"]');
+           return thread?.textContent.includes("selection.ts:2") &&
+                  thread.textContent.includes("Why the latest value?");"#,
+        vec![], Duration::from_secs(10),
+    ).await;
+    world.screenshot(&client, "full-file-latest-reopened").await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[aria-label='Close discussion']"),
+        "leave the Latest file discussion",
+    )
+    .await;
+    std::fs::remove_file(world.temp_dir.as_ref().unwrap().join("selection.ts")).unwrap();
+    open_recorded_file(&client, "Second recorded source", "const later = 99;").await;
+    assert_eq!(client.execute(
+        r#"return !document.querySelector('[aria-label="File selection.ts"] [aria-label="Reopen selection discussion"]');"#,
+        vec![],
+    ).await.unwrap(), json!(true));
+    open_recorded_file(&client, "First recorded source", "const selected = 42;").await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::Css("[aria-label='Reopen selection discussion']"),
+        "reopen the first snapshot's discussion",
+    )
+    .await;
+    gui_acceptance::wait_for_js(
+        &client, "recorded question at the original snapshot",
+        r#"const thread = document.querySelector('[aria-label="File selection.ts"] [data-testid="selection-mini-thread"]');
+           return thread?.textContent.includes("selection.ts:2") &&
+                  thread.textContent.includes("Why the recorded value?");"#,
+        vec![], Duration::from_secs(10),
+    ).await;
+    for theme in ["light", "dark"] {
+        let ready = client
+            .execute_async(
+                r#"const [theme, done] = arguments;
+               import('/src/stores/uiStore.ts').then(({useUIStore}) => {
+                 useUIStore.getState().setTheme(theme);
+                 requestAnimationFrame(() => {
+                   document.querySelector('[data-testid=selection-mini-thread]')
+                     .scrollIntoView({block: 'start'});
+                   done(true);
+                 });
+               }).catch(error => done(String(error)));"#,
+                vec![json!(theme)],
+            )
+            .await
+            .unwrap();
+        assert_eq!(ready, json!(true));
+        world
+            .screenshot(&client, &format!("full-file-recorded-reopened-{theme}"))
+            .await;
+    }
 }

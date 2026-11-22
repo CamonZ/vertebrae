@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { commands, events, type ReviewThread } from "../../bindings";
+import { commands, events, type ReviewThread, type ReviewMappingRequest } from "../../bindings";
 import { unwrapCommand } from "../../query/commandResult";
 import { useChatStore } from "../../stores/chatStore";
 import {
@@ -67,43 +67,38 @@ export function useSelectionDiscussionCatalog({
       if (current()) report(error);
     };
 
-    function map(next: WorktreeSnapshot, ids?: ReadonlySet<string>) {
+    function map(next: WorktreeSnapshot | null, ids?: ReadonlySet<string>) {
       if (!ids) snapshotVersion++;
       const version = snapshotVersion;
-      const requests = controller
-        .getSnapshot()
-        .threads.flatMap(({ id, git, status }) =>
-          git.original.home.kind === "worktree" &&
-          status.kind !== "unreadable" &&
-          (!ids || ids.has(id))
-            ? [
-                {
-                  threadId: id,
-                  ...git.capture,
-                  range: reviewRange(git.original),
-                  location: reviewLocation(
-                    git.original,
-                    parent,
-                    next.comparison
-                  ),
-                },
-              ]
-            : []
-        );
-      if (!requests.length) return;
-      void unwrapAnchor(commands.mapReviewThreads(worktreePath, requests))
-        .then((positions) => {
-          if (!current() || version !== snapshotVersion) return;
-          const live = positions.filter(
-            ({ threadId }) => !rows.isDeleted(threadId)
-          );
-          controller.applyMappings(next, live);
-          reportMapping(null);
-          for (const { threadId } of live) savePosition(threadId);
-        })
-        .catch((error: unknown) => {
-          if (current() && version === snapshotVersion) reportMapping(error);
+      const byCheckout = new Map<string, ReviewMappingRequest[]>();
+      for (const { id, git, status } of controller.getSnapshot().threads) {
+        const { original } = git;
+        if (original.home.kind !== "worktree" || original.fullFile?.turn ||
+            (!next && !original.fullFile) ||
+            status.kind === "unreadable" || (ids && !ids.has(id))) continue;
+        const checkout = original.fullFile?.checkout ?? worktreePath;
+        const requests = byCheckout.get(checkout) ?? [];
+        requests.push({
+          threadId: id,
+          originalBlobId: git.capture.originalBlobId,
+          range: reviewRange(original),
+          location: reviewLocation(original, parent, next?.comparison),
         });
+        byCheckout.set(checkout, requests);
+      }
+      if (!byCheckout.size) return;
+      void Promise.allSettled([...byCheckout].map(([checkout, requests]) =>
+        unwrapAnchor(commands.mapReviewThreads(checkout, requests))
+      )).then((results) => {
+        if (!current() || version !== snapshotVersion) return;
+        const live = results.flatMap((result) =>
+          result.status === "fulfilled" ? result.value.filter(({ threadId }) => !rows.isDeleted(threadId)) : []
+        );
+        controller.applyMappings(next, live);
+        const failed = results.find((result) => result.status === "rejected");
+        reportMapping(failed?.reason ?? null);
+        for (const { threadId } of live) savePosition(threadId);
+      }).catch(reportCurrent);
     }
 
     function savePosition(id: string) {
@@ -176,6 +171,7 @@ export function useSelectionDiscussionCatalog({
       if (rows.isDeleted(id) || row.payload.parentChatId !== parent) return;
       const previous = rows.row(id);
       const previousThread = controller.thread(id);
+      const threadBinding = { ...binding, worktreePath: previousThread?.anchor.fullFile?.checkout ?? worktreePath };
       if (
         previous &&
         (previous.revision > row.revision ||
@@ -188,7 +184,7 @@ export function useSelectionDiscussionCatalog({
       ) {
         const session = findDiscussionSession(
           Object.values(useChatStore.getState().sessions),
-          binding,
+          threadBinding,
           id
         );
         if (session && previousThread && !previousThread.sessionId)
@@ -228,7 +224,7 @@ export function useSelectionDiscussionCatalog({
     function observe(row: ReviewThread) {
       void apply(row)
         .then((needsMapping) => {
-          if (needsMapping && current() && snapshot.current)
+          if (needsMapping && current())
             map(snapshot.current, new Set([row.threadId]));
         })
         .catch(reportCurrent);
@@ -252,7 +248,7 @@ export function useSelectionDiscussionCatalog({
             }
           })
       );
-      if (current() && refreshVersion === request && snapshot.current) {
+      if (current() && refreshVersion === request) {
         map(snapshot.current, new Set(restored.filter((id) => id !== null)));
       }
     }
@@ -262,10 +258,11 @@ export function useSelectionDiscussionCatalog({
       rows.delete(id);
       positions.remove(id);
       snippets.delete(id);
-      controller.remove(id);
+      const removed = controller.remove(id);
+      const threadBinding = { ...binding, worktreePath: removed?.anchor.fullFile?.checkout ?? worktreePath };
       const store = useChatStore.getState();
       const sessions = Object.values(store.sessions).filter((session) =>
-        matchesDiscussion(session, binding, id)
+        matchesDiscussion(session, threadBinding, id)
       );
       for (const session of sessions) {
         if (session.backendSessionId) {
@@ -344,7 +341,7 @@ export function useSelectionDiscussionCatalog({
       await useChatStore.getState().hydrateLocalSessionIndex({
         isCurrent: current,
         include: (session) =>
-          matchesDiscussion(session, binding) &&
+          matchesDiscussion(session, { ...binding, worktreePath: session.discussion?.worktreePath ?? worktreePath }) &&
           !rows.isDeleted(session.discussion.reviewThreadId),
       });
       indexLoaded = true;

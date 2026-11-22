@@ -412,6 +412,19 @@
   overflow: auto;
 }
 
+/* Keep the line cursor's focus overlay outside the editable file scroller. */
+.document-body:has(> [data-diff-cursor-host="file"]) {
+  display: flex;
+  flex-direction: column;
+  overflow: clip;
+}
+
+.document-file-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 .changes-workspace {
   --diffs-font-size: calc(13px * var(--reading-scale));
   gap: 0;

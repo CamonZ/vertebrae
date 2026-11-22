@@ -130,7 +130,8 @@ export function SelectionDiscussionProvider({
     return () => window.removeEventListener("focus", onFocus);
   }, [checkAvailability]);
 
-  const canAsk = !!parentChatId && !!projectPath && readyWorktree === worktreePath;
+  const canAskFullFile = !!parentChatId && !!projectPath;
+  const canAsk = canAskFullFile && readyWorktree === worktreePath;
 
   const mainSelection = {
     harness,
@@ -224,9 +225,10 @@ export function SelectionDiscussionProvider({
       const question = text.trim();
       if (choice.error !== null || !thread || thread.status.kind === "unreadable" || !question || !parentChatId || !projectPath) return;
 
+      const checkout = thread.anchor.fullFile?.checkout ?? worktreePath;
       const store = useChatStore.getState();
       const session = (thread.sessionId ? store.sessions[thread.sessionId] : undefined) ??
-        findDiscussionSession(Object.values(store.sessions), { projectPath, parentChatId, worktreePath }, id);
+        findDiscussionSession(Object.values(store.sessions), { projectPath, parentChatId, worktreePath: checkout }, id);
       // One turn at a time, and never into a process that is closing.
       if (
         session &&
@@ -245,7 +247,7 @@ export function SelectionDiscussionProvider({
           harness: choice.harness,
           providerId: choice.providerId,
           projectPath,
-          discussionBinding: { parentChatId, reviewThreadId: id, worktreePath },
+          discussionBinding: { parentChatId, reviewThreadId: id, worktreePath: checkout },
         });
       if (applyChoice) {
         store.setSessionSelectedModel(sessionId, choice.modelId);
@@ -296,7 +298,7 @@ export function SelectionDiscussionProvider({
   );
 
   const begin = useCallback(async (anchor: CodeSelection, question?: string) => {
-    if (!canAsk || !parentChatId || !projectPath || capturing.current ||
+    if (!(anchor.fullFile ? canAskFullFile : canAsk) || !parentChatId || !projectPath || capturing.current ||
         !supportsInlineDiscussion(anchor)) return false;
     capturing.current = true;
     setAnchorError(null);
@@ -306,7 +308,7 @@ export function SelectionDiscussionProvider({
     const generation = getProjectScopeGeneration();
     try {
       const capture = await unwrapAnchor(commands.captureReviewAnchor({
-        worktree: worktreePath,
+        worktree: anchor.fullFile?.checkout ?? worktreePath,
         threadId: id,
         location: reviewLocation(anchor, parentChatId, comparison()),
         range: reviewRange(anchor),
@@ -332,11 +334,12 @@ export function SelectionDiscussionProvider({
       });
     }
     return true;
-  }, [canAsk, comparison, controller, parentChatId, projectPath, reportCatalogError, send, worktreePath]);
+  }, [canAsk, canAskFullFile, comparison, controller, parentChatId, projectPath, reportCatalogError, send, worktreePath]);
 
   const actions = useMemo<DiscussionActions>(
     () => ({
       canAsk,
+      canAskFullFile,
       select: (anchor) => {
         controller.select(anchor);
         if (anchor) void checkAvailability();
@@ -348,7 +351,7 @@ export function SelectionDiscussionProvider({
         setFocusRequest(id && options?.focus ? id : null);
         const thread = id ? controller.thread(id) : undefined;
 
-        if (thread?.anchor.home.kind === "worktree") callbacks.current.onOpen();
+        if (thread?.anchor.home.kind === "worktree" && !thread.anchor.fullFile) callbacks.current.onOpen();
         if (thread?.sessionId) {
           const store = useChatStore.getState();
           const session = store.sessions[thread.sessionId];
@@ -370,10 +373,10 @@ export function SelectionDiscussionProvider({
       focusTaken: (id) =>
         setFocusRequest((current) => (current === id ? null : current)),
     }),
-    [controller, send, cancel, canAsk, begin, reconcile, checkAvailability]
+    [controller, send, cancel, canAsk, canAskFullFile, begin, reconcile, checkAvailability]
   );
 
-  const unreadable = state.threads.find(({ status }) => status.kind === "unreadable")?.status;
+  const unreadable = state.threads.find(({ status, anchor }) => status.kind === "unreadable" && !anchor.fullFile?.turn)?.status;
   const readError = unreadable?.kind === "unreadable" ? unreadable.message : null;
   const value = useMemo<DiscussionValue>(
     () => ({
@@ -794,7 +797,7 @@ export function DiscussionSnapshot({
   }, [snapshot]);
 
   if (!discussion) return null;
-  const detached = discussion.threads.filter((thread) => thread.status.kind !== "inline");
+  const detached = discussion.threads.filter((thread) => thread.status.kind !== "inline" && !thread.anchor.fullFile?.turn);
   if (!discussion.anchorError && !detached.length) return null;
   return (
     <div className="selection-discussion-notices">

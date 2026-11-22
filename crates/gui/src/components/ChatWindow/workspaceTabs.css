@@ -204,6 +204,41 @@
   background: var(--color-bg-2);
 }
 
+/* A plain-file annotation shares its viewport with the line-number gutter. */
+.full-file-discussion {
+  container: full-file-discussion / inline-size;
+}
+
+@container full-file-discussion (max-width: 230px) {
+  .diff-comment-thread {
+    padding: 3px;
+  }
+  .selection-mini-thread {
+    margin-block: 4px;
+    padding: 6px;
+  }
+  .selection-mini-header,
+  .selection-mini-anchor {
+    gap: 4px;
+  }
+  .selection-mini-anchor {
+    flex-basis: 100%;
+  }
+  .selection-mini-messages {
+    padding-top: 8px;
+  }
+  .selection-mini-messages .evlog--bare .evrow--user:not(.is-prompt):not(.is-system) .evbody {
+    max-width: 100%;
+    padding: 4px 6px;
+  }
+  .selection-mini-thread .selection-mini-composer textarea {
+    padding: 5px;
+  }
+  .diff-comment-editor-actions button {
+    padding-inline: 5px;
+  }
+}
+
 .selection-mini-actions {
   flex-wrap: wrap;
   align-items: center;

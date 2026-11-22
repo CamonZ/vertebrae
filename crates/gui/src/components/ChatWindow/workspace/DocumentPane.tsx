@@ -34,6 +34,8 @@ export interface DocumentPaneProps {
   onRevealed?(): void;
   /** Called on every edit of the document. */
   onEdited?(): void;
+  onFileView?(): void;
+  focusCursor?(cursor: HTMLElement): void;
 }
 
 function unavailable(body: Body, side: string): string | null {
@@ -63,6 +65,8 @@ export function DocumentPane({
   reveal,
   onRevealed,
   onEdited,
+  onFileView,
+  focusCursor,
 }: DocumentPaneProps) {
   const edit = (next: string) => {
     setDraft(worktreePath, path, next);
@@ -135,6 +139,10 @@ export function DocumentPane({
           path={path}
           view="file"
           contents={text}
+          displayedText={text}
+          dirty={dirty}
+          focusCursor={focusCursor}
+          discussionSource={{ checkout: worktreePath, turn: null }}
           baseline={null}
           reveal={reveal}
           onRevealed={onRevealed}
@@ -187,7 +195,10 @@ export function DocumentPane({
               type="button"
               aria-pressed={view === "file"}
               title={CHANGES_COMMANDS.file}
-              onClick={() => setView(worktreePath, path, "file")}
+              onClick={() => {
+                onFileView?.();
+                setView(worktreePath, path, "file");
+              }}
             >
               File
             </button>

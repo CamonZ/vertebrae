@@ -238,7 +238,7 @@ export function useDiffComments(
     for (const thread of threadAnchors) {
       const home = thread.anchor.home;
       if (
-        home.kind !== surface.kind ||
+        thread.anchor.fullFile || home.kind !== surface.kind ||
         (home.kind === "tool_call" && home.toolUseId !== toolUseId)
       )
         continue;
@@ -408,7 +408,7 @@ export function useDiffComments(
     (path: string) => {
       if (sharedSelection) {
         const sameSurface =
-          sharedSelection.home.kind === surface.kind &&
+          !sharedSelection.fullFile && sharedSelection.home.kind === surface.kind &&
           (sharedSelection.home.kind !== "tool_call" ||
             sharedSelection.home.toolUseId === toolUseId);
         if (!sameSurface || sharedSelection.path !== path) return null;
@@ -475,7 +475,7 @@ export function useDiffComments(
     return threadAnchors.find(
       ({ anchor, detached }) =>
         !detached &&
-        anchor.home.kind === surface.kind &&
+        !anchor.fullFile && anchor.home.kind === surface.kind &&
         (anchor.home.kind !== "tool_call" || anchor.home.toolUseId === toolUseId) &&
         anchor.path === cursor.path &&
         (anchor.side === "old" ? "deletions" : "additions") === side &&

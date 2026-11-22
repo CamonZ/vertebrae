@@ -1,5 +1,19 @@
+import {
+  FULL_FILE_SELECTION_LABEL,
+  useFullFileDiscussion,
+} from "./useFullFileDiscussion";
+import type { FullFileSource } from "../selectionDiscussions";
+import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
 import type { DiffPreferences } from "../../../utils/codeAppearance";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   DIFFS_TAG_NAME,
   parseDiffFromFile,
@@ -17,9 +31,12 @@ import {
   usePierreDiffOptions,
   usePierreThemeOptions,
 } from "../../../hooks/useCodeAppearance";
+import { DIFF_CURSOR_HOST_ATTRIBUTE } from "../../thread/toolChange/diffCursor";
 import { diffWorkerPool } from "../../thread/toolChange/diffWorkerPool";
 
-const createEditor: EditorFactory<undefined, undefined> = (
+const acceptEdit = () => "accept" as const;
+
+const createEditor: EditorFactory<ReviewAnnotation, undefined> = (
   type,
   options,
   editStateKey
@@ -34,6 +51,10 @@ export interface DocumentEditorProps {
   baseline: string | null;
   onChange(text: string): void;
   readOnly?: boolean;
+  discussionSource?: FullFileSource;
+  focusCursor?(cursor: HTMLElement): void;
+  displayedText?: string | null;
+  dirty?: boolean;
   diffStyle?: DiffPreferences["diffStyle"];
   /**
    * File view only: lines to select, and to scroll to once rendered unless
@@ -49,31 +70,33 @@ export interface DocumentEditorProps {
   onRevealed?(): void;
 }
 
-/**
- * Centre a line in its nearest vertical scroller. Not `scrollIntoView`: on
- * a line wider than the view it also scrolls the code sideways, under the
- * sticky gutter. Without a scrolling ancestor the document scrolls.
- */
-function scrollVerticallyIntoView(row: Element) {
-  for (let node: Element | null = row; node; ) {
-    const root = node.getRootNode();
-    node = node.parentElement ?? (root instanceof ShadowRoot ? root.host : null);
-    if (!node) {
-      row.scrollIntoView({ block: "center", inline: "nearest" });
-      return;
-    }
-    const { overflowY } = getComputedStyle(node);
-    if (
-      (overflowY === "auto" || overflowY === "scroll") &&
-      node.scrollHeight > node.clientHeight
-    ) {
-      const line = row.getBoundingClientRect();
-      const view = node.getBoundingClientRect();
-      node.scrollTop +=
-        line.top - view.top - (node.clientHeight - line.height) / 2;
-      return;
-    }
+/** Scroll the document viewport without shifting the file under its gutter. */
+function scrollDocumentLine(
+  host: HTMLElement | null,
+  lineNumber: number,
+  align: "center" | "nearest"
+): boolean {
+  const viewport =
+    host?.querySelector<HTMLElement>(".document-file-scroll") ??
+    host?.closest<HTMLElement>(".document-body");
+  const file = host?.querySelector(DIFFS_TAG_NAME);
+  const selector = `[data-line="${lineNumber}"]`;
+  const row =
+    file?.shadowRoot?.querySelector(selector) ?? file?.querySelector(selector);
+  if (!row || !viewport) return false;
+  if (align === "center" && viewport.scrollHeight <= viewport.clientHeight) {
+    row.scrollIntoView({ block: "center", inline: "nearest" });
+    return true;
   }
+
+  const line = row.getBoundingClientRect();
+  const top = viewport.getBoundingClientRect().top + viewport.clientTop;
+  const bottom = top + viewport.clientHeight;
+  if (align === "center")
+    viewport.scrollTop += (line.top + line.bottom - top - bottom) / 2;
+  else if (line.top < top) viewport.scrollTop += line.top - top;
+  else if (line.bottom > bottom) viewport.scrollTop += line.bottom - bottom;
+  return true;
 }
 
 /** How long to wait for a large file's lines to render before giving up. */
@@ -92,6 +115,10 @@ export default function DocumentEditor({
   baseline,
   onChange,
   readOnly = false,
+  discussionSource,
+  focusCursor,
+  displayedText,
+  dirty = false,
   diffStyle,
   reveal,
   onRevealed,
@@ -113,6 +140,11 @@ export default function DocumentEditor({
     return [working, parseDiffFromFile(old, working)] as const;
   });
 
+  const editChange = useRef(onChange);
+  editChange.current = onChange;
+  const onEditChange = useCallback((event: { file: FileContents }) => {
+    editChange.current(event.file.contents);
+  }, []);
   const hostRef = useRef<HTMLDivElement>(null);
   const revealLine = reveal?.line;
   const revealEnd = reveal?.endLine;
@@ -128,6 +160,43 @@ export default function DocumentEditor({
     [revealLine, revealEnd]
   );
 
+  const cursorScrollFrame = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(cursorScrollFrame.current), []);
+
+  const discussion = useFullFileDiscussion(
+    discussionSource,
+    path,
+    displayedText ?? contents,
+    selectedLines,
+    dirty,
+    (line) => {
+      cancelAnimationFrame(cursorScrollFrame.current);
+      // Follow the keyboard selection after Pierre applies the new range.
+      cursorScrollFrame.current = requestAnimationFrame(() => {
+        scrollDocumentLine(hostRef.current, line, "nearest");
+      });
+    }
+  );
+  useLayoutEffect(() => {
+    if (discussion.enabled && hostRef.current) focusCursor?.(hostRef.current);
+  }, [discussion.enabled, focusCursor]);
+
+  const discussionFocus = discussion.focus;
+  const setHost = useCallback(
+    (node: HTMLDivElement | null) => {
+      hostRef.current = node;
+      discussionFocus.current = node;
+    },
+    [discussionFocus]
+  );
+  const fullFileOptions = discussion.enabled
+    ? {
+        ...fileOptions,
+        ...discussion.options,
+        unsafeCSS: `${fileOptions.unsafeCSS ?? ""}\n${discussion.annotationCSS}`,
+      }
+    : fileOptions;
+
   // Pierre renders lines asynchronously into its shadow root; scroll once the
   // first revealed line exists. A remount after the scroll (a save, a view
   // change) keeps the selection without scrolling back.
@@ -136,13 +205,7 @@ export default function DocumentEditor({
     let frame = 0;
     const deadline = performance.now() + REVEAL_TIMEOUT_MS;
     const scroll = () => {
-      const container = hostRef.current?.querySelector(DIFFS_TAG_NAME);
-      const selector = `[data-line="${revealLine}"]`;
-      const row =
-        container?.shadowRoot?.querySelector(selector) ??
-        container?.querySelector(selector);
-      if (row) {
-        scrollVerticallyIntoView(row);
+      if (scrollDocumentLine(hostRef.current, revealLine, "center")) {
         onRevealedRef.current?.();
       } else if (performance.now() < deadline)
         frame = requestAnimationFrame(scroll);
@@ -159,19 +222,51 @@ export default function DocumentEditor({
             fileDiff={fileDiff}
             options={diffOptions}
             edit={!readOnly && file != null}
-            onEditChange={(event) => onChange(event.file.contents)}
-            onEditComplete={() => "accept"}
+            onEditChange={onEditChange}
+            onEditComplete={acceptEdit}
           />
         ) : file ? (
-          <div ref={hostRef} style={{ display: "contents" }}>
-            <File
-              file={file}
-              options={fileOptions}
-              selectedLines={selectedLines}
-              edit={!readOnly}
-              onEditChange={(event) => onChange(event.file.contents)}
-              onEditComplete={() => "accept"}
-            />
+          <div
+            ref={setHost}
+            className={
+              discussion.enabled
+                ? "diff-line-cursor-host diff-line-cursor-host--changes flex min-h-0 flex-1 flex-col"
+                : "contents"
+            }
+            data-focus-halo={discussion.enabled ? "overlay" : undefined}
+            tabIndex={discussion.enabled ? 0 : undefined}
+            role={discussion.enabled ? "group" : undefined}
+            {...{
+              [DIFF_CURSOR_HOST_ATTRIBUTE]: discussion.enabled
+                ? "file"
+                : undefined,
+            }}
+            aria-label={
+              discussion.enabled ? FULL_FILE_SELECTION_LABEL : undefined
+            }
+            onKeyDown={discussion.onKeyDown}
+          >
+            {discussion.reason && <p role="alert">{discussion.reason}</p>}
+            <div
+              className={
+                discussion.enabled ? "document-file-scroll" : "contents"
+              }
+            >
+              <File
+                file={file}
+                options={fullFileOptions}
+                selectedLines={discussion.range}
+                lineAnnotations={
+                  discussion.enabled ? discussion.annotations : undefined
+                }
+                renderAnnotation={
+                  discussion.enabled ? discussion.renderAnnotation : undefined
+                }
+                edit={!readOnly}
+                onEditChange={onEditChange}
+                onEditComplete={acceptEdit}
+              />
+            </div>
           </div>
         ) : null}
       </EditProvider>

@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::local_chat::{
     annotations::LocalChatAnnotationStore,
+    file_history::{self, HistoryRead},
     worktree_delta::git::{self, CacheBudget, Limits, Side},
     worktree_files,
 };
@@ -71,12 +72,22 @@ pub enum ReviewAnchorSource {
     Worktree {
         commit: Option<String>,
     },
+    FullFile {
+        turn: Option<ReviewAnchorTurn>,
+    },
     ToolCall {
         #[serde(rename = "chatId")]
         chat_id: String,
         #[serde(rename = "toolUseId")]
         tool_use_id: String,
     },
+}
+
+#[derive(Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewAnchorTurn {
+    session_id: String,
+    turn_id: String,
 }
 
 #[derive(Deserialize, specta::Type)]
@@ -177,6 +188,21 @@ fn content(
     location: &ReviewAnchorLocation,
     annotations: &LocalChatAnnotationStore,
 ) -> Result<Option<Vec<u8>>, ReviewAnchorError> {
+    if let ReviewAnchorSource::FullFile { turn: Some(turn) } = &location.source {
+        let checkout = repo.workdir().ok_or(ReviewAnchorError::NotRepository)?;
+        return match file_history::read_for_checkout(
+            annotations,
+            &turn.session_id,
+            &turn.turn_id,
+            &location.path,
+            Some(checkout),
+        ) {
+            HistoryRead::File(worktree_files::FileBody::Text { contents, .. }) => {
+                Ok(Some(contents.into_bytes()))
+            }
+            _ => Err(ReviewAnchorError::ContentUnavailable),
+        };
+    }
     let ReviewAnchorSource::ToolCall {
         chat_id,
         tool_use_id,
@@ -205,11 +231,23 @@ fn worktree_content(
     head: Oid,
     location: &ReviewAnchorLocation,
 ) -> Result<Option<Vec<u8>>, ReviewAnchorError> {
+    if matches!(location.source, ReviewAnchorSource::FullFile { turn: None }) {
+        let root = repo.workdir().ok_or(ReviewAnchorError::NotRepository)?;
+        return match worktree_files::read_file(root, &location.path)
+            .map_err(|_| ReviewAnchorError::ContentUnavailable)?
+        {
+            worktree_files::FileBody::Text { contents, .. } => Ok(Some(contents.into_bytes())),
+            worktree_files::FileBody::Missing => Ok(None),
+            _ => Err(ReviewAnchorError::ContentUnavailable),
+        };
+    }
     let relative =
         worktree_files::relative(&location.path).map_err(|_| ReviewAnchorError::InvalidPath)?;
     let path = Path::new(&relative);
     match &location.source {
-        ReviewAnchorSource::ToolCall { .. } => Err(ReviewAnchorError::ContentUnavailable),
+        ReviewAnchorSource::ToolCall { .. } | ReviewAnchorSource::FullFile { .. } => {
+            Err(ReviewAnchorError::ContentUnavailable)
+        }
         ReviewAnchorSource::Worktree { commit: None }
             if location.side == ReviewThreadSide::Right =>
         {
@@ -358,6 +396,15 @@ pub async fn capture_review_anchor(
         parent,
     } = request;
     let parent = parent.ok_or(ReviewAnchorError::ParentUnavailable)?;
+    if let ReviewAnchorSource::FullFile { turn } = &location.source {
+        if location.side != ReviewThreadSide::Right
+            || turn
+                .as_ref()
+                .is_some_and(|turn| turn.session_id != parent.chat_id)
+        {
+            return Err(ReviewAnchorError::ContentUnavailable);
+        }
+    }
     let project_path = parent
         .project_path
         .ok_or(ReviewAnchorError::ParentUnavailable)?;
@@ -393,11 +440,24 @@ pub async fn capture_review_anchor(
     })
     .await?;
 
-    let (home_kind, tool_use_id) = match location.source {
+    let (home_kind, tool_use_id, origin_ref) = match location.source {
         ReviewAnchorSource::ToolCall { tool_use_id, .. } => {
-            (ReviewThreadHome::ToolCall, Some(tool_use_id))
+            (ReviewThreadHome::ToolCall, Some(tool_use_id), None)
         }
-        ReviewAnchorSource::Worktree { .. } => (ReviewThreadHome::Worktree, None),
+        ReviewAnchorSource::Worktree { .. } => (ReviewThreadHome::Worktree, None, None),
+        // The catalog's worktree home supports local origin references. Keep
+        // the full-file identity alongside its retained blob and checkout.
+        ReviewAnchorSource::FullFile { turn } => {
+            let identity = match turn {
+                Some(turn) => serde_json::json!([turn.session_id, turn.turn_id]).to_string(),
+                None => "null".into(),
+            };
+            (
+                ReviewThreadHome::Worktree,
+                None,
+                Some(format!("full-file:{identity}")),
+            )
+        }
     };
     let payload = ReviewThreadInput {
         parent_chat_id: parent.chat_id,
@@ -414,7 +474,7 @@ pub async fn capture_review_anchor(
         status: ReviewThreadStatus::Open,
         outdated_noted: false,
         origin_kind: ReviewThreadOrigin::Local,
-        origin_ref: None,
+        origin_ref,
     };
     let mut write = match ThreadWrite::open(&state, &project, thread_id).await {
         Ok(write) => write,
@@ -659,6 +719,61 @@ mod tests {
             side: ReviewThreadSide::Right,
             source: ReviewAnchorSource::Worktree { commit: None },
         }
+    }
+
+    #[test]
+    fn full_file_anchor_maps_lines_in_a_clean_file_without_diff_hunks() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path()).unwrap();
+        let path = dir.path().join("a");
+        std::fs::write(&path, "first\nselected\nthird\n").unwrap();
+        git(dir.path(), &["add", "a"]);
+        git(
+            dir.path(),
+            &[
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.test",
+                "commit",
+                "-m",
+                "fixture",
+            ],
+        );
+        let mut location = working_location("a");
+        location.source = ReviewAnchorSource::FullFile { turn: None };
+        let head = repo.blob(b"").unwrap();
+        let bytes = worktree_content(&repo, head, &location).unwrap().unwrap();
+        let range = ReviewLineRange {
+            start_line: 2,
+            line: 2,
+        };
+        let snippet = std::str::from_utf8(range.slice(&bytes).unwrap()).unwrap();
+        assert!(selected_text_matches(snippet, "selected"));
+        assert!(!selected_text_matches(snippet, "unsaved"));
+
+        let thread_id = Uuid::new_v4();
+        let blob = capture(&repo, thread_id, &bytes).unwrap();
+        drop(repo);
+        let repo = Repository::open(dir.path()).unwrap();
+        let retained = repo
+            .find_blob(repo.refname_to_id(&ref_name(thread_id)).unwrap())
+            .unwrap();
+        assert_eq!(range.slice(retained.content()).unwrap(), b"selected\n");
+
+        std::fs::write(path, "inserted\nfirst\nselected\nthird\n").unwrap();
+        let mapped = map_thread(
+            &repo,
+            head,
+            ReviewMappingRequest {
+                thread_id,
+                original_blob_id: blob.to_string(),
+                range,
+                location,
+            },
+        );
+        assert_eq!(mapped.status, ReviewMappingStatus::Open);
+        assert_eq!((mapped.start_line, mapped.line), (Some(3), Some(3)));
     }
 
     #[test]

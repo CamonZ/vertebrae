@@ -104,3 +104,14 @@ Feature: Discuss code beside the main conversation
     When I save a tool-patch anchor without starting a discussion
     And I restart the GUI application
     Then I can start the restored discussion on the recorded tool patch
+
+  Scenario: A discussion can anchor on an unchanged line in a full file
+    Given a Changes selection fixture is open beside a drafted main conversation
+    When I discuss unchanged lines in the full file
+    Then the full-file discussion reopens at its saved range
+    And I can still type and save edits in the full file
+
+  Scenario: A recorded file discussion belongs to the turn that supplied the text
+    Given two turns link to different recorded versions of the same file
+    When I discuss the first recorded version
+    Then the recorded discussion reopens on its own turn after the live file is deleted
