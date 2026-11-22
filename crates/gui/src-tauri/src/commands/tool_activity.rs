@@ -113,7 +113,7 @@ pub(super) struct Classification {
     pub labels: Vec<String>,
 }
 
-fn digest(value: &[u8]) -> String {
+pub(super) fn digest(value: &[u8]) -> String {
     format!("{:x}", Sha256::digest(value))
 }
 
@@ -128,11 +128,16 @@ fn endpoint_identity(raw: Option<&str>) -> Option<String> {
         })
 }
 
-fn classifier_fingerprint(
+/// Fingerprint of a durable decision: the configured decision role, the
+/// caller's `contract` version and any `extra` identity fields (prompts,
+/// categories). Bump the contract when prompt/threshold/parser semantics
+/// change. Credentials and arbitrary provider environment values are
+/// deliberately excluded.
+pub(super) fn decision_fingerprint(
     config: &vertebrae_sacrum_client::VertebraeConfigFile,
+    contract: &str,
+    extra: serde_json::Map<String, Value>,
 ) -> Result<String, CommandError> {
-    // Credentials and arbitrary provider environment values are deliberately excluded.
-    // Bump the contract version when prompt/threshold/parser semantics change.
     let provider = config
         .decision_model
         .provider
@@ -142,18 +147,35 @@ fn classifier_fingerprint(
         .and_then(|p| p.base_url.as_deref().or(p.url.as_deref()))
         .or(config.typesafe.url.as_deref());
 
-    let identity = json!({
-        "contract": "separated-invocations-v2-threshold-0.9",
+    let mut identity = json!({
+        "contract": contract,
         "role": config.decision_model,
         "harness": provider.map(|p| p.harness),
         "wire_api": provider.and_then(|p| p.wire_api),
         "default_model": provider.and_then(|p| p.default_model.as_ref()),
         "endpoint": endpoint_identity(endpoint),
-        "categories": include_str!("../../../src/components/thread/toolActivity/categories.json"),
     });
+    if let Value::Object(fields) = &mut identity {
+        fields.extend(extra);
+    }
     serde_json::to_vec(&identity)
         .map(|bytes| digest(&bytes))
         .map_err(|_| invalid("Could not fingerprint decision settings."))
+}
+
+fn classifier_fingerprint(
+    config: &vertebrae_sacrum_client::VertebraeConfigFile,
+) -> Result<String, CommandError> {
+    decision_fingerprint(
+        config,
+        "separated-invocations-v2-threshold-0.9",
+        serde_json::Map::from_iter([(
+            "categories".into(),
+            json!(include_str!(
+                "../../../src/components/thread/toolActivity/categories.json"
+            )),
+        )]),
+    )
 }
 
 async fn classify_durable(
@@ -564,6 +586,28 @@ mod tests {
         assert!(rows[31].is_some());
         assert!(rows[32].is_none());
         assert!(rows[33].is_some());
+    }
+
+    #[test]
+    fn shared_fingerprint_keeps_existing_durable_decisions_valid() {
+        // The identity this classifier persisted before the role fingerprint
+        // was shared; a different value would re-ask every stored invocation.
+        let mut config = VertebraeConfigFile::default();
+        config.decision_model.enabled = true;
+        config.decision_model.model = Some("fixture".into());
+        let legacy = json!({
+            "contract": "separated-invocations-v2-threshold-0.9",
+            "role": config.decision_model,
+            "harness": Option::<()>::None,
+            "wire_api": Option::<()>::None,
+            "default_model": Option::<()>::None,
+            "endpoint": Option::<String>::None,
+            "categories": include_str!("../../../src/components/thread/toolActivity/categories.json"),
+        });
+        assert_eq!(
+            classifier_fingerprint(&config).unwrap(),
+            digest(&serde_json::to_vec(&legacy).unwrap())
+        );
     }
 
     #[tokio::test]

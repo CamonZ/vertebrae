@@ -166,6 +166,8 @@ export type ChatMessage =
       toolName: string;
       message: string;
       input?: string;
+      /** Absent means pending; the card records the user's answer here. */
+      status?: "pending" | "resolved" | "unavailable";
       timestamp: string;
     }
   | {
@@ -798,6 +800,12 @@ interface ChatStoreActions {
   addMessage: (sessionId: string, message: ChatMessage) => void;
   /** Mark a structured user question as answered. */
   resolveUserQuestion: (sessionId: string, requestId: string) => void;
+  /** Record the outcome of a permission request card. */
+  setPermissionRequestStatus: (
+    sessionId: string,
+    requestId: string,
+    status: "resolved" | "unavailable"
+  ) => void;
   /** Mark one question unavailable when its permission connection is gone. */
   markUserQuestionUnavailable: (sessionId: string, requestId: string) => void;
   /** Disable unresolved question cards after their backend session exits. */
@@ -3736,6 +3744,26 @@ export const useChatStore = create<ChatStore>((set, get) => {
             : message
         ),
       }));
+    },
+
+    setPermissionRequestStatus: (sessionId, requestId, status) => {
+      updateSession(sessionId, (session) => {
+        const index = session.messages.findIndex(
+          (message) =>
+            message.kind === "permission_request" &&
+            message.requestId === requestId
+        );
+        const message = session.messages[index];
+        if (
+          !message ||
+          message.kind !== "permission_request" ||
+          message.status === status
+        )
+          return session;
+        const messages = [...session.messages];
+        messages[index] = { ...message, status };
+        return { ...session, messages };
+      });
     },
 
     markUserQuestionUnavailable: (sessionId, requestId) => {

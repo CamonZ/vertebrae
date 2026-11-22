@@ -351,7 +351,15 @@ const HistoricalChatItems = memo(function HistoricalChatItems({
         </EventLog>
       </ChatSessionContext.Provider>
     ) : item.kind === "permission" ? (
-      <PermissionRequestTurn key={item.key} message={item.message} />
+      <PermissionRequestTurn
+        key={item.key}
+        message={item.message}
+        onSettled={(requestId, status) =>
+          useChatStore
+            .getState()
+            .setPermissionRequestStatus(sessionId, requestId, status)
+        }
+      />
     ) : (
       <UserQuestionTurn
         key={item.key}

@@ -1,3 +1,4 @@
+import { ChatAttentionDrivers } from "./ChatAttentionDrivers";
 import {
   useTaskChangeListener,
   useArtifactChangeListener,
@@ -47,5 +48,10 @@ export function GlobalListeners() {
   useLocalChatEventRouter();
   useGateChatSync();
 
-  return <ChatAssociationDrivers />;
+  return (
+    <>
+      <ChatAssociationDrivers />
+      <ChatAttentionDrivers />
+    </>
+  );
 }

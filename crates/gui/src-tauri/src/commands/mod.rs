@@ -71,6 +71,7 @@ impl CommandError {
 mod artifact;
 mod backend;
 mod chat_association;
+mod chat_attention;
 pub(crate) mod chat_catalog;
 mod daemon;
 mod execution;
@@ -90,6 +91,7 @@ mod workflow;
 pub use artifact::*;
 pub use backend::*;
 pub use chat_association::*;
+pub use chat_attention::*;
 pub use daemon::*;
 pub use execution::*;
 pub use external_editor::*;

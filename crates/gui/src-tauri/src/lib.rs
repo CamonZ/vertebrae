@@ -164,6 +164,7 @@ fn create_builder() -> Builder {
             commands::get_main_chat_worktree,
             commands::analyze_tool_activities,
             commands::classify_tool_operations,
+            commands::classify_chat_turn_attention,
             commands::open_local_file,
             commands::create_local_chat_session,
             commands::refresh_local_chat_session_gate,

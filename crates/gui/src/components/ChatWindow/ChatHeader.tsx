@@ -2,13 +2,17 @@ import { CHAT_AREA_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StopIcon } from "../panels";
 import { OverflowMenu } from "../molecules/OverflowMenu";
-import type { LocalChatLifecycle } from "../../stores/chatStore";
 import { FALLBACK_CHAT_PROJECT_LABEL } from "../../utils/localChatSessionGroups";
+import {
+  CHAT_ATTENTION,
+  type ChatAttention,
+} from "../../utils/chatAttention";
+import { ChatAttentionDot } from "./ChatAttentionDot";
 
 interface ChatHeaderProps {
   label: string;
-  lifecycle: LocalChatLifecycle;
-  isActive: boolean;
+  /** The chat's attention state: dot plus reason text. */
+  attention: ChatAttention;
   isClosing: boolean;
   canStopGeneration: boolean;
   onClosePanel?: () => void;
@@ -275,8 +279,7 @@ export function PaneControls({
 
 export function ChatHeader({
   label,
-  lifecycle,
-  isActive,
+  attention,
   isClosing,
   canStopGeneration,
   onClosePanel,
@@ -627,23 +630,18 @@ export function ChatHeader({
               {projectLabel}
             </span>
           )}
-          {lifecycle === "error" ? (
-            <span
-              data-testid="chat-error-dot"
-              className="em"
-              style={{
-                background: "var(--color-err)",
-                boxShadow:
-                  "0 0 6px color-mix(in oklch, var(--color-err) 60%, transparent)",
-              }}
-            />
-          ) : isActive ? (
-            <span data-testid="chat-active-dot" className="em ok" />
-          ) : lifecycle === "closed" ? (
-            <span data-testid="chat-closed-dot" className="em mute" />
-          ) : (
-            <span className="em" />
-          )}
+          <ChatAttentionDot attention={attention} />
+          {attention.state !== "idle" &&
+            CHAT_ATTENTION[attention.state].needsUser && (
+              <span
+                className="hc-attention-reason"
+                data-attention={attention.state}
+                data-testid="chat-attention-reason"
+                aria-hidden="true"
+              >
+                {attention.reason ?? CHAT_ATTENTION[attention.state].label}
+              </span>
+            )}
         </div>
         {(titleEditError || titleError) && (
           <span className="hc-title-error" role="alert">

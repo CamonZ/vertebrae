@@ -1,8 +1,8 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FloatingChatLauncher } from "./FloatingChatLauncher";
-import { useChatStore } from "../../stores/chatStore";
+import { useChatStore, type ChatSession } from "../../stores/chatStore";
 import {
   clearPersistedLocalChatSessions,
   loadPersistedLocalChatSession,
@@ -312,5 +312,64 @@ describe("FloatingChatLauncher", () => {
     fireEvent.keyDown(window, { key: "Alt" });
 
     expect(useChatStore.getState().panelOpen).toBe(false);
+  });
+
+  describe("attention signals", () => {
+    const chat = (
+      id: string,
+      extra: Partial<ChatSession> = {}
+    ): ChatSession => ({
+      id,
+      label: id,
+      messages: [
+        { kind: "user", text: "Go", timestamp: "2026-11-22T10:00:00.000Z" },
+      ],
+      status: "open",
+      harness: "claude",
+      backendSessionId: null,
+      providerResumeId: null,
+      lifecycle: "idle",
+      ...extra,
+    });
+    const put = (...sessions: ChatSession[]) =>
+      act(() =>
+        useChatStore.setState({
+          sessions: Object.fromEntries(sessions.map((s) => [s.id, s])),
+        })
+      );
+
+    it("glows only while a counted chat is running", () => {
+      render(<FloatingChatLauncher />);
+      const launcher = screen.getByTestId("local-chat-launcher");
+      expect(launcher).not.toHaveAttribute("data-running");
+
+      put(chat("a", { lifecycle: "streaming" }));
+      expect(launcher).toHaveAttribute("data-running", "true");
+
+      // Discussions do not count toward the launcher.
+      put(chat("d", { lifecycle: "streaming", discussion: {} as never }));
+      expect(launcher).not.toHaveAttribute("data-running");
+
+      put(chat("a"));
+      expect(launcher).not.toHaveAttribute("data-running");
+    });
+
+    it("shows the flat attention dot and count only while chats need the user", () => {
+      render(<FloatingChatLauncher />);
+      expect(
+        screen.queryByTestId("local-chat-launcher-attention")
+      ).not.toBeInTheDocument();
+
+      put(
+        chat("a", { lifecycle: "error" }),
+        chat("b", { lifecycle: "streaming" })
+      );
+      expect(
+        screen.getByRole("button", { name: "Open project chat, 1 need you" })
+      ).toHaveAttribute("data-running", "true");
+      expect(
+        screen.getByTestId("local-chat-launcher-attention")
+      ).toBeInTheDocument();
+    });
   });
 });

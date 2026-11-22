@@ -1,3 +1,5 @@
+import { useChatAttention } from "../../hooks/useChatAttention";
+import { ChatAttentionDot } from "./ChatAttentionDot";
 import { CatalogSaveWarning } from "./CatalogSaveWarning";
 import {
   memo,
@@ -796,6 +798,10 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                           </button>
 
                           <div className="hc-mini-history-secondary">
+                            <SessionAttentionDot
+                              sessionId={session.id}
+                              title={title}
+                            />
                             {activityBySessionId?.has(session.id) ? (
                               <SessionActivityBadge
                                 activity={activityBySessionId.get(session.id)!}
@@ -1003,6 +1009,28 @@ function miniThreadTitle(
     title: inferredTitle,
     label: fallbackLabel,
   });
+}
+
+/**
+ * A loaded chat's attention dot in its history row. Running is left to the
+ * activity badge beside it, and unloaded history shows nothing.
+ */
+function SessionAttentionDot({
+  sessionId,
+  title,
+}: {
+  sessionId: string;
+  title: string;
+}) {
+  const attention = useChatAttention(sessionId);
+  if (attention.state === "running") return null;
+  return (
+    <ChatAttentionDot
+      attention={attention}
+      subject={title}
+      testId="local-chat-history-attention"
+    />
+  );
 }
 
 function HarnessBadge({ harness }: { harness: LocalChatHarnessKind }) {

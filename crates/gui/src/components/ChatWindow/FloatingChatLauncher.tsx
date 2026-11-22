@@ -1,3 +1,7 @@
+import {
+  useAnyChatRunning,
+  useChatsNeedingYou,
+} from "../../hooks/useChatAttention";
 import { loadMainChatWorktree } from "../../utils/chatAssociation/defaultWorktree";
 import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 import { useCallback, useEffect, useRef } from "react";
@@ -38,6 +42,8 @@ export function FloatingChatLauncher() {
   const setPanelOpen = useChatStore((s) => s.setPanelOpen);
   const startFreshSession = useChatStore((s) => s.startFreshSession);
   const panelOpen = useChatStore((s) => s.panelOpen);
+  const needYou = useChatsNeedingYou().length;
+  const running = useAnyChatRunning();
   const toggleRequestRef = useRef(0);
 
   // Open the panel when closed; close when already open. Reads panelOpen from
@@ -108,9 +114,16 @@ export function FloatingChatLauncher() {
       type="button"
       className="hc-launch"
       data-testid="local-chat-launcher"
+      data-running={running || undefined}
       onClick={() => void toggleChat()}
-      title="Open project chat (⌥ ⌥)"
-      aria-label="Open project chat"
+      title={
+        needYou > 0
+          ? `${needYou} need you · Open project chat (⌥ ⌥)`
+          : "Open project chat (⌥ ⌥)"
+      }
+      aria-label={
+        needYou > 0 ? `Open project chat, ${needYou} need you` : "Open project chat"
+      }
     >
       <span className="ic" aria-hidden>
         <svg
@@ -128,7 +141,13 @@ export function FloatingChatLauncher() {
         <kbd className="key">⌥</kbd>
         <kbd className="key">⌥</kbd>
       </span>
-      <span className="ember" aria-hidden />
+      {needYou > 0 && (
+        <span
+          className="ember"
+          data-testid="local-chat-launcher-attention"
+          aria-hidden
+        />
+      )}
     </button>
   );
 }

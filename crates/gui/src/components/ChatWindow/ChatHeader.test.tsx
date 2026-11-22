@@ -1,12 +1,20 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ChatHeader } from "./ChatHeader";
+import type {
+  ChatAttention,
+  ChatAttentionState,
+} from "../../utils/chatAttention";
+
+const attention = (
+  state: ChatAttentionState,
+  reason: string | null = null
+): ChatAttention => ({ state, reason, since: null });
 
 function renderHeader(overrides: Record<string, unknown> = {}) {
   const props = {
     label: "Test Chat",
-    lifecycle: "idle" as const,
-    isActive: false,
+    attention: { state: "idle", reason: null, since: null } as ChatAttention,
     isClosing: false,
     canStopGeneration: false,
     onClearMessages: vi.fn(),
@@ -180,29 +188,58 @@ describe("ChatHeader", () => {
 
   // --- Status dots ---
 
-  it("renders the error dot when lifecycle is error", () => {
-    renderHeader({ lifecycle: "error" });
-    expect(screen.getByTestId("chat-error-dot")).toBeInTheDocument();
-    expect(screen.queryByTestId("chat-active-dot")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("chat-closed-dot")).not.toBeInTheDocument();
+  it("renders error as a flat err dot with its reason, never a glow", () => {
+    renderHeader({ attention: attention("error") });
+    const dot = screen.getByRole("img", { name: "Error" });
+    expect(dot).toHaveAttribute("data-tone", "err");
+    expect(dot.getAttribute("style")).toBeNull();
+    expect(screen.getByTestId("chat-attention-reason")).toHaveTextContent(
+      "Error"
+    );
   });
 
-  it("renders the active dot when isActive is true", () => {
-    renderHeader({ isActive: true });
-    expect(screen.getByTestId("chat-active-dot")).toBeInTheDocument();
+  it("names blocked and needs-you reasons in the dot and as text", () => {
+    const { rerender, props } = renderHeader({
+      attention: attention("blocked", "Permission: Bash"),
+    });
+    expect(
+      screen.getByRole("img", { name: "Blocked: Permission: Bash" })
+    ).toHaveAttribute("data-tone", "accent");
+    expect(screen.getByTestId("chat-attention-reason")).toHaveTextContent(
+      "Permission: Bash"
+    );
+    rerender(
+      <ChatHeader
+        {...props}
+        attention={attention("needs-you", "Asked you something")}
+      />
+    );
+    expect(
+      screen.getByRole("img", { name: "Needs you: Asked you something" })
+    ).toHaveAttribute("data-tone", "accent");
   });
 
-  it("renders the closed dot when lifecycle is closed", () => {
-    renderHeader({ lifecycle: "closed" });
-    expect(screen.getByTestId("chat-closed-dot")).toBeInTheDocument();
+  it("shows running, your-turn and closed as dots without reason text", () => {
+    for (const [state, tone] of [
+      ["running", "ok"],
+      ["your-turn", "mute"],
+      ["closed", "hollow"],
+    ] as const) {
+      const { unmount } = renderHeader({ attention: attention(state) });
+      expect(screen.getByTestId("chat-attention-dot")).toHaveAttribute(
+        "data-tone",
+        tone
+      );
+      expect(
+        screen.queryByTestId("chat-attention-reason")
+      ).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
-  it("renders a neutral ember when idle and not active", () => {
-    const { container } = renderHeader({ lifecycle: "idle", isActive: false });
-    expect(container.querySelector(".em")).toBeInTheDocument();
-    expect(screen.queryByTestId("chat-error-dot")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("chat-active-dot")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("chat-closed-dot")).not.toBeInTheDocument();
+  it("draws no dot when idle", () => {
+    renderHeader();
+    expect(screen.queryByTestId("chat-attention-dot")).not.toBeInTheDocument();
   });
 
   // --- Always-visible actions ---
