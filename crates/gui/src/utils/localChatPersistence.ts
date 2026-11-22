@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { isOpenLocalChatConversation, normalizeDiscussionBinding } from "./localChatDiscussion";
 import { localChatActivityStatus } from "./localChatActivity";
 import type {
@@ -83,8 +84,33 @@ export function hasFailedCatalogSave(sessionId: string): boolean {
   return failedCatalogSaves.has(sessionId);
 }
 
-export function retryCatalogSave(): Promise<boolean> {
-  return scheduleIndexSave();
+async function logCatalogDiagnostic(event: string, details: Record<string, unknown>): Promise<void> {
+  const message = `[ChatCatalogSync] ${event} ${JSON.stringify(details)}`;
+  try {
+    await invoke<void>("plugin:log|log", {
+      level: 4, // Tauri log plugin's Warn level.
+      location: "chat_catalog",
+      message,
+    });
+  } catch {
+    console.warn(message);
+  }
+}
+
+function catalogErrorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (
+    error && typeof error === "object" &&
+    "message" in error && typeof error.message === "string"
+  ) return error.message;
+  return "Unknown error";
+}
+
+export async function retryCatalogSave(sessionId?: string): Promise<boolean> {
+  if (sessionId) await logCatalogDiagnostic("retry_requested", { sessionId });
+  const saved = await scheduleIndexSave();
+  if (sessionId) await logCatalogDiagnostic("retry_finished", { sessionId, indexSaved: saved });
+  return saved;
 }
 
 function setCatalogSaveFailed(ids: Iterable<string>, failed: boolean): void {
@@ -645,7 +671,11 @@ async function flushIndexSaveQueue(): Promise<boolean> {
       if (result.status === "error") {
         succeeded = false;
         setCatalogSaveFailed(changes.keys(), true);
-        console.warn("[ChatCatalogSync] index_save_failed");
+        await logCatalogDiagnostic("index_save_failed", {
+          sessionIds: [...changes.keys()],
+          kind: "command_error",
+          error: catalogErrorMessage(result.error),
+        });
       } else {
         for (const id of deletedIds) pendingDeletedIds.delete(id);
         setCatalogSaveFailed(deletedIds, false);
@@ -657,10 +687,14 @@ async function flushIndexSaveQueue(): Promise<boolean> {
         }
       }
     }
-  } catch {
+  } catch (error) {
     succeeded = false;
     setCatalogSaveFailed(pendingChangedIds.keys(), true);
-    console.warn("[ChatCatalogSync] index_save_failed");
+    await logCatalogDiagnostic("index_save_failed", {
+      sessionIds: [...pendingChangedIds.keys()],
+      kind: "exception",
+      error: catalogErrorMessage(error),
+    });
   } finally {
     indexSaveInFlight = false;
     if (indexSaveQueued && !blockedByHydration) {
@@ -688,10 +722,16 @@ async function loadSessionIndexFromCommand(): Promise<Record<
           .map((session) => [session.id, session])
       );
     }
-    console.warn("[ChatCatalogSync] index_load_failed");
+    await logCatalogDiagnostic("index_load_failed", {
+      kind: "command_error",
+      error: catalogErrorMessage(result.error),
+    });
     return null;
-  } catch {
-    console.warn("[ChatCatalogSync] index_load_failed");
+  } catch (error) {
+    await logCatalogDiagnostic("index_load_failed", {
+      kind: "exception",
+      error: catalogErrorMessage(error),
+    });
     return null;
   }
 }

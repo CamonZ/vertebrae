@@ -731,6 +731,12 @@ describe("localChatPersistence", () => {
         .mockResolvedValueOnce({ status: "error", error: { message: "Write failed" } })
         .mockResolvedValue({ status: "ok", data: null });
       const persistence = await import("./localChatPersistence");
+      const { invoke } = await import("@tauri-apps/api/core");
+      const log = vi.mocked(invoke);
+      log.mockClear();
+      const messages = () => log.mock.calls
+        .filter(([command]) => command === "plugin:log|log")
+        .map(([, args]) => args && "message" in args ? args.message : undefined);
       const onChange = vi.fn();
       const unsubscribe = persistence.subscribeToCatalogSaves(onChange);
 
@@ -738,10 +744,19 @@ describe("localChatPersistence", () => {
       expect(save).not.toHaveBeenCalled();
       expect(persistence.hasFailedCatalogSave("s-1")).toBe(true);
       expect(persistence.hasFailedCatalogSave("other")).toBe(false);
-      expect(await persistence.retryCatalogSave()).toBe(false);
+      expect(await persistence.retryCatalogSave("s-1")).toBe(false);
       expect(persistence.hasFailedCatalogSave("s-1")).toBe(true);
+      expect(messages()).toEqual([
+        '[ChatCatalogSync] index_load_failed {"kind":"command_error","error":"Read failed"}',
+        '[ChatCatalogSync] retry_requested {"sessionId":"s-1"}',
+        '[ChatCatalogSync] index_save_failed {"sessionIds":["s-1"],"kind":"command_error","error":"Write failed"}',
+        '[ChatCatalogSync] retry_finished {"sessionId":"s-1","indexSaved":false}',
+      ]);
 
-      expect(await persistence.retryCatalogSave()).toBe(true);
+      expect(await persistence.retryCatalogSave("s-1")).toBe(true);
+      expect(messages().at(-1)).toBe(
+        '[ChatCatalogSync] retry_finished {"sessionId":"s-1","indexSaved":true}'
+      );
       expect(save.mock.lastCall?.[0].sessions).toEqual([
         expect.objectContaining({ id: "s-1", providerResumeId: "conv-1", harness }),
       ]);
