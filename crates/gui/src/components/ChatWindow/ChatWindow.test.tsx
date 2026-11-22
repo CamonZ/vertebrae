@@ -42,6 +42,7 @@ import {
   routeLocalChatToolCallEvent,
   routeLocalChatToolResultEvent,
   routeLocalChatTurnStartedEvent,
+  routeLocalChatSteeringInputEvent,
   routePermissionRequestEvent,
 } from "../../hooks/useLocalChatEventRouter";
 import {
@@ -153,6 +154,7 @@ vi.mock("../../bindings", async () => {
           sufficient_signal: true,
         },
       }),
+      steerLocalChatTurn: vi.fn(),
       sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
       closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
       resolvePermissionRequest: vi.fn().mockResolvedValue({ status: "ok" }),
@@ -2931,7 +2933,7 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTitle("Send message")).toBeDisabled();
+    expect(screen.getByTitle("Queue message")).toBeDisabled();
     fireEvent.keyDown(window, { key: ".", metaKey: true });
 
     await waitFor(() => {
@@ -3646,7 +3648,7 @@ describe("ChatWindow", () => {
     expect(
       screen.getByPlaceholderText("Type a message to queue...")
     ).toBeEnabled();
-    expect(screen.getByTitle("Send message")).toBeDisabled();
+    expect(screen.getByTitle("Queue message")).toBeDisabled();
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
 
@@ -3681,6 +3683,113 @@ describe("ChatWindow", () => {
     expect(screen.getByText("Streaming now")).toBeInTheDocument();
     expect(screen.getByText("Thinking...")).toBeInTheDocument();
   });
+
+  it.each(["Control+click", "Control+Enter"])("steers with %s while Enter queues", async (action) => {
+    const turnId = "steering-turn";
+    const session = createSession({
+      backendSessionId: "steer-backend",
+      lifecycle: "streaming",
+      activeTurn: { localId: "steering-local", turnId, phase: "active" },
+    });
+    useChatStore.setState({ sessions: { "test-session": session }, activeSessionId: "test-session" });
+    type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
+    let resolveReply!: (value: Reply) => void;
+    const reply = new Promise<Reply>((resolve) => { resolveReply = resolve; });
+    mockedCommands.steerLocalChatTurn.mockReturnValueOnce(reply);
+    render(<ChatWindow sessionId="test-session" />);
+    const composer = screen.getByTestId("local-chat-composer");
+    fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeDisabled();
+    fireEvent.keyUp(composer, { key: "Control" });
+    fireEvent.change(composer, { target: { value: "Change course" } });
+    const arrow = screen.getByRole("button", { name: "Queue message" });
+    const straightPath = arrow.querySelector("path")?.getAttribute("d");
+    expect(arrow).toHaveAttribute("aria-keyshortcuts", "Control+Enter");
+    fireEvent.keyDown(composer, { key: "Enter", metaKey: true });
+    fireEvent.keyDown(composer, { key: "Enter", altKey: true });
+    expect(mockedCommands.steerLocalChatTurn).not.toHaveBeenCalled();
+    expect(composer).toHaveValue("Change course");
+    fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
+    expect(arrow).toHaveAccessibleName("Steer active turn");
+    expect(arrow.querySelector("path")).not.toHaveAttribute("d", straightPath);
+    fireEvent.keyUp(composer, { key: "Control" });
+    expect(arrow).toHaveAccessibleName("Queue message");
+    expect(arrow.querySelector("path")).toHaveAttribute("d", straightPath);
+    fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
+    fireEvent.blur(composer);
+    expect(arrow).toHaveAccessibleName("Queue message");
+    fireEvent.keyDown(composer, { key: "Control", ctrlKey: true });
+    if (action === "Control+click") fireEvent.click(arrow, { ctrlKey: true });
+    else fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true });
+    expect(mockedCommands.steerLocalChatTurn).toHaveBeenCalledWith("steer-backend", turnId, "Change course");
+    expect(composer).toHaveValue("Change course");
+    expect(arrow).toBeDisabled();
+
+    await act(async () => {
+      const input = {
+        backend_session_id: "steer-backend", turn_id: turnId, input_id: "steer:input-1",
+        content: "Change course", observed_at: "2026-01-01T00:00:00Z",
+      };
+      routeLocalChatSteeringInputEvent(input);
+      routeLocalChatSteeringInputEvent(input);
+      resolveReply({ status: "ok", data: turnId });
+    });
+    expect(composer).toHaveValue("");
+    expect(screen.getByText("Sent to the active turn")).toBeInTheDocument();
+    expect(useChatStore.getState().sessions["test-session"].messages.filter(
+      (message) => message.kind === "user" && message.text === "Change course"
+    )).toEqual([{ kind: "user", text: "Change course", inputId: "steer:input-1", turnId, timestamp: "2026-01-01T00:00:00Z" }]);
+
+    fireEvent.change(composer, { target: { value: "Afterward" } });
+    if (action === "Control+click") fireEvent.click(arrow);
+    else fireEvent.keyDown(composer, { key: "Enter" });
+    await waitFor(() => expect(useChatStore.getState().sessions["test-session"].queuedMessages).toEqual(["Afterward"]));
+    expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(["new project", "rebound turn"])(
+    "leaves a %s draft alone when a steering reply is late",
+    async (replacement) => {
+      const projectChanged = replacement === "new project";
+      const session = createSession({
+        projectPath: "/old",
+        backendSessionId: "old-steer-backend",
+        lifecycle: "streaming",
+        activeTurn: { localId: "old-local", turnId: "old-turn", phase: "active" },
+      });
+      useChatStore.setState({ sessions: { "test-session": session }, activeSessionId: "test-session" });
+      type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
+      let resolveReply!: (value: Reply) => void;
+      const reply = new Promise<Reply>((resolve) => { resolveReply = resolve; });
+      mockedCommands.steerLocalChatTurn.mockReturnValueOnce(reply);
+      render(<ChatWindow sessionId="test-session" />);
+      const composer = screen.getByTestId("local-chat-composer");
+      fireEvent.change(composer, { target: { value: "Old instruction" } });
+      fireEvent.keyDown(composer, { key: "Enter", ctrlKey: true });
+
+      await act(async () => {
+        useChatStore.setState({ sessions: {
+          "test-session": {
+            ...session,
+            projectPath: projectChanged ? "/replacement" : session.projectPath,
+            backendSessionId: projectChanged ? "replacement" : session.backendSessionId,
+            activeTurn: { localId: "old-local", turnId: "new-turn", phase: "active" },
+          },
+        } });
+        if (projectChanged) {
+          useComposerDraftStore.getState().setDraft("test-session", "New draft");
+          resolveReply({ status: "error", error: { SendFailed: "Old turn finished" } });
+        } else {
+          resolveReply({ status: "ok", data: "old-turn" });
+        }
+      });
+      expect(screen.getByTestId("local-chat-composer")).toHaveValue(
+        projectChanged ? "New draft" : "Old instruction"
+      );
+      expect(screen.queryByText(/Old turn finished|Sent to the active turn/)).not.toBeInTheDocument();
+      expect(useChatStore.getState().sessions["test-session"].activeTurn?.turnId).toBe("new-turn");
+    }
+  );
 
   it("disables ordinary composer sends while a user question is pending", () => {
     const questions = [

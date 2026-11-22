@@ -1229,7 +1229,8 @@ export function useLocalChat(sessionId: string | null) {
         lifecycle === "starting" ||
         lifecycle === "resuming" ||
         lifecycle === "sending" ||
-        lifecycle === "streaming"
+        lifecycle === "streaming" ||
+        pendingLocalChatSteering.has(session.backendSessionId)
       ) {
         inferSessionTitleInBackground(
           session,
@@ -1413,3 +1414,5 @@ export function useOpenChat() {
     [openSession]
   );
 }
+
+export const pendingLocalChatSteering = new Set<string>();

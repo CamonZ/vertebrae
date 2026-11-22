@@ -2,7 +2,8 @@ use serde_json::{Value, json};
 use vertebrae_harness_core::{
     DiagnosticEvent, FileChange, FileChangeEvent, FileChangeKind, HarnessError,
     HarnessEventPayloadV1, ItemId, SessionTitle, TextEvent, ThreadId, ToolCallEvent, ToolCallId,
-    ToolOutputEvent, ToolStatus, TurnId, TurnOutcome, UpdateSemantics, UsageEvent,
+    ToolOutputEvent, ToolStatus, TurnId, TurnInput, TurnInputProvenance, TurnOutcome,
+    UpdateSemantics, UsageEvent,
 };
 
 use super::outcome::{TurnAccumulator, outcome_from_completion, parse_usage, usage_delta};
@@ -139,6 +140,27 @@ impl SessionState {
                     .await?;
                 } else {
                     match item.get("type").and_then(Value::as_str) {
+                        Some("userMessage") if !is_child => {
+                            if let Some(id) = item["clientId"]
+                                .as_str()
+                                .filter(|id| id.starts_with("steer:"))
+                                && root_turn.steering_inputs.insert(id.to_owned())
+                            {
+                                correlation.item_id = Some(ItemId::new(id));
+                                self.emit(
+                                    stream,
+                                    correlation,
+                                    HarnessEventPayloadV1::TurnInput(TurnInput {
+                                        thread_id: self.root_thread_id.clone(),
+                                        run_id: None,
+                                        content: crate::rollout::content_text(item.get("content")),
+                                        provenance: TurnInputProvenance::Human,
+                                    }),
+                                    UpdateSemantics::Snapshot,
+                                )
+                                .await?;
+                            }
+                        }
                         Some("agentMessage") => {
                             if let Some(text) = item.get("text").and_then(Value::as_str) {
                                 if !is_child {

@@ -384,6 +384,16 @@ pub trait SessionHandle: Send + Sync {
     /// matching terminal event must not begin after that start-delivery
     /// failure.
     async fn send(&self, request: SendTurnRequest) -> Result<Arc<dyn TurnHandle>, HarnessError>;
+    /// Submit input to the expected active turn and return the turn that received it.
+    /// Some providers may consume the input in a continuation after this turn.
+    async fn steer(
+        &self,
+        _expected_turn_id: &TurnId,
+        _content: String,
+    ) -> Result<TurnId, HarnessError> {
+        Err(HarnessError::Unsupported("live steering".into()))
+    }
+
     /// Compact the current conversation without submitting a user prompt.
     /// Resolves only after provider completion; unsupported adapters reject it.
     async fn compact(&self) -> Result<(), HarnessError> {

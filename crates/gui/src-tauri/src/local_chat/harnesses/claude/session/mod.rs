@@ -1074,6 +1074,28 @@ impl ClaudeSessionRuntime {
         result
     }
 
+    pub(crate) async fn steer_turn(
+        &self,
+        session_id: &str,
+        expected_turn_id: &str,
+        content: String,
+    ) -> Result<String, LocalChatSessionError> {
+        let handle = self
+            .sessions
+            .read()
+            .await
+            .active
+            .get(session_id)
+            .map(|session| session.handle.clone())
+            .ok_or_else(|| LocalChatSessionError::SessionNotFound(session_id.to_string()))?;
+        crate::local_chat::harnesses::shared::steer_session(
+            handle.as_ref(),
+            expected_turn_id,
+            content,
+        )
+        .await
+    }
+
     pub(crate) async fn interrupt_turn(
         &self,
         session_id: &str,

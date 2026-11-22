@@ -455,3 +455,44 @@ fn replay_recovers_only_known_owned_service_tier_settings() {
             HarnessEventPayloadV1::SessionStarted(start) if start.speed_tier_status.is_some())));
     }
 }
+
+#[test]
+fn steering_replay_keeps_distinct_same_text_inputs_in_their_provider_turn() {
+    for legacy in [false, true] {
+        let raw = json!({"type":"response_item","payload":{
+            "type":"message","role":"user","content":[{"type":"input_text","text":"same"}]
+        }});
+        let mut body = format!(
+            "{}\n",
+            json!({"type":"event_msg","payload":{"type":"task_started","turn_id":"provider-turn"}})
+        );
+        for id in ["steer:first", "steer:second"] {
+            body.push_str(&format!("{raw}\n"));
+            if legacy {
+                body.push_str(&format!(
+                    "{}\n",
+                    json!({"type":"event_msg","payload":{"type":"user_message","client_id":id,"message":"same"}})
+                ));
+            } else {
+                body.push_str(&completed(json!({
+                    "type":"UserMessage", "id":format!("provider-{id}"), "client_id":id,
+                    "content":[{"type":"text","text":"same"}],
+                })));
+            }
+        }
+
+        let drafts = parse(&body);
+        let inputs: Vec<_> = drafts
+            .iter()
+            .filter(|draft| matches!(&draft.payload, HarnessEventPayloadV1::TurnInput(input) if input.content == "same"))
+            .collect();
+        assert_eq!(inputs.len(), 2);
+        for (draft, id) in inputs.iter().zip(["steer:first", "steer:second"]) {
+            assert_eq!(draft.correlation.item_id.as_ref().unwrap().as_str(), id);
+            assert_eq!(
+                draft.correlation.turn_id.as_ref().unwrap().as_str(),
+                "provider-turn"
+            );
+        }
+    }
+}

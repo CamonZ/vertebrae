@@ -256,6 +256,7 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     harness: normalizeHarness(candidate.harness),
     backendSessionId: null,
     providerResumeId,
+    steeringTurnIds: candidate.steeringTurnIds ?? undefined,
     providerParentResumeId:
       typeof candidate.providerParentResumeId === "string"
         ? candidate.providerParentResumeId
@@ -484,6 +485,7 @@ function serializeSession(
     createdAt,
     updatedAt,
     messageCount,
+    steeringTurnIds: session.steeringTurnIds,
     association: session.association ?? null,
     gate: session.gate ?? null,
   };
@@ -530,6 +532,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     lifecycle: session.lifecycle ?? "idle",
     status: session.status,
     ...(session.gate ? { gate: session.gate } : {}),
+    ...(session.steeringTurnIds ? { steeringTurnIds: session.steeringTurnIds } : {}),
     ...(binding && { discussionBinding: binding }),
   };
 }

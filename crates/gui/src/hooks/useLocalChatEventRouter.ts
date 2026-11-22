@@ -1,7 +1,11 @@
+import {
+  getProjectScopeGeneration,
+  isCurrentProjectScopeGeneration,
+} from "../stores/projectScopedStores";
 import { recoveredSpeedTier } from "../utils/localChatSpeedTier";
 import { createLocalChatTextBatch } from "../utils/localChatTextBatch";
 import { useEffect } from "react";
-import { events } from "../bindings";
+import { commands, events } from "../bindings";
 import type {
   LocalChatAnnotationEvent,
   LocalChatBackgroundRosterEvent,
@@ -17,6 +21,7 @@ import type {
   LocalChatToolCallEvent,
   LocalChatToolResultEvent,
   LocalChatTurnStartedEvent,
+  LocalChatSteeringInputEvent,
   LocalChatFileChangeEvent,
   PermissionRequestEvent,
 } from "../bindings";
@@ -29,6 +34,7 @@ import {
 import {
   currentActiveTurnLocalId,
   currentBackendSessionId,
+  pendingLocalChatSteering,
   doSendMessage,
   doStartSession,
   handleEndEvent,
@@ -166,6 +172,69 @@ function shouldRouteContentEvent(
   return allowSettled && !!session && getLocalChatLifecycle(session) === "idle";
 }
 
+export async function steerLocalChatTurn(
+  sessionId: string,
+  backendSessionId: string,
+  turnId: string,
+  content: string
+): Promise<string> {
+  if (pendingLocalChatSteering.has(backendSessionId)) {
+    throw new Error("Waiting for the previous steering message");
+  }
+  const projectGeneration = getProjectScopeGeneration();
+  const projectPath = useChatStore.getState().sessions[sessionId]?.projectPath;
+  const ownsSession = () => {
+    const session = useChatStore.getState().sessions[sessionId];
+    return isCurrentProjectScopeGeneration(projectGeneration) &&
+      session?.backendSessionId === backendSessionId && session.projectPath === projectPath;
+  };
+  pendingLocalChatSteering.add(backendSessionId);
+  try {
+    const result = await commands.steerLocalChatTurn(backendSessionId, turnId, content);
+    if (result.status === "error") {
+      throw new Error(
+        "SendFailed" in result.error ? result.error.SendFailed : "The chat session has ended"
+      );
+    }
+    const store = useChatStore.getState();
+    const routed = rootTurnByBackendSessionId.get(backendSessionId);
+    // IPC replies and events use separate delivery paths. Hold the queue if
+    // a follow-up was confirmed before its start event has arrived.
+    if (
+      result.data !== turnId &&
+      routed?.turnId === turnId &&
+      routed.phase === "settled" &&
+      ownsSession() &&
+      getLocalChatLifecycle(store.sessions[sessionId]) === "idle"
+    ) {
+      store.beginActiveTurn(sessionId);
+      store.bindActiveTurn(sessionId, result.data);
+      store.setSessionLifecycle(sessionId, "streaming");
+    }
+    return result.data;
+  } finally {
+    pendingLocalChatSteering.delete(backendSessionId);
+    if (ownsSession()) {
+      void flushNextQueuedMessage(sessionId);
+    }
+  }
+}
+
+export function routeLocalChatSteeringInputEvent(
+  payload: LocalChatSteeringInputEvent
+): boolean {
+  const sessionId = resolveSessionId(payload.backend_session_id);
+  if (!sessionId) return false;
+  useChatStore.getState().addMessage(sessionId, {
+    kind: "user",
+    text: payload.content,
+    timestamp: payload.observed_at,
+    inputId: payload.input_id,
+    turnId: payload.turn_id,
+  });
+  return true;
+}
+
 export function routeLocalChatTurnStartedEvent(
   payload: LocalChatTurnStartedEvent
 ): boolean {
@@ -198,10 +267,15 @@ export function routeLocalChatTurnStartedEvent(
     phase: "active",
   });
 
-  const bound = useChatStore
-    .getState()
-    .bindActiveTurn(sessionId, payload.turn_id);
-  return bound;
+  const store = useChatStore.getState();
+  if (
+    pendingLocalChatSteering.has(payload.backend_session_id) &&
+    getLocalChatLifecycle(store.sessions[sessionId]) === "idle"
+  ) {
+    store.beginActiveTurn(sessionId);
+    store.setSessionLifecycle(sessionId, "streaming");
+  }
+  return store.bindActiveTurn(sessionId, payload.turn_id);
 }
 
 export function routeLocalChatSessionInitEvent(
@@ -674,7 +748,11 @@ export async function flushNextQueuedMessage(
 ): Promise<boolean> {
   const initial = useChatStore.getState();
   const session = initial.sessions[sessionId];
-  if (!session || getLocalChatLifecycle(session) !== "idle") return false;
+  if (
+    !session ||
+    getLocalChatLifecycle(session) !== "idle" ||
+    (session.backendSessionId && pendingLocalChatSteering.has(session.backendSessionId))
+  ) return false;
 
   const content = initial.shiftQueuedMessage(sessionId);
   if (!content) return false;
@@ -798,6 +876,14 @@ function subscribeLocalChatEvents(): Unlisten {
       routeLocalChatSessionUsageEvent(event.payload);
     })
   );
+  if (events.localChatSteeringInputEvent) {
+    void register(
+      events.localChatSteeringInputEvent.listen((event) => {
+        textBatch.flush();
+        routeLocalChatSteeringInputEvent(event.payload);
+      })
+    );
+  }
   void register(
     events.localChatTextEvent.listen((event) => {
       textBatch.push(event.payload);

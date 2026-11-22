@@ -170,6 +170,7 @@ fn create_builder() -> Builder {
             commands::send_local_chat_message,
             commands::compact_local_chat_session,
             commands::interrupt_local_chat_turn,
+            commands::steer_local_chat_turn,
             commands::close_local_chat_session,
             commands::set_local_chat_recording_worktree,
             commands::infer_local_chat_session_title,
@@ -250,6 +251,7 @@ fn create_builder() -> Builder {
             // Provider-neutral local chat events
             LocalChatSessionInitEvent,
             LocalChatTurnStartedEvent,
+            crate::local_chat::LocalChatSteeringInputEvent,
             LocalChatTextEvent,
             LocalChatToolCallEvent,
             LocalChatToolResultEvent,
@@ -522,6 +524,7 @@ mod tests {
             "async getSupportedLocalChatHarnesses(",
             "async createLocalChatSession(",
             "async sendLocalChatMessage(",
+            "async steerLocalChatTurn(",
             "async closeLocalChatSession(",
             "async inferLocalChatSessionTitle(",
             "async setupLocalBackend(",
@@ -547,6 +550,8 @@ mod tests {
             bindings.contains("localBackendProgressEvent: LocalBackendProgressEvent"),
             "generated bindings should include local backend progress events"
         );
+        assert!(bindings.contains("localChatSteeringInputEvent: LocalChatSteeringInputEvent"));
+        assert!(bindings.contains("steeringTurnIds?:"));
         for ty in [
             "export type LocalChatHarnessKind",
             "export type LocalChatHarnessCatalog",

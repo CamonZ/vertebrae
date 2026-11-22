@@ -60,6 +60,15 @@ pub struct LocalChatTextEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
+pub struct LocalChatSteeringInputEvent {
+    pub backend_session_id: String,
+    pub turn_id: String,
+    pub input_id: String,
+    pub content: String,
+    pub observed_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event, PartialEq)]
 pub struct LocalChatTurnStartedEvent {
     pub backend_session_id: String,
     pub harness: LocalChatHarnessKind,
@@ -311,6 +320,7 @@ pub(crate) enum LocalChatEvent {
     Init(LocalChatSessionInitEvent),
     Title(LocalChatSessionTitleEvent),
     TurnStarted(LocalChatTurnStartedEvent),
+    SteeringInput(LocalChatSteeringInputEvent),
     Text(LocalChatTextEvent),
     ToolCall(LocalChatToolCallEvent),
     ToolResult(LocalChatToolResultEvent),
@@ -331,6 +341,7 @@ impl LocalChatEvent {
         match self {
             LocalChatEvent::Init(_) => "local-chat-session-init-event",
             LocalChatEvent::Title(_) => "local-chat-session-title-event",
+            LocalChatEvent::SteeringInput(_) => "local-chat-steering-input-event",
             LocalChatEvent::TurnStarted(_) => "local-chat-turn-started-event",
             LocalChatEvent::Text(_) => "local-chat-text-event",
             LocalChatEvent::ToolCall(_) => "local-chat-tool-call-event",
@@ -424,6 +435,7 @@ impl LocalChatEventSink {
         let result = match &event {
             LocalChatEvent::Init(payload) => payload.emit(app_handle),
             LocalChatEvent::Title(payload) => payload.emit(app_handle),
+            LocalChatEvent::SteeringInput(payload) => payload.emit(app_handle),
             LocalChatEvent::TurnStarted(payload) => payload.emit(app_handle),
             LocalChatEvent::Text(payload) => payload.emit(app_handle),
             LocalChatEvent::ToolCall(payload) => payload.emit(app_handle),

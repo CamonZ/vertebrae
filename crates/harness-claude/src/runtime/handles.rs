@@ -102,6 +102,27 @@ impl SessionHandle for ClaudeSessionHandle {
         self.provider_resume_id.as_ref()
     }
 
+    async fn steer(
+        &self,
+        expected_turn_id: &TurnId,
+        content: String,
+    ) -> Result<TurnId, HarnessError> {
+        let (response, receiver) = oneshot::channel();
+        self.command_tx
+            .send(SessionCommand::Steer {
+                turn_id: expected_turn_id.clone(),
+                content,
+                response,
+            })
+            .map_err(|_| HarnessError::InvalidRequest("Claude session has ended".into()))?;
+        receiver
+            .await
+            .map_err(|_| {
+                HarnessError::Operation("Claude closed before confirming steering delivery".into())
+            })?
+            .map_err(HarnessError::Operation)
+    }
+
     async fn send(
         &self,
         mut request: SendTurnRequest,

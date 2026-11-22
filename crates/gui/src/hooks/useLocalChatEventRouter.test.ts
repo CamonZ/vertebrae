@@ -26,6 +26,7 @@ import {
   routeLocalChatTurnStartedEvent,
   routePermissionRequestEvent,
   resetLocalChatTurnRoutingForTests,
+  steerLocalChatTurn,
   useLocalChatEventRouter,
 } from "./useLocalChatEventRouter";
 import { useLocalChat } from "./useLocalChat";
@@ -63,6 +64,7 @@ vi.mock("../bindings", () => {
           sufficient_signal: true,
         },
       }),
+      steerLocalChatTurn: vi.fn(),
       sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
       closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     },
@@ -1342,6 +1344,58 @@ describe("useLocalChatEventRouter route functions", () => {
         is_root: true,
       })
     ).toBe(true);
+  });
+
+  it("holds the queue through a provider-owned steering follow-up", async () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+        queuedMessages: ["queued"],
+      }),
+    });
+    const end = (turnId: string): LocalChatSessionEndEvent => ({
+      backend_session_id: "backend-local",
+      harness: "claude",
+      turn_id: turnId,
+      thread_id: "backend-local-thread",
+      is_root: true,
+      duration_ms: 1,
+      cost_usd: 0,
+      num_turns: 1,
+      result: "done",
+      is_error: false,
+      context_tokens: 0,
+      context_window: 200000,
+    });
+    type Reply = Awaited<ReturnType<typeof commands.steerLocalChatTurn>>;
+    let resolveReply!: (reply: Reply) => void;
+    mockedCommands.steerLocalChatTurn.mockReturnValueOnce(
+      new Promise<Reply>((resolve) => { resolveReply = resolve; })
+    );
+
+    startTurn("backend-local", "original");
+    const steering = steerLocalChatTurn("local", "backend-local", "original", "steer");
+    expect(routeLocalChatSessionEndEvent(end("original"))).toBe(true);
+    expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
+    // The reply may arrive before the independent TurnStarted listener.
+    resolveReply({ status: "ok", data: "follow-up" });
+    expect(await steering).toBe("follow-up");
+    expect(useChatStore.getState().sessions.local.activeTurn?.turnId).toBe("follow-up");
+    expect(mockedCommands.sendLocalChatMessage).not.toHaveBeenCalled();
+
+    expect(routeLocalChatTurnStartedEvent({
+      backend_session_id: "backend-local",
+      harness: "claude",
+      turn_id: "follow-up",
+      thread_id: "backend-local-thread",
+      is_root: true,
+    })).toBe(false);
+    expect(routeLocalChatSessionEndEvent(end("follow-up"))).toBe(true);
+    await waitFor(() => expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledExactlyOnceWith(
+      "backend-local", "queued", DEFAULT_TURN_SETTINGS
+    ));
   });
 
   it("keeps sequential queued turns active when prior-turn events arrive late", async () => {

@@ -16,10 +16,12 @@ import type { ChatMessage } from "./chatStore";
  * Stable identity for one message. Two messages with the same key are the
  * same conversational element; occurrence disambiguates repeats.
  */
-function chatMessageKey(message: ChatMessage): string {
+function chatMessageKey(message: ChatMessage, knownUserIds?: ReadonlySet<string>): string {
   switch (message.kind) {
     case "user":
-      return `${message.kind}:${message.text}`;
+      return message.inputId && (!knownUserIds || knownUserIds.has(message.inputId))
+        ? `user:input:${message.inputId}`
+        : `user:text:${message.text}`;
     case "assistant":
       return message.itemId
         ? `${message.kind}:item:${message.itemId}`
@@ -55,7 +57,8 @@ function chatMessageKey(message: ChatMessage): string {
  */
 function occurrenceKeys(
   messages: readonly ChatMessage[],
-  direction: "forward" | "reverse" = "forward"
+  direction: "forward" | "reverse" = "forward",
+  knownUserIds?: ReadonlySet<string>
 ): string[] {
   const counts = new Map<string, number>();
   const keys = new Array<string>(messages.length);
@@ -64,7 +67,7 @@ function occurrenceKeys(
       ? messages.map((_, index) => index)
       : messages.map((_, index) => messages.length - index - 1);
   for (const index of indexes) {
-    const base = chatMessageKey(messages[index]);
+    const base = chatMessageKey(messages[index], knownUserIds);
     const occurrence = (counts.get(base) ?? 0) + 1;
     counts.set(base, occurrence);
     keys[index] = `${base}\u0000${occurrence}`;
@@ -92,6 +95,9 @@ function mergeHydratedMatch(
       return replayed;
     }
     return current;
+  }
+  if (replayed.kind === "user" && current.kind === "user" && replayed.inputId) {
+    return { ...replayed, ...current };
   }
   if (replayed.kind !== "file_edit" || current.kind !== "file_edit") {
     return current;
@@ -129,7 +135,12 @@ function mergeHydratedMessagesWithBoundary(
   }
 
   const currentKeys = occurrenceKeys(current, "reverse");
-  const hydratedKeys = occurrenceKeys(hydrated, "reverse");
+  // Claude records stable UUIDs for ordinary inputs too. Live ordinary
+  // inputs have no provider ID, so pair those rows by occurrence.
+  const liveInputIds = new Set(current.flatMap((message) =>
+    message.kind === "user" && message.inputId ? [message.inputId] : []
+  ));
+  const hydratedKeys = occurrenceKeys(hydrated, "reverse", liveInputIds);
   const currentByOccurrence = new Map(
     currentKeys.map((key, index) => [key, current[index]])
   );

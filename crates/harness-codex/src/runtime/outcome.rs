@@ -9,6 +9,7 @@ use crate::{number, optional_string};
 #[derive(Default)]
 pub(crate) struct TurnAccumulator {
     pub(super) text: String,
+    pub(super) steering_inputs: std::collections::HashSet<String>,
     pub(super) usage: Option<TurnUsage>,
     pub(super) last_usage: Option<TurnUsage>,
     pub(super) context_tokens: Option<u64>,

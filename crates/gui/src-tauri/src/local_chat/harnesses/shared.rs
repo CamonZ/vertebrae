@@ -300,6 +300,21 @@ impl EventSink for LocalChatHarnessEventSink {
                     is_root: is_root_stream,
                 }))?;
             }
+            HarnessEventPayloadV1::TurnInput(input) if is_root_stream => {
+                if let (Some(turn_id), Some(input_id)) =
+                    (turn_id, item_id.filter(|id| id.starts_with("steer:")))
+                {
+                    self.emit_local(LocalChatEvent::SteeringInput(
+                        crate::local_chat::LocalChatSteeringInputEvent {
+                            backend_session_id,
+                            turn_id,
+                            input_id,
+                            content: input.content,
+                            observed_at,
+                        },
+                    ))?;
+                }
+            }
             HarnessEventPayloadV1::Text(value) => {
                 self.emit_local(LocalChatEvent::Text(LocalChatTextEvent {
                     backend_session_id,
@@ -1236,4 +1251,19 @@ mod tests {
 
         assert_eq!(translated, expected);
     }
+}
+
+pub(super) async fn steer_session(
+    session: &dyn vertebrae_harness_core::SessionHandle,
+    expected_turn_id: &str,
+    content: String,
+) -> Result<String, crate::local_chat::LocalChatSessionError> {
+    session
+        .steer(
+            &vertebrae_harness_core::TurnId::new(expected_turn_id),
+            content,
+        )
+        .await
+        .map(|turn_id| turn_id.to_string())
+        .map_err(|error| crate::local_chat::LocalChatSessionError::SendFailed(error.to_string()))
 }
