@@ -18,7 +18,7 @@ import {
 
 export type ReplayContext = Pick<
   ChatSession,
-  "id" | "createdAt" | "providerResumeId"
+  "id" | "createdAt" | "providerResumeId" | "steeringTurnIds"
 >;
 
 export interface ReplayPreparation {
@@ -100,7 +100,11 @@ function conversationEventToChatMessage(
         timestamp: event.timestamp,
       };
     case "user_message":
-      return { kind: "user", text: event.text, timestamp: event.timestamp };
+      return {
+        kind: "user", text: event.text, timestamp: event.timestamp,
+        ...(event.inputId ? { inputId: event.inputId } : {}),
+        ...(event.turnId ? { turnId: event.turnId } : {}),
+      };
     case "assistant_message":
       return {
         kind: "assistant",
@@ -246,7 +250,16 @@ export function replayLinesToChatMessages(
     }
 
     const message = conversationEventToChatMessage(event);
-    if (message) messages.push(message);
+    if (!message) continue;
+    const localTurnId =
+      message.kind === "user" && message.inputId
+        ? session.steeringTurnIds?.[message.inputId]
+        : undefined;
+    messages.push(
+      message.kind === "user" && localTurnId
+        ? { ...message, turnId: localTurnId }
+        : message
+    );
   }
 
   return sanitizeSessionMessages(messages, session.providerResumeId);

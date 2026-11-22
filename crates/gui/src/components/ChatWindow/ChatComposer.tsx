@@ -212,6 +212,9 @@ interface ChatComposerProps {
   /** The hovered or pinned comment, whose target is highlighted. */
   onActiveCommentChange?: (id: string | null) => void;
   onSend: (message?: string) => boolean | void;
+  onSteer?: () => void;
+  isSteering?: boolean;
+  steeringStatus?: string;
   onStartSession: (initialPrompt?: string) => boolean | void;
   onHarnessChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onModelChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -256,6 +259,9 @@ export function ChatComposer({
   onNavigateComment,
   onActiveCommentChange,
   onSend,
+  onSteer,
+  isSteering,
+  steeringStatus,
   onStartSession,
   onHarnessChange,
   onModelChange,
@@ -834,14 +840,25 @@ export function ChatComposer({
         />
       </div>
       <div className="p-3">
+        {steeringStatus && (
+          <div className="hc-composer-alert mb-2" role="status">{steeringStatus}</div>
+        )}
         <ChatInput
           ref={inputRef}
           value={inputValue}
           onChange={setInputValue}
           onSubmit={submit}
+          onSteer={
+            onSteer && pendingComments.length === 0
+              ? () => {
+                  inputRef.current?.focus();
+                  onSteer();
+                }
+              : undefined
+          }
           disabled={!canUseComposer}
           canSubmit={
-            canUseComposer &&
+            canUseComposer && !isSteering &&
             (pendingComments.length > 0
               ? canSubmitComments
               : inputValue.trim().length > 0 &&

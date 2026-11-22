@@ -8,7 +8,7 @@ use tokio::{
 use vertebrae_harness_core::{
     CompletionStatus, ControlSink, EventCorrelation, EventSequencer, EventSink, HarnessError,
     HarnessEventPayloadV1, ResolutionSource, SequencedEventSink, SessionCloseOutcome,
-    SessionCloseStatus, StreamId, ThreadKind, TurnInput, TurnInputProvenance, TurnOutcome,
+    SessionCloseStatus, StreamId, ThreadKind, TurnId, TurnInput, TurnInputProvenance, TurnOutcome,
     TurnSettings, TurnStarted,
 };
 
@@ -50,9 +50,13 @@ pub(super) async fn run_persistent_process_v2(
     let mut decoder =
         ClaudeStreamDecoder::with_root_locator_resolver(context, root_locator_resolver);
     let mut output = spawn_output_readers(stdout, stderr);
+    // The UUID echoed by Claude is the delivery boundary. A result before
+    // that echo means the provider is consuming the input as a follow-up.
+    let mut steering: Option<PendingSteering> = None;
     let mut pending_turn: Option<PendingTurn> = None;
     let mut pending_settings: Option<PendingSettings> = None;
     let mut ready_turn: Option<TurnSubmission> = None;
+    let mut steering_timer = Box::pin(tokio::time::sleep(initialization_timeout));
     let mut settings_timer = Box::pin(tokio::time::sleep(initialization_timeout));
     let mut initialization_timer = Box::pin(tokio::time::sleep(initialization_timeout));
     let mut initialization_timer_armed = false;
@@ -93,6 +97,11 @@ pub(super) async fn run_persistent_process_v2(
                     "Claude session initialization timed out after {} ms",
                     initialization_timeout.as_millis()
                 ));
+                break 'process;
+            }
+            _ = &mut steering_timer, if steering.is_some() && pending_turn.is_none() => {
+                close_status = SessionCloseStatus::Failed;
+                close_error = Some("Claude ended the turn without confirming steering delivery".into());
                 break 'process;
             }
             _ = &mut settings_timer, if pending_settings.is_some() => {
@@ -169,7 +178,7 @@ pub(super) async fn run_persistent_process_v2(
                 Some(SessionCommand::Send { request, outcome_tx, response }) => {
                     let request_turn_id = request.turn_id.to_string();
                     let request_content = request.content.clone();
-                    if pending_turn.is_some() || pending_settings.is_some() || ready_turn.is_some() {
+                    if pending_turn.is_some() || pending_settings.is_some() || ready_turn.is_some() || steering.is_some() {
                         trace(
                             decoder.context().root_thread_id.as_str(),
                             "message.rejected",
@@ -205,6 +214,25 @@ pub(super) async fn run_persistent_process_v2(
                     }
                     settings_timer.as_mut().reset(tokio::time::Instant::now() + initialization_timeout);
                     pending_settings = Some(pending);
+                }
+                Some(SessionCommand::Steer { turn_id, content, response }) => {
+                    if content.trim().is_empty()
+                        || steering.is_some()
+                        || !pending_turn.as_ref().is_some_and(|turn| turn.id == turn_id && turn.input_emitted)
+                    {
+                        let _ = response.send(Err("The requested turn is unavailable for steering".into()));
+                        continue;
+                    }
+                    let id = uuid::Uuid::new_v4().to_string();
+                    let mut frame = super::events::user_message(decoder.context().session_id.as_ref(), &content);
+                    frame["uuid"] = serde_json::Value::String(id.clone());
+                    if let Err(error) = write_line(&mut stdin, &frame.to_string()).await {
+                        let _ = response.send(Err(format!("Claude steering delivery could not be confirmed: {error}")));
+                        close_status = SessionCloseStatus::Failed;
+                        close_error = Some(error.to_string());
+                        break 'process;
+                    }
+                    steering = Some(PendingSteering { id, content, response });
                 }
                 Some(SessionCommand::Interrupt { turn_id, response }) => {
                     if pending_turn.as_ref().map(|turn| &turn.id) != Some(&turn_id) {
@@ -347,6 +375,22 @@ pub(super) async fn run_persistent_process_v2(
                         }
                         continue;
                     }
+                    if steering.as_ref().is_some_and(|steer| {
+                        serde_json::from_str::<serde_json::Value>(&line).is_ok_and(|record|
+                            record["type"] == "user" && record["uuid"].as_str() == Some(&steer.id))
+                    }) && let Some(steer) = steering.take() {
+                        let turn_id = match accept_steering(&steer, &mut pending_turn, &mut decoder, &sequenced).await {
+                            Ok(turn_id) => turn_id,
+                            Err(error) => {
+                                let _ = steer.response.send(Err(error.to_string()));
+                                close_status = SessionCloseStatus::Failed;
+                                close_error = Some(error.to_string());
+                                break 'process;
+                            }
+                        };
+                        let _ = steer.response.send(Ok(turn_id));
+                        continue;
+                    }
                     match decoder.decode_line(&line) {
                             Ok(drafts) => {
                         let mut saw_root_declaration = false;
@@ -440,6 +484,9 @@ pub(super) async fn run_persistent_process_v2(
                                 )
                                 .await;
                                 decoder.context_mut().turn_id = None;
+                                if steering.is_some() {
+                                    steering_timer.as_mut().reset(tokio::time::Instant::now() + initialization_timeout);
+                                }
                                 trace(
                                     decoder.context().root_thread_id.as_str(),
                                     "turn.settled",
@@ -581,6 +628,13 @@ pub(super) async fn run_persistent_process_v2(
                 None => break 'process,
             }
         }
+    }
+
+    if let Some(steer) = steering.take() {
+        let message = close_error
+            .clone()
+            .unwrap_or_else(|| "Claude stopped before confirming steering delivery".into());
+        let _ = steer.response.send(Err(message));
     }
 
     let unsent_error = close_error
@@ -823,6 +877,71 @@ pub(super) enum BeginTurnError {
     StdinClosed(PendingTurn, String),
     /// The turn was rejected and already answered.
     Failed(String),
+}
+
+struct PendingSteering {
+    id: String,
+    content: String,
+    response: oneshot::Sender<Result<TurnId, String>>,
+}
+
+async fn accept_steering(
+    steer: &PendingSteering,
+    pending_turn: &mut Option<PendingTurn>,
+    decoder: &mut ClaudeStreamDecoder,
+    sink: &SequencedEventSink,
+) -> Result<TurnId, HarnessError> {
+    let context = decoder.context().clone();
+    let active_turn = pending_turn
+        .as_ref()
+        .map(|turn| turn.id.clone())
+        .or(context.turn_id);
+    let is_follow_up = active_turn.is_none();
+    let turn_id = active_turn.unwrap_or_else(|| TurnId::new(&steer.id));
+    let mut correlation = correlation(
+        context.session_id,
+        &context.root_thread_id,
+        Some(turn_id.clone()),
+        None,
+    );
+    correlation.provider_resume_id = context.provider_resume_id;
+    if is_follow_up {
+        decoder.clear_pending_background_turn();
+        decoder.context_mut().turn_id = Some(turn_id.clone());
+        emit_runtime_event(
+            sink,
+            context.root_stream_id.clone(),
+            correlation.clone(),
+            HarnessEventPayloadV1::TurnStarted(TurnStarted {
+                input_summary: super::events::summary(&steer.content),
+            }),
+        )
+        .await?;
+        *pending_turn = Some(PendingTurn {
+            id: turn_id.clone(),
+            content: steer.content.clone(),
+            input_emitted: true,
+            response: None,
+            outcome_tx: watch::channel(OutcomeState::Pending).0,
+        });
+    }
+    correlation.item_id = Some(vertebrae_harness_core::ItemId::new(format!(
+        "steer:{}",
+        steer.id
+    )));
+    emit_runtime_event(
+        sink,
+        context.root_stream_id,
+        correlation,
+        HarnessEventPayloadV1::TurnInput(TurnInput {
+            thread_id: context.root_thread_id,
+            run_id: None,
+            content: steer.content.clone(),
+            provenance: TurnInputProvenance::Human,
+        }),
+    )
+    .await?;
+    Ok(turn_id)
 }
 
 pub(super) async fn emit_pending_turn_input(

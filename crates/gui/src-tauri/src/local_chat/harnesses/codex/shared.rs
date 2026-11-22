@@ -309,6 +309,27 @@ impl LocalChatHarness for CodexLocalChatHarness {
         }
     }
 
+    async fn steer_turn(
+        &self,
+        backend_session_id: &str,
+        expected_turn_id: &str,
+        content: String,
+    ) -> Result<String, LocalChatSessionError> {
+        let session = self
+            .sessions
+            .read()
+            .await
+            .get(backend_session_id)
+            .cloned()
+            .ok_or_else(|| LocalChatSessionError::SessionNotFound(backend_session_id.into()))?;
+        crate::local_chat::harnesses::shared::steer_session(
+            session.session.as_ref(),
+            expected_turn_id,
+            content,
+        )
+        .await
+    }
+
     async fn interrupt_turn(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError> {
         let session = self
             .sessions

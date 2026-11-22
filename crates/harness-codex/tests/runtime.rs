@@ -1170,6 +1170,19 @@ async fn in_flight_interrupt_waits_for_provider_terminal_outcome() {
         tokio::task::yield_now().await;
     }
     turn.interrupt().await.unwrap();
+    assert!(
+        session
+            .steer(turn.turn_id(), "after stop".into())
+            .await
+            .is_err()
+    );
+    assert!(
+        !requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|method| method == "turn/steer")
+    );
 
     let outcome = turn.await_outcome().await.unwrap();
     assert_eq!(outcome.status, CompletionStatus::Interrupted);
@@ -1728,5 +1741,119 @@ async fn resumed_provider_tier_is_requested_metadata_and_is_retained_for_turns()
         );
         session.close().await.unwrap();
         server.abort();
+    }
+}
+
+#[tokio::test]
+async fn steering_uses_the_active_provider_turn_and_projects_each_consumed_input_once() {
+    for stop in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = accept_async(stream).await.unwrap();
+            let mut ready_tx = Some(ready_tx);
+            let mut accepted = Vec::new();
+            while let Some(Ok(Message::Text(text))) = socket.next().await {
+                let request: Value = serde_json::from_str(&text).unwrap();
+                let id = &request["id"];
+                let result = match request["method"].as_str().unwrap() {
+                    "initialize" => json!({"capabilities":{}}),
+                    "initialized" => continue,
+                    "thread/start" => json!({"thread":{"id":"root-thread"}}),
+                    "turn/start" => json!({"turn":{"id":"provider-turn"}}),
+                    "turn/steer" => {
+                        let input_id = request["params"]["clientUserMessageId"].as_str().unwrap();
+                        assert!(input_id.starts_with("steer:"));
+                        assert!(!accepted.iter().any(|previous| previous == input_id));
+                        assert_eq!(
+                            request["params"],
+                            json!({
+                                "threadId":"root-thread", "expectedTurnId":"provider-turn",
+                                "clientUserMessageId":input_id,
+                                "input":[{"type":"text","text":"same","text_elements":[]}]
+                            })
+                        );
+                        accepted.push(input_id.to_owned());
+                        let event = json!({"method":"item/completed","params":{
+                            "threadId":"root-thread","turnId":"provider-turn","item":{
+                                "id":format!("item-{input_id}"),"clientId":input_id,"type":"userMessage",
+                                "content":[{"type":"text","text":"same","text_elements":[]}]
+                            }
+                        }});
+                        for _ in 0..2 {
+                            socket.send(Message::Text(event.to_string())).await.unwrap();
+                        }
+                        json!({"turnId":"provider-turn"})
+                    }
+                    "turn/interrupt" if stop => {
+                        socket.send(Message::Text(json!({"method":"turn/completed","params":{
+                        "threadId":"root-thread","turn":{"id":"provider-turn","status":"interrupted"}
+                    }}).to_string())).await.unwrap();
+                        break;
+                    }
+                    method => panic!("unexpected request {method}"),
+                };
+                socket
+                    .send(Message::Text(json!({"id":id,"result":result}).to_string()))
+                    .await
+                    .unwrap();
+                if request["method"] == "turn/start" {
+                    socket.send(Message::Text(json!({"method":"item/agentMessage/delta","params":{
+                    "threadId":"root-thread","turnId":"provider-turn","delta":"ready","itemId":"answer"
+                }}).to_string())).await.unwrap();
+                    ready_tx.take().unwrap().send(()).unwrap();
+                }
+                if accepted.len() == 2 && !stop {
+                    socket.send(Message::Text(json!({"method":"turn/completed","params":{
+                    "threadId":"root-thread","turn":{"id":"provider-turn","status":"completed"}
+                }}).to_string())).await.unwrap();
+                    break;
+                }
+            }
+            assert_eq!(accepted.len(), 2);
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+        let events = Arc::new(CapturingSink::default());
+        let session = start_test_session(&runtime(format!("ws://{address}")), events.clone()).await;
+        let turn_id = TurnId::new("local-turn");
+        let turn = session.send(SendTurnRequest {
+            turn_id: turn_id.clone(),
+            content: "root".into(),
+            output_schema: None,
+            settings: Default::default(),
+        }).await.unwrap();
+        ready_rx.await.unwrap();
+        // The reader has bound the provider turn once its delta reaches the sink.
+        loop {
+            if events.events.lock().unwrap().iter().any(|event| matches!(&event.payload,
+                HarnessEventPayloadV1::Text(text) if text.text == "ready")) {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert!(session.steer(&TurnId::new("stale"), "wrong".into()).await.is_err());
+        for _ in 0..2 {
+            assert_eq!(session.steer(&turn_id, "same".into()).await.unwrap(), turn_id);
+        }
+        if stop {
+            turn.interrupt().await.unwrap();
+            assert!(session.steer(&turn_id, "after stop".into()).await.is_err());
+        }
+        let outcome = turn.await_outcome().await.unwrap();
+        assert_eq!(outcome.status, if stop { CompletionStatus::Interrupted } else { CompletionStatus::Completed });
+        assert!(session.steer(&turn_id, "too late".into()).await.is_err());
+        let _ = session.close().await;
+        server.await.unwrap();
+        let captured = events.events.lock().unwrap();
+        let inputs: Vec<_> = captured.iter().filter(|event|
+            matches!(&event.payload, HarnessEventPayloadV1::TurnInput(input) if input.content == "same")
+        ).collect();
+        assert_eq!(inputs.len(), 2);
+        assert_ne!(inputs[0].correlation.item_id, inputs[1].correlation.item_id);
+        assert!(inputs.iter().all(|event| event.correlation.turn_id.as_ref() == Some(&turn_id)));
+        assert_balanced_turn(&captured, turn_id.as_str(), &outcome);
+    }).await.unwrap();
     }
 }

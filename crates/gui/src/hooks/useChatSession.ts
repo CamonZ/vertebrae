@@ -1,5 +1,10 @@
 import { useProviderSettingsStore } from "../stores/providerSettingsStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  isCurrentProjectScopeGeneration,
+  useProjectScopeGeneration,
+} from "../stores/projectScopedStores";
+import { steerLocalChatTurn } from "./useLocalChatEventRouter";
 import { useLocalChat } from "./useLocalChat";
 import { commands } from "../bindings";
 import type {
@@ -46,6 +51,16 @@ export function useChatSession(sessionId: string) {
     (state) => state.revision
   );
   const hasLoadedCatalog = useRef(false);
+  const projectGeneration = useProjectScopeGeneration();
+  const [steering, setSteering] = useState<{
+    sessionId: string;
+    backendSessionId: string;
+    projectGeneration: number;
+    projectPath: string | null | undefined;
+    turnId: string;
+    pending: boolean;
+    message: string;
+  }>();
   // The draft outlives a remount of this chat's window (split, maximize).
   const inputValue = useComposerDraftStore(
     (state) => state.bySession[sessionId] ?? ""
@@ -489,16 +504,91 @@ export function useChatSession(sessionId: string) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [canStopGeneration, handleStopGeneration]);
 
+  const steeringForSession =
+    steering?.sessionId === sessionId &&
+    steering.projectGeneration === projectGeneration &&
+    steering.projectPath === session?.projectPath &&
+    (steering.backendSessionId === session?.backendSessionId ||
+      (!session?.backendSessionId && session?.hasUserMessage))
+      ? steering
+      : undefined;
+  const isSteering = steeringForSession?.pending ?? false;
+  const canSteer =
+    canSendMessage &&
+    lifecycle === "streaming" &&
+    session?.activeTurn?.phase === "active" &&
+    !!session.activeTurn.turnId &&
+    (session.harness === "codex" || session.harness === "claude");
+
+  const handleSteer = useCallback(async () => {
+    const backendSessionId = session?.backendSessionId;
+    const turnId = session?.activeTurn?.turnId;
+    const content = inputValue.trim();
+    if (!canSteer || isSteering || !backendSessionId || !turnId || !content) {
+      return;
+    }
+
+    const request = {
+      sessionId,
+      backendSessionId,
+      projectGeneration,
+      projectPath: session?.projectPath,
+      turnId,
+      pending: true,
+      message: "Sending steering message…",
+    };
+    setSteering(request);
+    const matchesChat = (allowClosed = false) => {
+      const latest = useChatStore.getState().sessions[sessionId];
+      return (
+        isCurrentProjectScopeGeneration(projectGeneration) &&
+        latest?.projectPath === request.projectPath &&
+        (latest?.backendSessionId === backendSessionId ||
+          (allowClosed && !latest?.backendSessionId && latest?.hasUserMessage))
+      );
+    };
+    const showResult = (message: string, deliveredTurnId = turnId) => {
+      const activeTurn = useChatStore.getState().sessions[sessionId]?.activeTurn;
+      setSteering((current) =>
+        current !== request ? current :
+          matchesChat(true) && (!activeTurn || activeTurn.turnId === deliveredTurnId)
+            ? { ...request, turnId: deliveredTurnId, pending: false, message }
+            : undefined
+      );
+    };
+    try {
+      const deliveredTurn = await steerLocalChatTurn(
+        sessionId, backendSessionId, turnId, content
+      );
+      const active = useChatStore.getState().sessions[sessionId]?.activeTurn;
+      if (
+        matchesChat() &&
+        (!active || active.turnId === turnId || active.turnId === deliveredTurn) &&
+        useComposerDraftStore.getState().bySession[sessionId] === inputValue
+      ) {
+        setInputValue("");
+      }
+      showResult(
+        deliveredTurn === turnId ? "Sent to the active turn" : "Delivered as a follow-up turn",
+        deliveredTurn
+      );
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Delivery could not be confirmed";
+      showResult(`Steering: ${detail}`);
+    }
+  }, [canSteer, inputValue, isSteering, projectGeneration, session, sessionId, setInputValue]);
+
   // --- Action callbacks ---
   const handleSend = useCallback((message?: string): boolean => {
     const trimmed = (message ?? inputValue).trim();
-    if (!trimmed || !canSendMessage) return false;
+    if (!trimmed || !canSendMessage || isSteering) return false;
     void sendMessage(trimmed);
     setInputValue("");
     return true;
   }, [
     canQueueMessage,
     canSendMessage,
+    isSteering,
     hasPendingUserQuestion,
     inputValue,
     isActive,
@@ -589,7 +679,7 @@ export function useChatSession(sessionId: string) {
       : lifecycle === "resuming"
         ? "Resume session"
         : isActive
-          ? "Send message"
+          ? canQueueMessage ? "Queue message" : "Send message"
           : hasResume || lifecycle === "closed" || lifecycle === "error"
             ? "Resume session"
             : "Start session";
@@ -673,6 +763,14 @@ export function useChatSession(sessionId: string) {
 
     // actions
     handleSend,
+    handleSteer,
+    canSteer,
+    isSteering,
+    steeringStatus: steeringForSession && (
+      steeringForSession.pending ||
+      !session?.activeTurn ||
+      session.activeTurn.turnId === steeringForSession.turnId
+    ) ? steeringForSession.message : undefined,
     handleStartSession,
     handleClearMessages,
     handleStopGeneration,

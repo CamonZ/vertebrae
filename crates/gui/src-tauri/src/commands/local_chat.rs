@@ -192,6 +192,10 @@ pub struct LocalChatSessionIndexEntry {
     pub updated_at: String,
     pub project_path: Option<String>,
     pub provider_resume_id: Option<String>,
+    /// Local steering attribution for provider transcripts without turn boundaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub steering_turn_ids: Option<std::collections::BTreeMap<String, String>>,
     /// Provider lineage used to group history without opening conversations.
     #[serde(default)]
     #[specta(optional)]
@@ -499,6 +503,20 @@ pub async fn compact_local_chat_session(
 ) -> Result<(), LocalChatSessionError> {
     local_chat_manager
         .compact_session(&backend_session_id)
+        .await
+}
+
+/// Deliver a message to the expected active turn.
+#[tauri::command]
+#[specta::specta]
+pub async fn steer_local_chat_turn(
+    local_chat_manager: State<'_, LocalChatSessionManager>,
+    backend_session_id: String,
+    expected_turn_id: String,
+    content: String,
+) -> Result<String, LocalChatSessionError> {
+    local_chat_manager
+        .steer_turn(&backend_session_id, &expected_turn_id, content)
         .await
 }
 

@@ -1096,6 +1096,17 @@ async interruptLocalChatTurn(backendSessionId: string) : Promise<Result<null, Lo
 }
 },
 /**
+ * Deliver a message to the expected active turn.
+ */
+async steerLocalChatTurn(backendSessionId: string, expectedTurnId: string, content: string) : Promise<Result<string, LocalChatSessionError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("steer_local_chat_turn", { backendSessionId, expectedTurnId, content }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Close a provider-neutral local chat session.
  */
 async closeLocalChatSession(backendSessionId: string) : Promise<Result<null, LocalChatSessionError>> {
@@ -1619,6 +1630,7 @@ localChatSessionInitEvent: LocalChatSessionInitEvent,
 localChatSessionTitleEvent: LocalChatSessionTitleEvent,
 localChatSessionUsageEvent: LocalChatSessionUsageEvent,
 localChatSessionWarningEvent: LocalChatSessionWarningEvent,
+localChatSteeringInputEvent: LocalChatSteeringInputEvent,
 localChatTextEvent: LocalChatTextEvent,
 localChatToolCallEvent: LocalChatToolCallEvent,
 localChatToolResultEvent: LocalChatToolResultEvent,
@@ -1657,6 +1669,7 @@ localChatSessionInitEvent: "local-chat-session-init-event",
 localChatSessionTitleEvent: "local-chat-session-title-event",
 localChatSessionUsageEvent: "local-chat-session-usage-event",
 localChatSessionWarningEvent: "local-chat-session-warning-event",
+localChatSteeringInputEvent: "local-chat-steering-input-event",
 localChatTextEvent: "local-chat-text-event",
 localChatToolCallEvent: "local-chat-tool-call-event",
 localChatToolResultEvent: "local-chat-tool-result-event",
@@ -2594,6 +2607,10 @@ association?: JsonValue | null; id: string; discussionBinding?: LocalChatDiscuss
  */
 providerId?: string | null; model: string | null; selectedModelId: string | null; selectedReasoningEffort: string | null; selectedSpeedTier?: string | null; selectedPersonality: string | null; permissionMode: PermissionMode | null; createdAt: string; updatedAt: string; projectPath: string | null; providerResumeId: string | null;
 /**
+ * Local steering attribution for provider transcripts without turn boundaries.
+ */
+steeringTurnIds?: Partial<{ [key in string]: string }> | null;
+/**
  * Provider lineage used to group history without opening conversations.
  */
 providerParentResumeId?: string | null; threadTotalTokens: number | null; messageCount: number; hasUserMessage?: boolean | null; lifecycle: string; status: string;
@@ -2613,6 +2630,7 @@ thread_total_tokens: number }
 export type LocalChatSessionWarningEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; warning: string }
 export type LocalChatSpeedTierOption = { id: string; label: string; is_default?: boolean }
 export type LocalChatSpeedTierStatus = { requested: string | null; active: string | null; eligible: boolean; available: boolean; diagnostic: string | null }
+export type LocalChatSteeringInputEvent = { backend_session_id: string; turn_id: string; input_id: string; content: string; observed_at: string }
 export type LocalChatTextEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; text: string; is_partial: boolean; completion_status?: string | null; parent_tool_use_id: string | null; item_id?: string | null }
 export type LocalChatToolCallEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; tool_name: string; input: string; parent_tool_use_id: string | null }
 export type LocalChatToolResultEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; result: string; is_error: boolean; parent_tool_use_id: string | null }

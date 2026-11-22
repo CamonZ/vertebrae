@@ -531,6 +531,20 @@ impl LocalChatSessionManager {
         result
     }
 
+    pub async fn steer_turn(
+        &self,
+        backend_session_id: &str,
+        expected_turn_id: &str,
+        content: String,
+    ) -> Result<String, LocalChatSessionError> {
+        let _lifecycle = self.lifecycle_gate.read().await;
+        let harness = self.harness(self.registry_harness(backend_session_id).await?)?;
+        drop(_lifecycle);
+        harness
+            .steer_turn(backend_session_id, expected_turn_id, content)
+            .await
+    }
+
     /// Interrupt the in-flight turn of a live session without closing it.
     pub async fn interrupt_turn(
         &self,

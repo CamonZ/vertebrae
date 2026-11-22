@@ -76,7 +76,8 @@ export const CHAT_SHORTCUT_SECTIONS = [
         label: "Fresh chat in selected project (active pane)",
       },
       { keys: ["⌘", "⇧", "⌥", "H"], label: "History for active pane" },
-      { keys: ["Enter"], label: "Send message" },
+      { keys: ["Enter"], label: "Send or queue during an active turn" },
+      { keys: ["⌃", "Enter"], label: "Steer the active turn from the composer" },
       {
         keys: ["⌘", "⌥", "↑ / ↓"],
         label: "Up to pending comments, then the transcript / back down",

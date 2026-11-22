@@ -1005,6 +1005,40 @@ describe("chatStore", () => {
       );
     });
 
+    it("reopens steering messages by input identity, including identical text", async () => {
+      const id = useChatStore.getState().openSession("Steering Replay", "/repo/steering");
+      const turnId = "existing-turn";
+      const timestamp = "2026-01-01T00:00:05Z";
+      const inputIds = ["steer:first", "steer:second"];
+      useChatStore.getState().setProviderResumeId(id, "steering-conversation");
+      for (const inputId of inputIds) {
+        useChatStore.getState().addMessage(id, {
+          kind: "user", text: "same text", inputId, turnId, timestamp,
+        });
+      }
+      useChatStore.setState({ sessions: {}, activeSessionId: null });
+      const replayed = [inputIds[0], ...inputIds].map((inputId, sequence) =>
+        JSON.stringify({
+          version: 1, event_id: `steering-${sequence}`, stream_id: "steering-stream",
+          sequence, timestamp, semantics: "snapshot", type: "turn_input",
+          correlation: { item_id: inputId, turn_id: "provider-turn" },
+          data: { thread_id: "steering-conversation", content: "same text", provenance: "human" },
+        })
+      );
+      const load = vi.spyOn(commands, "loadLocalChatSessionReplay").mockResolvedValue({
+        status: "ok",
+        data: { events: replayed, cache_key: "steering-v1", next_cursor: null, has_more: false },
+      });
+      useChatStore.getState().openSession("Steering Replay", "/repo/steering");
+      await vi.waitFor(() => {
+        expect(load).toHaveBeenCalled();
+        expect(useChatStore.getState().sessions[id].providerReplay?.loading).not.toBe("initial");
+      });
+      expect(useChatStore.getState().sessions[id].messages).toEqual(
+        inputIds.map((inputId) => ({ kind: "user", text: "same text", inputId, turnId, timestamp }))
+      );
+    });
+
     it("keeps replay overlap in replay order and preserves duplicate occurrences", async () => {
       const id = useChatStore
         .getState()

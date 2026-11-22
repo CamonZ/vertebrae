@@ -17,6 +17,7 @@ pub(crate) struct CodexSessionHandle {
 }
 pub(crate) struct CodexTurnHandle {
     pub(super) turn_id: TurnId,
+    state: Arc<SessionState>,
     pub(super) cancel: watch::Sender<bool>,
     pub(super) outcome: watch::Receiver<OutcomeState<TurnOutcome>>,
 }
@@ -93,9 +94,17 @@ impl SessionHandle for CodexSessionHandle {
         });
         Ok(Arc::new(CodexTurnHandle {
             turn_id,
+            state,
             cancel,
             outcome: rx,
         }))
+    }
+    async fn steer(
+        &self,
+        expected_turn_id: &TurnId,
+        content: String,
+    ) -> Result<TurnId, HarnessError> {
+        self.state.steer_turn(expected_turn_id, content).await
     }
     async fn compact(&self) -> Result<(), HarnessError> {
         let _gate = self
@@ -116,6 +125,10 @@ impl TurnHandle for CodexTurnHandle {
         &self.turn_id
     }
     async fn interrupt(&self) -> Result<(), HarnessError> {
+        self.state
+            .connection()
+            .root_turn_identity
+            .disable_steering(&self.turn_id);
         let _ = self.cancel.send(true);
         Ok(())
     }

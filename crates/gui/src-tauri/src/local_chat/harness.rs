@@ -379,6 +379,17 @@ pub(crate) trait LocalChatHarness: Send + Sync {
         settings: LocalChatTurnSettings,
     ) -> Result<(), LocalChatSessionError>;
 
+    async fn steer_turn(
+        &self,
+        _backend_session_id: &str,
+        _expected_turn_id: &str,
+        _content: String,
+    ) -> Result<String, LocalChatSessionError> {
+        Err(LocalChatSessionError::SendFailed(
+            "Live steering is unavailable".into(),
+        ))
+    }
+
     async fn compact_session(
         &self,
         _backend_session_id: &str,

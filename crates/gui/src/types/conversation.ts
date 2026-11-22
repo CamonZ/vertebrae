@@ -56,6 +56,8 @@ interface BaseEvent {
 export interface UserMessageEvent extends BaseEvent {
   kind: "user_message";
   text: string;
+  inputId?: string;
+  turnId?: string;
 }
 
 export interface GateEvaluationEvent extends BaseEvent {
@@ -582,7 +584,18 @@ function parseHarnessEvent(
               options.preserveRawInputs ||
               shouldKeepUserMessage(text))
           ) {
-            events.push({ kind: "user_message", timestamp, text });
+            const inputId = readString(correlation?.item_id);
+            const turnId = readString(correlation?.turn_id);
+            if (inputId?.startsWith("steer:")) {
+              const key = JSON.stringify([raw.stream_id, inputId]);
+              if (state.userInputIds.has(key)) break;
+              state.userInputIds.add(key);
+            }
+            events.push({
+              kind: "user_message", timestamp, text,
+              ...(inputId?.startsWith("steer:") ? { inputId } : {}),
+              ...(inputId?.startsWith("steer:") && turnId ? { turnId } : {}),
+            });
           }
         }
       }
@@ -803,6 +816,7 @@ function parseHarnessEvent(
 }
 
 interface HarnessParseState {
+  userInputIds: Set<string>;
   /** Current text/reasoning delta row, keyed by turn and payload type. */
   activeDeltaByPayloadKey: Map<string, number>;
   /** Terminal/streaming assistant rows keyed by provider item identity. */
@@ -930,6 +944,7 @@ export function parseSessionLogs(
         activeDeltaByPayloadKey: new Map(),
         assistantIndexByItemId: new Map(),
         turnsWithText: new Set(),
+        userInputIds: new Set(),
         todoListByItemId: new Map(),
         fileEditByToolId: new Map(),
       };

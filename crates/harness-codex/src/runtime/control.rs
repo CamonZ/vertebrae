@@ -22,6 +22,7 @@ pub(crate) enum ControlDisposition {
 struct ActiveRootTurn {
     normalized_turn_id: TurnId,
     provider_turn_id: Option<String>,
+    stopping: bool,
 }
 
 #[derive(Default)]
@@ -59,6 +60,7 @@ impl RootTurnIdentity {
         state.active = Some(ActiveRootTurn {
             normalized_turn_id: turn_id,
             provider_turn_id: None,
+            stopping: false,
         });
     }
 
@@ -89,6 +91,28 @@ impl RootTurnIdentity {
                 state.recent_provider_turn_id = active.provider_turn_id;
             }
         }
+    }
+
+    pub(super) fn disable_steering(&self, turn_id: &TurnId) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(active) = state.active.as_mut()
+            && &active.normalized_turn_id == turn_id
+        {
+            active.stopping = true;
+        }
+    }
+
+    pub(super) fn provider_turn_for(&self, turn_id: &TurnId) -> Option<String> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .active
+            .as_ref()
+            .filter(|active| &active.normalized_turn_id == turn_id && !active.stopping)
+            .and_then(|active| active.provider_turn_id.clone())
     }
 
     pub(crate) fn active_provider_turn(&self) -> Option<String> {

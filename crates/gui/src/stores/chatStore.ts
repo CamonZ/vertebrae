@@ -107,7 +107,7 @@ export { isLocalChatLifecycleBusy } from "../utils/localChatActivity";
  * Message types for the Claude chat
  */
 export type ChatMessage =
-  | { kind: "user"; text: string; timestamp: string }
+  | { kind: "user"; text: string; timestamp: string; inputId?: string; turnId?: string }
   | {
       kind: "gate_evaluation";
       attempt: number;
@@ -420,6 +420,8 @@ export interface StreamingAssistantMessage {
 }
 
 export interface ChatSession {
+  /** Provider input identity to the turn observed at delivery. */
+  steeringTurnIds?: Record<string, string>;
   /** Unique session identifier */
   id: string;
   /** Human-readable label for the session tab */
@@ -2162,6 +2164,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
                 id: current.id,
                 createdAt: current.createdAt,
                 providerResumeId: current.providerResumeId,
+                steeringTurnIds: current.steeringTurnIds,
               },
               previousInstalled: refresh
                 ? (currentReplay?.installedMessages ?? [])
@@ -3039,6 +3042,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
               id: latest.id,
               createdAt: latest.createdAt,
               providerResumeId: latest.providerResumeId,
+              steeringTurnIds: latest.steeringTurnIds,
             },
             previousInstalled: latest.providerReplay!.installedMessages,
             messages: latest.messages,
@@ -3570,6 +3574,23 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ) {
             return session;
           }
+          if (message.kind === "user" && message.inputId) {
+            const inputId = message.inputId;
+            const existing = session.messages.find(
+              (row) => row.kind === "user" && row.inputId === inputId
+            );
+            if (existing) {
+              const turnId = message.turnId;
+              if (!turnId || session.steeringTurnIds?.[inputId]) return session;
+              return {
+                ...session,
+                steeringTurnIds: { ...session.steeringTurnIds, [inputId]: turnId },
+                messages: session.messages.map((row) =>
+                  row === existing ? { ...row, turnId } : row
+                ),
+              };
+            }
+          }
           const nextHasUserMessage =
             session.hasUserMessage || message.kind === "user";
           let messages = [...session.messages];
@@ -3697,6 +3718,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
             messages,
             hasUserMessage: nextHasUserMessage,
             updatedAt: message.timestamp,
+            ...(message.kind === "user" && message.inputId && message.turnId && {
+              steeringTurnIds: { ...session.steeringTurnIds, [message.inputId]: message.turnId },
+            }),
           };
         },
         { persist: persistMessage }
@@ -4540,6 +4564,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           titleUserMessageCount: 0,
           backendSessionId: null,
           providerResumeId: null,
+          steeringTurnIds: undefined,
           selectedModelId: session.selectedModelId ?? null,
           model: undefined,
           tokenUsage: undefined,

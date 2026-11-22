@@ -68,7 +68,8 @@ describe("ChatShortcutHints", () => {
     render(<ChatShortcutHints onClose={vi.fn()} />);
     expect(screen.getByText("Toggle chat")).toBeInTheDocument();
     expect(screen.getByText("Split pane")).toBeInTheDocument();
-    expect(screen.getByText("Send message")).toBeInTheDocument();
+    expect(screen.getByText("Send or queue during an active turn")).toBeInTheDocument();
+    expect(screen.getByText("Steer the active turn from the composer")).toBeInTheDocument();
   });
 });
 

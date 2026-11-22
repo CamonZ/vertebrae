@@ -78,8 +78,9 @@ pub(crate) use events::{
     LocalChatCompactionEvent, LocalChatEvent, LocalChatEventSink, LocalChatFileChange,
     LocalChatFileChangeEvent, LocalChatSessionEndEvent, LocalChatSessionErrorEvent,
     LocalChatSessionInitEvent, LocalChatSessionTitleEvent, LocalChatSessionUsageEvent,
-    LocalChatSessionWarningEvent, LocalChatSpeedTierStatus, LocalChatTextEvent,
-    LocalChatToolCallEvent, LocalChatToolResultEvent, LocalChatTurnStartedEvent,
+    LocalChatSessionWarningEvent, LocalChatSpeedTierStatus, LocalChatSteeringInputEvent,
+    LocalChatTextEvent, LocalChatToolCallEvent, LocalChatToolResultEvent,
+    LocalChatTurnStartedEvent,
 };
 pub use gate::{LocalChatGateBinding, LocalChatGateRevision};
 pub(crate) use harness::{

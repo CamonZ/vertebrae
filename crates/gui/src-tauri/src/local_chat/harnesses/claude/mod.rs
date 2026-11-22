@@ -183,6 +183,17 @@ impl LocalChatHarness for ClaudeLocalChatHarness {
         self.runtime.close_session(backend_session_id).await
     }
 
+    async fn steer_turn(
+        &self,
+        backend_session_id: &str,
+        expected_turn_id: &str,
+        content: String,
+    ) -> Result<String, LocalChatSessionError> {
+        self.runtime
+            .steer_turn(backend_session_id, expected_turn_id, content)
+            .await
+    }
+
     async fn interrupt_turn(&self, backend_session_id: &str) -> Result<(), LocalChatSessionError> {
         self.runtime.interrupt_turn(backend_session_id).await
     }

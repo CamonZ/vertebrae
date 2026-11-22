@@ -317,11 +317,14 @@ fn decode_claude_line(
         && value.get("isCompactSummary").and_then(Value::as_bool) != Some(true))
     .then(|| user_text(&value))
     .flatten();
+    let user_id = value.get("uuid").and_then(Value::as_str).map(str::to_owned);
     let mut line_drafts = decoder
         .decode_value_at_sequence(value, timestamp, source)
         .unwrap_or_default();
     if let Some(text) = replay_user_text {
-        let input = decoder.replay_user_input_draft(text, timestamp);
+        let mut input = decoder.replay_user_input_draft(text, timestamp);
+        input.correlation.item_id =
+            user_id.map(|id| vertebrae_harness_core::ItemId::new(format!("steer:{id}")));
         // The durable human input is a boundary even when Claude's JSONL
         // has no corresponding result record or normalized turn ID.
         drafts.push(HarnessEventDraftV1 {

@@ -94,6 +94,11 @@ enum SessionCommand {
         outcome_tx: watch::Sender<OutcomeState<TurnOutcome>>,
         response: oneshot::Sender<Result<(), String>>,
     },
+    Steer {
+        turn_id: TurnId,
+        content: String,
+        response: oneshot::Sender<Result<TurnId, String>>,
+    },
     Interrupt {
         turn_id: TurnId,
         response: oneshot::Sender<Result<(), String>>,

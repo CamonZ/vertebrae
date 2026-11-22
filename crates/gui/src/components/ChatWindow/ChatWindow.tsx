@@ -949,6 +949,9 @@ export function ChatWindow({
               onNavigateComment={handleNavigateComment}
               onActiveCommentChange={handleActiveCommentChange}
               onSend={handleSend}
+              onSteer={chat.canSteer ? chat.handleSteer : undefined}
+              isSteering={chat.isSteering}
+              steeringStatus={chat.steeringStatus}
               onStartSession={handleStartSession}
               onHarnessChange={chat.handleHarnessChange}
               onModelChange={chat.handleModelChange}

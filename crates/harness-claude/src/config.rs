@@ -455,6 +455,7 @@ impl ClaudeProviderConfig {
                     "stream-json".into(),
                     "--verbose".into(),
                     "--include-partial-messages".into(),
+                    "--replay-user-messages".into(),
                 ]);
                 // Make bypass selectable on a later turn without enabling it
                 // until the user explicitly requests that mode. Read-only

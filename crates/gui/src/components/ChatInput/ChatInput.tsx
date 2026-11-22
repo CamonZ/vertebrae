@@ -1,8 +1,10 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
+  useState,
   type ReactNode,
 } from "react";
 import { focusKeepProps } from "../../utils/focusKeep";
@@ -15,6 +17,7 @@ export interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  onSteer?: () => void;
   /**
    * Blocks submitting, not typing: the textarea stays editable so a focused
    * composer keeps focus and keystrokes while a turn starts or runs.
@@ -33,7 +36,7 @@ export interface ChatInputProps {
 
 /**
  * Reusable chat input: textarea with an embedded send button.
- * Enter submits; Shift+Enter inserts a newline.
+ * Enter submits, Shift+Enter inserts a newline, and Control+Enter steers when available.
  */
 export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
   function ChatInput(
@@ -41,6 +44,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       value,
       onChange,
       onSubmit,
+      onSteer,
       disabled = false,
       canSubmit = true,
       ariaLabel,
@@ -56,6 +60,15 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
   ) {
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     useKeepFocus(textareaRef);
+    const [controlHeld, setControlHeld] = useState(false);
+    const steeringArmed = !!onSteer && controlHeld && canSubmit && !disabled && !!value.trim();
+
+    useEffect(() => {
+      if (!controlHeld) return;
+      const resetControl = () => setControlHeld(false);
+      window.addEventListener("blur", resetControl);
+      return () => window.removeEventListener("blur", resetControl);
+    }, [controlHeld]);
     const hasFooter = footerLeft != null || footerRight != null;
     const setRefs = useCallback(
       (node: HTMLTextAreaElement | null) => {
@@ -102,21 +115,40 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
 
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-          e.preventDefault();
-          if (canSubmit && !disabled) onSubmit();
+        setControlHeld(e.ctrlKey);
+
+        if (
+          e.key !== "Enter" ||
+          e.nativeEvent.isComposing ||
+          e.shiftKey ||
+          e.metaKey ||
+          e.altKey ||
+          (e.ctrlKey && !onSteer)
+        ) return;
+
+        e.preventDefault();
+        if (canSubmit && !disabled) {
+          if (e.ctrlKey) onSteer?.();
+          else onSubmit();
         }
       },
-      [canSubmit, disabled, onSubmit]
+      [canSubmit, disabled, onSteer, onSubmit]
     );
 
     const sendButton = (
       <button
         type="button"
-        onClick={onSubmit}
+        onMouseDown={(event) => {
+          if (steeringArmed && event.ctrlKey) event.preventDefault();
+        }}
+        onClick={(event) => {
+          if (steeringArmed && event.ctrlKey) onSteer?.();
+          else onSubmit();
+        }}
         disabled={disabled || !canSubmit}
-        title={buttonTitle}
-        aria-label={buttonAriaLabel}
+        title={onSteer ? "Steer (Ctrl+Enter) · Queue (Enter)" : buttonTitle}
+        aria-label={steeringArmed ? "Steer active turn" : buttonAriaLabel}
+        aria-keyshortcuts={onSteer ? "Control+Enter" : undefined}
         className={
           hasFooter
             ? "action-primary flex h-7 w-7 shrink-0 items-center justify-center rounded-md"
@@ -125,6 +157,7 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
       >
         <svg
           className="h-4 w-4"
+          aria-hidden="true"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -133,7 +166,11 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
             strokeLinecap="round"
             strokeLinejoin="round"
             strokeWidth={2}
-            d="M12 5v14m0-14l-6 6m6-6l6 6"
+            d={
+              steeringArmed
+                ? "M14 5l6 6-6 6M4 19v-2a6 6 0 0 1 6-6h10"
+                : "M12 5v14m0-14l-6 6m6-6l6 6"
+            }
           />
         </svg>
       </button>
@@ -159,6 +196,8 @@ export const ChatInput = forwardRef<HTMLTextAreaElement, ChatInputProps>(
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
+          onKeyUp={(event) => setControlHeld(event.ctrlKey)}
+          onBlur={() => setControlHeld(false)}
           aria-label={ariaLabel}
           placeholder={placeholder}
           data-testid={textareaTestId}

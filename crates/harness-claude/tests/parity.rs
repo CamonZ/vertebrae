@@ -390,6 +390,7 @@ fn gui_persistent_and_daemon_one_shot_own_distinct_exact_launch_policies() {
             "stream-json",
             "--verbose",
             "--include-partial-messages",
+            "--replay-user-messages",
             "--allow-dangerously-skip-permissions",
             "--mcp-config",
             "{\"mcpServers\":{\"vtb-gate\":{\"command\":\"gate\"}}}",

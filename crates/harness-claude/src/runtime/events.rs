@@ -138,13 +138,16 @@ pub(super) async fn emit_run_input(
 }
 
 pub(super) fn encode_user_message(session_id: Option<&SessionId>, content: &str) -> String {
+    user_message(session_id, content).to_string()
+}
+
+pub(super) fn user_message(session_id: Option<&SessionId>, content: &str) -> serde_json::Value {
     serde_json::json!({
         "type": "user",
         "session_id": session_id.map(SessionId::as_str),
         "parent_tool_use_id": serde_json::Value::Null,
         "message": { "role": "user", "content": content },
     })
-    .to_string()
 }
 
 pub(super) fn summary(content: &str) -> Option<String> {

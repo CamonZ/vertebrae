@@ -100,6 +100,8 @@ pub(super) struct Sidecar {
     pub discussion: Option<super::super::local_chat::LocalChatDiscussionBinding>,
     pub association: Option<Value>,
     pub gate: Option<crate::local_chat::LocalChatGateBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steering_turn_ids: Option<BTreeMap<String, String>>,
 }
 
 impl Sidecar {
@@ -116,6 +118,7 @@ impl Sidecar {
             discussion: session.discussion_binding.clone(),
             association,
             gate: session.gate.clone(),
+            steering_turn_ids: session.steering_turn_ids.clone(),
         }
     }
 }

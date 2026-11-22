@@ -713,6 +713,9 @@ fn hydrate_record(
     value["id"] = json!(chat_id);
     value["projectPath"] = json!(project_path);
     let sidecar = catalog.sidecars.get(id);
+    value["steeringTurnIds"] = json!(previous
+        .and_then(|session| session.steering_turn_ids.as_ref())
+        .or_else(|| sidecar.and_then(|sidecar| sidecar.steering_turn_ids.as_ref())));
     let discussion = delivery::is_discussion(payload);
     value["discussionBinding"] = if discussion {
         let worktree_path = previous
@@ -2093,6 +2096,7 @@ mod tests {
                 discussion: None,
                 association: Some(json!({"worktreePath": "local-only"})),
                 gate: None,
+                steering_turn_ids: Some(BTreeMap::from([("steer:1".into(), "turn-1".into())])),
             },
         );
 
@@ -2109,6 +2113,7 @@ mod tests {
         assert_eq!(update.session_id, "chat");
         assert_eq!(session.label, "chat-5");
         assert_eq!(session.project_path.as_deref(), Some("/repo"));
+        assert_eq!(session.steering_turn_ids.unwrap()["steer:1"], "turn-1");
         assert_eq!(session.association.unwrap()["worktreePath"], "local-only");
         assert_eq!(
             load(&path)

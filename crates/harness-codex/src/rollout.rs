@@ -31,6 +31,7 @@ pub(crate) struct ReplayState {
     stream_id: StreamId,
     emitted_session_start_ids: HashSet<String>,
     emitted_thread: bool,
+    active_turn_id: Option<TurnId>,
     suppressed_tool_ids: HashSet<String>,
     // Completed provider items are authoritative over legacy records with the
     // same ID, regardless of record order. Last snapshot wins deterministically.
@@ -47,13 +48,44 @@ impl ReplayState {
             stream_id: request.stream_id.clone(),
             emitted_session_start_ids: HashSet::new(),
             emitted_thread: false,
+            active_turn_id: None,
             suppressed_tool_ids: HashSet::new(),
             completed_item_sequences: HashMap::new(),
         }
     }
 
     fn finish(&self, drafts: &mut Vec<HarnessEventDraftV1>) {
+        // Legacy rollouts may contain a raw user message followed by its
+        // identity-bearing event. Keep the authoritative record if both exist.
+        let mut duplicate = None;
+        let mut suppress = HashSet::new();
+        let mut seen = HashSet::new();
+        for (index, draft) in drafts.iter().enumerate() {
+            if let HarnessEventPayloadV1::TurnInput(input) = &draft.payload {
+                if let Some(id) = draft.correlation.item_id.as_ref()
+                    && id.as_str().starts_with("steer:")
+                {
+                    if !seen.insert(id.clone()) {
+                        suppress.insert(index);
+                    } else if let Some((raw_index, raw)) = duplicate.take()
+                        && raw == input
+                    {
+                        suppress.insert(raw_index);
+                    }
+                } else if draft.correlation.item_id.is_none() {
+                    duplicate = Some((index, input));
+                }
+            } else {
+                duplicate = None;
+            }
+        }
+        let mut index = 0;
         drafts.retain(|draft| {
+            let keep = !suppress.contains(&index);
+            index += 1;
+            if !keep {
+                return false;
+            }
             let id = match &draft.payload {
                 HarnessEventPayloadV1::ToolCall(call) => Some(&call.tool_call_id),
                 HarnessEventPayloadV1::ToolOutput(output) => Some(&output.tool_call_id),
@@ -560,6 +592,7 @@ fn parse_event_msg(
                     .filter(|id| !id.is_empty())
                     .unwrap_or_else(|| format!("missing-turn-at-{provider_sequence}")),
             ));
+            state.active_turn_id.clone_from(&draft.correlation.turn_id);
             vec![draft]
         }
         Some("task_complete") => {
@@ -576,6 +609,7 @@ fn parse_event_msg(
                 }),
             );
             draft.correlation.turn_id = string(payload, "turn_id").map(TurnId::new);
+            state.active_turn_id = None;
             vec![draft]
         }
         Some("thread_settings_applied" | "session_configured") => {
@@ -601,6 +635,22 @@ fn parse_event_msg(
                     speed_tier_status: Some(status),
                     tools: Vec::new(),
                 }),
+            )]
+        }
+        Some("user_message") => {
+            let Some(id) = string(payload, "client_id").filter(|id| id.starts_with("steer:"))
+            else {
+                return Vec::new();
+            };
+            let Some(text) = string(payload, "message") else {
+                return Vec::new();
+            };
+            vec![steering_replay_draft(
+                state,
+                timestamp,
+                provider_sequence,
+                id,
+                text,
             )]
         }
         Some("item_completed") => {
@@ -660,6 +710,28 @@ fn is_legacy_tool_record(raw: &Value, state: &ReplayState) -> bool {
 
 /// The rollout uses core item shapes; App Server uses client-facing shapes.
 /// Translate here, then share the live projection to keep event semantics equal.
+fn steering_replay_draft(
+    state: &ReplayState,
+    timestamp: DateTime<Utc>,
+    provider_sequence: u64,
+    id: String,
+    text: String,
+) -> HarnessEventDraftV1 {
+    let mut draft = state.item_draft(
+        timestamp,
+        provider_sequence,
+        Some(ItemId::new(id)),
+        HarnessEventPayloadV1::TurnInput(TurnInput {
+            thread_id: state.thread_id.clone(),
+            run_id: None,
+            content: text,
+            provenance: TurnInputProvenance::Human,
+        }),
+    );
+    draft.correlation.turn_id.clone_from(&state.active_turn_id);
+    draft
+}
+
 fn completed_item_drafts(
     payload: &Map<String, Value>,
     timestamp: DateTime<Utc>,
@@ -675,6 +747,26 @@ fn completed_item_drafts(
         return Vec::new();
     };
     match item.get("type").and_then(Value::as_str) {
+        Some("UserMessage") => {
+            let Some(client_id) = item["client_id"]
+                .as_str()
+                .filter(|id| id.starts_with("steer:"))
+            else {
+                return Vec::new();
+            };
+            let text = content_text(item.get("content"));
+            let mut draft = steering_replay_draft(
+                state,
+                timestamp,
+                provider_sequence,
+                client_id.to_owned(),
+                text,
+            );
+            if let Some(turn_id) = string(payload, "turn_id") {
+                draft.correlation.turn_id = Some(TurnId::new(turn_id));
+            }
+            return vec![draft];
+        }
         Some("CommandExecution") => {
             item["type"] = json!("commandExecution");
             if let Some(command) = item.get("command").and_then(Value::as_array) {
@@ -1132,7 +1224,7 @@ fn apply_patch_changes(input: Option<&Value>) -> Vec<FileChange> {
     changes
 }
 
-fn content_text(value: Option<&Value>) -> String {
+pub(crate) fn content_text(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(text)) => text.clone(),
         Some(Value::Array(items)) => items

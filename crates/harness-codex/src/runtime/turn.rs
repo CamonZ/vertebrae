@@ -317,6 +317,52 @@ impl SessionState {
         Ok(result)
     }
 
+    pub(super) async fn steer_turn(
+        &self,
+        turn_id: &TurnId,
+        content: String,
+    ) -> Result<TurnId, HarnessError> {
+        if content.trim().is_empty() {
+            return Err(HarnessError::InvalidRequest(
+                "Steering requires a message".into(),
+            ));
+        }
+        if *self.closed_rx.borrow() {
+            return Err(HarnessError::InvalidRequest(
+                "Codex session has ended".into(),
+            ));
+        }
+        let connection = self.connection();
+        let provider_turn = connection
+            .root_turn_identity
+            .provider_turn_for(turn_id)
+            .ok_or_else(|| {
+                HarnessError::InvalidRequest(
+                    "The requested turn is no longer active or is still starting".into(),
+                )
+            })?;
+        let input_id = format!("steer:{}", uuid::Uuid::new_v4());
+        let response = connection
+            .request_with_timeout(
+                "turn/steer",
+                json!({
+                    "threadId": self.root_thread_id.as_str(),
+                    "expectedTurnId": provider_turn,
+                    "clientUserMessageId": input_id,
+                    "input": [{"type": "text", "text": content, "text_elements": []}],
+                }),
+                self.config.request_timeout,
+                None,
+            )
+            .await?;
+        if response["turnId"].as_str() != Some(&provider_turn) {
+            return Err(HarnessError::Operation(
+                "Codex did not confirm the requested turn".into(),
+            ));
+        }
+        Ok(turn_id.clone())
+    }
+
     pub(super) async fn next_provider_notification(
         &self,
         provider_turn: &str,
