@@ -14,7 +14,7 @@ const anchorErrors: Record<ReviewAnchorError, string> = {
   invalid_range: "The selected lines are unavailable.",
   parent_unavailable: "Save this chat in a Vertebrae project before starting an inline discussion.",
   catalog_unavailable: "The discussion could not be saved. Try again.",
-  content_unavailable: "The selected snapshot is unavailable. Refresh the diff and select the lines again.",
+  content_unavailable: "The selected snapshot is unavailable. Reload the file or diff and select the lines again.",
   git: "Git could not load the review anchor.",
 };
 
@@ -37,6 +37,9 @@ export function reviewLocation(
 ): ReviewAnchorLocation {
   const side = anchor.side === "old" ? "LEFT" : "RIGHT";
   const { home } = anchor;
+  if (anchor.fullFile) {
+    return { path: anchor.path, side, source: { kind: "full_file", turn: anchor.fullFile.turn } };
+  }
   if (home.kind === "tool_call") {
     return {
       path: anchor.path,

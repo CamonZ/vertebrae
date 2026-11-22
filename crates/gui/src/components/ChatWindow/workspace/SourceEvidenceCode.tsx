@@ -1,8 +1,15 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import {
+  FULL_FILE_SELECTION_LABEL,
+  useFullFileDiscussion,
+} from "./useFullFileDiscussion";
+import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
+import type { FullFileSource } from "../selectionDiscussions";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { parseDiffFromFile, type SelectionSide } from "@pierre/diffs";
 import {
   CodeView,
   WorkerPoolContext,
+  type CodeViewAnnotationArgs,
   type CodeViewHandle,
   type CodeViewItem,
 } from "@pierre/diffs/react";
@@ -10,6 +17,7 @@ import {
   usePierreDiffOptions,
   usePierreThemeOptions,
 } from "../../../hooks/useCodeAppearance";
+import { DIFF_CURSOR_HOST_ATTRIBUTE } from "../../thread/toolChange/diffCursor";
 import { diffWorkerPool } from "../../thread/toolChange/diffWorkerPool";
 import type { ResolvedSource } from "./resolveSource";
 
@@ -20,6 +28,7 @@ export interface SourceEvidenceCodeProps {
   side?: "old" | "new";
   /** Changes on every request so a repeated click scrolls again. */
   nonce: number;
+  discussionSource?: FullFileSource;
 }
 
 /**
@@ -33,12 +42,13 @@ export default function SourceEvidenceCode({
   endLine,
   side,
   nonce,
+  discussionSource,
 }: SourceEvidenceCodeProps): ReactNode {
   const fileOptions = usePierreThemeOptions();
   const diffOptions = usePierreDiffOptions();
-  const viewRef = useRef<CodeViewHandle<undefined, undefined>>(null);
+  const viewRef = useRef<CodeViewHandle<ReviewAnnotation, undefined>>(null);
 
-  const items = useMemo<CodeViewItem<undefined>[]>(
+  const items = useMemo<CodeViewItem<ReviewAnnotation>[]>(
     () => [
       source.kind === "file"
         ? {
@@ -93,6 +103,26 @@ export default function SourceEvidenceCode({
         }
       : null;
 
+  const discussion = useFullFileDiscussion(
+    source.kind === "file" ? discussionSource : undefined,
+    id,
+    source.kind === "file" ? source.contents : null,
+    selectedLines?.range ?? null,
+    false,
+    (lineNumber) =>
+      viewRef.current?.scrollTo({
+        type: "line",
+        id,
+        lineNumber,
+        align: "nearest",
+        behavior: "instant",
+      })
+  );
+  const signature = JSON.stringify(discussion.annotations);
+  const [revision, setRevision] = useState({ signature, source, version: 0 });
+  if (revision.signature !== signature || revision.source !== source)
+    setRevision({ signature, source, version: revision.version + 1 });
+
   useEffect(() => {
     viewRef.current?.scrollTo(
       line !== undefined
@@ -107,15 +137,62 @@ export default function SourceEvidenceCode({
     );
   }, [nonce, items, id, line, lineSide]);
 
-  return (
+  const item = items[0];
+  const view = (
     <WorkerPoolContext.Provider value={diffWorkerPool}>
       <CodeView
         ref={viewRef}
         className="changes-code-view"
-        items={items}
-        options={options}
-        selectedLines={selectedLines}
+        items={
+          discussion.enabled && item.type === "file"
+            ? [
+                {
+                  ...item,
+                  annotations: discussion.annotations,
+                  version: revision.version,
+                },
+              ]
+            : items
+        }
+        options={
+          discussion.enabled
+            ? {
+                ...options,
+                ...discussion.options,
+                unsafeCSS: `${options.unsafeCSS ?? ""}\n${discussion.annotationCSS}`,
+              }
+            : options
+        }
+        selectedLines={
+          discussion.enabled
+            ? discussion.range && { id, range: discussion.range }
+            : selectedLines
+        }
+        renderAnnotation={
+          discussion.enabled
+            ? (...[annotation]: CodeViewAnnotationArgs<ReviewAnnotation>) =>
+                discussion.renderAnnotation(annotation)
+            : undefined
+        }
       />
     </WorkerPoolContext.Provider>
+  );
+
+  return discussion.enabled ? (
+    <div
+      ref={discussion.focus}
+      tabIndex={0}
+      role="group"
+      {...{ [DIFF_CURSOR_HOST_ATTRIBUTE]: "file" }}
+      data-focus-halo="overlay"
+      className="diff-line-cursor-host diff-line-cursor-host--changes flex min-h-0 flex-1 flex-col"
+      aria-label={FULL_FILE_SELECTION_LABEL}
+      onKeyDown={discussion.onKeyDown}
+    >
+      {discussion.reason && <p role="alert">{discussion.reason}</p>}
+      {view}
+    </div>
+  ) : (
+    view
   );
 }

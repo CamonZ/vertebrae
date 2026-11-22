@@ -8,6 +8,7 @@ import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 
 export interface DiscussionActions {
   canAsk: boolean;
+  canAskFullFile?: boolean;
   select(anchor: CodeSelection | null): void;
   discuss(anchor: CodeSelection, question: string): Promise<boolean>;
   attach(anchor: CodeSelection, outdated?: boolean, question?: string): void;

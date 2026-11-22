@@ -512,7 +512,17 @@ pub(crate) fn read_for_view(
     turn: &str,
     path: &str,
 ) -> HistoryRead {
-    match read_file(store, session, turn, path) {
+    read_for_checkout(store, session, turn, path, None)
+}
+
+pub(crate) fn read_for_checkout(
+    store: &LocalChatAnnotationStore,
+    session: &str,
+    turn: &str,
+    path: &str,
+    checkout: Option<&Path>,
+) -> HistoryRead {
+    match read_file(store, session, turn, path, checkout) {
         Ok(body) => HistoryRead::File(body),
         Err(error) => HistoryRead::Failure { error },
     }
@@ -525,7 +535,7 @@ pub(crate) fn read(
     turn: &str,
     path: &str,
 ) -> Result<FileBody, String> {
-    read_file(store, session, turn, path).map_err(|e| e.to_string())
+    read_file(store, session, turn, path, None).map_err(|e| e.to_string())
 }
 
 fn read_file(
@@ -533,6 +543,7 @@ fn read_file(
     session: &str,
     turn: &str,
     path: &str,
+    checkout: Option<&Path>,
 ) -> Result<FileBody, HistoryFailure> {
     let path = worktree_files::relative(path)
         .map_err(|e| HistoryFailure::new(HistoryFailureKind::InvalidPath, e.to_string(), false))?;
@@ -549,6 +560,15 @@ fn read_file(
         })?;
     let capture: Capture = serde_json::from_value(payload)
         .map_err(|e| HistoryFailure::new(HistoryFailureKind::Unsupported, e.to_string(), false))?;
+    if let Some(checkout) = checkout {
+        let matches = checkout
+            .canonicalize()
+            .ok()
+            .is_some_and(|root| capture.worktree.canonicalize().ok().as_ref() == Some(&root));
+        if !matches {
+            return Err("The recorded turn belongs to a different checkout.".into());
+        }
+    }
     if let CaptureState::Unavailable { message } = &capture.state {
         return Err(HistoryFailure::new(
             HistoryFailureKind::CaptureUnavailable,

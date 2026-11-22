@@ -479,13 +479,19 @@ export function ChatWindow({
     outdated = false,
     body = ""
   ) => {
-    const comment = createDiffComment({
-      home: anchor.home,
-      file: anchor.file,
-      span: anchor,
-      body,
-      id: `local-comment-${nextPendingCommentId++}`,
-    });
+    const id = `local-comment-${nextPendingCommentId++}`;
+    const comment = anchor.fullFile
+      ? {
+          kind: "diff" as const,
+          id, body, outdated,
+          home: anchor.home,
+          path: anchor.path,
+          side: anchor.side,
+          startLine: anchor.startLine,
+          endLine: anchor.endLine,
+          hunk: anchor.code,
+        }
+      : createDiffComment({ home: anchor.home, file: anchor.file, span: anchor, body, id });
     if (comment) {
       const attachment = { ...comment, selectionCode: anchor.code, outdated };
       updatePendingComments((comments) => [...comments, attachment]);
@@ -971,7 +977,7 @@ export function ChatWindow({
       <DiffReviewContext.Provider value={diffReview}>
         <SelectionDiscussionProvider
           key={JSON.stringify([chat.session.projectPath, sessionId, ownWorktreePath])}
-          worktreePath={ownWorktreePath ?? ""}
+          worktreePath={ownWorktreePath ?? worktreePath ?? ""}
           parentChatId={sessionId}
           projectPath={chat.session.projectPath}
           harness={chat.session.harness}

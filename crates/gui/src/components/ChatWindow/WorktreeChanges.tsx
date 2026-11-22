@@ -123,7 +123,9 @@ function changesDiscussionItems(
   refocus: () => void
 ): PaletteItem[] {
   if (!discussion) return [];
-  const active = discussion.threads.find(({ id }) => id === discussion.activeId);
+  // Full-file threads are opened from their document's own annotations.
+  const threads = discussion.threads.filter(({ anchor }) => !anchor.fullFile);
+  const active = threads.find(({ id }) => id === discussion.activeId);
   const activeItems: PaletteItem[] = [];
   if (active) {
     const hint = selectionLabel(active.anchor);
@@ -193,7 +195,7 @@ function changesDiscussionItems(
       })
     );
   }
-  const openItems: PaletteItem[] = discussion.threads
+  const openItems: PaletteItem[] = threads
     .filter(({ id }) => id !== discussion.activeId)
     .map((thread) => ({
       id: `changes-discussion-open-${thread.id}`,
@@ -244,6 +246,28 @@ export function WorktreeChanges({
   const targetButton = useRef<HTMLButtonElement>(null);
   const fileList = useRef<HTMLElement>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
+  const [fileCursorRequest, setFileCursorRequest] = useState<{
+    path: string;
+    focus(cursor: HTMLElement): void;
+  } | null>(null);
+  const requestFileCursor = useCallback((path: string) => {
+    const origin = document.activeElement;
+    let pending = true;
+    setFileCursorRequest({
+      path,
+      focus(cursor) {
+        if (!pending) return;
+        pending = false;
+        const active = cursor.ownerDocument.activeElement;
+        // The file can finish loading after the user has moved elsewhere.
+        if (
+          active === origin ||
+          active === sectionRef.current ||
+          active === cursor.ownerDocument.body
+        ) cursor.focus({ preventScroll: true });
+      },
+    });
+  }, []);
   const openPalette = useCommandPaletteStore((state) => state.openPalette);
   const discussion = useContext(SelectionDiscussionContext);
   const [base, setBase] = useState<ComparisonEndpoint | null>(null);
@@ -638,7 +662,10 @@ export function WorktreeChanges({
     setReveal(null);
     setActivePath(path);
     if (historical) setHistoricalDocument({ path, view });
-    else openDocument(worktreePath, path, view);
+    else {
+      if (view === "file") requestFileCursor(path);
+      openDocument(worktreePath, path, view);
+    }
   };
 
   const save = (path: string) =>
@@ -848,7 +875,7 @@ export function WorktreeChanges({
     }
     if (typing) return;
 
-    const inCursor = !!origin.closest(`[${DIFF_CURSOR_HOST_ATTRIBUTE}]`);
+    const inDiffCursor = !!origin.closest(`[${DIFF_CURSOR_HOST_ATTRIBUTE}=""]`);
     const vertical = event.key === "ArrowUp" || event.key === "ArrowDown";
     // ⌥⇧↑/↓ outside the diff: previous/next file heading. The diff's own
     // headings and lines move the line cursor instead.
@@ -858,7 +885,7 @@ export function WorktreeChanges({
       event.shiftKey &&
       !event.metaKey &&
       !event.ctrlKey &&
-      !inCursor
+      !inDiffCursor
     ) {
       event.preventDefault();
       event.stopPropagation();
@@ -892,7 +919,7 @@ export function WorktreeChanges({
     }
 
     // v outside the diff marks the active file; the diff handles its own.
-    if (event.key === CHANGES_VIEWED_KEY && !inCursor && selectedFile) {
+    if (event.key === CHANGES_VIEWED_KEY && !inDiffCursor && selectedFile) {
       event.preventDefault();
       event.stopPropagation();
       if (!event.repeat)
@@ -1324,6 +1351,7 @@ export function WorktreeChanges({
                       dismissTurn();
                       setReveal(null);
                       setActivePath(path);
+                      requestFileCursor(path);
                       activate(worktreePath, path);
                     }}
                   >
@@ -1392,6 +1420,12 @@ export function WorktreeChanges({
                 )
               }
               onEdited={() => setReveal(null)}
+              onFileView={() => requestFileCursor(activeDocument)}
+              focusCursor={
+                fileCursorRequest?.path === activeDocument
+                  ? fileCursorRequest.focus
+                  : undefined
+              }
               diffStyle={diffStyle}
               onSave={save}
               onSaved={refreshAll}

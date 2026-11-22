@@ -3,12 +3,13 @@ import { errorMessage } from "../../query/commandResult";
 import type { ChatSession } from "../../stores/chatStore";
 import { canonicalPath, spanRows } from "../thread/toolChange/diffLineMapper";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
-import type { SelectionThread } from "./selectionDiscussions";
+import type { FullFileSource, SelectionThread } from "./selectionDiscussions";
 import { unwrapAnchor } from "./reviewAnchors";
 
 interface SavedDiscussion {
   thread: ReviewThread;
   home: { kind: "worktree" } | { kind: "tool_call"; toolUseId: string };
+  fullFile?: FullFileSource;
   sessionId: string | null;
   code: string | null;
   readError?: Error;
@@ -58,6 +59,21 @@ export async function readSavedDiscussion(
 ): Promise<SavedDiscussion | null> {
   const { threadId, payload } = thread;
   if (payload.parentChatId !== scope.parentChatId) return null;
+  let fullFile: FullFileSource | undefined;
+  const prefix = "full-file:";
+  if (payload.homeKind === "worktree" && payload.originRef?.startsWith(prefix)) {
+    if (!thread.checkoutPath) return null;
+    const identity: unknown = JSON.parse(payload.originRef.slice(prefix.length));
+    if (identity === null) {
+      fullFile = { checkout: thread.checkoutPath, turn: null };
+    } else if (Array.isArray(identity) && identity.length === 2 &&
+        identity[0] === scope.parentChatId && typeof identity[1] === "string") {
+      fullFile = { checkout: thread.checkoutPath, turn: { sessionId: scope.parentChatId, turnId: identity[1] } };
+    } else {
+      return null;
+    }
+    scope = { ...scope, worktreePath: fullFile.checkout };
+  }
   if (
     thread.checkoutPath === null
       ? !sessions.some((session) => matchesDiscussion(session, scope, threadId))
@@ -84,12 +100,13 @@ export async function readSavedDiscussion(
     snippets.set(threadId, read);
   }
   try {
-    return { thread, home, sessionId, code: await read };
+    return { thread, home, fullFile, sessionId, code: await read };
   } catch (error) {
     if (snippets.get(threadId) === read) snippets.delete(threadId);
     return {
       thread,
       home,
+      fullFile,
       sessionId,
       code: null,
       readError: new Error(
@@ -107,6 +124,7 @@ export function placeWorktreeDiscussions(
     ({
       thread: { threadId, payload },
       home: savedHome,
+      fullFile,
       sessionId,
       code,
       readError,
@@ -117,7 +135,7 @@ export function placeWorktreeDiscussions(
           ? { ...savedHome, wholeBranch: snapshot?.wholeBranch ?? false }
           : savedHome;
       const worktreeFile =
-        home.kind === "worktree"
+        !fullFile && home.kind === "worktree"
           ? snapshot?.files.find(
               (file) =>
                 (side === "old" ? file.oldPath : file.newPath) === payload.path
@@ -136,6 +154,7 @@ export function placeWorktreeDiscussions(
         file,
         code: code ?? "",
         home,
+        ...(fullFile ? { fullFile } : {}),
       } as const;
       const outdated = payload.status === "outdated";
       const anchor = {
@@ -158,7 +177,7 @@ export function placeWorktreeDiscussions(
           : {
               kind: outdated
                 ? "outdated"
-                : home.kind === "worktree" &&
+                : !fullFile && home.kind === "worktree" &&
                     (!worktreeFile || !spanRows(worktreeFile, anchor))
                   ? "detached"
                   : "inline",

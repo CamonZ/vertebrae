@@ -2351,6 +2351,42 @@ it("captures the selected range before starting an inline thread", async () => {
   });
 });
 
+it("captures a historical selection and sends the exact recorded code to the read-only provider", async () => {
+  render(fixture("A", vi.fn(), "main-chat"));
+  const turn = { sessionId: "main-chat", turnId: "recorded-turn" };
+  const recorded = {
+    ...anchor,
+    code: "recorded first\nrecorded second",
+    startLine: 4,
+    endLine: 5,
+    fullFile: { checkout: "/recorded-checkout", turn },
+  };
+  act(() => liveDiscussion.select(recorded));
+  await waitFor(() => expect(commands.getSupportedLocalChatHarnesses).toHaveBeenCalled());
+  await act(async () => {
+    expect(await liveDiscussion.discuss(recorded, "Explain the recorded code")).toBe(true);
+  });
+
+  expect(commands.captureReviewAnchor).toHaveBeenCalledWith({
+    worktree: "/recorded-checkout",
+    threadId: expect.any(String),
+    location: { path: recorded.path, side: "RIGHT", source: { kind: "full_file", turn } },
+    range: { startLine: 4, line: 5 },
+    selectedText: "recorded first\nrecorded second",
+    parent: { chatId: "main-chat", projectPath: "/project" },
+  });
+  await waitFor(() => expect(commands.createLocalChatSession).toHaveBeenCalledWith(
+    expect.objectContaining({
+      working_dir: "/recorded-checkout",
+      read_only: true,
+      initial_prompt: `Context: ${JSON.stringify({
+        path: recorded.path, side: "new", startLine: 4, endLine: 5,
+        code: "recorded first\nrecorded second", outdated: false,
+      })}\nQuestion: Explain the recorded code`,
+    })
+  ));
+});
+
 it("moves a Git-anchored discussion and displays the captured lines when outdated", async () => {
   vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({
     status: "ok",
