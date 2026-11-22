@@ -326,6 +326,21 @@ export function ChatWindow({
     (id: string | null) => setActiveCommentState({ sessionId, id }),
     [sessionId]
   );
+  const commentNumbers = useMemo(
+    () =>
+      new Map(pendingComments.map((comment, index) => [comment.id, index + 1])),
+    [pendingComments]
+  );
+  const [openCommentRequest, setOpenCommentRequest] = useState<{
+    sessionId: string;
+    id: string;
+    nonce: number;
+  } | null>(null);
+  const handleOpenComment = useCallback(
+    (id: string) =>
+      setOpenCommentRequest({ sessionId, id, nonce: nextFocusNonce++ }),
+    [sessionId]
+  );
   const textComments = useMemo(
     () =>
       pendingComments.filter(
@@ -906,6 +921,8 @@ export function ChatWindow({
                 onAddComment={handleAddComment}
                 textComments={textComments}
                 activeCommentId={activeCommentId}
+                commentNumbers={commentNumbers}
+                onOpenComment={handleOpenComment}
                 footer={
                   <>
                     <DiscussionSnapshot snapshot={worktreeSnapshot} />
@@ -959,6 +976,11 @@ export function ChatWindow({
               onRemoveComment={handleRemoveComment}
               onNavigateComment={handleNavigateComment}
               onActiveCommentChange={handleActiveCommentChange}
+              openCommentRequest={
+                openCommentRequest?.sessionId === sessionId
+                  ? openCommentRequest
+                  : null
+              }
               onSend={handleSend}
               onSteer={chat.canSteer ? chat.handleSteer : undefined}
               isSteering={chat.isSteering}

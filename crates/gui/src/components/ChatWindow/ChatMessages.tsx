@@ -41,6 +41,8 @@ import {
   type TextSelectionAnchor,
 } from "./assistantTextComments";
 import { useCommentHighlights } from "./commentHighlight";
+import { CommentHighlightMarkers } from "./CommentHighlightMarkers";
+import { useCommentHover } from "./useCommentHover";
 import { TranscriptCommentCard } from "./TranscriptCommentCard";
 import { VIEWPORT_GUTTER_PX } from "./commentCardPlacement";
 import { useScrollFollow } from "./useScrollFollow";
@@ -135,6 +137,7 @@ function isBackward(selection: Selection): boolean {
 }
 
 const NO_TEXT_COMMENTS: readonly PendingTextComment[] = [];
+const NO_COMMENT_NUMBERS: ReadonlyMap<string, number> = new Map();
 
 interface ChatEmptyStateProps {
   notice?: ReactNode;
@@ -508,6 +511,10 @@ interface ChatMessagesProps {
   textComments?: readonly PendingTextComment[];
   /** The comment whose composer chip is hovered or pinned. */
   activeCommentId?: string | null;
+  /** Each pending comment's number, as on its composer chip. */
+  commentNumbers?: ReadonlyMap<string, number>;
+  /** Open a text comment's details from its transcript highlight. */
+  onOpenComment?: (id: string) => void;
   /** Rendered inline after the last message, such as gate steering. */
   footer?: ReactNode;
 }
@@ -534,6 +541,8 @@ export function ChatMessages({
   onAddComment = () => undefined,
   textComments = NO_TEXT_COMMENTS,
   activeCommentId = null,
+  commentNumbers = NO_COMMENT_NUMBERS,
+  onOpenComment,
   footer = null,
 }: ChatMessagesProps) {
   const retryHistory = useChatStore(
@@ -669,10 +678,24 @@ export function ChatMessages({
       window.removeEventListener("resize", follow);
     };
   }, [selectionAction]);
-  useCommentHighlights(messagesContainerRef, textComments, activeCommentId, [
-    messages,
-    streamingAssistant,
-  ]);
+  const highlightRevision = useMemo(
+    () => [messages, streamingAssistant],
+    [messages, streamingAssistant]
+  );
+  const commentRangesRef = useRef<ReadonlyMap<string, Range>>(new Map());
+  const hoveredCommentId = useCommentHover(
+    messagesContainerRef,
+    commentRangesRef,
+    textComments.length > 0 && !!onOpenComment
+  );
+  useCommentHighlights(
+    messagesContainerRef,
+    textComments,
+    activeCommentId,
+    highlightRevision,
+    hoveredCommentId,
+    commentRangesRef
+  );
   // Tool calls with file changes render as diffs; warm Pierre ahead of them.
   useEffect(preloadDiffRenderer, []);
   useEffect(() => {
@@ -1044,6 +1067,17 @@ export function ChatMessages({
           >
             <span className="transcript-cursor-caret" />
           </div>
+          {textComments.length > 0 && onOpenComment ? (
+            <CommentHighlightMarkers
+              viewportRef={messagesContainerRef}
+              rangesRef={commentRangesRef}
+              hoveredId={hoveredCommentId}
+              activeId={activeCommentId}
+              numbers={commentNumbers}
+              revision={highlightRevision}
+              onOpen={onOpenComment}
+            />
+          ) : null}
           {isEmpty && !isActive && !isLoadingInitialHistory && (
             <ChatEmptyState notice={notice} />
           )}

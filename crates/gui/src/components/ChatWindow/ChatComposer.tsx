@@ -211,6 +211,8 @@ interface ChatComposerProps {
   onNavigateComment?: (id: string) => void;
   /** The hovered or pinned comment, whose target is highlighted. */
   onActiveCommentChange?: (id: string | null) => void;
+  /** Pin a comment's details open, as a click on its chip does. */
+  openCommentRequest?: { id: string; nonce: number } | null;
   onSend: (message?: string) => boolean | void;
   onSteer?: () => void;
   isSteering?: boolean;
@@ -258,6 +260,7 @@ export function ChatComposer({
   onRemoveComment,
   onNavigateComment,
   onActiveCommentChange,
+  openCommentRequest = null,
   onSend,
   onSteer,
   isSteering,
@@ -292,6 +295,11 @@ export function ChatComposer({
     document.addEventListener("mousedown", dismiss);
     return () => document.removeEventListener("mousedown", dismiss);
   }, [modelSettingsOpen]);
+  useEffect(() => {
+    if (!openCommentRequest) return;
+    setPinnedCommentId(openCommentRequest.id);
+    setActiveCommentId(openCommentRequest.id);
+  }, [openCommentRequest]);
   useEffect(() => {
     if (
       pinnedCommentId &&

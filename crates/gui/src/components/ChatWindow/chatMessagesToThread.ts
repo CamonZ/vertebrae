@@ -1,3 +1,4 @@
+import { parseSentComments } from "./sentCommentSet";
 import { withFileReferenceReplyIds } from "../../utils/fileReferenceReplyIds";
 /**
  * chatMessagesToThread — adapter: chatStore `ChatMessage[]` → canonical
@@ -379,7 +380,9 @@ export function chatMessagesToThread(
             role: "human",
             label: "You",
             text: draft.userText,
-            textFormat: "markdown",
+            textFormat: parseSentComments(draft.userText)
+              ? "comments"
+              : "markdown",
           }
         : null;
     const messagesOut: Message[] = userMsg ? [userMsg, ...grouped] : grouped;

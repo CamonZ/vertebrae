@@ -58,6 +58,7 @@ import {
 } from "../components/thread/toolChange/DiffCommentThread";
 import { DiffReviewContext } from "../components/thread/toolChange/DiffReviewContext";
 import type { ReviewSurface } from "../components/thread/toolChange/diffComments";
+import type { CommentedRange } from "../components/thread/toolChange/commentedLines";
 import {
   canonicalPath,
   resolveSelection,
@@ -100,11 +101,17 @@ export interface DiffCommentsApi {
     ref: RefObject<HTMLDivElement | null>;
   };
   renderAnnotation(annotation: { metadata: ReviewAnnotation }): ReactNode;
+  /**
+   * The lines each comment and inline discussion in one file is about, to
+   * highlight beside their cards; stable until those change.
+   */
+  commentedRangesFor(path: string): readonly CommentedRange[];
   /** The keyboard cursor when it rests on a collapsed gap; null otherwise. */
   gapCursor: GapCursor | null;
 }
 
 const NONE: ReviewDiffAnnotation[] = [];
+const NO_RANGES: readonly CommentedRange[] = [];
 
 export interface DiffCursorOptions {
   /** How the surface lays out rows; split diffs have a column per side. */
@@ -265,6 +272,52 @@ export function useDiffComments(
   const annotationsFor = useCallback(
     (path: string) => annotationsByPath.get(path) ?? NONE,
     [annotationsByPath]
+  );
+
+  const activeCommentId = review?.activeCommentId ?? review?.focus?.commentId;
+  const rangesByPath = useMemo(() => {
+    const byPath = new Map<string, CommentedRange[]>();
+    const add = (path: string, range: CommentedRange) => {
+      const ranges = byPath.get(path) ?? [];
+      byPath.set(path, ranges);
+      ranges.push(range);
+    };
+    for (const placement of placements ?? []) {
+      const matches =
+        placement.surface.kind === surface.kind &&
+        (placement.surface.kind !== "tool_call" ||
+          placement.surface.toolUseId === toolUseId);
+      // A file-level comment (endLine 0) has no lines to mark.
+      if (!matches || placement.endLine < 1) continue;
+      add(placement.path, {
+        side: placement.side === "old" ? "deletions" : "additions",
+        start: placement.startLine,
+        end: placement.endLine,
+        active: placement.commentId === activeCommentId,
+      });
+    }
+    for (const { anchor, detached } of threadAnchors) {
+      const home = anchor.home;
+      if (
+        detached ||
+        anchor.fullFile ||
+        home.kind !== surface.kind ||
+        (home.kind === "tool_call" && home.toolUseId !== toolUseId)
+      )
+        continue;
+      add(anchor.path, {
+        side: anchor.side === "old" ? "deletions" : "additions",
+        start: anchor.startLine,
+        end: anchor.endLine,
+        active: false,
+      });
+    }
+    return byPath;
+  }, [placements, threadAnchors, surface.kind, toolUseId, activeCommentId]);
+
+  const commentedRangesFor = useCallback(
+    (path: string) => rangesByPath.get(path) ?? NO_RANGES,
+    [rangesByPath]
   );
   const addComment = review?.addComment;
   const worktreeBranch = review?.worktree?.wholeBranch ?? false;
@@ -721,6 +774,7 @@ export function useDiffComments(
     selectedLinesFor,
     onSelectionChange,
     renderAnnotation,
+    commentedRangesFor,
     gapCursor,
   };
 }

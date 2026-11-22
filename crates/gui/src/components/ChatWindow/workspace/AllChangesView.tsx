@@ -34,6 +34,10 @@ import {
   changesCursorScrollBehavior,
   useChangesCursorOverlay,
 } from "./useChangesCursorOverlay";
+import {
+  COMMENTED_LINES_CSS,
+  useCommentedLines,
+} from "../../thread/toolChange/commentedLines";
 import { diffWorkerPool } from "../../thread/toolChange/diffWorkerPool";
 import {
   clickedCodeLine,
@@ -459,6 +463,14 @@ export default function AllChangesView({
           },
         }
       : null;
+  const { commentedRangesFor } = review;
+  const scheduleCommentPaint = useCommentedLines(
+    viewRef,
+    useCallback(
+      (id: string) => commentedRangesFor(itemPaths.get(id) ?? id),
+      [commentedRangesFor, itemPaths]
+    )
+  );
   const { overlayRef, schedule: scheduleCursorPaint } = useChangesCursorOverlay(
     viewRef,
     containerRef,
@@ -475,7 +487,7 @@ export default function AllChangesView({
       // No top padding: the focus halo sits flush on the first file.
       layout: CODE_VIEW_LAYOUT,
       expansionLineCount: GAP_BATCH,
-      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}\n${semanticOn ? SEMANTIC_GUTTER_CSS : ""}`,
+      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}\n${COMMENTED_LINES_CSS}\n${semanticOn ? SEMANTIC_GUTTER_CSS : ""}`,
       onPostRender: (...args: Parameters<typeof onGapsPostRender>) => {
         onGapsPostRender(...args);
         // Pierre renders an item before adding it to its rendered range, so
@@ -492,6 +504,7 @@ export default function AllChangesView({
           }
         });
         scheduleCursorPaint();
+        scheduleCommentPaint();
       },
       ...(review.enabled
         ? {
@@ -518,6 +531,7 @@ export default function AllChangesView({
       itemPaths,
       onGapsPostRender,
       scheduleCursorPaint,
+      scheduleCommentPaint,
       requestFile,
       semanticOn,
       paintGutter,

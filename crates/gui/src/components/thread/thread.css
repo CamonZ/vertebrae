@@ -374,20 +374,22 @@
   line-height: 1.45;
   color: var(--color-fg);
 }
+/* A comment card (chatComments.css): focused or chip-hovered gets the
+   accent left bar, never a glow or outline. */
 .diff-comment {
-  border: 1px solid var(--color-line);
-  border-left: 3px solid var(--color-accent);
-  border-radius: 6px;
-  background: var(--color-bg-1);
-  padding: 6px 8px;
+  border: 1px solid var(--comment-line, var(--color-line-strong));
+  border-radius: var(--comment-radius, var(--radius-lg));
+  background: var(--comment-surface, var(--color-bg-2));
+  padding: 8px 10px;
+  box-shadow: inset 2px 0 0 transparent;
+  transition: box-shadow 100ms;
 }
-.diff-comment[data-focused] {
-  outline: 2px solid var(--color-accent);
-}
-/* Its composer chip is hovered or pinned. */
+.diff-comment[data-focused],
 .diff-comment[data-active] {
-  background: var(--color-accent-wash);
-  outline: 2px solid var(--color-accent);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .diff-comment { transition: none; }
 }
 .diff-comment-editor-hint {
   margin-right: auto;
@@ -406,7 +408,10 @@
   align-items: center;
   gap: 8px;
   color: var(--color-fg-mute);
-  font-size: 11px;
+  font: 400 11px/1.4 var(--font-mono);
+}
+.diff-comment-meta button {
+  font-family: var(--font-sans);
 }
 .diff-comment-where {
   min-width: 0;
@@ -416,10 +421,11 @@
   white-space: nowrap;
 }
 .diff-comment-outdated {
-  border: 1px solid var(--color-warn);
-  border-radius: 4px;
-  padding: 0 4px;
+  border-radius: 999px;
+  padding: 0 6px;
+  background: color-mix(in oklch, var(--color-warn) 12%, transparent);
   color: var(--color-warn);
+  font: 500 10px/16px var(--font-sans);
 }
 .diff-comment-actions,
 .diff-comment-editor-actions,
@@ -441,8 +447,8 @@
 .diff-comment-editor-actions button {
   font: 400 12px/1.45 var(--font-sans);
   background: transparent;
-  border: 1px solid var(--color-line);
-  border-radius: 4px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
   padding: 4px 8px;
   color: var(--color-fg-soft);
   cursor: pointer;
@@ -472,7 +478,7 @@
   width: 100%;
   resize: vertical;
   border: 1px solid var(--color-line);
-  border-radius: 6px;
+  border-radius: var(--radius-lg);
   background: var(--color-bg);
   padding: 6px 8px;
   color: var(--color-fg);

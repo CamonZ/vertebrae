@@ -1,16 +1,152 @@
 /*
- * Comments on assistant text and the composer's pending-comment chips.
- * Inline cards sit on bg-2 with a hairline, 12px radius; controls 8px.
- * Accent marks one thing per cluster: the quote bar / the primary action.
+ * One comment family: the transcript comment card, the composer chips and
+ * their popover, inline selection discussions, diff review comments and the
+ * comment cards of a sent user turn (SentComments).
+ *
+ * A comment card sits on bg-2 with a hairline and radius-lg; its quote is a
+ * muted left-barred block; meta (where, side, time) is mono 11px. Accent
+ * marks exactly one thing per card: the primary action, or the focus bar
+ * of the comment the user is looking at. No glow (DESIGN.md glow rule).
  */
+:root {
+  --comment-surface: var(--color-bg-2);
+  --comment-line: var(--color-line-strong);
+  --comment-radius: var(--radius-lg);
+  --comment-quote-bar: var(--color-line-strong);
+  /* Highlight tints: rest < hover < focused. */
+  --comment-tint-rest: color-mix(in oklch, var(--color-accent) 14%, transparent);
+  --comment-tint-hover: color-mix(in oklch, var(--color-accent) 26%, transparent);
+  --comment-tint-focus: color-mix(in oklch, var(--color-accent) 22%, transparent);
+}
 
-/* Quotes of pending text comments in the transcript. */
+.vtb-comment-card {
+  border: 1px solid var(--comment-line);
+  border-radius: var(--comment-radius);
+  background: var(--comment-surface);
+  color: var(--color-fg);
+}
+
+/* Where a comment lives: path, side, home. Data, so mono. */
+.vtb-comment-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-fg-soft);
+  font: 400 11px/1.4 var(--font-mono);
+}
+
+.vtb-comment-quote {
+  border-left: 2px solid var(--comment-quote-bar);
+  padding: 2px 0 2px 10px;
+  color: var(--color-fg-soft);
+  font: 400 12px/1.55 var(--font-sans);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vtb-comment-quote mark {
+  background: transparent;
+  color: var(--color-fg);
+  font-weight: 500;
+}
+.vtb-comment-quote-code {
+  margin: 0;
+  white-space: pre;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.vtb-comment-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.vtb-comment-outdated {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--color-warn) 12%, transparent);
+  color: var(--color-warn);
+  font: 500 10px/16px var(--font-sans);
+}
+
+/* Quotes of pending text comments in the transcript. At rest a quiet
+   underline and wash; under the pointer a stronger tint; focused (its chip
+   hovered or pinned) a tint plus the accent bar in the gutter. */
 ::highlight(vtb-comment) {
-  background-color: var(--color-accent-wash);
+  background-color: var(--comment-tint-rest);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, var(--color-accent) 55%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+::highlight(vtb-comment-hover) {
+  background-color: var(--comment-tint-hover);
+  text-decoration: underline;
+  text-decoration-color: var(--color-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 ::highlight(vtb-comment-active) {
-  background-color: color-mix(in oklch, var(--color-accent) 35%, transparent);
+  background-color: var(--comment-tint-focus);
   color: var(--color-fg);
+}
+/* A sent comment jumped back to its quote. */
+::highlight(vtb-comment-jump) {
+  background-color: var(--comment-tint-hover);
+  color: var(--color-fg);
+}
+
+/* The focused comment's quote: the response's 2px left rail turns accent
+   along the quoted lines (CommentHighlightMarkers). */
+.comment-focus-bar {
+  position: absolute;
+  z-index: 1;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  pointer-events: none;
+}
+
+/* The hovered quote's marker: its number, centred on the rail at the
+   quote's first line, clear of the text. Hovering the marker swaps the
+   number for the open glyph. */
+.comment-hover-marker {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 1px;
+  padding: 0;
+  border: 1px solid var(--comment-line);
+  border-radius: 999px;
+  background: var(--comment-surface);
+  color: var(--color-fg-soft);
+  font: 500 9px/1 var(--font-mono);
+  cursor: pointer;
+  transform: translate(-50%, -50%);
+  transition:
+    color 100ms,
+    border-color 100ms;
+}
+.comment-hover-marker > * {
+  grid-area: 1 / 1;
+}
+.comment-hover-marker-open {
+  visibility: hidden;
+}
+.comment-hover-marker:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.comment-hover-marker:hover .comment-hover-marker-number {
+  visibility: hidden;
+}
+.comment-hover-marker:hover .comment-hover-marker-open {
+  visibility: visible;
 }
 
 /* Floating "Comment" pill shown after a selection is finished. */
@@ -49,8 +185,8 @@
   max-width: calc(100vw - 1rem);
   /* Border and ring come from the focus halo (data-focus-halo="surface"). */
   border: 1px solid;
-  border-radius: 12px;
-  background: var(--color-bg-2);
+  border-radius: var(--comment-radius);
+  background: var(--comment-surface);
   color: var(--color-fg);
   --surface-shadow: 0 12px 32px rgb(0 0 0 / 0.32);
   font: 400 13px/1.5 var(--font-sans);
@@ -86,6 +222,7 @@
 }
 .chat-comment-card-title .mono {
   font-family: var(--font-mono);
+  font-size: 11px;
 }
 .chat-comment-icon-button {
   display: inline-flex;
@@ -108,12 +245,12 @@
   color: var(--color-err);
 }
 
-/* The commented text: accent bar, muted context, the selection emphasised. */
+/* The commented text: muted bar and context, the selection emphasised. */
 .chat-comment-quote {
   margin: 6px 12px 0;
   max-height: 6rem;
   overflow-y: auto;
-  border-left: 2px solid var(--color-accent);
+  border-left: 2px solid var(--comment-quote-bar);
   padding: 2px 0 2px 10px;
   color: var(--color-fg-mute);
   font-size: 12px;
@@ -238,9 +375,9 @@
   max-width: 220px;
   height: 26px;
   padding: 0 8px 0 6px;
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
-  background: var(--color-bg-2);
+  border: 1px solid var(--comment-line);
+  border-radius: var(--comment-radius);
+  background: var(--comment-surface);
   color: var(--color-fg-soft);
   font: 400 12px/1 var(--font-sans);
   cursor: pointer;
@@ -251,7 +388,7 @@
 }
 .chat-comment-chip:hover,
 .chat-comment-chip[aria-expanded="true"] {
-  border-color: var(--color-line-strong);
+  border-color: var(--color-fg-faint);
   background: var(--color-bg-3);
   color: var(--color-fg);
 }
@@ -283,6 +420,84 @@
   font-size: 11px;
 }
 
+/* A sent comment set in the user turn: compact quote cards, then the
+   follow-up. Each card's quote (or location) jumps back to what it quoted. */
+.sent-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  white-space: normal;
+}
+.sent-comments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.sent-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+.sent-comment-anchor {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+button.vtb-comment-quote.sent-comment-anchor {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.sent-comment-anchor.vtb-comment-meta {
+  display: flex;
+  padding: 0;
+  border: 0;
+}
+.sent-comment-anchor:hover:not(:disabled) {
+  color: var(--color-fg-soft);
+}
+.sent-comment-anchor.vtb-comment-quote:hover:not(:disabled) {
+  border-left-color: var(--color-fg-mute);
+}
+.sent-comment-anchor:disabled {
+  cursor: default;
+}
+.sent-comment-anchor[data-missing] {
+  cursor: default;
+  text-decoration: line-through;
+  text-decoration-color: var(--color-fg-faint);
+}
+.sent-comment-quote-line {
+  display: block;
+}
+.sent-comment-location {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sent-comment .vtb-comment-quote-code {
+  max-height: calc(4 * 1.55em);
+  overflow: hidden;
+}
+.sent-comment-body {
+  font-family: var(--font-sans);
+  font-size: var(--chat-user-size, 13px);
+  line-height: 1.5;
+}
+
 @keyframes chat-comment-in {
   from {
     opacity: var(--comment-enter-opacity, 0);
@@ -293,5 +508,8 @@
   .chat-comment-trigger,
   .chat-comment-card {
     animation: none;
+  }
+  .comment-hover-marker {
+    transition: none;
   }
 }
