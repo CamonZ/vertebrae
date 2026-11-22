@@ -99,12 +99,13 @@ function harnessLog(
   options: {
     streamId?: string;
     turnId?: string;
+    itemId?: string;
     parentToolCallId?: string;
     semantics?: "delta" | "snapshot";
   } = {}
 ): SessionLog {
   const streamId = options.streamId ?? "root";
-  const eventId = execId + "-" + createdAt + "-" + type;
+  const eventId = options.itemId ?? execId + "-" + createdAt + "-" + type;
   return {
     id: eventId,
     step_execution_id: execId,
@@ -117,6 +118,7 @@ function harnessLog(
         session_id: "session-1",
         thread_id: streamId + "-thread",
         ...(options.turnId ? { turn_id: options.turnId } : {}),
+        ...(options.itemId ? { item_id: options.itemId } : {}),
         ...(options.parentToolCallId
           ? { parent_tool_call_id: options.parentToolCallId }
           : {}),
@@ -347,6 +349,28 @@ describe("runToThreads — execute step", () => {
     const [thread] = runToThreads(input);
     expect(thread.kind).toBe("execute");
     expect(thread.step?.kind).toBe("execute");
+  });
+
+  it("keeps literal, independently identified logs even when they equal the output", () => {
+    const text = "**output**";
+    const [thread] = runToThreads({
+      taskRun: taskRun("2024-01-01T10:00:00Z"),
+      stepExecutions: [
+        exec({ id: "execute-1", step_type: "execute", output: text }),
+      ],
+      logsByExecutionId: {
+        "execute-1": ["first", "second"].map((itemId) =>
+          harnessLog("execute-1", "text", { text }, "2024-01-01T10:00:01Z", {
+            itemId,
+          })
+        ),
+      },
+    });
+    expect(thread.turns.flatMap((turn) => turn.messages)).toMatchObject([
+      { type: "agent", itemId: "first", prose: text, proseFormat: "plain" },
+      { type: "agent", itemId: "second", prose: text, proseFormat: "plain" },
+      { type: "result", body: text },
+    ]);
   });
 });
 
@@ -786,7 +810,10 @@ describe("msgsToThread — CHAT variant", () => {
 });
 
 describe("conversationEventsToThread", () => {
-  function backgroundDone(progress: string | null, error: string | null = null) {
+  function backgroundDone(
+    progress: string | null,
+    error: string | null = null
+  ) {
     return conversationEventsToThread([
       {
         kind: "background_work",

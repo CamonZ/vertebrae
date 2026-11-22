@@ -40,6 +40,19 @@ impl SessionLogEventSink {
         self.queue.push_event(event, false).await
     }
 
+    /// Offers observational output without slowing a child pipe reader.
+    pub fn try_enqueue(&self, event: HarnessEventV1) -> bool {
+        self.queue
+            .try_push(
+                QueueItem::Event {
+                    event: Box::new(event),
+                    ack: None,
+                },
+                OUTPUT_QUEUE_CAPACITY,
+            )
+            .is_ok()
+    }
+
     /// Waits until every queued record before this call has been persisted.
     pub async fn flush(&self) -> Result<(), HarnessError> {
         self.queue.flush().await
@@ -84,6 +97,11 @@ enum QueueItem {
     Flush {
         ack: oneshot::Sender<Result<(), HarnessError>>,
     },
+}
+
+enum QueuePushError {
+    Full(QueueItem),
+    Closed,
 }
 
 impl OutputQueue {
@@ -139,34 +157,36 @@ impl OutputQueue {
     }
 
     async fn enqueue(&self, item: QueueItem, limit: usize) -> Result<(), HarnessError> {
-        let mut item = Some(item);
+        let mut item = item;
         loop {
             let notified = self.space_available.notified();
-            let queued = {
-                let mut state = self
-                    .state
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner);
-                if state.shutdown {
+            match self.try_push(item, limit) {
+                Ok(()) => return Ok(()),
+                Err(QueuePushError::Closed) => {
                     return Err(HarnessError::EventSink(
                         "persistence worker is shutting down".into(),
                     ));
                 }
-                if state.items.len() < limit {
-                    state
-                        .items
-                        .push_back(item.take().expect("queue item is enqueued once"));
-                    true
-                } else {
-                    false
-                }
-            };
-            if queued {
-                self.item_available.notify_one();
-                return Ok(());
+                Err(QueuePushError::Full(pending)) => item = pending,
             }
             notified.await;
         }
+    }
+
+    fn try_push(&self, item: QueueItem, limit: usize) -> Result<(), QueuePushError> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.shutdown {
+            return Err(QueuePushError::Closed);
+        }
+        if state.items.len() >= limit {
+            return Err(QueuePushError::Full(item));
+        }
+        state.items.push_back(item);
+        self.item_available.notify_one();
+        Ok(())
     }
 
     async fn next(&self) -> Option<QueueItem> {
@@ -718,6 +738,10 @@ mod tests {
         for _ in 0..OUTPUT_QUEUE_CAPACITY {
             sink.enqueue(event.clone()).await.unwrap();
         }
+        assert!(
+            !sink.try_enqueue(event.clone()),
+            "stdout offers skip a full queue"
+        );
         let mut terminal = event.clone();
         terminal.event_id = "terminal-event".into();
         terminal.payload = HarnessEventPayloadV1::RunFinished(RunOutcome {

@@ -43,6 +43,20 @@ reaps it before the slot is released; it raises `cancelled` and does not undo
 side effects. Background processes a command leaves in its group are killed when
 it exits.
 
+Execute stdout is also streamed to the attempt's session log and run trace.
+Each newline ends a record, and a final unterminated line is sent at EOF.
+The log preview decodes UTF-8 lossily and keeps the first 8 KiB of an
+oversized line with a truncation marker. If the 256-record persistence queue
+is full, the preview skips new stdout records so the process can keep
+writing. The complete stdout and stderr remain available in the command result.
+
+Use `vtb::log::info("message")` to write a message to the same attempt without
+running a command. Each call creates a separate record, even for repeated
+text. It waits for Sacrum to accept the record or for the attempt to be
+cancelled, and accepts strings up to 8 KiB in UTF-8. Session logs are visible
+to project members who have access
+to the run, so keep secrets out of messages and command stdout.
+
 Sacrum owns retries; the worker does not select transitions or start new attempts.
 
 ## Related

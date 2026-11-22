@@ -758,9 +758,17 @@ function appendStepResult(
     if (prose.trim() === body) return true;
     return bodyCanon !== null && canonicalJson(prose) === bodyCanon;
   };
-  const deduped = turns
-    .map((t) => ({ ...t, messages: t.messages.filter((m) => !isDuplicate(m)) }))
-    .filter((t) => t.messages.length > 0);
+  // Execute text contains independent log records, including text equal to
+  // the returned result.
+  const deduped =
+    exec.step_type === "execute"
+      ? turns
+      : turns
+          .map((t) => ({
+            ...t,
+            messages: t.messages.filter((m) => !isDuplicate(m)),
+          }))
+          .filter((t) => t.messages.length > 0);
 
   const results: ResultMessage[] = [
     {
@@ -888,6 +896,11 @@ function eventsToTurns(
     ...groupBySpawn(events, resultById, speaker, model, runStartMs)
   );
 
+  if (exec.step_type === "execute") {
+    for (const message of messages) {
+      if (message.type === "agent") message.proseFormat = "plain";
+    }
+  }
   return [{ id: `${exec.id ?? "exec"}-t0`, messages }];
 }
 

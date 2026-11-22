@@ -19,6 +19,7 @@ import {
   resetProjectScopedStores,
 } from "../stores/projectScopedStores";
 import { useSessionLogStore } from "../stores/sessionLogStore";
+import { parseSessionLogs } from "../types/conversation";
 import { useRunTrace } from "./useRunTrace";
 import { useSessionLogChangeListener } from "./useSessionLogChangeListener";
 
@@ -373,6 +374,66 @@ describe("useRunTrace", () => {
       })
     );
     expect(result.current.logsByExecutionId["exec-1"]).toEqual([newer, extra]);
+  });
+
+  it("keeps equal execute messages distinct across live delivery and hydration", async () => {
+    const record = (sequence: number) =>
+      sessionLog({
+        id: `log-${sequence}`,
+        logical_key: `harness:event-${sequence}`,
+        format: "harness",
+        content: JSON.stringify({
+          version: 1,
+          event_id: `event-${sequence}`,
+          sequence,
+          stream_id: "exec-1",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          correlation: { item_id: `event-${sequence}` },
+          semantics: "snapshot",
+          type: "text",
+          data: { text: "same Rhai message" },
+        }),
+      });
+    const first = record(1);
+    const second = record(2);
+    let resolveTrace!: (value: unknown) => void;
+    mockGetTaskRunTrace.mockReturnValue(
+      new Promise((resolve) => {
+        resolveTrace = resolve;
+      })
+    );
+    const { result } = renderHook(() => useRunTrace("task-1", "run-1"), {
+      wrapper,
+    });
+    await waitFor(() => expect(mockGetTaskRunTrace).toHaveBeenCalled());
+
+    act(() => {
+      const store = useSessionLogStore.getState();
+      store.upsertLog("exec-1", first);
+      store.upsertLog("exec-1", second);
+      store.flushPending();
+      resolveTrace({
+        status: "ok",
+        data: {
+          root_task_run_id: "run-1",
+          task_runs: [],
+          step_executions: [execution({ step_type: "execute" })],
+          session_logs: [{ ...first }],
+        } satisfies TaskRunTrace,
+      });
+    });
+
+    await waitFor(() => {
+      const logs = result.current.logsByExecutionId["exec-1"];
+      expect(logs?.map((log) => log.logical_key)).toEqual([
+        first.logical_key,
+        second.logical_key,
+      ]);
+      expect(parseSessionLogs(logs)).toMatchObject([
+        { kind: "assistant_message", text: "same Rhai message" },
+        { kind: "assistant_message", text: "same Rhai message" },
+      ]);
+    });
   });
 
   it("preserves newer live session logs when a trace fetch resolves late", async () => {
