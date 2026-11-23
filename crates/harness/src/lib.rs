@@ -329,9 +329,66 @@ pub fn read_only_tool_permitted(tool_name: &str) -> bool {
     vertebrae_harness_claude::is_claude_read_only_tool(tool_name)
 }
 
+pub use vertebrae_harness_acp::{AcpRuntime, Discovery as AcpDiscovery};
+
 impl HarnessRuntimeFactory {
     pub fn new(config: HarnessFactoryConfig) -> Self {
         Self { config }
+    }
+
+    /// Construct a desktop ACP runtime without adding a workflow harness selector.
+    pub fn create_acp_chat(
+        &self,
+        executable: &Path,
+        args: Vec<String>,
+    ) -> Result<Arc<vertebrae_harness_acp::AcpRuntime>, HarnessError> {
+        if args.iter().any(|arg| arg.contains('\0')) {
+            return Err(HarnessError::InvalidRequest(
+                "ACP arguments cannot contain a NUL character.".into(),
+            ));
+        }
+        let is_executable = |path: &Path| {
+            if !path.is_file() {
+                return false;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                path.metadata()
+                    .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0)
+            }
+            #[cfg(not(unix))]
+            true
+        };
+        let found = if executable.is_absolute() {
+            is_executable(executable).then(|| executable.to_path_buf())
+        } else if executable.components().count() == 1
+            && executable.file_name().is_some()
+            && executable.as_os_str() == executable.file_name().unwrap_or_default()
+        {
+            let path = self
+                .config
+                .search_path
+                .clone()
+                .or_else(|| env::var_os("PATH"))
+                .unwrap_or_default();
+            env::split_paths(&path)
+                .filter(|directory| directory.is_absolute())
+                .map(|directory| directory.join(executable))
+                .find(|candidate| is_executable(candidate))
+        } else {
+            return Err(HarnessError::InvalidRequest(
+                "Enter an absolute ACP executable path or a command on PATH.".into(),
+            ));
+        };
+        let executable = found.ok_or_else(|| HarnessError::Unavailable(
+            "ACP executable was not found. Check the executable in Settings → Providers & Models → ACP agent.".into(),
+        ))?;
+        Ok(Arc::new(vertebrae_harness_acp::AcpRuntime::new(
+            executable,
+            args,
+            self.config.environment.clone(),
+        )))
     }
 
     pub fn resolve_provider(
@@ -1073,6 +1130,37 @@ mod tests {
 
     fn executable() -> PathBuf {
         std::env::current_exe().expect("the test executable should exist")
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn acp_chat_validates_executable_and_literal_arguments() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("test-agent");
+        std::fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+        let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
+            search_path: Some(directory.path().as_os_str().to_owned()),
+            ..Default::default()
+        });
+        assert!(matches!(
+            factory.create_acp_chat(Path::new("test-agent"), vec![]),
+            Err(HarnessError::Unavailable(_))
+        ));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            factory
+                .create_acp_chat(Path::new("test-agent"), vec!["two words".into()])
+                .is_ok()
+        );
+        assert!(matches!(
+            factory.create_acp_chat(Path::new("./test-agent"), vec![]),
+            Err(HarnessError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            factory.create_acp_chat(&path, vec!["bad\0argument".into()]),
+            Err(HarnessError::InvalidRequest(_))
+        ));
     }
 
     #[test]

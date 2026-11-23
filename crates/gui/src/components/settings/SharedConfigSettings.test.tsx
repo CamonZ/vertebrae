@@ -146,6 +146,88 @@ describe("shared configuration forms", () => {
     }
   );
 
+  it("saves the ACP executable and preserves each literal argument", async () => {
+    const user = userEvent.setup();
+    const connection = {
+      name: "Review agent",
+      executable: "/Applications/Agent Tools/agy",
+      args: ["acp", "--name=two words", "$HOME; literal"],
+    };
+    vi.mocked(commands.saveSharedSettings).mockImplementation(async (_, edit) => {
+      if (edit.section !== "acp_agent") throw new Error("Expected an ACP connection");
+      return { status: "ok", data: {
+        ...settings, local_chat_acp_agents: [edit.settings], revision: "revision-2",
+      } };
+    });
+
+    mount("providers");
+    await user.click(await screen.findByRole("button", { name: "Add ACP connection" }));
+    await user.type(screen.getByLabelText("Connection name"), connection.name);
+    await user.type(
+      screen.getByLabelText("Agent executable"),
+      connection.executable
+    );
+    for (const [index, arg] of ["unused", ...connection.args].entries()) {
+      await user.click(screen.getByRole("button", { name: "Add argument" }));
+      await user.type(screen.getByLabelText(`Argument ${index + 1}`), arg);
+    }
+    const firstArgument = screen.getByLabelText("Argument 1");
+    const secondArgument = screen.getByLabelText("Argument 2");
+    await user.click(screen.getByRole("button", { name: "Remove argument 1" }));
+    expect(firstArgument).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Argument 1")).toBe(secondArgument);
+
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(commands.saveSharedSettings).toHaveBeenCalledWith("revision-1", {
+        section: "acp_agent",
+        settings: { id: expect.any(String), ...connection },
+      });
+      expect(useProviderSettingsStore.getState().revision).toBe(1);
+    });
+    expect(screen.getByLabelText("Argument 2")).toHaveValue("--name=two words");
+    await user.click(screen.getByRole("button", { name: "Remove argument 1" }));
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    expect(screen.getByLabelText("Argument 1")).toHaveValue("acp");
+    expect(screen.getByLabelText("Argument 3")).toHaveValue("$HOME; literal");
+  });
+
+  it("validates, preserves rejected drafts, and explicitly clears the ACP agent", async () => {
+    const user = userEvent.setup();
+    const first = { id: "first", name: "First agent", executable: "/agent/agy", args: ["acp"] };
+    const second = { id: "second", name: "Second agent", executable: "/agent/vibe", args: [] };
+    vi.mocked(commands.getSharedSettings).mockResolvedValue({
+      status: "ok",
+      data: { ...settings, local_chat_acp_agents: [first, second] },
+    });
+    vi.mocked(commands.saveSharedSettings).mockResolvedValueOnce({
+      status: "error",
+      error: { message: "Settings changed on disk." },
+    });
+    mount("providers");
+    await user.click(await screen.findByRole("button", { name: "First agent" }));
+    const executable = screen.getByLabelText("Agent executable");
+    await user.clear(executable);
+    expect(executable).toHaveAttribute("aria-invalid", "true");
+    await user.type(executable, "./relative");
+    expect(executable).toHaveAccessibleDescription(/absolute executable path/);
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    await user.clear(executable);
+    await user.type(executable, "/new/agy");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Settings changed on disk.");
+    expect(executable).toHaveValue("/new/agy");
+    expect(screen.getByLabelText("Argument 1")).toHaveValue("acp");
+    await user.click(screen.getByRole("button", { name: "Remove connection" }));
+    expect(screen.getByText(/Save changes to remove First agent/)).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(commands.saveSharedSettings).toHaveBeenLastCalledWith("revision-1", {
+      section: "remove_acp_agent",
+      id: "first",
+    }));
+  });
+
   it("saves a revisioned connection patch while keeping stored credentials", async () => {
     const user = userEvent.setup();
     mount("connection");

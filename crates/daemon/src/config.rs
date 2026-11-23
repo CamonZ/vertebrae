@@ -590,6 +590,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         }
     }

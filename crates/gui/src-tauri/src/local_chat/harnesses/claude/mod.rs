@@ -281,6 +281,7 @@ mod tests {
             speed_tier: None,
             permission_mode: Some(PermissionMode::Plan),
             personality: Some("Explanatory".to_string()),
+            provider_id: None,
             provider: None,
             gate: None,
         };

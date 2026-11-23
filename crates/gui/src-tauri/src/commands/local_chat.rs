@@ -1,3 +1,6 @@
+mod queue;
+pub use queue::*;
+
 use super::*;
 use crate::local_chat::{
     LocalChatAnnotation, LocalChatAnnotationStore, LocalChatHarnessKind, LocalChatTurnSettings,
@@ -197,6 +200,9 @@ pub struct LocalChatSessionIndexEntry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[specta(optional)]
     pub steering_turn_ids: Option<std::collections::BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub queued_messages: Option<Vec<String>>,
     /// Provider lineage used to group history without opening conversations.
     #[serde(default)]
     #[specta(optional)]
@@ -1032,6 +1038,7 @@ pub async fn discover_local_chat_child_sessions(
     let harness = match input.harness {
         LocalChatHarnessKind::Claude => StepHarness::Claude,
         LocalChatHarnessKind::Codex => StepHarness::Codex,
+        LocalChatHarnessKind::Acp => return Ok(Vec::new()),
     };
     let request = TranscriptReplayRequest {
         provider_resume_id: ProviderResumeId::new(resume_id),
@@ -1086,6 +1093,14 @@ pub async fn load_local_chat_session_replay(
     let harness = match input.harness {
         LocalChatHarnessKind::Claude => StepHarness::Claude,
         LocalChatHarnessKind::Codex => StepHarness::Codex,
+        LocalChatHarnessKind::Acp => {
+            return Ok(LoadLocalChatSessionReplayOutput {
+                events: Vec::new(),
+                cache_key: None,
+                next_cursor: None,
+                has_more: false,
+            })
+        }
     };
     let claude_local_chat = input.harness == LocalChatHarnessKind::Claude;
     let session_id = input.session_id.clone();

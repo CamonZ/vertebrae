@@ -17,6 +17,7 @@ use crate::types::PermissionMode;
 pub enum LocalChatHarnessKind {
     Claude,
     Codex,
+    Acp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -100,6 +101,12 @@ pub struct LocalChatProviderInfo {
     /// `None` means "use the harness's model catalog".
     pub models: Option<Vec<LocalChatModelOption>>,
     pub default_model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub discovered: Option<LocalChatHarnessInfo>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub supports_steering: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, PartialEq, Eq)]
@@ -232,6 +239,7 @@ pub(crate) struct HarnessCreateSessionInput {
     pub(crate) permission_mode: Option<PermissionMode>,
     pub(crate) personality: Option<String>,
     pub(crate) provider: Option<LocalChatProviderSelection>,
+    pub(crate) provider_id: Option<String>,
     pub(crate) gate: Option<LocalChatGateBinding>,
 }
 
@@ -252,6 +260,7 @@ impl CreateLocalChatSessionInput {
             permission_mode: self.permission_mode,
             personality: self.personality,
             provider,
+            provider_id: self.provider_id,
             gate: self.gate,
         }
     }
@@ -365,6 +374,12 @@ pub(crate) trait LocalChatHarness: Send + Sync {
     fn kind(&self) -> LocalChatHarnessKind;
 
     async fn info(&self) -> LocalChatHarnessInfo;
+
+    async fn catalog_entries(
+        &self,
+    ) -> Result<(LocalChatHarnessInfo, Vec<LocalChatProviderInfo>), LocalChatSessionError> {
+        Ok((self.info().await, Vec::new()))
+    }
 
     async fn create_session(
         &self,

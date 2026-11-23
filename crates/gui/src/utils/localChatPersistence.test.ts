@@ -55,6 +55,59 @@ describe("localChatPersistence", () => {
     vi.restoreAllMocks();
   });
 
+  it("persists and restores a paused ACP queue when the chat catalog is locked", async () => {
+    vi.resetModules();
+    const { commands: freshCommands } = await import("../bindings");
+    vi.spyOn(freshCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "error",
+      error: { message: "Catalog locked" },
+    });
+    vi.spyOn(freshCommands, "loadLocalChatQueues").mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    const saveQueue = vi
+      .spyOn(freshCommands, "saveLocalChatQueue")
+      .mockResolvedValue({
+        status: "ok",
+        data: null,
+      });
+    const persistence = await import("./localChatPersistence");
+    await persistence.persistLocalChatSession(
+      makeSession({
+        harness: "acp",
+        queuedMessages: ["first", "second"],
+        lifecycle: "streaming",
+      })
+    );
+    const saved = saveQueue.mock.calls[0][1];
+    expect(saved).toMatchObject({
+      harness: "acp",
+      queuedMessages: ["first", "second"],
+    });
+    await persistence.persistLocalChatSession(makeSession({ harness: "acp" }));
+    expect(saveQueue).toHaveBeenLastCalledWith("s-1", null);
+
+    if (!saved) throw new Error("Missing saved queue");
+    vi.resetModules();
+    const { commands: restartedCommands } = await import("../bindings");
+    vi.spyOn(restartedCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "error",
+      error: { message: "Catalog locked" },
+    });
+    vi.spyOn(restartedCommands, "loadLocalChatQueues").mockResolvedValue({
+      status: "ok",
+      data: [saved],
+    });
+    const restarted = await import("./localChatPersistence");
+    const recovered = await restarted.hydrateLocalChatSessionIndex();
+    expect(normalizeLocalChatSession(recovered.sessions["s-1"])).toMatchObject({
+      lifecycle: "idle",
+      queuedMessages: ["first", "second"],
+      queuePaused: true,
+    });
+  });
+
   it("retains activity without replaying a busy runtime from persisted metadata", async () => {
     await persistLocalChatSession(makeSession({ lifecycle: "streaming" }));
     const persisted = loadPersistedLocalChatSession("s-1");

@@ -33,7 +33,7 @@ import {
   currentBackendSessionId,
   doCloseSession,
 } from "../../hooks/useLocalChat";
-import { deliverLocalChatTurn } from "../../hooks/useLocalChatEventRouter";
+import { deliverLocalChatTurn } from "../../hooks/localChatTurnDelivery";
 import {
   SelectionDiscussions,
   anchorNotice,

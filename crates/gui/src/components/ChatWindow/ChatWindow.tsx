@@ -67,6 +67,7 @@ import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
 import { useChatWindowPalette } from "./chatPaletteCommands";
+import { ChatQueue } from "./ChatQueue";
 import { BackgroundActivityPanel } from "./BackgroundActivityPanel";
 import {
   activeBackgroundWorkCount,
@@ -702,7 +703,11 @@ export function ChatWindow({
         onClearMessages={() => void chat.handleClearMessages()}
         onStopGeneration={() => void chat.handleStopGeneration()}
         onTitleSave={chat.handleTitleSave}
-        onTitleRegenerate={() => void chat.handleRegenerateTitle()}
+        onTitleRegenerate={
+          chat.canRegenerateTitle
+            ? () => void chat.handleRegenerateTitle()
+            : undefined
+        }
         isTitleRegenerating={chat.isTitleRegenerating}
         titleError={chat.titleError}
         projectLabel={
@@ -905,6 +910,7 @@ export function ChatWindow({
             id={`${sessionId}-composer`}
             onRender={() => renderObserver?.("composer")}
           >
+            <ChatQueue session={chat.session} busy={chat.isBusy} />
             <ChatComposer
               session={chat.session}
               inputValue={chat.inputValue}

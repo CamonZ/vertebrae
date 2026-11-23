@@ -99,7 +99,7 @@ fn key(project: &str, chat: &str) -> String {
 
 /// The GUI serializes catalog writers with SERIAL and index writers with INDEX_SERIAL.
 /// The application data directory is trusted and owned by this user.
-fn durable_write(path: &Path, bytes: &[u8]) -> Result<(), CommandError> {
+pub(super) fn durable_write(path: &Path, bytes: &[u8]) -> Result<(), CommandError> {
     use std::io::Write;
 
     let root = path.parent().ok_or_else(error)?;

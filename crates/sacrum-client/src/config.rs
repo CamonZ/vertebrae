@@ -56,9 +56,44 @@ pub struct VertebraeConfigFile {
     pub providers: BTreeMap<ProviderId, ProviderProfile>,
     #[serde(default, skip_serializing_if = "ObservabilityConfig::is_default")]
     pub observability: ObservabilityConfig,
+    /// Named ACP connections for desktop chat.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub local_chat_acp_agents: BTreeMap<String, LocalChatAcpSection>,
     /// Daemon-wide execution settings shared by every project.
     #[serde(default, skip_serializing_if = "DaemonSection::is_default")]
     pub daemon: DaemonSection,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct LocalChatAcpSection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub executable: PathBuf,
+    #[serde(default)]
+    pub args: Vec<String>,
+}
+
+impl VertebraeConfigFile {
+    pub fn acp_agents(&self) -> impl Iterator<Item = (&str, &LocalChatAcpSection)> {
+        self.local_chat_acp_agents
+            .iter()
+            .map(|(id, config)| (id.as_str(), config))
+    }
+}
+
+impl LocalChatAcpSection {
+    pub fn display_name<'a>(&'a self, id: &'a str) -> &'a str {
+        self.name.as_deref().unwrap_or(id)
+    }
+}
+
+impl std::fmt::Debug for LocalChatAcpSection {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalChatAcpSection")
+            .field("executable", &self.executable)
+            .finish_non_exhaustive()
+    }
 }
 
 /// `[daemon]` settings read by vtb-daemon at startup.
@@ -840,6 +875,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -873,6 +909,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -904,6 +941,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -1056,6 +1094,7 @@ models = ["kimi-k2"]
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -1159,6 +1198,7 @@ path = "/Users/test/other"
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         }
     }
@@ -1252,6 +1292,7 @@ path = "/Users/test/other"
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -1282,6 +1323,7 @@ path = "/Users/test/other"
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -1576,6 +1618,7 @@ path = "/Users/test/other"
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -1610,6 +1653,7 @@ path = "/Users/test/other"
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         }
     }
@@ -1677,6 +1721,7 @@ path = "/Users/test/other"
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config);

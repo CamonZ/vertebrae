@@ -55,9 +55,18 @@ pub struct UserQuestion {
     pub free_form: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionPresentation {
+    Approval,
+    FixedChoice,
+}
+
 /// Optional provider-supplied presentation data used by interactive surfaces.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ControlPresentation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub question_presentation: Option<QuestionPresentation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

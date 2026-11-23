@@ -22,7 +22,7 @@ export function ProviderForm({
 }: {
   draft: Extract<SettingsEdit, { section: "provider" }>;
   stored?: ProviderSettings;
-  change: (v: SettingsEdit) => void;
+  change: (v: Extract<SettingsEdit, { section: "provider" }>) => void;
 }) {
   const environment = new Map<string, EnvironmentEdit>(
     stored?.environment_names.map((name) => [name, { name, secret: keep }]) ??

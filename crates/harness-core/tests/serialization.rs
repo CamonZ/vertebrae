@@ -81,6 +81,7 @@ fn control_request() -> ControlRequestEnvelope {
             }],
         },
         presentation: Some(ControlPresentation {
+            question_presentation: None,
             tool_name: Some("AskUserQuestion".into()),
             tool_call_id: Some(ToolCallId::from("tool-question")),
             input: Some(json!({"questions": []})),

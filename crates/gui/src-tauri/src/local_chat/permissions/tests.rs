@@ -97,6 +97,7 @@ fn harness_question_control_preserves_ui_shape_and_returns_exact_answer() {
             }],
         },
         presentation: Some(vertebrae_harness_core::ControlPresentation {
+            question_presentation: None,
             tool_name: Some("AskUserQuestion".into()),
             tool_call_id: Some(vertebrae_harness_core::ToolCallId::new("tool-question")),
             input: Some(serde_json::json!({
@@ -152,6 +153,48 @@ fn harness_question_control_preserves_ui_shape_and_returns_exact_answer() {
         if answers.len() == 1
             && answers[0].question_id == "environment"
             && answers[0].free_form.as_deref() == Some("Staging"))
+    );
+}
+
+#[test]
+fn fixed_approval_choices_reject_unknown_labels_and_return_the_option_id() {
+    let mut request = harness_approval_request("fixed-approval");
+    request.request = ControlRequest::UserQuestion {
+        questions: vec![vertebrae_harness_core::UserQuestion {
+            id: "permission".into(),
+            prompt: "Read file?".into(),
+            header: None,
+            options: vec![vertebrae_harness_core::QuestionOption {
+                id: "allow-once-v2".into(),
+                label: "Allow once".into(),
+                description: None,
+            }],
+            multiple: false,
+            free_form: false,
+        }],
+    };
+    request.presentation = Some(vertebrae_harness_core::ControlPresentation {
+        question_presentation: Some(vertebrae_harness_core::QuestionPresentation::Approval),
+        ..Default::default()
+    });
+    assert_eq!(
+        harness_permission_event("chat", &request)
+            .unwrap()
+            .question_presentation,
+        Some(crate::events::QuestionPresentation::Approval)
+    );
+    let decision = |answer: &str| LocalPermissionDecision {
+        behavior: "allow".into(),
+        updated_input: Some(serde_json::json!({"answers": {"Read file?": answer}})),
+        message: None,
+    };
+    assert!(validate_harness_question_decision(&request, &decision("other")).is_err());
+    let selection = decision("Allow once");
+    validate_harness_question_decision(&request, &selection).unwrap();
+    let result = local_decision_to_control_resolution(&request, selection).unwrap();
+    assert!(
+        matches!(result.decision, Some(ControlDecision::QuestionsAnswered(answers))
+        if answers[0].selected_option_ids == ["allow-once-v2"] && answers[0].free_form.is_none())
     );
 }
 

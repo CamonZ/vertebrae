@@ -207,6 +207,7 @@ export type ChatMessage =
       toolUseId: string;
       questions: UserQuestion[];
       originalQuestions: JsonValue;
+      presentation?: import("../bindings").QuestionPresentation;
       inputError?: string;
       status: "pending" | "resolved" | "unavailable";
       timestamp: string;
@@ -549,6 +550,9 @@ export interface ChatSession {
   toolAnnotationsLoad?: number;
   /** Runtime-only user messages queued while a local turn is still active */
   queuedMessages?: string[];
+  /** Invalidates acknowledgements for discarded queue heads. */
+  queueRevision?: number;
+  queuePaused?: boolean;
   /** Durable local metadata for session-history ordering */
   createdAt?: string;
   /** Durable local metadata for session-history ordering */
@@ -839,6 +843,7 @@ interface ChatStoreActions {
   shiftQueuedMessage: (sessionId: string) => string | null;
   /** Clear queued user messages for a local session */
   clearQueuedMessages: (sessionId: string) => void;
+  setQueuePaused: (sessionId: string, paused: boolean) => void;
   /** Apply live background work; finished work is added to the timeline */
   applyBackgroundWork: (
     sessionId: string,
@@ -4070,17 +4075,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     enqueueQueuedMessage: (sessionId, content) => {
+      const persist = get().sessions[sessionId]?.harness === "acp";
       updateSession(
         sessionId,
         (session) => ({
           ...session,
           queuedMessages: [...(session.queuedMessages ?? []), content],
         }),
-        { persist: false }
+        { persist }
       );
     },
 
     shiftQueuedMessage: (sessionId) => {
+      const persist = get().sessions[sessionId]?.harness === "acp";
       let content: string | null = null;
       updateSession(
         sessionId,
@@ -4091,20 +4098,33 @@ export const useChatStore = create<ChatStore>((set, get) => {
           return {
             ...session,
             queuedMessages: remaining.length > 0 ? remaining : undefined,
+            queuePaused: remaining.length > 0 && session.queuePaused,
           };
         },
-        { persist: false }
+        { persist }
       );
       return content;
     },
 
     clearQueuedMessages: (sessionId) => {
+      const persist = get().sessions[sessionId]?.harness === "acp";
       updateSession(
         sessionId,
         (session) =>
           session.queuedMessages?.length
-            ? { ...session, queuedMessages: undefined }
+            ? { ...session, queuedMessages: undefined, queuePaused: false, queueRevision: (session.queueRevision ?? 0) + 1 }
             : session,
+        { persist }
+      );
+    },
+
+    setQueuePaused: (sessionId, paused) => {
+      updateSession(
+        sessionId,
+        (session) => {
+          const queuePaused = paused && !!session.queuedMessages?.length;
+          return !!session.queuePaused === queuePaused ? session : { ...session, queuePaused };
+        },
         { persist: false }
       );
     },
@@ -4416,6 +4436,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         activeTurn: null,
         streamingAssistant: null,
         queuedMessages: undefined,
+        queuePaused: false,
+        queueRevision: (session.queueRevision ?? 0) + 1,
       };
       if (isDisposableClosedLocalChatSession(closedSession)) {
         persistLocalChatSession(closedSession);
@@ -4467,6 +4489,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           liveAssistantMessages: undefined,
           providerReplay: undefined,
           queuedMessages: undefined,
+          queuePaused: false,
+          queueRevision: (session.queueRevision ?? 0) + 1,
           updatedAt: timestamp,
           messageCount: 0,
         }),

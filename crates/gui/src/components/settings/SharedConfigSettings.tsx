@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useBlocker } from "react-router-dom";
 import {
   commands,
-  type SettingsEdit,
   type SharedSettings,
 } from "../../bindings";
 import { Button } from "../atoms/Button";
@@ -13,13 +12,17 @@ import { Modal } from "../molecules/Modal";
 import { TextField, Choice, SecretField, Notice } from "./SettingsFields";
 import { Toggle } from "../Toggle";
 import {
+  acpAgentDraft,
   draftFor,
+  settingsEdit,
+  type SettingsDraft,
   providerDraft,
   validateSettingsDraft,
   type ConfigSection,
 } from "./settingsDraft";
 import { SettingsValidationContext } from "./settingsValidation";
 import { DecisionModelForm } from "./DecisionModelForm";
+import { AcpAgentForm } from "./AcpAgentForm";
 import { ProviderForm } from "./ProviderForm";
 export type { ConfigSection } from "./settingsDraft";
 
@@ -34,18 +37,19 @@ export function SharedConfigSettings({
 }) {
   const request = useRef(0);
   const [settings, setSettings] = useState<SharedSettings | null>(null);
-  const [draft, setDraft] = useState<SettingsEdit | null>(null);
-  const [baseline, setBaseline] = useState("");
+  const [draft, setDraft] = useState<SettingsDraft | null>(null);
+  const [baseline, setBaseline] = useState<SettingsDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [pending, setPending] = useState<SettingsEdit | "reload" | null>(null);
-  const dirty = draft !== null && JSON.stringify(draft) !== baseline;
+  const [pending, setPending] = useState<SettingsDraft | "reload" | null>(null);
+  const dirty = draft !== null && baseline !== null &&
+    JSON.stringify(settingsEdit(draft)) !== JSON.stringify(settingsEdit(baseline));
   const blocker = useBlocker(dirty || busy);
-  const install = useCallback((data: SharedSettings, next: SettingsEdit) => {
+  const install = useCallback((data: SharedSettings, next: SettingsDraft) => {
     setSettings(data);
     setDraft(next);
-    setBaseline(JSON.stringify(next));
+    setBaseline(next);
     setError(null);
   }, []);
   const load = useCallback(async () => {
@@ -89,17 +93,17 @@ export function SharedConfigSettings({
     window.addEventListener("beforeunload", prevent);
     return () => window.removeEventListener("beforeunload", prevent);
   }, [dirty, busy]);
-  const select = (next: SettingsEdit) => {
+  const select = (next: SettingsDraft) => {
     if (dirty) {
       setPending(next);
       return;
     }
     setDraft(next);
-    setBaseline(JSON.stringify(next));
+    setBaseline(next);
     setSaved(false);
     setError(null);
   };
-  const change = (next: SettingsEdit) => {
+  const change = (next: SettingsDraft) => {
     setDraft(next);
     setSaved(false);
   };
@@ -116,7 +120,7 @@ export function SharedConfigSettings({
         ? !draft.endpoint.trim()
         : false;
   const validation = draft
-    ? (validateSettingsDraft(draft) ??
+    ? (validateSettingsDraft(settingsEdit(draft)) ??
       (hiddenEndpoint && endpointMissing
         ? {
             field:
@@ -128,6 +132,7 @@ export function SharedConfigSettings({
           }
         : null))
     : null;
+  const focusUndoRemoval = useCallback((button: HTMLButtonElement | null) => button?.focus(), []);
   async function save() {
     if (!settings || !draft || busy || validation) return;
     setBusy(true);
@@ -135,7 +140,7 @@ export function SharedConfigSettings({
     try {
       const result = await commands.saveSharedSettings(
         settings.revision,
-        draft
+        settingsEdit(draft)
       );
       if (result.status === "error") setError(result.error.message);
       else {
@@ -144,10 +149,16 @@ export function SharedConfigSettings({
             ? providerDraft(
                 result.data.providers.find((p) => p.id === draft.id)
               )
-            : draftFor(section, result.data);
+            : draft.section === "acp_agent"
+              ? acpAgentDraft(result.data.local_chat_acp_agents?.find((agent) => agent.id === draft.settings.id))
+              : draftFor(section, result.data);
         install(result.data, next);
         setSaved(true);
-        if (draft.section === "provider" || draft.section === "typesafe") {
+        if (
+          draft.section === "provider" ||
+          draft.section === "typesafe" ||
+          draft.section === "acp_agent"
+        ) {
           useProviderSettingsStore.getState().changed();
         }
       }
@@ -213,7 +224,7 @@ export function SharedConfigSettings({
                     runtime. Chat defaults remain in Chat settings.
                   </Notice>
                   <div className="flex flex-wrap gap-2">
-                    <Button onClick={() => select(draftFor(section, settings))}>
+                    <Button aria-pressed={draft.section === "typesafe"} onClick={() => select(draftFor(section, settings))}>
                       TypeSafe
                     </Button>
                     {settings.providers.map((p) => (
@@ -231,11 +242,43 @@ export function SharedConfigSettings({
                       Add provider
                     </Button>
                   </div>
+                  <div role="group" aria-label="ACP connections" className="flex flex-wrap gap-2">
+                    {(settings.local_chat_acp_agents ?? []).map((agent) => (
+                      <Button
+                        key={agent.id}
+                        aria-pressed={draft.section === "acp_agent" && draft.settings.id === agent.id}
+                        onClick={() => select(acpAgentDraft(agent))}
+                      >
+                        {agent.name}
+                      </Button>
+                    ))}
+                    <Button aria-pressed={draft.section === "acp_agent" && !settings.local_chat_acp_agents?.some((agent) => agent.id === draft.settings.id)} onClick={() => select(acpAgentDraft())}>
+                      Add ACP connection
+                    </Button>
+                  </div>
                   <Notice>
                     Saved provider changes apply to new sessions and requests.
                     Existing sessions keep their configuration.
                   </Notice>
                 </>
+              )}
+              {draft.section === "acp_agent" && (
+                draft.remove ? (
+                  <div className="space-y-3">
+                    <Notice>Save changes to remove {draft.settings.name}.</Notice>
+                    <Button ref={focusUndoRemoval} onClick={() => change({ ...draft, remove: false })}>
+                      Undo removal
+                    </Button>
+                  </div>
+                ) : (
+                  <AcpAgentForm
+                    settings={draft.settings}
+                    onChange={(settings) => change({ ...draft, settings })}
+                    onRemove={settings.local_chat_acp_agents?.some((agent) => agent.id === draft.settings.id)
+                      ? () => change({ ...draft, remove: true })
+                      : undefined}
+                  />
+                )
               )}
               {draft.section === "decision_model" && (
                 <DecisionModelForm
@@ -443,7 +486,7 @@ export function SharedConfigSettings({
             <Button
               disabled={!dirty || busy}
               onClick={() => {
-                setDraft(JSON.parse(baseline) as SettingsEdit);
+                setDraft(baseline);
                 setError(null);
                 setSaved(false);
               }}
@@ -454,7 +497,8 @@ export function SharedConfigSettings({
               {saved
                 ? draft.section === "provider" ||
                   draft.section === "typesafe" ||
-                  draft.section === "decision_model"
+                  draft.section === "decision_model" ||
+                  draft.section === "acp_agent"
                   ? "Settings saved. Applies to new sessions and requests."
                   : "Settings saved. Restart the GUI to apply these settings."
                 : dirty
@@ -478,7 +522,7 @@ export function SharedConfigSettings({
               if (pending === "reload") void load();
               else if (pending) {
                 setDraft(pending);
-                setBaseline(JSON.stringify(pending));
+                setBaseline(pending);
                 setError(null);
                 setSaved(false);
               }

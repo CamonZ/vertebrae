@@ -2055,6 +2055,7 @@ impl SacrumSocket {
             .unwrap_or(serde_json::Value::Null);
 
         let event = PermissionRequestEvent {
+            question_presentation: None,
             request_id,
             session_id,
             turn_id: None,

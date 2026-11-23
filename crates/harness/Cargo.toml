@@ -15,6 +15,7 @@ vertebrae-harness-codex = { path = "../harness-codex" }
 vertebrae-harness-core = { path = "../harness-core" }
 vertebrae-harness-typesafe = { path = "../harness-typesafe" }
 vertebrae-harness-mistral-vibe = { path = "../harness-mistral-vibe" }
+vertebrae-harness-acp = { path = "../harness-acp" }
 
 [dev-dependencies]
 hegeltest = "0.50.3"

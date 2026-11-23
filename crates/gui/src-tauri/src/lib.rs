@@ -181,6 +181,8 @@ fn create_builder() -> Builder {
             commands::chat_catalog::load_cached_local_chat_project_exclusions,
             commands::chat_catalog::deliver_local_chat_catalog_outbox,
             commands::save_local_chat_session_index,
+            commands::save_local_chat_queue,
+            commands::load_local_chat_queues,
             commands::chat_catalog::check_review_anchor_worktree,
             commands::chat_catalog::capture_review_anchor,
             commands::chat_catalog::map_review_threads,

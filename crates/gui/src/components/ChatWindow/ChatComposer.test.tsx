@@ -405,6 +405,24 @@ describe("ChatComposer", () => {
     ]);
   });
 
+  it("offers a provider choice without model or permission overrides for ACP", async () => {
+    render(<ChatComposer {...defaultProps({
+      session: createSession({ harness: "acp" }),
+      visibleHarness: {
+        ...CLAUDE_INFO,
+        harness: "acp",
+        label: "ACP agent",
+        models: [],
+        default_model_id: null,
+        permission_modes: [],
+      },
+    })} />);
+
+    expect(screen.queryByTestId("local-chat-permission-mode-picker")).not.toBeInTheDocument();
+    expect(getComposerPicker("local-chat-provider-picker")).toBeVisible();
+    expect(screen.queryByTestId("local-chat-model-picker")).not.toBeInTheDocument();
+  });
+
   it("renders only Codex permission profiles for Codex sessions", () => {
     render(
       <ChatComposer
@@ -952,7 +970,7 @@ describe("ChatComposer", () => {
     expect(
       screen.getByTestId("local-chat-provider-unavailable")
     ).toHaveTextContent(
-      "Local chat unavailable because neither Claude nor Codex was found."
+      "No local chat provider is available. Check Settings → Providers & Models."
     );
     expect(screen.getByTestId("local-chat-composer")).toBeEnabled();
     expect(screen.getByTitle("Start session")).toBeDisabled();

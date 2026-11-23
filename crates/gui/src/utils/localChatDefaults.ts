@@ -17,6 +17,7 @@ export const BUILTIN_PROVIDER_BY_HARNESS: Record<LocalChatHarnessKind, string> =
   {
     claude: "anthropic",
     codex: "openai",
+    acp: "local:acp",
   };
 
 export interface LocalChatHarnessDefaults {
@@ -58,7 +59,7 @@ interface LocalChatDefaultsState {
   resetProvider: (providerId: string) => void;
 }
 
-const HARNESS_KINDS: LocalChatHarnessKind[] = ["claude", "codex"];
+const HARNESS_KINDS: LocalChatHarnessKind[] = ["claude", "codex", "acp"];
 const PERMISSION_MODES: PermissionMode[] = [
   "accept_edits",
   "auto",
@@ -306,7 +307,7 @@ export function providerHarnessInfo(
   catalog: Pick<LocalChatHarnessCatalog, "harnesses">,
   provider: LocalChatProviderInfo
 ): LocalChatHarnessInfo | null {
-  const info = catalog.harnesses.find(
+  const info = provider.discovered ?? catalog.harnesses.find(
     (candidate) => candidate.harness === provider.harness
   );
   if (!info) return null;

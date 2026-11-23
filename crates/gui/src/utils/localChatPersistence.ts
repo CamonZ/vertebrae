@@ -1,3 +1,4 @@
+import { writeLocalChatQueue } from "./localChatQueueStorage";
 import { invoke } from "@tauri-apps/api/core";
 import { isOpenLocalChatConversation, normalizeDiscussionBinding } from "./localChatDiscussion";
 import { localChatActivityStatus } from "./localChatActivity";
@@ -12,6 +13,7 @@ import type {
   LocalChatDiscussionBinding,
   LocalChatGateBinding,
   LocalChatHarnessKind,
+  LocalChatSessionIndexEntry as WireSessionIndexEntry,
   PermissionMode,
 } from "../bindings";
 import { commands } from "../bindings";
@@ -22,6 +24,7 @@ export const DEFAULT_LOCAL_CHAT_HARNESS: LocalChatHarnessKind = "claude";
 const VALID_LOCAL_CHAT_HARNESSES = new Set<LocalChatHarnessKind>([
   "claude",
   "codex",
+  "acp",
 ]);
 const VALID_PERMISSION_MODES = new Set<PermissionMode>([
   "accept_edits",
@@ -40,11 +43,14 @@ const VALID_TITLE_STATUSES = new Set<ChatTitleStatus>([
 ]);
 const FALLBACK_TIMESTAMP = "1970-01-01T00:00:00.000Z";
 
-type LocalChatSessionIndexEntry = LocalChatSessionSummary & {
+type LocalChatSessionIndexEntry = Omit<LocalChatSessionSummary, "model" | "threadTotalTokens"> & {
+  model?: string | null;
+  threadTotalTokens?: number | null;
   status: "open" | "closed";
   permissionMode?: PermissionMode | null;
   gate?: LocalChatGateBinding | null;
   discussionBinding?: LocalChatDiscussionBinding;
+  queuedMessages?: string[];
 };
 
 type LoadLocalChatSessionIndex = () => Promise<
@@ -269,6 +275,9 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
       ? Math.max(0, Math.floor(candidate.titleUserMessageCount))
       : 0;
 
+  const queuedMessages = Array.isArray(candidate.queuedMessages)
+    ? candidate.queuedMessages.filter((item) => typeof item === "string" && item.trim())
+    : undefined;
   const discussion = normalizeDiscussionBinding(candidate.discussionBinding);
 
   return {
@@ -287,6 +296,8 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     backendSessionId: null,
     providerResumeId,
     steeringTurnIds: candidate.steeringTurnIds ?? undefined,
+    queuedMessages,
+    queuePaused: !!queuedMessages?.length,
     parentChatId: typeof candidate.parentChatId === "string" ? candidate.parentChatId : null,
     providerParentResumeId:
       typeof candidate.providerParentResumeId === "string"
@@ -518,6 +529,8 @@ function serializeSession(
     updatedAt,
     messageCount,
     steeringTurnIds: session.steeringTurnIds,
+    queuedMessages: session.harness === "acp" ? session.queuedMessages : undefined,
+    queuePaused: session.harness === "acp" && !!session.queuedMessages?.length,
     association: session.association ?? null,
     gate: session.gate ?? null,
   };
@@ -531,7 +544,7 @@ function readSessions(): Record<string, ChatSession> {
   return sessionIndexCache;
 }
 
-function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
+function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry & WireSessionIndexEntry {
   const binding = session.discussion;
   return {
     activityStatus: session.activityStatus ?? localChatActivityStatus(session),
@@ -546,11 +559,11 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     titleUserMessageCount: session.titleUserMessageCount ?? 0,
     harness: session.harness ?? DEFAULT_LOCAL_CHAT_HARNESS,
     providerId: session.providerId ?? null,
-    model: session.model,
-    selectedModelId: session.selectedModelId,
-    selectedReasoningEffort: session.selectedReasoningEffort,
+    model: session.model ?? null,
+    selectedModelId: session.selectedModelId ?? null,
+    selectedReasoningEffort: session.selectedReasoningEffort ?? null,
     selectedSpeedTier: session.selectedSpeedTier,
-    selectedPersonality: session.selectedPersonality,
+    selectedPersonality: session.selectedPersonality ?? null,
     permissionMode: session.permissionMode ?? "default",
     createdAt: session.createdAt ?? FALLBACK_TIMESTAMP,
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
@@ -558,7 +571,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     providerParentResumeId: session.providerParentResumeId ?? null,
     parentChatId: session.parentChatId ?? null,
     providerResumeId: session.providerResumeId ?? null,
-    threadTotalTokens: session.threadTotalTokens,
+    threadTotalTokens: session.threadTotalTokens ?? null,
     messageCount:
       session.messageCount ?? durableMessages(session.messages).length,
     hasUserMessage: hasLocalChatUserMessage(session),
@@ -594,11 +607,17 @@ export function applyRemoteLocalChatSession(
   }
   if (raw === null) {
     if (!sessionIndexCache[sessionId]) return undefined;
+    if (sessionIndexCache[sessionId].queuedMessages?.length) void writeQueue(sessionId, null);
     delete sessionIndexCache[sessionId];
     return null;
   }
   const session = normalizeLocalChatSession(raw);
   if (!session || session.id !== sessionId) return undefined;
+  const localQueue = sessionIndexCache[sessionId]?.queuedMessages;
+  if (localQueue?.length) {
+    session.queuedMessages = localQueue;
+    session.queuePaused = true;
+  }
   sessionIndexCache[sessionId] = session;
   return session;
 }
@@ -742,23 +761,70 @@ async function loadSessionIndexFromCommand(
   }
 }
 
+async function loadQueuedChats(): Promise<Record<string, ChatSession>> {
+  if (!commands.loadLocalChatQueues) return {};
+  try {
+    const result = await commands.loadLocalChatQueues();
+    if (result.status === "ok") {
+      const entries = Array.isArray(result.data) ? result.data : [];
+      return Object.fromEntries(
+        entries.flatMap((entry) => {
+          const session = normalizeLocalChatSession(entry);
+          return session?.queuedMessages?.length ? [[session.id, session]] : [];
+        })
+      );
+    }
+    await logCatalogDiagnostic("queue_load_failed", {
+      error: result.error.message,
+    });
+  } catch (error) {
+    await logCatalogDiagnostic("queue_load_failed", {
+      error: catalogErrorMessage(error),
+    });
+  }
+  return {};
+}
+
+function mergeQueuedChats(
+  sessions: Record<string, ChatSession>,
+  queued: Record<string, ChatSession>
+) {
+  for (const [id, snapshot] of Object.entries(queued)) {
+    sessions[id] = {
+      ...(sessions[id] ?? snapshot),
+      queuedMessages: snapshot.queuedMessages,
+      queuePaused: true,
+    };
+  }
+  return sessions;
+}
+
+function writeQueue(id: string, session: ChatSession | null) {
+  return writeLocalChatQueue(id, session && {
+    ...toIndexEntry(session),
+    queuedMessages: session.queuedMessages,
+  });
+}
+
 async function hydrateSessionIndexCache(): Promise<boolean> {
   if (sessionIndexHydrated) return true;
   if (!sessionIndexHydratePromise) {
-    sessionIndexHydratePromise = loadSessionIndexFromCommand("loadLocalChatSessionIndex")
-      .then((loaded) => {
-        if (loaded === null) return false;
+    sessionIndexHydratePromise = Promise.all([
+      loadSessionIndexFromCommand("loadLocalChatSessionIndex"),
+      loadQueuedChats(),
+    ])
+      .then(([loaded, queued]) => {
         const merged = Object.fromEntries(
           Object.entries({
-            ...loaded,
+            ...mergeQueuedChats(loaded ?? {}, queued),
             ...sessionIndexCache,
           }).filter(([id]) => !isLocalChatSessionCleared(id))
         );
         const deduplicated = deduplicateDefaultEmptyLocalChatSessions(merged);
         sessionIndexCache = deduplicated.sessions;
-        sessionIndexHydrated = true;
-        if (deduplicated.changed) scheduleIndexSave();
-        return true;
+        sessionIndexHydrated = loaded !== null;
+        if (deduplicated.changed && sessionIndexHydrated) scheduleIndexSave();
+        return sessionIndexHydrated;
       })
       .finally(() => {
         sessionIndexHydratePromise = null;
@@ -790,12 +856,15 @@ export async function refreshLocalChatSessionIndex(
   }
 
   const before = { ...sessionIndexCache };
-  const loaded = await loadSessionIndexFromCommand("recoverLocalChatSessionIndex");
+  const [loaded, queued] = await Promise.all([
+    loadSessionIndexFromCommand("recoverLocalChatSessionIndex"),
+    loadQueuedChats(),
+  ]);
   if (!isCurrent() || loaded === null) {
     return null;
   }
 
-  const merged = { ...loaded };
+  const merged = mergeQueuedChats(loaded, queued);
 
   // Retain edits made while the backend snapshot was in flight.
   for (const id of new Set([
@@ -973,29 +1042,46 @@ export function persistLocalChatSession(
   session: ChatSession
 ): Promise<boolean> {
   const sessions = readSessions();
-  const serialized = serializeSession(session, sessions[session.id]);
+  const previous = sessions[session.id];
+  const serialized = serializeSession(session, previous);
   if (isDisposableClosedLocalChatSession(session)) {
+    const queueSave = previous?.queuedMessages?.length
+      ? writeQueue(session.id, null)
+      : Promise.resolve(true);
     delete sessions[session.id];
     pendingDeletedIds.add(session.id);
-    return writeSessions(sessions);
+    return Promise.all([writeSessions(sessions), queueSave]).then(
+      ([index, queue]) => index && queue
+    );
   }
-  const previous = sessions[session.id];
+  const queueSave =
+    previous?.queuedMessages !== serialized.queuedMessages
+      ? writeQueue(
+          session.id,
+          serialized.queuedMessages?.length ? serialized : null
+        )
+      : Promise.resolve(true);
   sessions[session.id] = serialized;
-  // Usage-only, lifecycle-only and partial-text updates leave the persisted
-  // projection unchanged: refresh the cache without queueing a network write.
   if (previous && sameIndexEntry(previous, serialized)) {
-    return indexSavePromise ?? Promise.resolve(true);
+    return Promise.all([
+      indexSavePromise ?? Promise.resolve(true),
+      queueSave,
+    ]).then(([index, queue]) => index && queue);
   }
   pendingChangedIds.set(session.id, ++nextChangeGeneration);
   const persistence = writeSessions(
     deduplicateDefaultEmptyLocalChatSessions(sessions).sessions
   );
   clearLocalChatSessionCleared(session.id);
-  return persistence;
+  return Promise.all([persistence, queueSave]).then(
+    ([index, queue]) => index && queue
+  );
 }
 
 export function removePersistedLocalChatSession(sessionId: string): void {
   const sessions = readSessions();
+  if (sessions[sessionId]?.queuedMessages?.length)
+    void writeQueue(sessionId, null);
   delete sessions[sessionId];
   pendingDeletedIds.add(sessionId);
   writeSessions(sessions);
