@@ -200,6 +200,9 @@ pub struct LocalChatSessionIndexEntry {
     #[serde(default)]
     #[specta(optional)]
     pub provider_parent_resume_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub parent_chat_id: Option<String>,
     pub thread_total_tokens: Option<u32>,
     pub message_count: u32,
     #[serde(default)]
@@ -703,25 +706,38 @@ async fn read_session_index_and_sweep(
     Ok(sessions)
 }
 
-/// Load the app-managed local chat metadata index.
+/// Load the app-managed local chat metadata index from local state only.
 #[tauri::command]
 #[specta::specta]
 pub async fn load_local_chat_session_index(
+    state: State<'_, AppState>,
+    local_chat_manager: State<'_, LocalChatSessionManager>,
+    annotation_store: State<'_, LocalChatAnnotationStore>,
+) -> Result<Vec<LocalChatSessionIndexEntry>, CommandError> {
+    let _index_guard = INDEX_SERIAL.lock().await;
+    let (_index_file, mut sessions) =
+        read_index_for_load(&state, &local_chat_manager, &annotation_store).await?;
+    super::chat_catalog::hydrate_cached(&state, &mut sessions).await?;
+    super::chat_catalog::reset_inactive_activity(
+        &mut sessions,
+        &local_chat_manager.live_chat_session_ids().await,
+    );
+    with_codex_lineage(sessions).await
+}
+
+/// Reload the index after a full catalog recovery. Reserved for migration and
+/// repair; ordinary loads use [`load_local_chat_session_index`].
+#[tauri::command]
+#[specta::specta]
+pub async fn recover_local_chat_session_index(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     local_chat_manager: State<'_, LocalChatSessionManager>,
     annotation_store: State<'_, LocalChatAnnotationStore>,
 ) -> Result<Vec<LocalChatSessionIndexEntry>, CommandError> {
     let _index_guard = INDEX_SERIAL.lock().await;
-    let path = local_chat_session_index_path()?;
-    let _index_file = super::chat_catalog::lock_index(&path).await?;
-    let mut sessions = read_session_index(&path)?;
-    // The legacy index is not the complete session set after migration. In
-    // backend mode annotation deletion is explicit, never inferred from it.
-    if state.sacrum_client.read().await.is_none() {
-        sweep_orphaned_annotations(&path, &annotation_store, &local_chat_manager, &sessions).await;
-    }
-
+    let (_index_file, mut sessions) =
+        read_index_for_load(&state, &local_chat_manager, &annotation_store).await?;
     super::chat_catalog::synchronize(&state, &app, &mut sessions, false, &[], None).await?;
 
     let live = local_chat_manager.live_chat_session_ids().await;
@@ -730,7 +746,31 @@ pub async fn load_local_chat_session_index(
         super::chat_catalog::synchronize(&state, &app, &mut sessions, true, &[], Some(&changed))
             .await?;
     }
+    with_codex_lineage(sessions).await
+}
 
+/// Lock and read the index; the returned file lock must outlive the catalog
+/// work that follows. Callers hold `INDEX_SERIAL`.
+async fn read_index_for_load(
+    state: &AppState,
+    local_chat_manager: &LocalChatSessionManager,
+    annotation_store: &LocalChatAnnotationStore,
+) -> Result<(std::fs::File, Vec<LocalChatSessionIndexEntry>), CommandError> {
+    let path = local_chat_session_index_path()?;
+    let index_file = super::chat_catalog::lock_index(&path).await?;
+    let sessions = read_session_index(&path)?;
+    // The legacy index is not the complete session set after migration. In
+    // backend mode annotation deletion is explicit, never inferred from it.
+    if state.sacrum_client.read().await.is_none() {
+        sweep_orphaned_annotations(&path, annotation_store, local_chat_manager, &sessions).await;
+    }
+    Ok((index_file, sessions))
+}
+
+/// Attach Codex transcript lineage so history can group without opening chats.
+async fn with_codex_lineage(
+    mut sessions: Vec<LocalChatSessionIndexEntry>,
+) -> Result<Vec<LocalChatSessionIndexEntry>, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig::default());
 

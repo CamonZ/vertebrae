@@ -41,17 +41,27 @@ export const queryKeys = {
     detail: (generation: number, id: string) =>
       [...queryKeys.tasks.details(generation), id] as const,
   },
-  localChatCompletion: (
-    generation: number,
-    projectId: string,
-    taskId: string
-  ) =>
-    [
-      ...queryKeys.project(generation),
-      "localChatCompletion",
-      projectId,
-      taskId,
-    ] as const,
+  localChatProjectHistory: {
+    all: (generation: number) =>
+      [...queryKeys.project(generation), "localChatProjectHistory"] as const,
+    cachedExclusions: (generation: number, projectId: string) =>
+      [
+        ...queryKeys.localChatProjectHistory.all(generation),
+        "cachedExclusions",
+        projectId,
+      ] as const,
+    reads: (generation: number, projectId: string) =>
+      [
+        ...queryKeys.localChatProjectHistory.all(generation),
+        "read",
+        projectId,
+      ] as const,
+    read: (generation: number, projectId: string, includeCompleted: boolean) =>
+      [
+        ...queryKeys.localChatProjectHistory.reads(generation, projectId),
+        includeCompleted,
+      ] as const,
+  },
   artifacts: {
     all: (generation: number) =>
       [...queryKeys.project(generation), "artifacts"] as const,

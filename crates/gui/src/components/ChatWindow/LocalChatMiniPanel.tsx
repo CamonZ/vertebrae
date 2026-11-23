@@ -24,7 +24,6 @@ import {
   normalizeLocalChatSessionQuery,
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
-import { useLocalChatSessionMetadata } from "../../hooks/useLocalChatCompletedSessions";
 import { formatRelative } from "../../utils/formatRelative";
 import { harnessDisplayName } from "./chatHelpers";
 import { Toggle } from "../Toggle";
@@ -35,6 +34,7 @@ import { SessionDeleteButton } from "./SessionDeleteButton";
 import { ConversationAssociations } from "./ConversationAssociations";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { RunHistoryRow } from "./run/RunHistoryRow";
+import type { HistoryLoadState } from "./useHistorySidebarModel";
 import { useHistoryRuns } from "../../hooks/useHistoryRuns";
 
 export type LocalChatSessionActivity = "thinking" | "compacting" | "stopping";
@@ -54,6 +54,16 @@ interface LocalChatMiniPanelProps {
   projectWarning: string | null;
   sessionGroups: LocalChatSessionGroup[];
   excludedProviderThreadIds?: ReadonlySet<string>;
+  nestedSessionIds?: ReadonlySet<string>;
+  /** Shown rows linked to completed tasks. */
+  completedSessionIds?: ReadonlySet<string>;
+  /** Matching chats hidden because their task is completed. */
+  hiddenCompletedCount?: number;
+  /** Whether completed chats and runs are shown. */
+  showCompleted: boolean;
+  onShowCompletedChange: (show: boolean) => void;
+  /** Selected project's chat history read. */
+  historyLoad?: HistoryLoadState;
   spawnOutlineBySessionId: Map<string, SpawnOutlineItem[]>;
   /** Runtime-only activity keyed by session; absent rows show their harness. */
   activityBySessionId?: ReadonlyMap<string, LocalChatSessionActivity>;
@@ -93,6 +103,12 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
   projectWarning,
   sessionGroups,
   excludedProviderThreadIds,
+  nestedSessionIds,
+  completedSessionIds,
+  hiddenCompletedCount = 0,
+  showCompleted,
+  onShowCompletedChange: setShowCompleted,
+  historyLoad,
   spawnOutlineBySessionId,
   activityBySessionId,
   thinkingIndicatorStyle = "shimmer",
@@ -117,38 +133,29 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     (group) => group.id === selectedProjectId
   );
 
-  // Sidebar-only, mount-scoped preference. Filtering never closes a pane or
-  // stops runtime work. An explicit reveal opts back into completed history.
-  const [showCompleted, setShowCompleted] = useState(false);
-  const { tasks, completedSessionIds } =
-    useLocalChatSessionMetadata(selectedProject);
+  // An explicit reveal opts back into completed history.
   const revealPreference = useRef(revealSession);
-
   useEffect(() => {
     if (!revealSession || revealPreference.current === revealSession) return;
-
     revealPreference.current = revealSession;
     setShowCompleted(true);
-  }, [revealSession]);
+  }, [revealSession, setShowCompleted]);
 
   const matchingGroups = useMemo(
     () =>
       filterLocalChatSessionGroups(
         selectedProject ? [selectedProject] : [],
         searchQuery,
-        excludedProviderThreadIds
+        excludedProviderThreadIds,
+        nestedSessionIds
       ),
-    [selectedProject, searchQuery, excludedProviderThreadIds]
+    [selectedProject, searchQuery, excludedProviderThreadIds, nestedSessionIds]
   );
 
-  const matchingSessionItems = useMemo(
+  const sessionItems = useMemo(
     () =>
       matchingGroups.flatMap((group) => group.allSessions ?? group.sessions),
     [matchingGroups]
-  );
-
-  const sessionItems = matchingSessionItems.filter(
-    (session) => showCompleted || !completedSessionIds.has(session.id)
   );
 
   const historyRuns = useHistoryRuns({
@@ -157,21 +164,14 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
     searchQuery,
   });
 
-  const hiddenCompletedCount =
-    matchingSessionItems.length -
-    sessionItems.length +
-    historyRuns.hiddenCompletedCount;
-
   const ticketGroups = useMemo(
     () =>
-      historyRuns.rows.length
-        ? groupLocalChatSessionsByHierarchy(
-            sessionItems,
-            new Map([...historyRuns.tasksById, ...tasks]),
-            historyRuns.rows
-          )
-        : groupLocalChatSessionsByHierarchy(sessionItems, tasks),
-    [sessionItems, tasks, historyRuns.rows, historyRuns.tasksById]
+      groupLocalChatSessionsByHierarchy(
+        sessionItems,
+        historyRuns.tasksById,
+        historyRuns.rows
+      ),
+    [sessionItems, historyRuns.rows, historyRuns.tasksById]
   );
 
   const groupedSessionIds = useMemo(() => {
@@ -606,6 +606,19 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
             </div>
           )}
 
+          {historyLoad?.isError && (
+            <div role="alert" className="hc-mini-history-error">
+              Could not refresh chat history.
+              <button
+                type="button"
+                disabled={historyLoad.isFetching}
+                onClick={historyLoad.retry}
+              >
+                Retry chat history
+              </button>
+            </div>
+          )}
+
           {historyRuns.isError && (
             <div role="alert" className="hc-mini-history-error">
               Could not load run history.
@@ -639,7 +652,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
               role="status"
               aria-live="polite"
             >
-              {hiddenCompletedCount > 0 ? (
+              {hiddenCompletedCount + historyRuns.hiddenCompletedCount > 0 ? (
                 <>
                   No active chats{hasSearchQuery ? " match your search" : ""}.
                   <button
@@ -781,7 +794,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
                         className="hc-mini-history-row"
                         data-active={isActive || undefined}
                         data-completed={
-                          completedSessionIds.has(session.id) || undefined
+                          completedSessionIds?.has(session.id) || undefined
                         }
                         data-activity={activityBySessionId?.get(session.id)}
                       >
@@ -831,7 +844,7 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
 
                               <ConversationAssociations
                                 session={session}
-                                completed={completedSessionIds.has(session.id)}
+                                completed={completedSessionIds?.has(session.id)}
                                 hideTicket={groupedSessionIds.has(session.id)}
                               />
 
@@ -964,7 +977,7 @@ function SessionAgents({
                   data-active={isAgentActive || undefined}
                   aria-current={isAgentActive ? "true" : undefined}
                   onClick={() => {
-                    if (spawn.threadId && onSelectAgent) {
+                    if ((spawn.threadId || spawn.sessionId) && onSelectAgent) {
                       void onSelectAgent(sessionId, spawn);
 
                       return;
@@ -976,12 +989,12 @@ function SessionAgents({
                     );
                   }}
                   title={
-                    spawn.threadId
+                    spawn.threadId || spawn.sessionId
                       ? `Open spawned agent ${spawn.label}`
                       : `Jump to spawned agent ${spawn.label}`
                   }
                   aria-label={
-                    spawn.threadId
+                    spawn.threadId || spawn.sessionId
                       ? `Open spawned agent ${spawn.label} from ${title}`
                       : `Jump to spawned agent ${spawn.label} in ${title}`
                   }
