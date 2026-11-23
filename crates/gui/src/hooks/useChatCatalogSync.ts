@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { commands, events } from "../bindings";
 import { useChatStore } from "../stores/chatStore";
@@ -13,13 +13,13 @@ interface CatalogEntryChanged {
 }
 
 /**
- * Full recovery runs only on explicit fallback invalidation. Ordinary CDC
- * entries arrive already merged by the backend and are applied incrementally,
- * so they never trigger a full catalog read. Startup and reconnect send pending
- * writes through the mutation-only outbox.
+ * Startup delivers pending writes from the cache. Reconnect and explicit
+ * invalidation reconcile missed changes before replaying the outbox.
+ * Ordinary CDC entries are already merged by the backend.
  */
 export function useChatCatalogSync() {
   const generation = useProjectScopeGeneration();
+  const needsRecovery = useRef(false);
 
   useEffect(() => {
     let disposed = false;
@@ -65,8 +65,19 @@ export function useChatCatalogSync() {
     };
 
     const subscriptions = [
-      listen<string>("websocket-state-changed", (event) => {
-        if (event.payload === "connected" && isCurrent()) void deliverOutbox();
+      listen<string>("websocket-state-changed", ({ payload }) => {
+        if (!isCurrent()) return;
+
+        if (payload === "reconnecting") {
+          needsRecovery.current = true;
+        } else if (payload === "connected") {
+          if (needsRecovery.current) {
+            needsRecovery.current = false;
+            void recover();
+          } else {
+            void deliverOutbox();
+          }
+        }
       }),
       listen<CatalogEntryChanged>("chat-catalog-entry-changed", (event) => {
         if (isCurrent()) {
@@ -80,7 +91,7 @@ export function useChatCatalogSync() {
       events.reviewThreadCatalogRecoveryNeeded.listen(() => void recover()),
     ];
 
-    void deliverOutbox();
+    if (!needsRecovery.current) void deliverOutbox();
 
     return () => {
       disposed = true;

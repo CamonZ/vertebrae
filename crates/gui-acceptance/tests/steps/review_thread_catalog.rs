@@ -328,7 +328,7 @@ async fn review_thread_cdc_and_recovery(world: &mut GuiWorld) {
     let relay = backend_relay(backend).await;
     let (_driver, address) = peer_driver(home.path(), &relay.endpoint).await;
     let peer = peer_client(&address, home.path(), slug).await;
-    ipc(&peer, "load_local_chat_session_index", json!({})).await;
+    ipc(&peer, "recover_local_chat_session_index", json!({})).await;
     assert_eq!(read_catalog(home.path(), false)["version"], 2);
     assert_eq!(threads(&peer, project).await, json!([]));
     listen_to_threads(&peer).await;
@@ -360,7 +360,7 @@ async fn review_thread_cdc_and_recovery(world: &mut GuiWorld) {
 
     let peer = peer_client(&address, home.path(), slug).await;
     listen_to_threads(&peer).await;
-    ipc(&peer, "load_local_chat_session_index", json!({})).await;
+    ipc(&peer, "recover_local_chat_session_index", json!({})).await;
     gui_acceptance::wait_for_js(
         &peer,
         "review thread recovery notification",
