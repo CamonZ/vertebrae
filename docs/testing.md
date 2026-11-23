@@ -276,6 +276,15 @@ npm run test:watch
 npm run test:coverage
 ```
 
+### Native macOS GUI verification
+
+Use the [native macOS worktree runbook](gui-development.md#verify-a-gui-change-on-macos)
+to exercise changes in WKWebView and native macOS interactions, such as folder
+pickers, menus, keyboard shortcuts, and window behavior. Record the actions
+you observed and run `scripts/validate.sh gui` for the GUI validation profile.
+The existing Colima smoke test below still covers Linux and its native GTK
+folder chooser.
+
 ### GUI-managed Docker smoke tests
 
 For GUI-driven project setup against the local Colima engine, run:

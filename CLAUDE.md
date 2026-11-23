@@ -42,6 +42,7 @@ policy.
 |---|---|
 | CLI commands/tasks/workflows | `docs/vtb-guide.md` |
 | GUI state and interaction | `docs/gui-development.md` |
+| Launch or verify the GUI from a worktree | [Native macOS GUI](docs/gui-development.md#run-the-native-macos-gui-from-a-worktree) |
 | Provider/live-replay/harness | `docs/architecture.md` |
 | Core/Sacrum contracts | `docs/system-overview.md` |
 | Packaging and signed updates | `docs/updates.md` |

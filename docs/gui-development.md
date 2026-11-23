@@ -14,6 +14,52 @@ npm install
 npm run tauri:dev
 ```
 
+## Run the native macOS GUI from a worktree
+
+From the checkout, run `DOCKER_CONTEXT=colima scripts/gui-macos.sh start`.
+The launcher seeds a private Sacrum and Postgres stack and builds the native
+Tauri app in the foreground. The app opens in a macOS window. Use a separate
+terminal to run `scripts/gui-macos.sh status` or `scripts/gui-macos.sh logs`,
+with the same Docker context. `scripts/gui-macos.sh shell` opens a host shell
+in the checkout with the same app home and backend connection.
+
+Quit the app or interrupt the foreground command, then run
+`scripts/gui-macos.sh stop` with the same context to remove the backend
+containers and keep the database. The launcher stores the app home under
+`test-output/macos-gui-home` in that checkout. Run provider sign-in commands
+through the launcher's shell to use that environment. The host development
+port 1420 must be available.
+
+For Linux GUI acceptance, see
+[GUI-managed Docker smoke tests](testing.md#gui-managed-docker-smoke-tests).
+
+### Verify a GUI change on macOS
+
+1. Start the launcher from the assigned worktree and keep its terminal open.
+   In another terminal, run `scripts/gui-macos.sh status` with the same
+   `DOCKER_CONTEXT`. Wait for Sacrum and Postgres to report healthy and for the
+   foreground log to show the worktree's `target/debug/gui` running.
+2. On first launch, select **Use an existing backend** in Project Setup and
+   continue with the backend preconfigured by the launcher. Choose the worktree
+   or a disposable fixture folder, create the project, and enter it. Confirm
+   the active project in the sidebar before testing. A new project starts with
+   an empty task list. Create any needed fixtures in this test backend.
+3. Open the native window and reproduce the ticket's acceptance criteria.
+   For a bug fix, exercise the original failure path and its expected result.
+   Use computer use when it can target the worktree window. The unbundled
+   `tauri dev` process may be missing from its app picker. If so, run the
+   interaction manually or report the UI check as pending. Use the process and
+   logs to verify startup and backend connectivity.
+4. Record the checkout, macOS version, relevant fixture state, steps, expected
+   and observed results, and any skipped checks. Keep screenshots or logs
+   under `test-output/` when they help demonstrate the result. If a test
+   requires a provider, sign in through the launcher's shell and verify a
+   completed turn before reporting it as passed.
+
+Run `scripts/validate.sh gui` for the GUI checks and use the existing Linux
+acceptance lane for changes that affect its scenarios.
+[See GUI testing and acceptance](testing.md#native-macos-gui-verification).
+
 ## Available Scripts
 
 ```bash
