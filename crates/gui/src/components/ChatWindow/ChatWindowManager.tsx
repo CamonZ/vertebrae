@@ -26,8 +26,6 @@ import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import {
-  filterLocalChatSessionGroups,
-  groupLocalChatSessionsByTicket,
   selectedLocalChatProject,
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
@@ -40,11 +38,8 @@ import { ChatHistoryResizeHandle } from "./ChatHistoryResizeHandle";
 import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import type { LocalChatSessionActivity } from "./LocalChatMiniPanel";
 import { ChatShortcutHints } from "./ChatShortcutHints";
-import {
-  buildHistoryChildOutlines,
-  buildSpawnOutline,
-  scrollToSpawn,
-} from "./sessionListUtils";
+import { scrollToSpawn } from "./sessionListUtils";
+import { useHistorySidebarModel } from "./useHistorySidebarModel";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 import { useUIStore } from "../../stores/uiStore";
 import { useNotificationStore } from "../../stores/notificationStore";
@@ -175,94 +170,6 @@ export function ChatWindowManager({
     panelOpen
   );
 
-  const historyChildOutlines = useMemo(
-    () => buildHistoryChildOutlines(Object.values(localSessionSummaries)),
-    [localSessionSummaries]
-  );
-
-  const spawnOutlineBySessionId = useMemo(() => {
-    const outlines = new Map<string, ReturnType<typeof buildSpawnOutline>>();
-
-    for (const sessionId of sessionList) {
-      const session = useChatStore.getState().sessions[sessionId];
-      if (!session) continue;
-
-      const outline = buildSpawnOutline(session.messages).filter(
-        (spawn) => spawn.threadId !== session.providerResumeId
-      );
-      const discovered = discoveredChildOutlines.get(session.id) ?? [];
-      const history = historyChildOutlines.get(session.id) ?? [];
-      const childRows = discovered.length ? discovered : history;
-
-      // Discovery works even when the spawn is outside the loaded parent page.
-      const groups: SpawnOutlineItem[][] = [];
-      for (const row of childRows) {
-        if ((row.depth ?? 0) > 0 && groups.length)
-          groups[groups.length - 1].push(row);
-        else groups.push([row]);
-      }
-
-      for (const row of outline) {
-        if (
-          !childRows.some(
-            (child) =>
-              (row.threadId && row.threadId === child.threadId) ||
-              row.spawnId === child.spawnId
-          )
-        )
-          groups.push([row]);
-      }
-
-      const positions = new Map(
-        session.messages.flatMap((message, index) =>
-          message.kind === "tool_call" ? [[message.toolId, index] as const] : []
-        )
-      );
-
-      groups.sort(
-        (left, right) =>
-          (positions.get(left[0].spawnId) ??
-            (left[0].id.startsWith("local-chat-")
-              ? Number.MAX_SAFE_INTEGER
-              : -1)) -
-          (positions.get(right[0].spawnId) ??
-            (right[0].id.startsWith("local-chat-")
-              ? Number.MAX_SAFE_INTEGER
-              : -1))
-      );
-
-      outlines.set(session.id, groups.flat());
-    }
-
-    return outlines;
-    // Intentionally keyed by top-level agent tool-call inputs only; assistant
-    // streaming text should not re-render the mini-panel outline.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    sessionList,
-    spawnOutlineToken,
-    discoveredChildOutlines,
-    historyChildOutlines,
-  ]);
-
-  const childProviderThreadIds = useMemo(() => {
-    const threadIds = new Set<string>();
-
-    for (const sessionId of sessionList) {
-      const session = useChatStore.getState().sessions[sessionId];
-      if (!session) continue;
-
-      const outline = spawnOutlineBySessionId.get(sessionId) ?? [];
-      for (const spawn of outline) {
-        if (spawn.threadId && spawn.threadId !== session.providerResumeId) {
-          threadIds.add(spawn.threadId);
-        }
-      }
-    }
-
-    return threadIds;
-  }, [sessionList, spawnOutlineBySessionId]);
-
   const {
     panelRef,
     isMaximized,
@@ -350,18 +257,6 @@ export function ChatWindowManager({
     selectedProjectId,
   ]);
 
-  const matchingHistorySessions = useMemo(
-    () =>
-      groupLocalChatSessionsByTicket(
-        filterLocalChatSessionGroups(
-          selectedProject ? [selectedProject] : [],
-          sessionQuery,
-          childProviderThreadIds
-        ).flatMap((group) => group.sessions)
-      ).flatMap((group) => group.sessions),
-    [selectedProject, sessionQuery, childProviderThreadIds]
-  );
-
   const [revealSession, setRevealSession] = useState<{
     sessionId: string;
     revision: number;
@@ -397,6 +292,27 @@ export function ChatWindowManager({
     moveActivePane,
   } = useChatPaneManagement({ needingYou });
   const shownPaneId = shownPane?.id ?? null;
+  const {
+    visibleHistoryGroups,
+    spawnOutlineBySessionId,
+    childProviderThreadIds,
+    nestedHistoryIds,
+    matchingHistorySessions,
+    completedHistoryIds,
+    hiddenCompletedCount,
+    showCompletedHistory,
+    setShowCompletedHistory,
+    historyLoad,
+  } = useHistorySidebarModel({
+    visible: panelOpen && isMaximized && historyVisible && !!shownPane,
+    selectedProject,
+    historyProjectGroups,
+    sessionList,
+    spawnOutlineToken,
+    discoveredChildOutlines,
+    sessionQuery,
+  });
+
   // Name the chat's project in its header once the open chats span more
   // than one project.
   const openChatsSpanProjects =
@@ -610,6 +526,11 @@ export function ChatWindowManager({
         preferredPaneId ??
         useChatStore.getState().paneLayout.activeId ??
         undefined;
+      if (agent.sessionId) {
+        await selectHistorySessionForActivePane(agent.sessionId, targetPaneId);
+        return null;
+      }
+
       const parent = useChatStore.getState().sessions[parentSessionId];
 
       if (!parent || !agent.threadId) {
@@ -873,8 +794,14 @@ export function ChatWindowManager({
               selectedProjectId={selectedProject?.id ?? null}
               onSelectProject={selectHistoryProject}
               revealSession={revealSession}
-              sessionGroups={historyProjectGroups}
+              sessionGroups={visibleHistoryGroups}
               excludedProviderThreadIds={childProviderThreadIds}
+              nestedSessionIds={nestedHistoryIds}
+              completedSessionIds={completedHistoryIds}
+              hiddenCompletedCount={hiddenCompletedCount}
+              showCompleted={showCompletedHistory}
+              onShowCompletedChange={setShowCompletedHistory}
+              historyLoad={historyLoad}
               spawnOutlineBySessionId={spawnOutlineBySessionId}
               activityBySessionId={activityBySessionId}
               thinkingIndicatorStyle={thinkingIndicatorStyle}

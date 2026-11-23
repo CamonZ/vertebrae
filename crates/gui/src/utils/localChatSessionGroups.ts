@@ -70,11 +70,12 @@ export function localChatSessionDisplayTitle(
 export function filterLocalChatSessionGroups(
   groups: LocalChatSessionGroup[],
   query: unknown,
-  excludedProviderThreadIds?: ReadonlySet<string>
+  excludedProviderThreadIds?: ReadonlySet<string>,
+  nestedSessionIds?: ReadonlySet<string>
 ): LocalChatSessionGroup[] {
   const normalizedQuery = normalizeLocalChatSessionQuery(query);
 
-  if (!normalizedQuery && !excludedProviderThreadIds) return groups;
+  if (!normalizedQuery && !excludedProviderThreadIds && !nestedSessionIds) return groups;
 
   return groups
     .map((group) => {
@@ -88,6 +89,7 @@ export function filterLocalChatSessionGroups(
           ])
       );
 
+      const byId = new Map(sourceSessions.map((session) => [session.id, session]));
       const matches = new Set<string>();
 
       for (const session of sourceSessions) {
@@ -101,13 +103,15 @@ export function filterLocalChatSessionGroups(
         let row: LocalChatSessionSummary | undefined = session;
         while (row && !matches.has(row.id)) {
           matches.add(row.id);
-          row = byThread.get(`${row.harness}:${row.providerParentResumeId}`);
+          row = (row.parentChatId ? byId.get(row.parentChatId) : undefined) ??
+            byThread.get(`${row.harness}:${row.providerParentResumeId}`);
         }
       }
 
       const sessions = sourceSessions.filter(
         (session) =>
           matches.has(session.id) &&
+          !nestedSessionIds?.has(session.id) &&
           (!session.providerResumeId ||
             !excludedProviderThreadIds?.has(session.providerResumeId))
       );

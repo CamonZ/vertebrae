@@ -47,7 +47,8 @@ import {
   persistLocalChatSession,
 } from "../../utils/localChatPersistence";
 import { HISTORY_WIDTH_STORAGE_KEY } from "../../hooks/useChatHistoryPanelLayout";
-import { commands } from "../../bindings";
+import { commands, events, type LocalChatProjectHistory } from "../../bindings";
+import { queryClient } from "../../query";
 import { useNotificationStore } from "../../stores/notificationStore";
 import { useShellStore } from "../../stores/shellStore";
 
@@ -66,6 +67,8 @@ vi.mock("../../bindings", async () => {
   const { withBuiltinProviders } = await import("../../test/localChatCatalog");
   return {
     commands: {
+      loadLocalChatProjectHistory: vi.fn(),
+      loadCachedLocalChatProjectExclusions: vi.fn(),
       getTaskRunHistory: vi.fn().mockResolvedValue({
         status: "ok",
         data: { entries: [], has_more: false, hidden_completed_count: 0 },
@@ -150,6 +153,7 @@ vi.mock("../../bindings", async () => {
       closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
     },
     events: {
+      taskChangedEvent: { listen: vi.fn(() => Promise.resolve(() => {})) },
       localChatSessionInitEvent: {
         listen: vi.fn(() => Promise.resolve(() => {})),
       },
@@ -237,6 +241,13 @@ describe("ChatWindowManager", () => {
     clearPersistedLocalChatSessions();
     useNotificationStore.getState().clearNotifications();
     vi.clearAllMocks();
+    queryClient.removeQueries({ queryKey: ["local-chat-project-history"] });
+    vi.mocked(commands.loadLocalChatProjectHistory).mockResolvedValue({
+      status: "ok", data: { sessions: [], excludedIds: [] },
+    });
+    vi.mocked(commands.loadCachedLocalChatProjectExclusions).mockResolvedValue({
+      status: "ok", data: [],
+    });
     vi.mocked(commands.discoverLocalChatChildSessions).mockResolvedValue({
       status: "ok",
       data: [],
@@ -295,6 +306,147 @@ describe("ChatWindowManager", () => {
 
     const { container } = render(<ChatWindowManager />);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("shows cached rows while loading only the visible project's filtered history", async () => {
+    const timestamp = "2026-01-01T00:00:00Z";
+    createPersistedHistorySession("cached-a", "Cached A", "/test/project", timestamp);
+    createPersistedHistorySession("completed-a", "Completed A", "/test/project", timestamp);
+    createPersistedHistorySession("cached-b", "Cached B", "/old/project", timestamp);
+    // The last read's exclusions hide completed rows before the next read returns.
+    vi.mocked(commands.loadCachedLocalChatProjectExclusions).mockResolvedValue({
+      status: "ok", data: ["completed-a"],
+    });
+    const load = vi.mocked(commands.loadLocalChatProjectHistory);
+    const pending: Array<(data: LocalChatProjectHistory) => void> = [];
+    load.mockImplementation(
+      () => new Promise((resolve) => {
+        pending.push((data) => resolve({ status: "ok", data }));
+      })
+    );
+    useChatStore.getState().openSession("Active", "/test/project");
+
+    render(<StrictMode><ChatWindowManager /></StrictMode>);
+    await waitFor(() => expect(commands.getProjects).toHaveBeenCalled());
+    expect(load).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText("Expand chat workspace"));
+    let sidebar = within(screen.getByTestId("local-chat-mini-panel"));
+    expect(await sidebar.findByRole("button", { name: /Load local chat Cached A/ })).toBeVisible();
+    await waitFor(() =>
+      expect(sidebar.queryByRole("button", { name: /Load local chat Completed A/ })).toBeNull()
+    );
+    await waitFor(() => expect(load.mock.calls).toEqual([["project-test", false]]));
+
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    expect(screen.queryByTestId("local-chat-mini-panel")).toBeNull();
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    sidebar = within(screen.getByTestId("local-chat-mini-panel"));
+    expect(load.mock.calls).toEqual([["project-test", false]]);
+
+    await act(async () => pending.shift()!({
+      excludedIds: ["completed-a"],
+      sessions: [{
+        id: "child-a",
+        label: "Child A",
+        title: "Catalog child A",
+        titleStatus: "manual",
+        titleConfidence: null,
+        titleUserMessageCount: 0,
+        harness: "claude",
+        model: null,
+        selectedModelId: null,
+        selectedReasoningEffort: null,
+        selectedPersonality: null,
+        permissionMode: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        projectPath: "/test/project",
+        providerResumeId: null,
+        parentChatId: "cached-a",
+        threadTotalTokens: null,
+        hasUserMessage: true,
+        messageCount: 1,
+        lifecycle: "idle",
+        status: "open",
+      }],
+    }));
+    expect(sidebar.queryByRole("button", { name: /Load local chat Completed A/ })).toBeNull();
+    expect(sidebar.getByRole("button", { name: /Load local chat Cached A/ })).toBeVisible();
+
+    expect(sidebar.queryByRole("button", { name: /Load local chat Catalog child A/ })).toBeNull();
+    fireEvent.click(sidebar.getByRole("button", { name: "Subagents for Cached A" }));
+    expect(sidebar.getByRole("button", { name: /Open spawned agent Catalog child A/ })).toBeVisible();
+
+    // Opting in reads completed chats on demand and marks them completed.
+    fireEvent.click(sidebar.getByRole("switch", { name: "Show completed" }));
+    await waitFor(() => expect(load.mock.calls.at(-1)).toEqual(["project-test", true]));
+    await act(async () => pending.shift()!({ excludedIds: [], sessions: [] }));
+    const completedRow = await sidebar.findByRole("button", { name: /Load local chat Completed A/ });
+    expect(
+      within(completedRow.closest(".hc-mini-history-row") as HTMLElement)
+        .getByRole("img", { name: "Completed conversation" })
+    ).toBeInTheDocument();
+    fireEvent.click(sidebar.getByRole("switch", { name: "Show completed" }));
+
+    // A late read for the previous project cannot change the selected view.
+    load.mockClear();
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    fireEvent.keyDown(window, { key: "b", metaKey: true });
+    sidebar = within(screen.getByTestId("local-chat-mini-panel"));
+    await waitFor(() => expect(load.mock.calls).toEqual([["project-test", false]]));
+    fireEvent.click(sidebar.getByRole("button", { name: "old-project" }));
+    expect(await sidebar.findByRole("button", { name: /Load local chat Cached B/ })).toBeVisible();
+    await waitFor(() =>
+      expect(load.mock.calls).toEqual([["project-test", false], ["project-old", false]])
+    );
+    const [finishLateA, finishB] = pending.splice(0);
+    await act(async () => finishB({ excludedIds: [], sessions: [] }));
+    await act(async () => finishLateA({ excludedIds: ["cached-b"], sessions: [] }));
+    expect(sidebar.getByRole("button", { name: /Load local chat Cached B/ })).toBeVisible();
+  });
+
+  it("refreshes again when a task completes while an earlier read is in flight", async () => {
+    const timestamp = "2026-01-01T00:00:00Z";
+    const association = (ticketId: string) => ({ association: { ticketId } });
+    createPersistedHistorySession("linked-a", "Linked A", "/test/project", timestamp, association("task-a") as Partial<ChatSession>);
+    createPersistedHistorySession("linked-b", "Linked B", "/test/project", timestamp, association("task-b") as Partial<ChatSession>);
+    const taskListeners: Array<(event: { payload: unknown }) => void> = [];
+    vi.mocked(events.taskChangedEvent.listen).mockImplementation((handler) => {
+      taskListeners.push(handler as (event: { payload: unknown }) => void);
+      return Promise.resolve(() => {});
+    });
+    const load = vi.mocked(commands.loadLocalChatProjectHistory);
+    const pending: Array<(data: LocalChatProjectHistory) => void> = [];
+    load.mockImplementation(
+      () => new Promise((resolve) => {
+        pending.push((data) => resolve({ status: "ok", data }));
+      })
+    );
+    useChatStore.getState().openSession("Active", "/test/project");
+
+    render(<ChatWindowManager />);
+    fireEvent.click(await screen.findByLabelText("Expand chat workspace"));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
+    await act(async () => pending.shift()!({ excludedIds: [], sessions: [] }));
+
+    const completed = (taskId: string) => ({
+      payload: { task_id: taskId, task: { completed_at: timestamp } },
+    });
+    act(() => taskListeners.forEach((listen) => listen(completed("task-a"))));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    // Task B changes after the read for task A started.
+    act(() => taskListeners.forEach((listen) => listen(completed("task-b"))));
+    await act(async () => pending.shift()!({ excludedIds: ["linked-a"], sessions: [] }));
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(3));
+    await act(async () =>
+      pending.shift()!({ excludedIds: ["linked-a", "linked-b"], sessions: [] })
+    );
+
+    const sidebar = within(screen.getByTestId("local-chat-mini-panel"));
+    await waitFor(() =>
+      expect(sidebar.queryByRole("button", { name: /Load local chat Linked B/ })).toBeNull()
+    );
   });
 
   it("renders the panel while a session lookup is pending", () => {

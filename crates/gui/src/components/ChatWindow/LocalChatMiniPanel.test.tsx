@@ -1,3 +1,4 @@
+import { StatefulMiniPanel } from "../../test/miniPanel";
 import { useState } from "react";
 import {
   fireEvent,
@@ -19,19 +20,19 @@ import {
   DEFAULT_HISTORY_WIDTH,
   MAX_HISTORY_WIDTH,
 } from "../../hooks/useChatHistoryPanelLayout";
-import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 import type { LocalChatSessionActivity } from "./LocalChatMiniPanel";
 import type { SpawnOutlineItem } from "./sessionListUtils";
 import type { ThinkingIndicatorStyle } from "../../stores/uiStore";
 
-const { completionState } = vi.hoisted(() => ({
-  completionState: { ids: new Set<string>(), tasks: new Map<string, Task>() },
+const { runMetadata } = vi.hoisted(() => ({
+  runMetadata: { tasks: new Map<string, Task>() },
 }));
 
-vi.mock("../../hooks/useLocalChatCompletedSessions", () => ({
-  useLocalChatSessionMetadata: () => ({
-    completedSessionIds: completionState.ids,
-    tasks: completionState.tasks,
+vi.mock("../../hooks/useHistoryRuns", () => ({
+  useHistoryRuns: () => ({
+    rows: [],
+    tasksById: runMetadata.tasks,
+    hiddenCompletedCount: 0,
   }),
 }));
 
@@ -115,7 +116,7 @@ function ControlledPanel({
   );
 
   return (
-    <LocalChatMiniPanel
+    <StatefulMiniPanel
       width={width}
       activeSessionId={
         activeSessionId ?? sessionGroups[0]?.sessions[0]?.id ?? "active"
@@ -155,7 +156,7 @@ function DeletingPanel() {
   ]);
 
   return (
-    <LocalChatMiniPanel
+    <StatefulMiniPanel
       width={DEFAULT_HISTORY_WIDTH}
       activeSessionId={session.id}
       activeProviderThreadId={null}
@@ -1368,128 +1369,6 @@ it("renders unassociated chats together after every ticket group", () => {
   ).toHaveLength(2);
 });
 
-describe("completed conversation filtering", () => {
-  const completed = makeSession("finished", {
-    association: { ticketId: "done-ticket" },
-  });
-
-  const open = makeSession("open", {
-    association: { ticketId: "open-ticket" },
-  });
-
-  const general = makeSession("general");
-  const groups = [
-    makeGroup("current", "Current project", [completed, open, general]),
-  ];
-
-  it("hides completed groups, preserves general chats, and toggles them back", async () => {
-    completionState.ids = new Set(["finished"]);
-
-    try {
-      render(<ControlledPanel sessionGroups={groups} />);
-
-      expect(
-        screen.queryByRole("button", { name: "done-ticket" })
-      ).not.toBeInTheDocument();
-
-      expect(
-        screen.getByRole("button", { name: /Load local chat general/ })
-      ).toBeInTheDocument();
-
-      await userEvent.click(
-        screen.getByRole("switch", { name: "Show completed" })
-      );
-
-      await userEvent.click(
-        screen.getByRole("button", { name: "done-ticket" })
-      );
-
-      expect(
-        screen.getByRole("img", { name: "Completed conversation" })
-      ).toBeInTheDocument();
-
-      await userEvent.click(
-        screen.getByRole("switch", { name: "Show completed" })
-      );
-
-      expect(
-        screen.queryByRole("img", { name: "Completed conversation" })
-      ).not.toBeInTheDocument();
-    } finally {
-      completionState.ids = new Set();
-    }
-  });
-
-  it("refreshes visibility without changing the active conversation and offers an empty recovery", async () => {
-    const onlyCompleted = [
-      makeGroup("current", "Current project", [completed]),
-    ];
-    const onSelect = vi.fn();
-
-    const view = render(
-      <ControlledPanel sessionGroups={onlyCompleted} onSelect={onSelect} />
-    );
-
-    expect(
-      screen.getByRole("button", { name: "done-ticket" })
-    ).toBeInTheDocument();
-
-    completionState.ids = new Set(["finished"]);
-
-    try {
-      view.rerender(
-        <ControlledPanel sessionGroups={onlyCompleted} onSelect={onSelect} />
-      );
-
-      expect(screen.getByRole("status")).toHaveTextContent("No active chats");
-      expect(onSelect).not.toHaveBeenCalled();
-
-      await userEvent.click(
-        screen.getByRole("button", { name: "Show completed" })
-      );
-
-      expect(
-        screen.getByRole("button", { name: "done-ticket" })
-      ).toBeInTheDocument();
-    } finally {
-      completionState.ids = new Set();
-    }
-  });
-
-  it("reveals completed work explicitly and keeps hidden rows out of keyboard navigation", async () => {
-    completionState.ids = new Set(["finished"]);
-    const onSelect = vi.fn();
-
-    try {
-      const view = render(
-        <ControlledPanel sessionGroups={groups} onSelect={onSelect} />
-      );
-
-      const search = screen.getByRole("searchbox", {
-        name: "Search local chats",
-      });
-
-      fireEvent.keyDown(search, { key: "ArrowDown" });
-
-      expect(onSelect).toHaveBeenLastCalledWith("general");
-
-      view.rerender(
-        <ControlledPanel
-          sessionGroups={groups}
-          onSelect={onSelect}
-          revealSession={{ sessionId: "finished", revision: 1 }}
-        />
-      );
-
-      expect(
-        await screen.findByRole("img", { name: "Completed conversation" })
-      ).toBeInTheDocument();
-    } finally {
-      completionState.ids = new Set();
-    }
-  });
-});
-
 describe("entity hierarchy browsing", () => {
   const row = (id: string, entity: string) =>
     makeSession(id, { association: { ticketId: entity, ticketTitle: entity } });
@@ -1526,7 +1405,7 @@ describe("entity hierarchy browsing", () => {
   it.each([false, true])(
     "nests single children and siblings without parent conversations (siblings=%s)",
     (siblings) => {
-      completionState.tasks = hierarchy();
+      runMetadata.tasks = hierarchy();
 
       const sessions = [row("child", "task")];
       if (siblings) sessions.push(row("sibling-chat", "sibling"));
@@ -1570,13 +1449,13 @@ describe("entity hierarchy browsing", () => {
           expect(siblingToggle).toBeInTheDocument();
         }
       } finally {
-        completionState.tasks = new Map();
+        runMetadata.tasks = new Map();
       }
     }
   );
 
   it("orders nested child rows before direct parent rows, navigates that order, and reveals all ancestors", async () => {
-    completionState.tasks = hierarchy();
+    runMetadata.tasks = hierarchy();
 
     const onSelect = vi.fn();
     const sessions = [
@@ -1624,87 +1503,10 @@ describe("entity hierarchy browsing", () => {
 
       expect(matchingChat).toBeInTheDocument();
     } finally {
-      completionState.tasks = new Map();
+      runMetadata.tasks = new Map();
     }
   });
 
-  it("retains completed parents around visible children and prunes empty branches on toggle", async () => {
-    completionState.tasks = hierarchy();
-    completionState.ids = new Set(["epic-chat", "ticket-chat", "sibling-chat"]);
-
-    const sessions = [
-      row("epic-chat", "epic"),
-      row("ticket-chat", "ticket"),
-      row("sibling-chat", "sibling"),
-      row("task-chat", "task"),
-      makeSession("general"),
-    ];
-    const group = makeGroup("current", "Project", sessions);
-
-    try {
-      render(<ControlledPanel sessionGroups={[group]} />);
-
-      const epicToggle = screen.getByRole("button", { name: "Epic" });
-
-      fireEvent.click(epicToggle);
-
-      const ticketToggle = screen.getByRole("button", { name: "Ticket" });
-
-      fireEvent.click(ticketToggle);
-
-      const taskToggle = screen.getByRole("button", { name: "Task" });
-
-      fireEvent.click(taskToggle);
-
-      const hiddenSibling = screen.queryByRole("button", { name: "Sibling" });
-      const visibleTask = screen.getByRole("button", {
-        name: /Load local chat task-chat/,
-      });
-
-      expect(hiddenSibling).not.toBeInTheDocument();
-      expect(visibleTask).toBeInTheDocument();
-
-      const completedToggle = screen.getByRole("switch", {
-        name: "Show completed",
-      });
-
-      await userEvent.click(completedToggle);
-
-      const siblingToggle = screen.getByRole("button", { name: "Sibling" });
-
-      fireEvent.click(siblingToggle);
-
-      const restoredRows = screen.getAllByRole("button", {
-        name: /^Load local chat/,
-      });
-      const restoredTitles = restoredRows.map((node) => node.textContent);
-
-      expect(restoredTitles).toEqual([
-        "task-chat",
-        "ticket-chat",
-        "sibling-chat",
-        "epic-chat",
-        "general",
-      ]);
-
-      await userEvent.click(completedToggle);
-
-      const removedSibling = screen.queryByRole("button", { name: "Sibling" });
-      const generalChat = screen.getByRole("button", {
-        name: /Load local chat general/,
-      });
-      const remainingTask = screen.getByRole("button", {
-        name: /Load local chat task-chat/,
-      });
-
-      expect(removedSibling).not.toBeInTheDocument();
-      expect(generalChat).toBeInTheDocument();
-      expect(remainingTask).toBeInTheDocument();
-    } finally {
-      completionState.tasks = new Map();
-      completionState.ids = new Set();
-    }
-  });
 });
 
 it("keeps a revealed conversation visible as parent metadata arrives, while allowing later collapse", async () => {
@@ -1737,7 +1539,7 @@ it("keeps a revealed conversation visible as parent metadata arrives, while allo
     level: "ticket",
   });
 
-  completionState.tasks = new Map([
+  runMetadata.tasks = new Map([
     ["task", task],
     ["parent", parent],
   ]);
@@ -1759,6 +1561,6 @@ it("keeps a revealed conversation visible as parent metadata arrives, while allo
 
     expect(parentToggle).toHaveAttribute("aria-expanded", "false");
   } finally {
-    completionState.tasks = new Map();
+    runMetadata.tasks = new Map();
   }
 });

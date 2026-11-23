@@ -8,7 +8,11 @@ use super::{
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::Path,
+};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 use vertebrae_sacrum_client::GraphqlClient;
@@ -48,6 +52,10 @@ struct Catalog {
     // Checkout identity is local and distinct from the shared ref namespace.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     anchor_checkouts: BTreeMap<String, BTreeMap<Uuid, String>>,
+    // Chats the last active-only history read hid, so a reopened sidebar
+    // filters cached rows before its next read returns.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    history_exclusions: BTreeMap<String, Vec<String>>,
 }
 
 impl Catalog {
@@ -283,7 +291,9 @@ fn projection(session: &LocalChatSessionIndexEntry) -> Value {
         "status": session.activity_status,
         "metadata": metadata,
         "task_id": association.get("ticketId"),
-        "parent_chat_id": discussion.map(|binding| &binding.parent_chat_id),
+        "parent_chat_id": discussion
+            .map(|binding| &binding.parent_chat_id)
+            .or(session.parent_chat_id.as_ref()),
         "review_thread_id": discussion.map(|binding| binding.review_thread_id),
         "gate_execution_id": session.gate.as_ref().map(|g| &g.execution_id),
         "gate_task_run_id": session.gate.as_ref().map(|g| &g.task_run_id),
@@ -312,7 +322,7 @@ pub(super) fn reset_inactive_activity(
 }
 
 /// Full recovery: read every page, merge it, then deliver pending writes.
-/// Reserved for startup, reconnect and explicit recovery.
+/// Reserved for migration and repair.
 async fn exchange(
     client: &GraphqlClient,
     project: &str,
@@ -433,6 +443,220 @@ impl CatalogAccess {
     }
 }
 
+/// Hydrate the owner-scoped disk cache without contacting Sacrum.
+pub(super) async fn hydrate_cached(
+    state: &AppState,
+    sessions: &mut Vec<LocalChatSessionIndexEntry>,
+) -> Result<(), CommandError> {
+    let Some(access) = CatalogAccess::open(state).await? else {
+        return Ok(());
+    };
+    let ownership = read_ownership(&access.root)?;
+    let Ok(scope) = scope_identity(&access.root, &access.client, &access.machine, false).await
+    else {
+        sessions.retain(|session| !ownership.contains_key(&session.id));
+        return Ok(());
+    };
+    sessions.retain(|session| {
+        ownership
+            .get(&session.id)
+            .is_none_or(|owner| owner == &scope)
+    });
+    let catalog = load(&state_path(&access.root, &scope))?;
+    for project in state.project_config.get_projects() {
+        hydrate_snapshot(&catalog, &project.project_id, &project.path, sessions);
+    }
+    Ok(())
+}
+
+fn read_ownership(root: &Path) -> Result<BTreeMap<String, String>, CommandError> {
+    match fs::read(root.join("chat-catalog-ownership.json")) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| error()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(BTreeMap::new()),
+        Err(_) => Err(error()),
+    }
+}
+
+#[derive(Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalChatProjectHistory {
+    sessions: Vec<LocalChatSessionIndexEntry>,
+    excluded_ids: Vec<String>,
+}
+
+/// Read one project's history without reconciling missing rows as deletions.
+/// `include_completed: false` hides chats linked to completed tasks.
+#[tauri::command]
+#[specta::specta]
+pub async fn load_local_chat_project_history(
+    state: tauri::State<'_, AppState>,
+    project_id: String,
+    include_completed: bool,
+) -> Result<LocalChatProjectHistory, CommandError> {
+    let project =
+        configured_project(state.project_config.get_projects(), &project_id).ok_or_else(error)?;
+    let Some(access) = CatalogAccess::open(&state).await? else {
+        return Ok(LocalChatProjectHistory {
+            sessions: vec![],
+            excluded_ids: vec![],
+        });
+    };
+    let path = access.path(true).await?;
+    let client = access.client.clone();
+    let machine = access.machine.clone();
+    let mut catalog = load(&path)?;
+    // A project revisited after an offline write should retry its outbox.
+    // Delivery is mutation-only and its failures leave the intents on disk.
+    deliver_or_log(&client, &project_id, &machine, &mut catalog, &path).await;
+    let known = catalog
+        .records(&project_id)
+        .map(|(id, _)| id.clone())
+        .collect();
+    drop(access);
+
+    let snapshot = entity::fetch_pages(
+        &client,
+        &project_id,
+        &machine,
+        EntityKind::Chat,
+        include_completed,
+    )
+    .await?;
+
+    // Let writes and CDC proceed during pagination, then merge against the
+    // latest durable revision. An omission says nothing about a new local row.
+    let access = CatalogAccess::open(&state).await?.ok_or_else(error)?;
+    if access.client.connection_identity() != client.connection_identity() {
+        return Err(error());
+    }
+    let mut catalog = load(&path)?;
+    let result = merge_history(&mut catalog, &project_id, &project.path, snapshot, &known);
+    if !include_completed {
+        catalog
+            .history_exclusions
+            .insert(project_id, result.excluded_ids.clone());
+    }
+    save(&path, &catalog)?;
+    Ok(result)
+}
+
+/// Chats the last active-only history read hid, read from disk without
+/// contacting Sacrum. Empty until the project's first history read.
+#[tauri::command]
+#[specta::specta]
+pub async fn load_cached_local_chat_project_exclusions(
+    state: tauri::State<'_, AppState>,
+    project_id: String,
+) -> Result<Vec<String>, CommandError> {
+    let Some(access) = CatalogAccess::open(&state).await? else {
+        return Ok(vec![]);
+    };
+    let Ok(path) = access.path(false).await else {
+        return Ok(vec![]);
+    };
+    Ok(load(&path)?
+        .history_exclusions
+        .remove(&project_id)
+        .unwrap_or_default())
+}
+
+/// Send every configured project's pending catalog writes after reconnect.
+/// Mutation-only: never reads a catalog snapshot.
+#[tauri::command]
+#[specta::specta]
+pub async fn deliver_local_chat_catalog_outbox(
+    state: tauri::State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let Some(access) = CatalogAccess::open(&state).await? else {
+        return Ok(());
+    };
+    let path = access.path(true).await?;
+    let mut catalog = load(&path)?;
+    for project in state.project_config.get_projects() {
+        deliver_or_log(
+            &access.client,
+            &project.project_id,
+            &access.machine,
+            &mut catalog,
+            &path,
+        )
+        .await;
+    }
+    Ok(())
+}
+
+/// Delivery failures keep their intents on disk for the next attempt.
+async fn deliver_or_log(
+    client: &GraphqlClient,
+    project: &str,
+    machine: &str,
+    catalog: &mut Catalog,
+    path: &Path,
+) {
+    if deliver(client, project, machine, catalog, path)
+        .await
+        .is_err()
+    {
+        tracing::info!(
+            pending = catalog
+                .records(project)
+                .filter(|(_, record)| record.desired.is_some())
+                .count(),
+            "chat_catalog_offline"
+        );
+    }
+}
+
+fn merge_history(
+    catalog: &mut Catalog,
+    project: &str,
+    project_path: &str,
+    snapshot: BTreeMap<EntityKey, Entry>,
+    known: &BTreeSet<EntityKey>,
+) -> LocalChatProjectHistory {
+    let present: BTreeSet<_> = snapshot.keys().cloned().collect();
+    for entry in snapshot.into_values() {
+        merge(catalog, project, entry);
+    }
+    let mut sessions = Vec::new();
+    hydrate_snapshot(catalog, project, project_path, &mut sessions);
+    let eligible: BTreeSet<_> = sessions
+        .iter()
+        .filter(|session| {
+            let id = EntityKey::chat(&session.id);
+            present.contains(&id)
+                || !known.contains(&id)
+                || catalog
+                    .record(project, &id)
+                    .is_some_and(|record| record.remote.revision == 0)
+        })
+        .map(|session| session.id.clone())
+        .collect();
+
+    let mut excluded_ids: Vec<_> = catalog
+        .records(project)
+        .filter_map(|(id, record)| match id {
+            EntityKey::Chat(chat) if record.tombstoned() => Some(chat.0.clone()),
+            _ => None,
+        })
+        .collect();
+    sessions.retain(|session| {
+        let visible = eligible.contains(&session.id)
+            && session
+                .discussion_binding
+                .as_ref()
+                .is_none_or(|discussion| eligible.contains(&discussion.parent_chat_id));
+        if !visible {
+            excluded_ids.push(session.id.clone());
+        }
+        visible
+    });
+    LocalChatProjectHistory {
+        sessions,
+        excluded_ids,
+    }
+}
+
 /// Persist pending changes before attempting network IO. A failed exchange is
 /// recoverable on the next save/load and never discards the local snapshot.
 pub(super) async fn synchronize(
@@ -458,11 +682,7 @@ pub(super) async fn synchronize(
 
     // Claim legacy sessions only within the authenticated owner scope.
     let ownership_path = root.join("chat-catalog-ownership.json");
-    let mut ownership: BTreeMap<String, String> = match fs::read(&ownership_path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| error())?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-        Err(_) => return Err(error()),
-    };
+    let mut ownership = read_ownership(root)?;
 
     sessions.retain(|s| ownership.get(&s.id).is_none_or(|owner| owner == &identity));
     for session in sessions.iter() {
@@ -716,6 +936,7 @@ fn hydrate_record(
         .unwrap_or_else(|| json!("idle"));
     value["id"] = json!(chat_id);
     value["projectPath"] = json!(project_path);
+    value["parentChatId"] = payload["parent_chat_id"].clone();
     let sidecar = catalog.sidecars.get(id);
     value["steeringTurnIds"] = json!(previous
         .and_then(|session| session.steering_turn_ids.as_ref())
@@ -1656,6 +1877,111 @@ mod tests {
         );
         assert_eq!(load(&path).unwrap().records("project").count(), 3);
         server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn project_history_filters_only_its_projection_and_follows_chat_cursors() {
+        let server = MockServer::start().await;
+        Mock::given(matchers::method("POST"))
+            .respond_with(|request: &wiremock::Request| {
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                assert!(body["query"]
+                    .as_str()
+                    .unwrap()
+                    .contains("includeCompleted:false"));
+                assert_eq!(body["variables"]["p"], "selected-project");
+                let (id, payload, cursor) = match body["variables"]["after"].as_str() {
+                    None => ("general", payload(1), Some("general")),
+                    Some("general") => {
+                        let mut discussion = payload(2);
+                        discussion["metadata"]["kind"] = json!("discussion");
+                        discussion["parent_chat_id"] = json!("completed");
+                        discussion["review_thread_id"] = json!(Uuid::new_v4());
+                        ("discussion", discussion, None)
+                    }
+                    _ => panic!("unexpected cursor"),
+                };
+                ResponseTemplate::new(200).set_body_json(json!({
+                    "data": {"chatCatalog": {
+                        "entries": [{"chatId": id, "revision": 1, "payload": payload}],
+                        "nextCursor": cursor
+                    }}
+                }))
+            })
+            .expect(2)
+            .mount(&server)
+            .await;
+
+        let client = GraphqlClient::new(SacrumConfig {
+            base_url: server.uri(),
+            api_token: "fixture".into(),
+            project_id: "different-project".into(),
+        });
+        let project = "selected-project";
+        let mut catalog = Catalog::default();
+        let mut completed = payload(3);
+        completed["task_id"] = json!(Uuid::new_v4());
+        merge(
+            &mut catalog,
+            project,
+            Entry {
+                id: EntityKey::chat("completed"),
+                revision: 1,
+                payload: completed.clone(),
+            },
+        );
+        enqueue(&mut catalog, project, "pending", payload(4));
+
+        let snapshot = entity::fetch_pages(&client, project, "machine", EntityKind::Chat, false)
+            .await
+            .unwrap();
+        let known = catalog.records(project).map(|(id, _)| id.clone()).collect();
+        merge(
+            &mut catalog,
+            project,
+            Entry {
+                id: EntityKey::chat("incremental"),
+                revision: 2,
+                payload: payload(5),
+            },
+        );
+        let history = merge_history(&mut catalog, project, "/repo", snapshot, &known);
+        assert_eq!(
+            history
+                .sessions
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            ["general", "incremental", "pending"]
+        );
+        assert_eq!(history.excluded_ids, ["completed", "discussion"]);
+        assert_eq!(
+            catalog.chat(project, "completed").unwrap().visible(),
+            &completed
+        );
+        assert!(catalog.chat(project, "pending").unwrap().desired.is_some());
+        assert!(catalog.chat(project, "discussion").is_some());
+        server.verify().await;
+    }
+
+    #[test]
+    fn history_exclusions_persist_and_older_catalogs_decode_without_them() {
+        let mut catalog = Catalog::default();
+        let older = storage::encode(&catalog).unwrap();
+        assert!(!String::from_utf8_lossy(&older).contains("history_exclusions"));
+        assert!(storage::decode(&older)
+            .unwrap()
+            .history_exclusions
+            .is_empty());
+
+        catalog
+            .history_exclusions
+            .insert("project".into(), vec!["completed".into()]);
+        let decoded = storage::decode(&storage::encode(&catalog).unwrap()).unwrap();
+        assert_eq!(
+            decoded.history_exclusions.get("project").unwrap(),
+            &["completed"]
+        );
     }
 
     #[tokio::test]

@@ -7,6 +7,12 @@ const mocks = vi.hoisted(() => ({
   generation: 1,
   handlers: new Map<string, (event: { payload: unknown }) => void>(),
   unlisten: vi.fn(),
+  deliver: vi.fn(),
+}));
+
+vi.mock("../bindings", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../bindings")>()),
+  commands: { deliverLocalChatCatalogOutbox: mocks.deliver },
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -39,33 +45,36 @@ describe("chat catalog recovery", () => {
     mocks.generation = 1;
     mocks.handlers.clear();
     mocks.refresh.mockResolvedValue(undefined);
+    mocks.deliver.mockResolvedValue({ status: "ok", data: null });
   });
 
-  it("recovers on mount, reconnect and an explicit fallback invalidation", async () => {
+  it("waits for explicit fallback invalidation before reading recovery snapshots", async () => {
     renderHook(useChatCatalogSync);
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
-
-    act(() =>
-      mocks.handlers.get("websocket-state-changed")!({
-        payload: "disconnected",
-      })
-    );
-    expect(mocks.refresh).toHaveBeenCalledTimes(1);
-
-    act(() =>
-      mocks.handlers.get("websocket-state-changed")!({ payload: "connected" })
-    );
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(2));
+    expect(mocks.refresh).not.toHaveBeenCalled();
 
     act(() => mocks.handlers.get("chat-catalog-changed")!({ payload: "" }));
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
 
     act(() =>
       mocks.handlers.get("review-thread-catalog-recovery-needed")!({
         payload: { projectId: "project" },
       })
     );
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(2));
+  });
+
+  it("delivers the outbox on startup and reconnect without a recovery read", async () => {
+    renderHook(useChatCatalogSync);
+    await waitFor(() => expect(mocks.deliver).toHaveBeenCalledTimes(1));
+
+    act(() =>
+      mocks.handlers.get("websocket-state-changed")!({ payload: "disconnected" })
+    );
+    act(() =>
+      mocks.handlers.get("websocket-state-changed")!({ payload: "connected" })
+    );
+    await waitFor(() => expect(mocks.deliver).toHaveBeenCalledTimes(2));
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
 
   it("coalesces duplicate events but reads again after an in-flight snapshot", async () => {
@@ -92,6 +101,7 @@ describe("chat catalog recovery", () => {
 
   it("retires an old scope and in-flight response on project change or unmount", async () => {
     const { rerender, unmount } = renderHook(useChatCatalogSync);
+    act(() => mocks.handlers.get("chat-catalog-changed")!({ payload: "" }));
     const oldGuard = mocks.refresh.mock.calls[0][0] as () => boolean;
     expect(oldGuard()).toBe(true);
 
@@ -99,6 +109,7 @@ describe("chat catalog recovery", () => {
     rerender();
     expect(oldGuard()).toBe(false);
 
+    act(() => mocks.handlers.get("chat-catalog-changed")!({ payload: "" }));
     const newGuard = mocks.refresh.mock.calls.at(-1)![0] as () => boolean;
     expect(newGuard()).toBe(true);
 
@@ -112,6 +123,7 @@ describe("chat catalog recovery", () => {
     mocks.refresh.mockRejectedValueOnce(new Error("secret transcript"));
 
     renderHook(useChatCatalogSync);
+    act(() => mocks.handlers.get("chat-catalog-changed")!({ payload: "" }));
     await waitFor(() =>
       expect(warning).toHaveBeenCalledWith("[ChatCatalogSync] recovery_failed")
     );
@@ -124,7 +136,6 @@ describe("chat catalog recovery", () => {
 
   it("applies CDC entries incrementally without any full recovery", async () => {
     renderHook(useChatCatalogSync);
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
 
     const session = { id: "chat", label: "Remote" };
     act(() => {
@@ -141,7 +152,7 @@ describe("chat catalog recovery", () => {
     expect(mocks.apply).toHaveBeenCalledTimes(51);
     expect(mocks.apply).toHaveBeenCalledWith("chat", session);
     expect(mocks.apply).toHaveBeenLastCalledWith("gone", null);
-    expect(mocks.refresh).toHaveBeenCalledTimes(1);
+    expect(mocks.refresh).not.toHaveBeenCalled();
   });
 
   it("ignores CDC entries delivered to a retired project scope", async () => {

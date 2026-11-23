@@ -1155,11 +1155,59 @@ async inferLocalChatSessionTitle(input: InferLocalChatSessionTitleInput) : Promi
 }
 },
 /**
- * Load the app-managed local chat metadata index.
+ * Load the app-managed local chat metadata index from local state only.
  */
 async loadLocalChatSessionIndex() : Promise<Result<LocalChatSessionIndexEntry[], CommandError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("load_local_chat_session_index") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reload the index after a full catalog recovery. Reserved for migration and
+ * repair; ordinary loads use [`load_local_chat_session_index`].
+ */
+async recoverLocalChatSessionIndex() : Promise<Result<LocalChatSessionIndexEntry[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("recover_local_chat_session_index") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Read one project's history without reconciling missing rows as deletions.
+ * `include_completed: false` hides chats linked to completed tasks.
+ */
+async loadLocalChatProjectHistory(projectId: string, includeCompleted: boolean) : Promise<Result<LocalChatProjectHistory, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_project_history", { projectId, includeCompleted }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Chats the last active-only history read hid, read from disk without
+ * contacting Sacrum. Empty until the project's first history read.
+ */
+async loadCachedLocalChatProjectExclusions(projectId: string) : Promise<Result<string[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_cached_local_chat_project_exclusions", { projectId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Send every configured project's pending catalog writes after reconnect.
+ * Mutation-only: never reads a catalog snapshot.
+ */
+async deliverLocalChatCatalogOutbox() : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("deliver_local_chat_catalog_outbox") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2595,6 +2643,7 @@ export type LocalChatHarnessKind = "claude" | "codex"
 export type LocalChatModelOption = { id: string; label: string; supported_reasoning_effort_ids?: string[] | null; supported_speed_tier_ids?: string[] | null; supports_personality?: boolean | null }
 export type LocalChatPermissionModeOption = { id: PermissionMode; label: string; is_default?: boolean }
 export type LocalChatPersonalityOption = { id: string; label: string; is_default?: boolean }
+export type LocalChatProjectHistory = { sessions: LocalChatSessionIndexEntry[]; excludedIds: string[] }
 /**
  * A provider choice in the local chat picker. Built-in providers reuse their
  * harness's model catalog; custom providers list exactly their configured
@@ -2626,7 +2675,7 @@ steeringTurnIds?: Partial<{ [key in string]: string }> | null;
 /**
  * Provider lineage used to group history without opening conversations.
  */
-providerParentResumeId?: string | null; threadTotalTokens: number | null; messageCount: number; hasUserMessage?: boolean | null; lifecycle: string; status: string;
+providerParentResumeId?: string | null; parentChatId?: string | null; threadTotalTokens: number | null; messageCount: number; hasUserMessage?: boolean | null; lifecycle: string; status: string;
 /**
  * Waiting `human_input` gate the chat resolves; Resolve reopens the chat
  * bound to the same run and step.

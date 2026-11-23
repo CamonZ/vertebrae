@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   buildSpawnOutline,
   buildHistoryChildOutlines,
+  mergeChildOutlineGroups,
   isAgentSpawnTool,
   parseToolInput,
   stringValue,
@@ -506,6 +507,12 @@ describe("history child lineage", () => {
         providerParentResumeId: "c",
       }),
       makeSummary({
+        id: "catalog-only",
+        title: "Catalog child",
+        parentChatId: "root",
+        providerResumeId: null,
+      }),
+      makeSummary({
         id: "orphan",
         harness: "codex",
         providerResumeId: "o",
@@ -536,9 +543,27 @@ describe("history child lineage", () => {
     ).toEqual([
       ["c", 0],
       ["n", 1],
+      [undefined, 0],
     ]);
+    expect(outlines.get("root")?.find((row) => row.sessionId === "catalog-only"))
+      .toMatchObject({ label: "Catalog child", depth: 0 });
     expect(outlines.get("child")?.map((row) => row.threadId)).toEqual(["n"]);
     for (const id of ["orphan", "cycle1", "cycle2", "other-provider"])
       expect(outlines.get(id)).toEqual([]);
   });
+});
+
+
+it("merges catalog descendants into their matching discovered branch", () => {
+  const row = (id: string, depth: number) => ({
+    id, depth, spawnId: id, threadId: id, label: id, detail: "",
+  });
+  const groups = mergeChildOutlineGroups(
+    [row("first", 0), row("second", 0)],
+    [row("first", 0), row("nested", 1)]
+  );
+  expect(groups.map((group) => group.map(({ id, depth }) => [id, depth]))).toEqual([
+    [["first", 0], ["nested", 1]],
+    [["second", 0]],
+  ]);
 });

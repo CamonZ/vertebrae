@@ -1,3 +1,4 @@
+import { StatefulMiniPanel } from "../../test/miniPanel";
 import { act, render, within } from "@testing-library/react";
 import { expect, test, vi } from "vitest";
 import * as hegel from "@hegeldev/hegel";
@@ -16,7 +17,6 @@ import {
   createMockTaskRun,
   createMockTaskRunControls,
 } from "../../test/test-utils";
-import { LocalChatMiniPanel } from "./LocalChatMiniPanel";
 
 // Keep the real task query, history hook, grouping, and run-row renderer.
 vi.mock("../../bindings", async (original) => {
@@ -31,12 +31,6 @@ vi.mock("../../bindings", async (original) => {
     },
   };
 });
-vi.mock("../../hooks/useLocalChatCompletedSessions", () => ({
-  useLocalChatSessionMetadata: () => ({
-    tasks: new Map(),
-    completedSessionIds: new Set(),
-  }),
-}));
 vi.mock("../../hooks", () => ({ useRunTrace: vi.fn() }));
 
 const ACTIVE = ["queued", "executing", "waiting", "stopping"] as const;
@@ -175,7 +169,7 @@ test("generated lifecycle sequences keep the latest active run of every open ent
         onDelete: vi.fn(),
         onSelectRun: vi.fn(),
       };
-      const view = render(<LocalChatMiniPanel {...props} />);
+      const view = render(<StatefulMiniPanel {...props} />);
       const check = async () => {
         // Query observers batch notifications onto the next timer turn.
         // Flushing only promises can compare the model to the previous frame.
@@ -184,7 +178,7 @@ test("generated lifecycle sequences keep the latest active run of every open ent
         });
         // Force a render as well as flushing cache notifications, without
         // remounting the sidebar or resetting its accordion/filter preferences.
-        view.rerender(<LocalChatMiniPanel {...props} />);
+        view.rerender(<StatefulMiniPanel {...props} />);
         const visible = [
           ...view.container.querySelectorAll<HTMLElement>("[data-run-id]"),
         ];

@@ -254,8 +254,13 @@ impl EntityKind {
         }
     }
 
-    fn snapshot_query(self) -> &'static str {
+    fn snapshot_query(self, include_completed: bool) -> &'static str {
         match self {
+            Self::Chat if !include_completed => concat!(
+                "query ChatCatalog($p:Uuid4!,$m:Uuid4!,$after:String){",
+                "chatCatalog(projectId:$p,installationId:$m,after:$after,limit:100,includeCompleted:false){",
+                "entries{id:chatId revision payload} nextCursor}}"
+            ),
             Self::Chat => concat!(
                 "query ChatCatalog($p:Uuid4!,$m:Uuid4!,$after:String){",
                 "chatCatalog(projectId:$p,installationId:$m,after:$after,limit:100,includeCompleted:true){",
@@ -301,10 +306,20 @@ pub(super) async fn fetch_snapshot(
     machine: &str,
     kind: EntityKind,
 ) -> Result<BTreeMap<EntityKey, Entry>, CommandError> {
+    fetch_pages(client, project, machine, kind, true).await
+}
+
+pub(super) async fn fetch_pages(
+    client: &GraphqlClient,
+    project: &str,
+    machine: &str,
+    kind: EntityKind,
+    include_completed: bool,
+) -> Result<BTreeMap<EntityKey, Entry>, CommandError> {
     let mut snapshot = BTreeMap::new();
     let mut seen_cursors = BTreeSet::new();
     let mut after: Option<String> = None;
-    let query = kind.snapshot_query();
+    let query = kind.snapshot_query(include_completed);
 
     loop {
         let page: Page = client

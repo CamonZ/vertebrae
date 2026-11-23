@@ -47,17 +47,20 @@ type LocalChatSessionIndexEntry = LocalChatSessionSummary & {
   discussionBinding?: LocalChatDiscussionBinding;
 };
 
+type LoadLocalChatSessionIndex = () => Promise<
+  | {
+      status: "ok";
+      data: unknown[];
+    }
+  | {
+      status: "error";
+      error: unknown;
+    }
+>;
+
 type LocalChatSessionIndexCommands = typeof commands & {
-  loadLocalChatSessionIndex?: () => Promise<
-    | {
-        status: "ok";
-        data: unknown[];
-      }
-    | {
-        status: "error";
-        error: unknown;
-      }
-  >;
+  loadLocalChatSessionIndex?: LoadLocalChatSessionIndex;
+  recoverLocalChatSessionIndex?: LoadLocalChatSessionIndex;
   saveLocalChatSessionIndex?: (input: {
     sessions: LocalChatSessionIndexEntry[];
     deletedIds?: string[];
@@ -152,6 +155,7 @@ export interface LocalChatSessionSummary {
   projectPath: string | null;
   providerResumeId: string | null;
   providerParentResumeId?: string | null;
+  parentChatId?: string | null;
   threadTotalTokens?: number;
   messageCount: number;
   /** Whether the user has sent at least one message in this session. */
@@ -283,6 +287,7 @@ export function normalizeLocalChatSession(value: unknown): ChatSession | null {
     backendSessionId: null,
     providerResumeId,
     steeringTurnIds: candidate.steeringTurnIds ?? undefined,
+    parentChatId: typeof candidate.parentChatId === "string" ? candidate.parentChatId : null,
     providerParentResumeId:
       typeof candidate.providerParentResumeId === "string"
         ? candidate.providerParentResumeId
@@ -495,6 +500,7 @@ function serializeSession(
     providerId: session.providerId ?? null,
     backendSessionId: null,
     providerParentResumeId: session.providerParentResumeId ?? null,
+    parentChatId: session.parentChatId ?? null,
     providerResumeId: session.providerResumeId ?? null,
     threadTotalTokens: session.threadTotalTokens,
     projectPath: session.projectPath ?? null,
@@ -550,6 +556,7 @@ function toIndexEntry(session: ChatSession): LocalChatSessionIndexEntry {
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
     projectPath: session.projectPath ?? null,
     providerParentResumeId: session.providerParentResumeId ?? null,
+    parentChatId: session.parentChatId ?? null,
     providerResumeId: session.providerResumeId ?? null,
     threadTotalTokens: session.threadTotalTokens,
     messageCount:
@@ -704,12 +711,11 @@ async function flushIndexSaveQueue(): Promise<boolean> {
   return succeeded;
 }
 
-async function loadSessionIndexFromCommand(): Promise<Record<
-  string,
-  ChatSession
-> | null> {
-  const indexCommands = commands as LocalChatSessionIndexCommands;
-  const load = indexCommands.loadLocalChatSessionIndex;
+/** Recovery runs the full catalog read; ordinary loads read local state. */
+async function loadSessionIndexFromCommand(
+  command: "loadLocalChatSessionIndex" | "recoverLocalChatSessionIndex"
+): Promise<Record<string, ChatSession> | null> {
+  const load = (commands as LocalChatSessionIndexCommands)[command];
   if (!load) return {};
   try {
     const result = await load();
@@ -739,7 +745,7 @@ async function loadSessionIndexFromCommand(): Promise<Record<
 async function hydrateSessionIndexCache(): Promise<boolean> {
   if (sessionIndexHydrated) return true;
   if (!sessionIndexHydratePromise) {
-    sessionIndexHydratePromise = loadSessionIndexFromCommand()
+    sessionIndexHydratePromise = loadSessionIndexFromCommand("loadLocalChatSessionIndex")
       .then((loaded) => {
         if (loaded === null) return false;
         const merged = Object.fromEntries(
@@ -784,7 +790,7 @@ export async function refreshLocalChatSessionIndex(
   }
 
   const before = { ...sessionIndexCache };
-  const loaded = await loadSessionIndexFromCommand();
+  const loaded = await loadSessionIndexFromCommand("recoverLocalChatSessionIndex");
   if (!isCurrent() || loaded === null) {
     return null;
   }
@@ -882,6 +888,7 @@ export function summarizeLocalChatSession(
     updatedAt: session.updatedAt ?? session.createdAt ?? FALLBACK_TIMESTAMP,
     projectPath: session.projectPath ?? null,
     providerParentResumeId: session.providerParentResumeId ?? null,
+    parentChatId: session.parentChatId ?? null,
     providerResumeId: session.providerResumeId,
     threadTotalTokens: session.threadTotalTokens,
     messageCount:

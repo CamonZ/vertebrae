@@ -475,8 +475,11 @@ describe("localChatPersistence", () => {
   it("reconciles remote removal while preserving an edit and deletion racing refresh", async () => {
     vi.resetModules();
     const { commands: freshCommands } = await import("../bindings");
-    const load = vi.spyOn(freshCommands, "loadLocalChatSessionIndex");
-    load.mockResolvedValue({ status: "ok", data: [] });
+    vi.spyOn(freshCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
+    const load = vi.spyOn(freshCommands, "recoverLocalChatSessionIndex");
     vi.spyOn(freshCommands, "saveLocalChatSessionIndex").mockResolvedValue({
       status: "ok",
       data: null,
@@ -490,7 +493,7 @@ describe("localChatPersistence", () => {
     );
 
     let deliver!: (
-      value: Awaited<ReturnType<typeof freshCommands.loadLocalChatSessionIndex>>
+      value: Awaited<ReturnType<typeof freshCommands.recoverLocalChatSessionIndex>>
     ) => void;
     load.mockImplementationOnce(
       () =>
@@ -529,9 +532,11 @@ describe("localChatPersistence", () => {
   it("drops a snapshot whose project scope retired during the read", async () => {
     vi.resetModules();
     const { commands: freshCommands } = await import("../bindings");
-    const load = vi
-      .spyOn(freshCommands, "loadLocalChatSessionIndex")
-      .mockResolvedValue({ status: "ok", data: [] });
+    const load = vi.spyOn(freshCommands, "recoverLocalChatSessionIndex");
+    vi.spyOn(freshCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "ok",
+      data: [],
+    });
     const persistence = await import("./localChatPersistence");
     await persistence.hydrateLocalChatSessionIndex();
 

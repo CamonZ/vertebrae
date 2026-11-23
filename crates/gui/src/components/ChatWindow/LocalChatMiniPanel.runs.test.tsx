@@ -1,3 +1,4 @@
+import { StatefulMiniPanel } from "../../test/miniPanel";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
@@ -26,12 +27,6 @@ const mocks = vi.hoisted(() => ({
   retry: vi.fn(),
 }));
 
-vi.mock("../../hooks/useLocalChatCompletedSessions", () => ({
-  useLocalChatSessionMetadata: () => ({
-    completedSessionIds: new Set<string>(),
-    tasks: new Map<string, Task>(),
-  }),
-}));
 
 vi.mock("../../hooks/useHistoryRuns", () => ({
   useHistoryRuns: ({ enabled }: { enabled: boolean }) => {
@@ -112,7 +107,7 @@ function renderPanel(
     onSelectRunStep: vi.fn(),
     ...overrides,
   };
-  render(<LocalChatMiniPanel {...props} />);
+  render(<StatefulMiniPanel {...props} />);
   return props;
 }
 

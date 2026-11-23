@@ -6,6 +6,7 @@ export const LOCAL_CHAT_SCROLL_TO_SPAWN_EVENT = "local-chat-scroll-to-spawn";
 
 export type SpawnOutlineItem = {
   parentThreadId?: string;
+  sessionId?: string;
   id: string;
   spawnId: string;
   threadId?: string;
@@ -396,23 +397,21 @@ export function buildHistoryChildOutlines(
       .map((s) => [`${s.harness}:${s.providerResumeId}`, s])
   );
 
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const parentOf = (session: LocalChatSessionSummary) =>
+    (session.parentChatId ? byId.get(session.parentChatId) : undefined) ??
+    byThread.get(`${session.harness}:${session.providerParentResumeId}`);
   const children = new Map<string, LocalChatSessionSummary[]>();
 
   for (const session of sessions) {
-    if (!session.providerParentResumeId || !session.providerResumeId) continue;
-
-    const parent = byThread.get(
-      `${session.harness}:${session.providerParentResumeId}`
-    );
-    if (!parent || parent.id === session.id) continue;
+    const parent = parentOf(session);
+    if (!parent) continue;
 
     const seen = new Set([session.id]);
     let ancestor: LocalChatSessionSummary | undefined = parent;
     while (ancestor && !seen.has(ancestor.id)) {
       seen.add(ancestor.id);
-      ancestor = byThread.get(
-        `${ancestor.harness}:${ancestor.providerParentResumeId}`
-      );
+      ancestor = parentOf(ancestor);
     }
     if (ancestor) continue;
 
@@ -430,9 +429,10 @@ export function buildHistoryChildOutlines(
       a.createdAt.localeCompare(b.createdAt)
     )) {
       rows.push({
-        id: `${child.harness}:${child.providerResumeId}`,
-        spawnId: child.providerResumeId!,
-        threadId: child.providerResumeId!,
+        id: child.id,
+        sessionId: child.id,
+        spawnId: child.providerResumeId ?? child.id,
+        threadId: child.providerResumeId ?? undefined,
         label: child.title || child.label,
         detail: "",
         depth: 0,
@@ -447,4 +447,94 @@ export function buildHistoryChildOutlines(
   for (const session of sessions) result.set(session.id, visit(session.id));
 
   return result;
+}
+
+/** Merge live discovery with persisted lineage without moving a child to a sibling branch. */
+export function mergeChildOutlineGroups(
+  discovered: SpawnOutlineItem[],
+  history: SpawnOutlineItem[]
+): SpawnOutlineItem[][] {
+  type Node = { row: SpawnOutlineItem; children: Node[] };
+  const roots: Node[] = [];
+  for (const outline of [discovered, history]) {
+    const ancestors: Node[] = [];
+    for (const row of outline) {
+      const depth = Math.min(row.depth ?? 0, ancestors.length);
+      const siblings = ancestors[depth - 1]?.children ?? roots;
+      let node = siblings.find(
+        ({ row: existing }) =>
+          existing.id === row.id ||
+          (!!row.threadId && row.threadId === existing.threadId)
+      );
+      if (!node) {
+        node = { row, children: [] };
+        siblings.push(node);
+      }
+      ancestors.splice(depth, ancestors.length - depth, node);
+    }
+  }
+
+  const flatten = (node: Node, depth: number): SpawnOutlineItem[] => [
+    { ...node.row, depth },
+    ...node.children.flatMap((child) => flatten(child, depth + 1)),
+  ];
+  return roots.map((root) => flatten(root, 0));
+}
+
+/**
+ * One open session's child outline: live discovery merged with persisted
+ * lineage, plus transcript spawns neither source knows, in transcript order.
+ * Rows under a hidden thread stay hidden with it.
+ */
+export function buildSessionChildOutline(
+  session: {
+    harness: string;
+    providerResumeId: string | null;
+    messages: readonly ChatMessage[];
+  },
+  discovered: readonly SpawnOutlineItem[],
+  history: SpawnOutlineItem[],
+  hiddenThreads: ReadonlySet<string>
+): SpawnOutlineItem[] {
+  const hidden = (id?: string) =>
+    !!id && hiddenThreads.has(`${session.harness}:${id}`);
+  const blocked = new Set<string>();
+  const visibleDiscovered = discovered.filter((row) => {
+    if (
+      !hidden(row.threadId) &&
+      (!row.parentThreadId || !blocked.has(row.parentThreadId))
+    )
+      return true;
+    if (row.threadId) blocked.add(row.threadId);
+    return false;
+  });
+  // Discovery works even when the spawn is outside the loaded parent page.
+  const groups = mergeChildOutlineGroups(visibleDiscovered, history);
+  const childRows = groups.flat();
+
+  for (const row of buildSpawnOutline(session.messages)) {
+    if (row.threadId === session.providerResumeId || hidden(row.threadId))
+      continue;
+    if (
+      !childRows.some(
+        (child) =>
+          (row.threadId && row.threadId === child.threadId) ||
+          row.spawnId === child.spawnId
+      )
+    )
+      groups.push([row]);
+  }
+
+  const positions = new Map(
+    session.messages.flatMap((message, index) =>
+      message.kind === "tool_call" ? [[message.toolId, index] as const] : []
+    )
+  );
+  const position = (row: SpawnOutlineItem) =>
+    positions.get(row.spawnId) ??
+    (row.id.startsWith("local-chat-") ? Number.MAX_SAFE_INTEGER : -1);
+
+  return groups
+    .sort((left, right) => position(left[0]) - position(right[0]))
+    .flat();
 }

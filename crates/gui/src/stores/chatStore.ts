@@ -491,6 +491,7 @@ export interface ChatSession {
   /** Provider-specific durable resume ID for this conversation. */
   providerResumeId: string | null;
   providerParentResumeId?: string | null;
+  parentChatId?: string | null;
   /** Project root captured when the local chat session was opened. */
   projectPath?: string | null;
   /** User-selected provider model alias for session startup overrides. */
@@ -705,6 +706,7 @@ interface ChatStoreActions {
   refreshLocalSessionIndex: (isCurrent: () => boolean) => Promise<void>;
   /** Apply one durably merged catalog CDC entry without a full recovery. */
   applyCatalogEntry: (sessionId: string, session: unknown | null) => void;
+  applyCatalogEntries: (entries: ReadonlyArray<{ id: string; session: unknown }>) => void;
   /** Hydrate and focus a persisted local chat session */
   selectPersistedSession: (
     sessionId: string,
@@ -2540,36 +2542,40 @@ export const useChatStore = create<ChatStore>((set, get) => {
       });
     },
 
-    applyCatalogEntry: (sessionId, raw) => {
-      const remote = applyRemoteLocalChatSession(sessionId, raw);
-      if (remote === undefined) return;
+    applyCatalogEntry: (sessionId, session) => {
+      get().applyCatalogEntries([{ id: sessionId, session }]);
+    },
+
+    applyCatalogEntries: (entries) => {
+      const updates = entries.flatMap(({ id, session }) => {
+        const remote = applyRemoteLocalChatSession(id, session);
+        return remote === undefined ? [] : [{ id, remote }];
+      });
+      if (!updates.length) return;
 
       set((state) => {
-        const existing = state.sessions[sessionId];
-        if (remote === null) {
-          const localSessionSummaries = omitLocalSessionSummary(
-            state.localSessionSummaries,
-            sessionId
-          );
-          if (!existing || existing.backendSessionId || existing.discussion) {
-            return { localSessionSummaries };
-          }
-          const sessions = { ...state.sessions };
-          delete sessions[sessionId];
-          return { sessions, localSessionSummaries };
-        }
+        // Copy `sessions` only when a session changes so summary-only
+        // updates do not re-render every session subscriber.
+        let sessions: Record<string, ChatSession> | null = null;
+        const localSessionSummaries = { ...state.localSessionSummaries };
 
-        const summary = localSessionSummaryFor(remote);
-        const localSessionSummaries = summary
-          ? { ...state.localSessionSummaries, [sessionId]: summary }
-          : omitLocalSessionSummary(state.localSessionSummaries, sessionId);
-        return {
-          sessions: {
-            ...state.sessions,
-            [sessionId]: mergeRemoteSession(existing, remote),
-          },
-          localSessionSummaries,
-        };
+        for (const { id, remote } of updates) {
+          const existing = (sessions ?? state.sessions)[id];
+          const summary = remote ? localSessionSummaryFor(remote) : null;
+          if (summary) localSessionSummaries[id] = summary;
+          else delete localSessionSummaries[id];
+
+          if (remote) {
+            sessions ??= { ...state.sessions };
+            sessions[id] = mergeRemoteSession(existing, remote);
+          } else if (existing && !existing.backendSessionId && !existing.discussion) {
+            sessions ??= { ...state.sessions };
+            delete sessions[id];
+          }
+        }
+        return sessions
+          ? { sessions, localSessionSummaries }
+          : { localSessionSummaries };
       });
     },
 
