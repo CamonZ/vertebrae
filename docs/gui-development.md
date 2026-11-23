@@ -26,9 +26,15 @@ in the checkout with the same app home and backend connection.
 Quit the app or interrupt the foreground command, then run
 `scripts/gui-macos.sh stop` with the same context to remove the backend
 containers and keep the database. The launcher stores the app home under
-`test-output/macos-gui-home` in that checkout. Run provider sign-in commands
-through the launcher's shell to use that environment. The host development
-port 1420 must be available.
+`test-output/macos-gui-home` in that checkout, and Codex's home under
+`/tmp/vtb-codex-<key>`, so Claude and Codex sign-ins and history stay apart
+from yours. Run provider sign-in commands through the launcher's shell to use
+that environment. To reuse your own Claude and Codex logins instead, start with
+`scripts/gui-macos.sh start --use-host-logins`. This links your login
+Keychain, `~/.claude`, `~/.claude.json` and `~/.local/bin` into the app home
+and uses `~/.codex`, so the app's Claude and Codex chats also land in your own
+history. The next start without the flag removes those links. The host
+development port 1420 must be available.
 
 For Linux GUI acceptance, see
 [GUI-managed Docker smoke tests](testing.md#gui-managed-docker-smoke-tests).
