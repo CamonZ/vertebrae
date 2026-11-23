@@ -169,4 +169,75 @@ describe("formatElapsed", () => {
     [3_720_000, "1h 02m"],
     [-5_000, "0s"],
   ])("%d ms → %s", (ms, text) => expect(formatElapsed(ms)).toBe(text));
+
+});
+
+describe("BackgroundActivityPanel list keys", () => {
+  it("walks one list with ↑/↓, shows output with ↵ and copies the command with ⌘C", () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <BackgroundActivityPanel
+        work={state(
+          { workId: "dev", description: "npm run dev", progress: "ready on :1420" },
+          { workId: "lint", description: "npm run lint", progress: "checking" }
+        )}
+      />
+    );
+    const section = screen.getByRole("region", { name: "Background tasks" });
+    const [first, second] = screen.getAllByTestId("background-activity-row");
+
+    act(() => section.focus());
+    fireEvent.keyDown(section, { key: "ArrowDown" });
+    expect(first).toHaveFocus();
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "ArrowDown" });
+    expect(second).toHaveFocus();
+    fireEvent.keyDown(second, { key: "ArrowUp" });
+    expect(first).toHaveFocus();
+
+    expect(first).toHaveAttribute("aria-expanded", "false");
+    fireEvent.keyDown(first, { key: "Enter" });
+    expect(first).toHaveAttribute("aria-expanded", "true");
+    fireEvent.keyDown(first, { key: "Enter" });
+    expect(first).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.keyDown(first, { key: "c", code: "KeyC", metaKey: true });
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(first).toHaveTextContent(writeText.mock.calls[0][0]);
+  });
+
+  it("offers only what a row has: no output to show, no command to copy", () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <BackgroundActivityPanel
+        work={state(
+          { workId: "quiet", description: "npm run build" },
+          { workId: "internal-id", progress: "working" }
+        )}
+      />
+    );
+    const [quiet, unnamed] = screen.getAllByRole("button", {
+      name: /npm run build|internal-id/,
+    });
+
+    expect(quiet.tagName).toBe("BUTTON");
+    expect(quiet).not.toHaveAttribute("aria-expanded");
+    expect(quiet).toHaveAttribute("aria-keyshortcuts", "Meta+C");
+    expect(quiet.title).not.toContain("output");
+    fireEvent.keyDown(quiet, { key: "Enter" });
+    expect(quiet).not.toHaveAttribute("aria-expanded");
+
+    expect(unnamed).toHaveAttribute("aria-keyshortcuts", "Enter");
+    fireEvent.keyDown(unnamed, { key: "c", code: "KeyC", metaKey: true });
+    expect(writeText).not.toHaveBeenCalled();
+  });
 });

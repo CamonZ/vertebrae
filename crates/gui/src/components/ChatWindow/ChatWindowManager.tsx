@@ -32,7 +32,7 @@ import {
   type LocalChatSessionGroup,
 } from "../../utils/localChatSessionGroups";
 import { normalizeProjectPath } from "../../utils/localChatPersistence";
-import { ChatPaneList } from "./ChatPaneList";
+import { ChatPaneList, type SideColumnControls } from "./ChatPaneList";
 import { ChatTabStrip } from "./ChatTabStrip";
 import { chatsNeedingYou, useChatTabs } from "./useChatTabs";
 import { ChatResizeHandle } from "./ChatResizeHandle";
@@ -726,14 +726,16 @@ export function ChatWindowManager({
     bindPaneToSession,
   ]);
 
-  const changesToggles = useRef(new Map<string, () => void>());
-  const registerChangesToggle = useCallback(
-    (paneId: string, toggle: (() => void) | null) => {
-      if (toggle) changesToggles.current.set(paneId, toggle);
-      else changesToggles.current.delete(paneId);
+  const sideColumns = useRef(new Map<string, SideColumnControls>());
+  const registerSideColumn = useCallback(
+    (paneId: string, controls: SideColumnControls | null) => {
+      if (controls) sideColumns.current.set(paneId, controls);
+      else sideColumns.current.delete(paneId);
     },
     []
   );
+  const shownSideColumn = () =>
+    shownPaneId ? sideColumns.current.get(shownPaneId) : undefined;
 
   const paneFinds = useRef(new Map<string, () => boolean>());
   const registerPaneFind = useCallback(
@@ -771,14 +773,9 @@ export function ChatWindowManager({
       startFreshActiveSession: startFreshActiveSessionForKeyboard,
       toggleHistorySelector,
       toggleHistoryVisibility,
-      toggleChangesPanel: () => {
-        const toggle = shownPaneId
-          ? changesToggles.current.get(shownPaneId)
-          : undefined;
-        if (!toggle) return false;
-        toggle();
-        return true;
-      },
+      toggleSideColumn: () => shownSideColumn()?.toggle() ?? false,
+      toggleSideSection: (section) =>
+        shownSideColumn()?.toggleSection(section) ?? false,
     },
     setShortcutsOpen,
   });
@@ -932,7 +929,7 @@ export function ChatWindowManager({
               onNextNeedingYou={() => focusNeedingYou(1)}
             />
             <ChatPaneList
-              registerChangesToggle={registerChangesToggle}
+              registerSideColumn={registerSideColumn}
               registerPaneFind={registerPaneFind}
               shownPane={shownPane}
               tabPanels={isMaximized}

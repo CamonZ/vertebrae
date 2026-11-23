@@ -1,80 +1,64 @@
-import { useChatStore } from "../../stores/chatStore";
+import type { FocusEvent } from "react";
 
-/** Marks a pane's Changes panel as a stop in the chat-area row. */
+const COMPOSER_SELECTOR = '[data-testid="local-chat-composer"]';
+
+/**
+ * Marks the shown section of a chat's side column (Changes, Discussions or
+ * Background tasks) as the stop after the composer in the chat-area row.
+ */
 export const CHAT_AREA_ATTRIBUTE = "data-chat-area";
 
-interface ChatArea {
-  paneId: string;
-  element: HTMLElement;
-}
-
 /**
- * The row ⌘⌥←/→ walks, left to right: each pane's chat (its composer), then
- * that pane's Changes when it is open.
+ * Focus entering a side section's list from outside (a section switch,
+ * ⌘⌥→) lands on its first row, so ↑/↓ move through the list at once.
  */
-export function chatAreas(root: ParentNode): ChatArea[] {
-  return Array.from(
-    root.querySelectorAll<HTMLElement>("[data-pane-id]")
-  ).flatMap((pane) => {
-    const paneId = pane.dataset.paneId ?? "";
-    const chat =
-      pane.querySelector<HTMLElement>('[data-testid="local-chat-composer"]') ??
-      pane.querySelector<HTMLElement>("[tabindex]") ??
-      pane;
-    const changes = pane.querySelector<HTMLElement>(
-      `[${CHAT_AREA_ATTRIBUTE}="changes"]`
-    );
-    return [
-      { paneId, element: chat },
-      ...(changes ? [{ paneId, element: changes }] : []),
-    ];
-  });
-}
-
-/** Index of the area holding `focused`: its Changes, else its pane's chat. */
-function currentArea(areas: ChatArea[], focused: Element | null): number {
-  if (!focused) return -1;
-  const changes = areas.findIndex(
-    (area) =>
-      area.element.hasAttribute(CHAT_AREA_ATTRIBUTE) &&
-      area.element.contains(focused)
-  );
-  if (changes >= 0) return changes;
-  const pane = focused.closest<HTMLElement>("[data-pane-id]")?.dataset.paneId;
-  return areas.findIndex((area) => area.paneId === pane);
+export function enterFirstRow(
+  event: FocusEvent<HTMLElement>,
+  rowSelector: string
+) {
+  const section = event.currentTarget;
+  const from = event.relatedTarget;
+  if (event.target !== section || (from instanceof Node && section.contains(from)))
+    return;
+  section.querySelector<HTMLElement>(rowSelector)?.focus({ preventScroll: true });
 }
 
 /**
- * Move focus `offset` areas along the row containing `from` (wrapping),
- * activating the destination pane first. False when there is nowhere to go.
+ * The areas ⌘⌥←/→ walks inside one chat: its composer, then its side
+ * column's shown section when the column is open (decision 49d12c2c §4).
+ */
+export function chatAreas(pane: ParentNode): HTMLElement[] {
+  const chat =
+    pane.querySelector<HTMLElement>(COMPOSER_SELECTOR) ??
+    pane.querySelector<HTMLElement>("[tabindex]");
+  const side = pane.querySelector<HTMLElement>(`[${CHAT_AREA_ATTRIBUTE}]`);
+  return [chat, side].filter((area): area is HTMLElement => !!area);
+}
+
+/**
+ * Move focus `offset` areas within the active chat (wrapping). It never
+ * leaves the chat: moving between chats is ⌃Tab, ⌘⌥N or ⌘⌥J. False when
+ * there is nowhere to go.
  */
 export function moveChatArea(from: Element | null, offset: -1 | 1): boolean {
-  const root =
-    from?.closest(".hc-chat-panes") ?? document.querySelector(".hc-chat-panes");
-  if (!root) return false;
-  const areas = chatAreas(root);
+  const pane =
+    from?.closest("[data-pane-id]") ??
+    document.querySelector(".hc-chat-panes [data-pane-id]");
+  if (!pane) return false;
+  const areas = chatAreas(pane);
   if (areas.length <= 1) return false;
-  const at = currentArea(areas, from);
+  // Anywhere else in the chat (transcript, header) counts as its chat area.
+  const at = !from || !pane.contains(from) ? -1 : areas[1].contains(from) ? 1 : 0;
   const next =
-    areas[
-      at < 0
-        ? offset === 1
-          ? 0
-          : areas.length - 1
-        : (at + offset + areas.length) % areas.length
-    ];
-  const store = useChatStore.getState();
-  if (store.paneLayout.activeId !== next.paneId) {
-    store.focusPane(next.paneId);
-    // A maximized layout shows the pane once it is active; focus after that.
-    requestAnimationFrame(() => next.element.focus({ preventScroll: true }));
-  } else {
-    next.element.focus({ preventScroll: true });
-  }
+    at < 0
+      ? offset === 1
+        ? areas[0]
+        : areas[1]
+      : areas[(at + offset + 2) % 2];
+  next.focus({ preventScroll: true });
   return true;
 }
 
-const COMPOSER_SELECTOR = '[data-testid="local-chat-composer"]';
 const TRANSCRIPT_SELECTOR = "[data-transcript-viewport]";
 
 /** Focus the composer of the pane holding `from`. */

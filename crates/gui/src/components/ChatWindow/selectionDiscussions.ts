@@ -1,6 +1,6 @@
 import type { CapturedReviewAnchor, MappedReviewThread } from "../../bindings";
 import type { SelectedLineRange } from "@pierre/diffs";
-import type { DiffCommentHome } from "./assistantTextComments";
+import type { DiffCommentHome, PendingDiffComment } from "./assistantTextComments";
 import {
   canonicalPath,
   resolveSelection,
@@ -8,7 +8,11 @@ import {
   type FilePatch,
   type LineSpan,
 } from "../thread/toolChange/diffLineMapper";
-import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
+import {
+  createDiffComment,
+  type ReviewSurface,
+  type WorktreeSnapshot,
+} from "../thread/toolChange/diffComments";
 
 export interface FullFileSource {
   checkout: string;
@@ -50,7 +54,85 @@ export function isOutdated({ status }: SelectionThread): boolean {
     (status.kind === "unavailable" && status.lastKnown === "outdated");
 }
 
+/**
+ * A selection attached to the composer as a comment, carrying its code; a
+ * full-file selection keeps its own code as the hunk. Null if no row matches.
+ */
+export function selectionAttachment(
+  anchor: CodeSelection,
+  id: string,
+  body: string,
+  outdated: boolean
+): PendingDiffComment | null {
+  const comment: PendingDiffComment | null = anchor.fullFile
+    ? {
+        kind: "diff",
+        id,
+        body,
+        outdated,
+        home: anchor.home,
+        path: anchor.path,
+        side: anchor.side,
+        startLine: anchor.startLine,
+        endLine: anchor.endLine,
+        hunk: anchor.code,
+      }
+    : createDiffComment({ home: anchor.home, file: anchor.file, span: anchor, body, id });
+  return comment && { ...comment, selectionCode: anchor.code, outdated };
+}
+
+/** Whether a selection anchors in the chat's Changes view (its home there). */
+export function anchorsInChanges(anchor: CodeSelection): boolean {
+  return anchor.home.kind === "worktree" && !anchor.fullFile;
+}
+
+/**
+ * Where a thread is drawn: nowhere when detached, else at its anchor in
+ * Changes, a tool call's patch in the transcript, or a full-file document.
+ */
+export type ThreadPlace = "detached" | "changes" | "transcript" | "document";
+
+export function threadPlace({ status, anchor }: SelectionThread): ThreadPlace {
+  if (status.kind !== "inline") return "detached";
+  if (anchor.fullFile) return "document";
+  return anchor.home.kind === "worktree" ? "changes" : "transcript";
+}
+
+export const THREAD_PLACES: readonly ThreadPlace[] = [
+  "detached",
+  "changes",
+  "transcript",
+  "document",
+];
+
+/**
+ * The Discussions section's list, grouped by where each thread is drawn:
+ * detached threads (their code changed or their anchor is gone) first, then
+ * Changes, transcript and document ones, each in creation order. Every
+ * thread is listed exactly once.
+ */
+export function discussionList(
+  threads: readonly SelectionThread[]
+): Record<ThreadPlace, SelectionThread[]> {
+  const groups: Record<ThreadPlace, SelectionThread[]> = {
+    detached: [],
+    changes: [],
+    transcript: [],
+    document: [],
+  };
+  for (const thread of threads) groups[threadPlace(thread)].push(thread);
+  return groups;
+}
+
 export type ThreadAnchor = Pick<SelectionThread, "id" | "anchor"> & { detached: boolean };
+
+/** Whether a diff surface draws this thread inline: only on its own home. */
+export function drawnOn({ anchor, detached }: ThreadAnchor, surface: ReviewSurface): boolean {
+  const home = anchor.home;
+  if (detached || anchor.fullFile || home.kind !== surface.kind) return false;
+  return home.kind !== "tool_call" ||
+    (surface.kind === "tool_call" && home.toolUseId === surface.toolUseId);
+}
 
 export function mergeDiscussion(previous: SelectionThread | undefined, restored: SelectionThread): SelectionThread {
   return {
@@ -335,5 +417,19 @@ export class SelectionDiscussions {
     const file = snapshot.files.find((file) => canonicalPath(file) === selection.path);
     if (!file || spanRows(file, selection)?.map((row) => row.text).join("\n") !== selection.code)
       this.publish({ ...this.state, selection: null });
+  }
+}
+
+/** The badge a thread shows when its anchor is no longer reliable. */
+export function anchorNotice(status: ThreadStatus) {
+  switch (status.kind) {
+    case "inline":
+    case "detached":
+      return null;
+    case "outdated":
+      return { marker: "outdated", label: "Outdated context" };
+    case "unavailable":
+    case "unreadable":
+      return { marker: "anchor unavailable", label: "Anchor unavailable" };
   }
 }

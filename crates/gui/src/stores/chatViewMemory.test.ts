@@ -82,11 +82,11 @@ describe("chat focus memory", () => {
 
   it("remembers the area per chat until forgotten", () => {
     saveChatFocusArea("s1", "transcript");
-    saveChatFocusArea("s2", "changes");
+    saveChatFocusArea("s2", "side");
     expect(chatFocusArea("s1")).toBe("transcript");
     forgetChatView("s1");
     expect(chatFocusArea("s1")).toBe("composer");
-    expect(chatFocusArea("s2")).toBe("changes");
+    expect(chatFocusArea("s2")).toBe("side");
   });
 
   it("classifies a focused element by the chat area holding it", () => {
@@ -96,7 +96,7 @@ describe("chat focus memory", () => {
       <textarea data-testid="local-chat-composer" id="m"></textarea>
       <button id="x"></button>`;
     const area = (id: string) => chatFocusAreaOf(document.getElementById(id)!);
-    expect(area("c")).toBe("changes");
+    expect(area("c")).toBe("side");
     expect(area("t")).toBe("transcript");
     expect(area("m")).toBe("composer");
     expect(area("x")).toBeNull();

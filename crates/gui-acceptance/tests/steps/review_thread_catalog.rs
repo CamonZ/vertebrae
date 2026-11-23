@@ -286,7 +286,7 @@ async fn cascade_updates_open_changes(world: &mut GuiWorld) {
     .await;
     gui_acceptance::wait_until("the peer Changes view displays the saved discussion", TIMEOUT, || async {
         let panel = peer.execute(
-            r#"const panel = document.querySelector('[aria-label="Changes panel"]');
+            r#"const panel = document.querySelector('[data-chat-area="changes"]');
                const marker = document.querySelector('[aria-label="Reopen selection discussion"]');
                return { visible: !!panel && !!marker,
                         contents: document.querySelector('[data-testid="local-chat-window"]')?.innerText.slice(0, 600) };"#,

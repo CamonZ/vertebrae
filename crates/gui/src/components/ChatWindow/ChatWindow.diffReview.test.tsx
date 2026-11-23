@@ -17,6 +17,7 @@ import {
   type ReactNode,
 } from "react";
 import { ChatWindow } from "./ChatWindow";
+import type { SideColumnControls } from "./ChatPaneList";
 import * as hegel from "@hegeldev/hegel";
 import * as gs from "@hegeldev/hegel/generators";
 import { usePendingCommentsStore } from "../../stores/pendingCommentsStore";
@@ -379,7 +380,7 @@ const association = {
 async function openReference(location: string) {
   fireEvent.click(screen.getByRole("button", { name: location }));
   const panel = await screen.findByRole("complementary", {
-    name: "Changes panel",
+    name: "Side column",
   });
   expect(
     screen.queryByRole("complementary", { name: "Evidence panel" })
@@ -620,7 +621,7 @@ describe("ChatWindow diff review comments", () => {
       expect(screen.getByText("Unsaved")).toBeVisible();
 
       // A changed range switches back to All Changes at its diff.
-      panel = screen.getByRole("complementary", { name: "Changes panel" });
+      panel = screen.getByRole("complementary", { name: "Side column" });
       fireEvent.click(screen.getByRole("button", { name: "f.ts:6–8" }));
       await waitFor(() =>
         expect(seen.scroll).toHaveBeenCalledExactlyOnceWith({
@@ -662,7 +663,7 @@ describe("ChatWindow diff review comments", () => {
       within(panel).queryByRole("button", { name: "Open in Changes" })
     ).toBeNull();
     expect(
-      screen.queryByRole("complementary", { name: "Changes panel" })
+      screen.queryByRole("complementary", { name: "Side column" })
     ).toBeNull();
     expect(mockedCommands.readWorktreeBaselineFile).toHaveBeenCalledWith(
       "/worktree",
@@ -910,7 +911,14 @@ describe("ChatWindow diff review comments", () => {
     let session = "a";
     let worktree = "/worktree";
     const worktrees: Record<string, string> = { a: "/worktree", b: "/other" };
-    let openOwner: string | null = null;
+    // Each chat keeps its own side column open or closed (db5160ff).
+    const opened: Record<string, boolean> = {};
+    // Checkouts whose Changes a chat has shown: remounting restores the file.
+    const remembered = new Set<string>();
+    const remounts = () =>
+      request?.session === session && request.worktree === worktree
+        ? true
+        : remembered.has(`${session}:${worktree}`);
     let request: { session: string; worktree: string; line: number } | null =
       null;
     let expectedScrollCount = 0;
@@ -948,7 +956,7 @@ describe("ChatWindow diff review comments", () => {
       for (const action of actions) {
         if (action === "ref" || action === "diff") {
           const line = action === "ref" ? 6 : 5;
-          openOwner = session;
+          opened[session] = true;
           request = { session, worktree, line };
           // Changes opens directly and scrolls once.
           expectedScrollCount++;
@@ -960,18 +968,16 @@ describe("ChatWindow diff review comments", () => {
             );
           await openReference(action === "ref" ? "f.ts:6–8" : "f.ts:5–6");
         } else if (action === "toggle") {
-          const opening: boolean = openOwner !== session;
-          openOwner = opening ? session : null;
-          if (
-            opening &&
-            request?.session === session &&
-            request.worktree === worktree
-          )
-            expectedScrollCount++;
+          const opening = !opened[session];
+          opened[session] = opening;
+          // Reopened, Changes scrolls once: to the reference, else its file.
+          if (opening && remounts()) expectedScrollCount++;
           firePaneControl("Changes");
         } else if (action === "session") {
           session = session === "a" ? "b" : "a";
           worktree = worktrees[session];
+          // Back on a chat with Changes open: it scrolls to where it was.
+          if (opened[session] && remounts()) expectedScrollCount++;
           view.rerender(<ChatWindow sessionId={session} />);
         } else if (action === "worktree") {
           worktree = "/replacement";
@@ -1027,12 +1033,13 @@ describe("ChatWindow diff review comments", () => {
             })
           );
         }
-        const open = openOwner === session;
+        const open = !!opened[session];
+        if (open) remembered.add(`${session}:${worktree}`);
         if (open && action !== "document")
           await screen.findByRole("button", { name: "Refresh changes" });
         await act(async () => {});
         expect(
-          screen.queryByRole("complementary", { name: "Changes panel" }) !==
+          screen.queryByRole("complementary", { name: "Side column" }) !==
             null,
           action
         ).toBe(open);
@@ -1645,7 +1652,7 @@ describe("ChatWindow diff review comments", () => {
   });
 });
 
-describe("Changes panel shortcut registration", () => {
+describe("Side column shortcut registration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -1654,12 +1661,12 @@ describe("Changes panel shortcut registration", () => {
   it("only toggles Changes through the shortcut when its own worktree has changes", async () => {
     seedSession();
 
-    let toggle: (() => void) | null = null;
-    const register = (next: (() => void) | null) => {
-      toggle = next;
+    let toggle: (() => boolean) | null = null;
+    const register = (next: SideColumnControls | null) => {
+      toggle = next?.toggle ?? null;
     };
     const view = render(
-      <ChatWindow sessionId="test-session" registerChangesToggle={register} />
+      <ChatWindow sessionId="test-session" registerSideColumn={register} />
     );
 
     await waitFor(() => expect(toggle).not.toBeNull());
@@ -1684,7 +1691,7 @@ describe("Changes panel shortcut registration", () => {
     await act(async () => toggle?.());
 
     expect(
-      screen.queryByRole("complementary", { name: "Changes panel" })
+      screen.queryByRole("complementary", { name: "Side column" })
     ).toBeNull();
     expect(mockedCommands.loadWorktreeChanges).toHaveBeenCalledExactlyOnceWith(
       "/worktree",
@@ -1694,13 +1701,13 @@ describe("Changes panel shortcut registration", () => {
     await act(async () => toggle?.());
     await waitFor(() =>
       expect(
-        screen.getByRole("complementary", { name: "Changes panel" })
+        screen.getByRole("complementary", { name: "Side column" })
       ).toBeVisible()
     );
     await act(async () => toggle?.());
 
     expect(
-      screen.queryByRole("complementary", { name: "Changes panel" })
+      screen.queryByRole("complementary", { name: "Side column" })
     ).toBeNull();
 
     view.unmount();
@@ -1723,12 +1730,12 @@ describe("Changes panel shortcut registration", () => {
       }));
     });
 
-    let toggle: (() => void) | null = null;
+    let toggle: (() => boolean) | null = null;
     render(
       <ChatWindow
         sessionId="test-session"
-        registerChangesToggle={(next) => {
-          toggle = next;
+        registerSideColumn={(next) => {
+          toggle = next?.toggle ?? null;
         }}
       />
     );
@@ -1738,23 +1745,26 @@ describe("Changes panel shortcut registration", () => {
     act(() => toggle?.());
     // Opened at once: there Changes compares other refs too.
     expect(
-      screen.getByRole("complementary", { name: "Changes panel" })
+      screen.getByRole("complementary", { name: "Side column" })
     ).toBeVisible();
     act(() => toggle?.());
     expect(
-      screen.queryByRole("complementary", { name: "Changes panel" })
+      screen.queryByRole("complementary", { name: "Side column" })
     ).toBeNull();
   });
 
-  it("does not register the Changes shortcut for an inactive pane or unassociated conversation", async () => {
+  it("registers only the foreground pane, and has nothing to toggle without a checkout or content", async () => {
     seedSession();
 
-    const register = vi.fn();
+    let controls: SideColumnControls | null = null;
+    const register = vi.fn((next: SideColumnControls | null) => {
+      controls = next;
+    });
     const view = render(
       <ChatWindow
         sessionId="test-session"
         isForegroundPane={false}
-        registerChangesToggle={register}
+        registerSideColumn={register}
       />
     );
 
@@ -1772,21 +1782,29 @@ describe("Changes panel shortcut registration", () => {
       }));
     });
     view.rerender(
-      <ChatWindow sessionId="test-session" registerChangesToggle={register} />
+      <ChatWindow sessionId="test-session" registerSideColumn={register} />
     );
 
-    expect(register).not.toHaveBeenCalled();
+    await waitFor(() => expect(controls).not.toBeNull());
+    let toggled = true;
+    act(() => {
+      toggled = controls!.toggle();
+    });
+    expect(toggled).toBe(false);
+    expect(
+      screen.queryByRole("complementary", { name: "Side column" })
+    ).toBeNull();
   });
 
   it("ignores a pending shortcut check after the active pane changes", async () => {
     seedSession();
 
-    let toggle: (() => void) | null = null;
-    const register = (next: (() => void) | null) => {
-      toggle = next;
+    let toggle: (() => boolean) | null = null;
+    const register = (next: SideColumnControls | null) => {
+      toggle = next?.toggle ?? null;
     };
     const view = render(
-      <ChatWindow sessionId="test-session" registerChangesToggle={register} />
+      <ChatWindow sessionId="test-session" registerSideColumn={register} />
     );
     const changed = await mockedCommands.loadWorktreeChanges("/worktree", {
       base: null,
@@ -1806,13 +1824,13 @@ describe("Changes panel shortcut registration", () => {
       <ChatWindow
         sessionId="test-session"
         isForegroundPane={false}
-        registerChangesToggle={register}
+        registerSideColumn={register}
       />
     );
     await act(async () => finish(changed));
 
     expect(
-      screen.queryByRole("complementary", { name: "Changes panel" })
+      screen.queryByRole("complementary", { name: "Side column" })
     ).toBeNull();
   });
 });

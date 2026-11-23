@@ -1,11 +1,16 @@
 import { useEffect, useRef } from "react";
 import {
   CHAT_HELP_SHORTCUT,
+  SIDE_COLUMN_SHORTCUTS,
   WORKSPACE_SHORTCUTS,
   matchesChatShortcut,
   matchesExactChatShortcut,
-  type WorkspaceShortcutId,
+  type ChatShortcutDefinition,
 } from "../components/ChatWindow/chatShortcuts";
+import {
+  SIDE_SECTIONS,
+  type SideSection,
+} from "../stores/chatSideColumnStore";
 
 export type ShortcutDispatchState = {
   shortcutsOpen: boolean;
@@ -14,13 +19,13 @@ export type ShortcutDispatchState = {
   toggleExpanded: () => void;
   /** ⌘⌥1–9: chat N in strip order (index 8 = last). */
   focusPaneByIndex: (index: number) => boolean;
-  /** ⌃Tab / ⌃⇧Tab: next / previous chat in strip order. */
+  /** ⌃Tab / ⌃⇧Tab, ⌘⇧] / ⌘⇧[: next / previous chat in strip order. */
   focusPaneByOffset: (offset: number) => boolean;
   /** ⌘⌥J / ⌘⌥⇧J: next / previous chat needing you. */
   focusNeedingYou: (offset: 1 | -1) => boolean;
   /** ⌘⌥⇧← / →: move the active chat in the strip. */
   moveActivePane: (offset: number) => boolean;
-  /** ⌘⌥←/→: move between the chat's areas (composer, Changes). */
+  /** ⌘⌥←/→: composer ↔ the chat's side column, never switching tabs. */
   focusAreaByOffset: (offset: -1 | 1) => boolean;
   /** ⌘⌥\: fresh chat after the active one. */
   openFreshChat: () => Promise<boolean>;
@@ -35,7 +40,10 @@ export type ShortcutDispatchState = {
   startFreshActiveSession: () => Promise<boolean>;
   toggleHistorySelector: () => boolean;
   toggleHistoryVisibility: () => void;
-  toggleChangesPanel: () => boolean;
+  /** ⌘⇧B: open (on its last section) or close the chat's side column. */
+  toggleSideColumn: () => boolean;
+  /** ⌃⌘1–3: show a side section, or close the column showing it. */
+  toggleSideSection: (section: SideSection) => boolean;
 };
 
 type WorkspaceHandler = (
@@ -44,23 +52,35 @@ type WorkspaceHandler = (
 ) => boolean | void | Promise<boolean>;
 
 /**
- * Workspace bindings in dispatch order. A handler returning false leaves the
- * event alone; void and promises always claim it.
+ * Workspace and side column bindings in dispatch order. A handler returning
+ * false leaves the event alone; void and promises always claim it.
  */
-const WORKSPACE_BINDINGS: readonly [WorkspaceShortcutId, WorkspaceHandler][] = [
-  ["toggleExpanded", (d) => d.toggleExpanded()],
-  ["nextChat", (d) => d.focusPaneByOffset(1)],
-  ["previousChat", (d) => d.focusPaneByOffset(-1)],
+const WORKSPACE_BINDINGS: readonly [ChatShortcutDefinition, WorkspaceHandler][] = [
+  [WORKSPACE_SHORTCUTS.toggleExpanded, (d) => d.toggleExpanded()],
+  [WORKSPACE_SHORTCUTS.nextChat, (d) => d.focusPaneByOffset(1)],
+  [WORKSPACE_SHORTCUTS.previousChat, (d) => d.focusPaneByOffset(-1)],
+  [WORKSPACE_SHORTCUTS.nextChatTab, (d) => d.focusPaneByOffset(1)],
+  [WORKSPACE_SHORTCUTS.previousChatTab, (d) => d.focusPaneByOffset(-1)],
   [
-    "chatByNumber",
+    WORKSPACE_SHORTCUTS.chatByNumber,
     (d, event) => d.focusPaneByIndex(paneNumberShortcutIndex(event) ?? -1),
   ],
-  ["nextNeedingYou", (d) => d.focusNeedingYou(1)],
-  ["previousNeedingYou", (d) => d.focusNeedingYou(-1)],
-  ["moveChatLeft", (d) => d.moveActivePane(-1)],
-  ["moveChatRight", (d) => d.moveActivePane(1)],
-  ["freshChat", (d) => d.openFreshChat()],
-  ["closeChat", (d) => d.closeActivePane()],
+  [WORKSPACE_SHORTCUTS.nextNeedingYou, (d) => d.focusNeedingYou(1)],
+  [WORKSPACE_SHORTCUTS.previousNeedingYou, (d) => d.focusNeedingYou(-1)],
+  [WORKSPACE_SHORTCUTS.moveChatLeft, (d) => d.moveActivePane(-1)],
+  [WORKSPACE_SHORTCUTS.moveChatRight, (d) => d.moveActivePane(1)],
+  [WORKSPACE_SHORTCUTS.freshChat, (d) => d.openFreshChat()],
+  [WORKSPACE_SHORTCUTS.closeChat, (d) => d.closeActivePane()],
+  [
+    SIDE_COLUMN_SHORTCUTS.toggle,
+    (d, event) => (event.repeat ? true : d.toggleSideColumn()),
+  ],
+  ...SIDE_SECTIONS.map(
+    (section): [ChatShortcutDefinition, WorkspaceHandler] => [
+      SIDE_COLUMN_SHORTCUTS[section],
+      (d, event) => (event.repeat ? true : d.toggleSideSection(section)),
+    ]
+  ),
 ];
 
 interface UseChatKeyboardShortcutsOptions {
@@ -99,8 +119,8 @@ export function paneNumberShortcutIndex(event: KeyboardEvent): number | null {
 
 /**
  * Global keyboard-shortcut dispatch for the chat panel: the workspace
- * bindings in WORKSPACE_SHORTCUTS (exact modifiers, matched on key codes),
- * then history, find, Changes and focus moves. The listener is capture-phase
+ * bindings in WORKSPACE_SHORTCUTS and SIDE_COLUMN_SHORTCUTS (exact
+ * modifiers, matched on key codes), then history, find and focus moves. The listener is capture-phase
  * and inert when `open` is false.
  */
 export function useChatKeyboardShortcuts({
@@ -135,8 +155,8 @@ export function useChatKeyboardShortcuts({
       if (current.shortcutsOpen) return;
 
       if (!event.isComposing) {
-        const binding = WORKSPACE_BINDINGS.find(([id]) =>
-          matchesExactChatShortcut(event, WORKSPACE_SHORTCUTS[id])
+        const binding = WORKSPACE_BINDINGS.find(([shortcut]) =>
+          matchesExactChatShortcut(event, shortcut)
         );
         if (binding) {
           const handled = binding[1](current, event);
@@ -158,18 +178,6 @@ export function useChatKeyboardShortcuts({
 
         if (!event.repeat) current.toggleHistoryVisibility();
 
-        return;
-      }
-
-      if (
-        isLetterShortcutKey(event, "KeyB", "b") &&
-        event.shiftKey &&
-        !event.altKey &&
-        !event.ctrlKey &&
-        !event.isComposing
-      ) {
-        if (!event.repeat && current.toggleChangesPanel())
-          event.preventDefault();
         return;
       }
 

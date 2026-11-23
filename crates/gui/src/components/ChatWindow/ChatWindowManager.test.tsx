@@ -34,6 +34,10 @@ const { savedProjects } = vi.hoisted(() => {
 
 import { ChatWindowManager } from "./ChatWindowManager";
 import { useChatStore } from "../../stores/chatStore";
+import {
+  applyBackgroundUpdate,
+  EMPTY_BACKGROUND_WORK,
+} from "../../stores/backgroundWork";
 import { usePanelFocusStore } from "../../stores/panelFocusStore";
 import { usePanelLayoutStore } from "../../stores/panelLayoutStore";
 import type { ChatSession } from "../../stores/chatStore";
@@ -2778,6 +2782,111 @@ describe("ChatWindowManager", () => {
     });
     expect(useChatStore.getState().activeSessionId).toBe(second);
     expect(screen.getAllByTestId("chat-pane")).toHaveLength(1);
+  });
+
+  it("keeps each chat's side column through tab switches and Cmd+\\ (db5160ff)", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 1800,
+    });
+    const running = (workId: string) =>
+      applyBackgroundUpdate(
+        EMPTY_BACKGROUND_WORK,
+        {
+          eventId: `e-${workId}`,
+          workId,
+          generation: 0,
+          kind: "command",
+          providerKind: null,
+          status: "running",
+          description: `npm run ${workId}`,
+          progress: null,
+          launchToolId: null,
+          startedAt: null,
+          finishedAt: null,
+          error: null,
+          observedAt: "2026-11-13T12:00:00Z",
+          turnId: null,
+          threadId: null,
+        },
+        { live: true }
+      ).state;
+    const first = useChatStore.getState().openSession("Task One");
+    const second = useChatStore
+      .getState()
+      .startFreshSessionInNewTab("Task Two");
+    useChatStore.setState((state) => ({
+      sessions: {
+        ...state.sessions,
+        [first]: { ...state.sessions[first], backgroundWork: running("dev") },
+        [second]: { ...state.sessions[second], backgroundWork: running("test") },
+      },
+    }));
+    render(<ChatWindowManager />);
+    const sideColumn = () =>
+      screen.queryByRole("complementary", { name: "Side column" });
+    const selectedTab = () =>
+      within(sideColumn()!).getByRole("tab", { selected: true });
+    const key = (init: KeyboardEventInit) =>
+      fireEvent.keyDown(window, { metaKey: true, shiftKey: true, ...init });
+
+    fireEvent.keyDown(window, { key: "¡", code: "Digit1", metaKey: true, altKey: true });
+    expect(useChatStore.getState().activeSessionId).toBe(first);
+
+    // ⌘⇧B opens on the first section with content.
+    key({ key: "B", code: "KeyB" });
+    expect(selectedTab()).toHaveTextContent("Background tasks");
+    expect(sideColumn()).toHaveTextContent("npm run dev");
+    // ⌃⌘2 shows Discussions; ⌃⌘1 cannot show Changes without a checkout.
+    const section = (digit: number) =>
+      fireEvent.keyDown(window, {
+        key: `${digit}`,
+        code: `Digit${digit}`,
+        metaKey: true,
+        ctrlKey: true,
+      });
+    section(2);
+    expect(selectedTab()).toHaveTextContent("Discussions");
+    section(1);
+    expect(selectedTab()).toHaveTextContent("Discussions");
+    expect(
+      within(sideColumn()!).getByRole("tab", { name: "Changes" })
+    ).toBeDisabled();
+
+    // ⌘⌥→ moves composer ↔ side column inside the chat, never switching tabs.
+    const composer = screen.getByTestId("local-chat-composer");
+    act(() => composer.focus());
+    fireEvent.keyDown(composer, { key: "ArrowRight", code: "ArrowRight", metaKey: true, altKey: true });
+    expect(useChatStore.getState().activeSessionId).toBe(first);
+    expect(
+      screen.getByRole("region", { name: "Discussions" })
+    ).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight", code: "ArrowRight", metaKey: true, altKey: true });
+    expect(screen.getByTestId("local-chat-composer")).toHaveFocus();
+    expect(useChatStore.getState().activeSessionId).toBe(first);
+
+    // ⌘⇧] is the next chat tab; the other chat has its own, closed, column.
+    key({ key: "}", code: "BracketRight" });
+    expect(useChatStore.getState().activeSessionId).toBe(second);
+    expect(sideColumn()).toBeNull();
+    section(3);
+    expect(selectedTab()).toHaveTextContent("Background tasks");
+    expect(sideColumn()).toHaveTextContent("npm run test");
+
+    // Back on the first chat (⌘⇧[): still open on Discussions.
+    key({ key: "{", code: "BracketLeft" });
+    expect(useChatStore.getState().activeSessionId).toBe(first);
+    expect(selectedTab()).toHaveTextContent("Discussions");
+
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    fireEvent.keyDown(window, { key: "\\", metaKey: true });
+    expect(selectedTab()).toHaveTextContent("Discussions");
+
+    key({ key: "B", code: "KeyB" });
+    expect(sideColumn()).toBeNull();
+    // Reopens on its last section.
+    key({ key: "B", code: "KeyB" });
+    expect(selectedTab()).toHaveTextContent("Discussions");
   });
 
   it("does not prevent app shortcuts when chat pane shortcuts cannot run", () => {

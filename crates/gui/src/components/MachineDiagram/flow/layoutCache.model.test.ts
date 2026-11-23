@@ -126,7 +126,9 @@ async function request(
     );
   }
   if (failed) {
-    m.memory = m.memory.filter((x) => x !== k);
+    // The pending computation held a slot, evicting the least recently used
+    // level when memory was full, and is forgotten once it fails.
+    if (m.memory.length >= CAPACITY) m.memory.shift();
     return;
   }
   touch(m, k);

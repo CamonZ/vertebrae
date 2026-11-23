@@ -8,7 +8,6 @@ import type {
   TurnDocumentTarget,
   TurnDocumentVersion,
 } from "./workspace/TurnDocument";
-import { isEditableShortcutTarget } from "../../utils/keyboard";
 import { FileReferenceNavigationContext } from "../shared/FileReferenceNavigationContext";
 import type { FileTarget } from "../shared/FileReferenceNavigationContext";
 import {
@@ -20,16 +19,30 @@ import {
   SourceEvidence,
   type EvidenceTarget,
 } from "./workspace/SourceEvidence";
-import { commands } from "../../bindings";
 import { ThreadFindContext } from "../thread/find";
 import { usePaneFind } from "./usePaneFind";
-import { useSidebarResize } from "./workspace/useSidebarResize";
-import "./workspaceTabs.css";
 import {
-  SelectionDiscussionProvider,
-  DiscussionSnapshot,
-} from "./SelectionDiscussionContext";
-import { type CodeSelection } from "./selectionDiscussions";
+  resizeFromRegionKey,
+  useSidebarResize,
+} from "./workspace/useSidebarResize";
+import "./workspaceTabs.css";
+import { SelectionDiscussionProvider } from "./SelectionDiscussionContext";
+import { useChatDiscussions } from "./selectionDiscussionState";
+import {
+  ChatSideColumn,
+  SIDE_COLUMN_BESIDE_MIN_WIDTH,
+} from "./ChatSideColumn";
+import { SideDiscussions } from "./SideDiscussions";
+import { useChatSideColumn } from "./useChatSideColumn";
+import {
+  useChatSideColumnStore,
+  useSideColumnView,
+} from "../../stores/chatSideColumnStore";
+import type { SideColumnControls } from "./ChatPaneList";
+import {
+  selectionAttachment,
+  type CodeSelection,
+} from "./selectionDiscussions";
 import { useBackgroundTask } from "../../background/useBackgroundTask";
 import type { BackgroundTask } from "../../background/types";
 import {
@@ -99,7 +112,8 @@ const prepareToolChain = (
 const NO_CHAIN: never[] = [];
 
 interface ChatWindowProps {
-  registerChangesToggle?: (toggle: (() => void) | null) => void;
+  /** Registers this chat's side column for ⌘⇧B and ⌘⇧[ ]. */
+  registerSideColumn?: (controls: SideColumnControls | null) => void;
   /** Registers this pane's find opener for ⌘F. */
   registerFind?: (openFind: (() => boolean) | null) => void;
   renderObserver?: (part: "transcript" | "composer") => void;
@@ -122,7 +136,7 @@ interface ChatWindowProps {
  * the message thread, and the composer footer with its context-utilization bar.
  */
 export function ChatWindow({
-  registerChangesToggle,
+  registerSideColumn,
   registerFind,
   sessionId,
   onClosePanel,
@@ -136,16 +150,17 @@ export function ChatWindow({
   const panelResize = useSidebarResize({
     initial: 560,
     side: "right",
-    label: "Resize Changes panel",
+    label: "Resize side column",
   });
-  const [changesSession, setChangesSession] = useState<string | null>(null);
-  const [backgroundSession, setBackgroundSession] = useState<string | null>(
-    null
-  );
+  // The side column outlives this window: hidden tabs unmount.
+  const sideColumn = useSideColumnView(sessionId);
+  const showSection = useChatSideColumnStore((state) => state.show);
+  const closeSideColumn = useChatSideColumnStore((state) => state.close);
+  const changesOpen = sideColumn.open && sideColumn.section === "changes";
   // Dirty documents that block leaving the Changes view until resolved.
   const [leaving, setLeaving] = useState<string[] | null>(null);
   const [leaveBusy, setLeaveBusy] = useState(false);
-  const changesRef = useRef<HTMLElement>(null);
+  const sideRef = useRef<HTMLElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // The All Changes patch as last loaded, kept after the Changes view closes
   // so its comments can still be placed on the conversation's tool calls.
@@ -371,6 +386,10 @@ export function ChatWindow({
     | null
   >(null);
   const nextSourceNonce = useRef(0);
+  const leaveChanges = useCallback(() => {
+    setSourceRequest(null);
+    closeSideColumn(sessionId);
+  }, [closeSideColumn, sessionId]);
   const ownWorktreePath = association.record?.worktreePath;
   const evidenceCheckout =
     ownWorktreePath ?? chat.session?.projectPath ?? undefined;
@@ -387,7 +406,6 @@ export function ChatWindow({
       reference?: Pick<FileTarget, "root" | "history">,
       fileReference = false
     ) => {
-      setBackgroundSession(null);
       const nonce = ++nextSourceNonce.current;
       const { path, line, endLine, column } = location;
       const revision =
@@ -406,7 +424,7 @@ export function ChatWindow({
           : evidenceCheckout;
         if (!checkout) return;
         setSourceRequest(null);
-        setChangesSession(null);
+        closeSideColumn(sessionId);
         setEvidence({
           sessionId,
           checkout,
@@ -450,9 +468,9 @@ export function ChatWindow({
       }
 
       setEvidence(null);
-      setChangesSession(sessionId);
+      showSection(sessionId, "changes");
     },
-    [evidenceCheckout, sessionId]
+    [evidenceCheckout, sessionId, closeSideColumn, showSection]
   );
 
   const openFileReference = (target: FileTarget) =>
@@ -488,7 +506,7 @@ export function ChatWindow({
     turn?.root ??
     null;
   const worktreePath =
-    changesSession === sessionId
+    changesOpen
       ? source?.kind === "checkout"
         ? source.worktreePath
         : (turnRoot ?? evidenceCheckout)
@@ -499,31 +517,14 @@ export function ChatWindow({
     outdated = false,
     body = ""
   ) => {
-    const id = `local-comment-${nextPendingCommentId++}`;
-    const comment = anchor.fullFile
-      ? {
-          kind: "diff" as const,
-          id,
-          body,
-          outdated,
-          home: anchor.home,
-          path: anchor.path,
-          side: anchor.side,
-          startLine: anchor.startLine,
-          endLine: anchor.endLine,
-          hunk: anchor.code,
-        }
-      : createDiffComment({
-          home: anchor.home,
-          file: anchor.file,
-          span: anchor,
-          body,
-          id,
-        });
-    if (comment) {
-      const attachment = { ...comment, selectionCode: anchor.code, outdated };
+    const attachment = selectionAttachment(
+      anchor,
+      `local-comment-${nextPendingCommentId++}`,
+      body,
+      outdated
+    );
+    if (attachment)
       updatePendingComments((comments) => [...comments, attachment]);
-    }
 
     inputRef.current?.focus();
   };
@@ -539,17 +540,22 @@ export function ChatWindow({
         if (!ownWorktreePath) return;
         setSourceRequest(null);
         activate(ownWorktreePath, null);
-        setChangesSession(sessionId);
-      } else if (changesSession === sessionId && worktreePath) {
+        showSection(sessionId, "changes");
+      } else if (changesOpen && worktreePath) {
         const dirty = dirtyPaths(worktreePath);
         if (dirty.length > 0) setLeaving(dirty);
-        else {
-          setSourceRequest(null);
-          setChangesSession(null);
-        }
+        else leaveChanges();
       }
     },
-    [pendingComments, sessionId, ownWorktreePath, changesSession, worktreePath]
+    [
+      pendingComments,
+      sessionId,
+      ownWorktreePath,
+      changesOpen,
+      worktreePath,
+      showSection,
+      leaveChanges,
+    ]
   );
 
   // A draftable gate's draft, read again whenever realtime updates report
@@ -577,11 +583,11 @@ export function ChatWindow({
     const area = chatFocusArea(sessionId);
     const composer = inputRef.current;
     const pane = composer?.closest("[data-pane-id]");
-    const changes =
-      area === "changes"
-        ? pane?.querySelector<HTMLElement>('[data-chat-area="changes"]')
+    const side =
+      area === "side"
+        ? pane?.querySelector<HTMLElement>("[data-chat-area]")
         : null;
-    if (changes) changes.focus({ preventScroll: true });
+    if (side) side.focus({ preventScroll: true });
     else if (
       composer &&
       !(area === "transcript" && focusPaneTranscript(composer))
@@ -594,101 +600,55 @@ export function ChatWindow({
     markComposerFocusHandled(composerFocusRevision);
   }, [composerFocusRevision, markComposerFocusHandled, sessionId]);
 
-  const showChanges = !!worktreePath && changesSession === sessionId;
+  const showChanges = !!worktreePath && changesOpen;
   const shownEvidence =
     !showChanges &&
     evidence?.sessionId === sessionId &&
     (evidence.fileReference || evidence.checkout === evidenceCheckout)
       ? evidence
       : null;
-  const toggleChanges = useCallback(() => {
-    if (!worktreePath) return;
-
-    if (!showChanges) {
-      setEvidence(null);
-      setBackgroundSession(null);
-      setChangesSession(sessionId);
-    } else {
-      const dirty = dirtyPaths(worktreePath);
-      if (dirty.length) setLeaving(dirty);
-      else {
-        setSourceRequest((current) =>
-          current?.kind === "working" ? current : null
-        );
-        setChangesSession(null);
-      }
-    }
-  }, [worktreePath, showChanges, sessionId]);
-
-  const showBackground =
-    backgroundSession === sessionId && !showChanges && !shownEvidence;
-  const toggleBackground = useCallback(() => {
-    if (showBackground) {
-      setBackgroundSession(null);
-      return;
-    }
-
-    // Open documents keep their drafts in the store while hidden.
-    setEvidence(null);
-    setChangesSession(null);
-    setSourceRequest(null);
-    setBackgroundSession(sessionId);
-  }, [showBackground, sessionId]);
-
-  // The main checkout's Changes compares branches as well as its own edits.
-  const isMainCheckout =
-    !!worktreePath && worktreePath === chat.session?.projectPath;
-  useEffect(() => {
-    if (!registerChangesToggle || !worktreePath || !isForegroundPane) return;
-
-    let current = true;
-    let pending = false;
-
-    registerChangesToggle(() => {
-      // Closing needs no check, and neither does the main checkout: clean,
-      // it still opens Changes to compare other refs.
-      if (showChanges || isMainCheckout) {
-        toggleChanges();
-        return;
-      }
-      if (pending) return;
-
-      pending = true;
-
-      // Check this conversation's worktree on demand, including committed
-      // branch changes against the same default baseline as the Changes view.
-      const comparison = {
-        base: null,
-        target: { kind: "working_tree" as const },
-        merge_base: true,
-      };
-
-      void commands
-        .loadWorktreeChanges(worktreePath, comparison)
-        .then((result) => {
-          if (current && result.status === "ok" && result.data.files.length > 0)
-            toggleChanges();
-        })
-        .catch(() => {
-          // A failed check cannot establish that this worktree has changes.
-        })
-        .finally(() => {
-          pending = false;
-        });
-    });
-
-    return () => {
-      current = false;
-      registerChangesToggle(null);
-    };
-  }, [
-    registerChangesToggle,
-    worktreePath,
-    isForegroundPane,
-    toggleChanges,
-    showChanges,
-    isMainCheckout,
+  const discussionKey = JSON.stringify([
+    chat.session?.projectPath,
+    sessionId,
+    ownWorktreePath,
   ]);
+  const discussions = useChatDiscussions(discussionKey);
+  const backgroundWork = chat.session?.backgroundWork;
+  const backgroundRunning = activeBackgroundWorkCount(backgroundWork);
+  const changedFiles = worktreeSnapshot
+    ? new Set(worktreeSnapshot.files.map((file) => file.newPath ?? file.oldPath)).size
+    : null;
+  const sectionCounts = useMemo(
+    () => ({
+      changes: changedFiles ?? 0,
+      discussions: discussions.count,
+      background: backgroundRunning,
+    }),
+    [changedFiles, discussions.count, backgroundRunning]
+  );
+  const side = useChatSideColumn({
+    sessionId,
+    view: sideColumn,
+    counts: sectionCounts,
+    register: registerSideColumn,
+    panel: sideRef,
+    worktreePath,
+    isMainCheckout:
+      !!worktreePath && worktreePath === chat.session?.projectPath,
+    active: isForegroundPane,
+    evidenceShown: !!shownEvidence,
+    onDirty: setLeaving,
+    // A working-tree reference stays for the next time Changes opens.
+    onClose: () =>
+      setSourceRequest((current) =>
+        current?.kind === "working" ? current : null
+      ),
+    onSelect: (section) => {
+      setEvidence(null);
+      if (section !== "changes") setSourceRequest(null);
+    },
+  });
+  const shownSection = side.shownSection;
 
   const conversationRef = useRef<HTMLDivElement>(null);
   const find = usePaneFind(conversationRef);
@@ -701,46 +661,25 @@ export function ChatWindow({
   if (!chat.session) return null;
 
   const isEmpty = chat.session.messages.length === 0;
-  const backgroundWork = chat.session.backgroundWork;
   const hasBackgroundWork = backgroundWorkRows(backgroundWork).length > 0;
+  // Narrow, the column replaces the transcript as the chat's view.
+  const sidePlacement =
+    panelResize.available >= SIDE_COLUMN_BESIDE_MIN_WIDTH ? "beside" : "view";
+  const panelProps = {
+    className: `changes-side-panel${panelResize.easing ? " is-easing" : ""}`,
+    style:
+      sidePlacement === "beside" ? { flexBasis: panelResize.width } : undefined,
+  };
 
   const content = (
     <div
       className="chat-association-panel flex h-full min-h-0 flex-col"
       data-testid="local-chat-window"
       data-project-path={chat.session.projectPath ?? ""}
-      onKeyDownCapture={(event) => {
-        // ⌥←/⌥→ and ⌥= resize the Changes panel while it has focus.
-        const changes = changesRef.current;
-        const origin = event.nativeEvent.composedPath()[0];
-        if (
-          !changes ||
-          !(origin instanceof HTMLElement) ||
-          !changes.contains(origin) ||
-          isEditableShortcutTarget(origin) ||
-          event.defaultPrevented ||
-          event.nativeEvent.isComposing ||
-          !event.altKey ||
-          event.metaKey ||
-          event.ctrlKey ||
-          event.shiftKey ||
-          origin.closest('[role="combobox"][aria-expanded="true"]') ||
-          document.querySelector('[role="dialog"][aria-modal="true"]')
-        )
-          return;
-        const resize =
-          event.key === "ArrowLeft"
-            ? () => panelResize.resizeBy(1)
-            : event.key === "ArrowRight"
-              ? () => panelResize.resizeBy(-1)
-              : event.code === "Equal"
-                ? panelResize.cycleWidth
-                : null;
-        if (!resize) return;
-        event.preventDefault();
-        event.stopPropagation();
-        resize();
-      }}
+      // ⌥←/⌥→ and ⌥= resize the side column while it has focus.
+      onKeyDownCapture={(event) =>
+        resizeFromRegionKey(event, sideRef.current, panelResize)
+      }
     >
       <ChatHeader
         showProjectContext={showProjectContext}
@@ -750,13 +689,11 @@ export function ChatWindow({
         canStopGeneration={chat.canStopGeneration}
         onClosePanel={onClosePanel}
         onStartFresh={onStartFresh}
-        changesOpen={showChanges}
-        onToggleChanges={worktreePath ? toggleChanges : undefined}
-        backgroundOpen={showBackground}
-        backgroundRunning={activeBackgroundWorkCount(backgroundWork)}
-        onToggleBackground={
-          hasBackgroundWork || showBackground ? toggleBackground : undefined
-        }
+        sideSection={shownSection}
+        onToggleSection={side.toggle}
+        changesAvailable={!!worktreePath}
+        backgroundAvailable={hasBackgroundWork}
+        backgroundRunning={backgroundRunning}
         onClearMessages={() => void chat.handleClearMessages()}
         onStopGeneration={() => void chat.handleStopGeneration()}
         onTitleSave={chat.handleTitleSave}
@@ -771,53 +708,68 @@ export function ChatWindow({
       <div
         ref={panelResize.containerRef}
         className="chat-with-changes min-h-0 flex-1"
-        data-changes-open={
-          showChanges || shownEvidence != null || showBackground
-        }
+        data-changes-open={shownSection !== null || shownEvidence != null}
+        data-side-placement={sidePlacement}
       >
-        {showChanges && (
-          <aside
-            aria-label="Changes panel"
-            className={`changes-side-panel${panelResize.easing ? " is-easing" : ""}`}
-            style={{ flexBasis: panelResize.width }}
-          >
-            <WorktreeChanges
-              key={`${sessionId}:${worktreePath}`}
-              ref={changesRef}
-              worktreePath={worktreePath}
-              onChangesLoaded={
-                worktreePath === evidenceCheckout
-                  ? handleWorktreeLoaded
-                  : undefined
-              }
-              onExit={() => inputRef.current?.focus()}
-              sourceJump={
-                source?.kind === "working" &&
-                source.worktreePath === worktreePath
-                  ? source.target
-                  : null
-              }
-              turnDocument={
-                source?.kind === "turn"
-                  ? { ...source, target: { ...source.target, root: turnRoot } }
-                  : null
-              }
-              onTurnDismiss={(nonce) => {
-                // Keep browsing the same checkout after leaving the reference.
-                setSourceRequest((current) =>
-                  current?.kind === "turn" && current.nonce === nonce
-                    ? { kind: "checkout", sessionId, worktreePath }
-                    : current
-                );
+        {shownSection && (
+          <aside ref={sideRef} aria-label="Side column" {...panelProps}>
+            <ChatSideColumn
+              section={shownSection}
+              counts={{
+                changes: changedFiles,
+                background: backgroundRunning,
               }}
-              onTurnVersionChange={(nonce, version) => {
-                setSourceRequest((current) =>
-                  current?.kind === "turn" && current.nonce === nonce
-                    ? { ...current, version }
-                    : current
-                );
-              }}
-            />
+              available={side.available}
+              onSection={side.select}
+              onClose={side.requestClose}
+            >
+              {shownSection === "changes" && worktreePath ? (
+                <WorktreeChanges
+                  key={`${sessionId}:${worktreePath}`}
+                  worktreePath={worktreePath}
+                  sessionId={sessionId}
+                  onChangesLoaded={
+                    worktreePath === evidenceCheckout
+                      ? handleWorktreeLoaded
+                      : undefined
+                  }
+                  onExit={() => inputRef.current?.focus()}
+                  sourceJump={
+                    source?.kind === "working" &&
+                    source.worktreePath === worktreePath
+                      ? source.target
+                      : null
+                  }
+                  turnDocument={
+                    source?.kind === "turn"
+                      ? {
+                          ...source,
+                          target: { ...source.target, root: turnRoot },
+                        }
+                      : null
+                  }
+                  onTurnDismiss={(nonce) => {
+                    // Keep browsing the same checkout after leaving the reference.
+                    setSourceRequest((current) =>
+                      current?.kind === "turn" && current.nonce === nonce
+                        ? { kind: "checkout", sessionId, worktreePath }
+                        : current
+                    );
+                  }}
+                  onTurnVersionChange={(nonce, version) => {
+                    setSourceRequest((current) =>
+                      current?.kind === "turn" && current.nonce === nonce
+                        ? { ...current, version }
+                        : current
+                    );
+                  }}
+                />
+              ) : shownSection === "discussions" ? (
+                <SideDiscussions />
+              ) : (
+                <BackgroundActivityPanel work={backgroundWork} />
+              )}
+            </ChatSideColumn>
           </aside>
         )}
         {shownEvidence && (
@@ -827,8 +779,8 @@ export function ChatWindow({
                 ? "File reference panel"
                 : "Evidence panel"
             }
-            className={`changes-side-panel${panelResize.easing ? " is-easing" : ""}`}
-            style={{ flexBasis: panelResize.width }}
+            ref={sideRef}
+            {...panelProps}
           >
             <SourceEvidence
               checkout={shownEvidence.checkout}
@@ -837,19 +789,7 @@ export function ChatWindow({
             />
           </aside>
         )}
-        {showBackground && (
-          <aside
-            aria-label="Background tasks panel"
-            className={`changes-side-panel${panelResize.easing ? " is-easing" : ""}`}
-            style={{ flexBasis: panelResize.width }}
-          >
-            <BackgroundActivityPanel
-              work={backgroundWork}
-              onClose={() => setBackgroundSession(null)}
-            />
-          </aside>
-        )}
-        {(showChanges || shownEvidence || showBackground) && (
+        {(shownSection || shownEvidence) && sidePlacement === "beside" && (
           <div {...panelResize.handleProps} className="changes-resize-handle" />
         )}
         {worktreePath && (
@@ -862,8 +802,7 @@ export function ChatWindow({
                 discardDraft(worktreePath, path);
               }
               setLeaving(null);
-              setSourceRequest(null);
-              setChangesSession(null);
+              leaveChanges();
             }}
             onSave={() => {
               setLeaveBusy(true);
@@ -872,10 +811,7 @@ export function ChatWindow({
                   // Stay in Changes on the first document that was not saved
                   // so its error or conflict is visible.
                   if (failed.length > 0) activate(worktreePath, failed[0]);
-                  else {
-                    setSourceRequest(null);
-                    setChangesSession(null);
-                  }
+                  else leaveChanges();
                 })
                 .finally(() => {
                   setLeaveBusy(false);
@@ -944,17 +880,16 @@ export function ChatWindow({
                 commentNumbers={commentNumbers}
                 onOpenComment={handleOpenComment}
                 footer={
-                  <>
-                    <DiscussionSnapshot snapshot={worktreeSnapshot} />
-                    {gate && gateStatus && gateDraft && (
-                      <GateSteering
-                        sessionId={sessionId}
-                        gate={gate}
-                        status={gateStatus}
-                        draft={gateDraft}
-                      />
-                    )}
-                  </>
+                  gate &&
+                  gateStatus &&
+                  gateDraft && (
+                    <GateSteering
+                      sessionId={sessionId}
+                      gate={gate}
+                      status={gateStatus}
+                      draft={gateDraft}
+                    />
+                  )
                 }
               />
             </Profiler>
@@ -1023,11 +958,8 @@ export function ChatWindow({
     >
       <DiffReviewContext.Provider value={diffReview}>
         <SelectionDiscussionProvider
-          key={JSON.stringify([
-            chat.session.projectPath,
-            sessionId,
-            ownWorktreePath,
-          ])}
+          key={discussionKey}
+          controller={discussions.controller}
           worktreePath={ownWorktreePath ?? worktreePath ?? ""}
           parentChatId={sessionId}
           projectPath={chat.session.projectPath}
@@ -1037,7 +969,8 @@ export function ChatWindow({
           reasoningEffort={chat.session.selectedReasoningEffort}
           speedTier={chat.session.selectedSpeedTier}
           personality={chat.session.selectedPersonality}
-          onOpen={() => setChangesSession(sessionId)}
+          snapshot={worktreeSnapshot}
+          onOpen={() => side.select("changes")}
           onAttach={attachSelection}
         >
           <FileReferenceNavigationContext.Provider value={openFileReference}>

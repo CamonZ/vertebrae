@@ -312,7 +312,7 @@ describe("ChatWindow", () => {
       await userEvent.click(screen.getByTestId("local-file-reference-link"));
 
       const changes = () =>
-        within(screen.getByRole("complementary", { name: "Changes panel" }));
+        within(screen.getByRole("complementary", { name: "Side column" }));
       const file = () =>
         within(changes().getByRole("region", { name: "File src/a.ts" }));
       expect(await file().findByText("recorded file")).toHaveAttribute(
@@ -385,7 +385,7 @@ describe("ChatWindow", () => {
     await userEvent.click(screen.getByTestId("local-file-reference-link"));
 
     const changes = within(
-      screen.getByRole("complementary", { name: "Changes panel" })
+      screen.getByRole("complementary", { name: "Side column" })
     );
     expect(await changes.findByText("Capture pending")).toBeVisible();
     expect(mockedCommands.readWorktreeFile).not.toHaveBeenCalled();
@@ -404,7 +404,7 @@ describe("ChatWindow", () => {
       })
     );
     expect(
-      screen.getByRole("complementary", { name: "Changes panel" })
+      screen.getByRole("complementary", { name: "Side column" })
     ).toBeVisible();
     expect(
       screen.queryByRole("region", { name: "File src/pending.ts" })
@@ -464,32 +464,40 @@ describe("ChatWindow", () => {
       expect(retired.disconnect).toHaveBeenCalledOnce();
       const current = observations.find((o) => o.node === replacement)!;
       expect(current).toBeDefined();
-      act(() => current.notify(800));
+      act(() => current.notify(1400));
       act(() => retired.notify(0));
       firePaneControl("Changes");
       let handle = await screen.findByRole("separator", {
-        name: "Resize Changes panel",
+        name: "Resize side column",
       });
       expect(handle).toHaveAttribute("aria-valuenow", "560");
       fireEvent.keyDown(handle, { key: "End" });
-      expect(handle).toHaveAttribute("aria-valuenow", "618");
+      expect(handle).toHaveAttribute("aria-valuenow", "1218");
       firePaneControl("Changes");
       expect(
-        screen.queryByRole("separator", { name: "Resize Changes panel" })
+        screen.queryByRole("separator", { name: "Resize side column" })
       ).toBeNull();
       firePaneControl("Changes");
       handle = await screen.findByRole("separator", {
-        name: "Resize Changes panel",
+        name: "Resize side column",
       });
-      expect(handle).toHaveAttribute("aria-valuenow", "618");
-      act(() => current.notify(480));
-      expect(handle).toHaveAttribute("aria-valuenow", "298");
-      act(() => current.notify(320));
-      expect(handle).toHaveAttribute("aria-valuemax", "180");
-      act(() => current.notify(1200));
-      expect(handle).toHaveAttribute("aria-valuenow", "618");
+      expect(handle).toHaveAttribute("aria-valuenow", "1218");
+      act(() => current.notify(1150));
+      expect(handle).toHaveAttribute("aria-valuenow", "968");
+      // Narrower than 1100px the column replaces the transcript: no splitter.
+      act(() => current.notify(900));
+      expect(
+        screen.queryByRole("separator", { name: "Resize side column" })
+      ).toBeNull();
+      expect(container.querySelector(".chat-with-changes")).toHaveAttribute(
+        "data-side-placement",
+        "view"
+      );
+      act(() => current.notify(1600));
+      handle = screen.getByRole("separator", { name: "Resize side column" });
+      expect(handle).toHaveAttribute("aria-valuenow", "1218");
       fireEvent.keyDown(handle, { key: "ArrowLeft" });
-      expect(handle).toHaveAttribute("aria-valuenow", "628");
+      expect(handle).toHaveAttribute("aria-valuenow", "1228");
     } finally {
       vi.unstubAllGlobals();
     }
@@ -730,32 +738,38 @@ describe("ChatWindow", () => {
     });
 
     expect(
-      screen.queryByRole("complementary", { name: "Background tasks panel" })
+      screen.queryByRole("complementary", { name: "Side column" })
     ).toBeNull();
 
     fireEvent.click(toggle);
 
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const column = screen.getByRole("complementary", { name: "Side column" });
     expect(
-      screen.getByRole("complementary", { name: "Background tasks panel" })
-    ).toHaveTextContent("npm run dev");
+      within(column).getByRole("tab", { name: /Background tasks/ })
+    ).toHaveAttribute("aria-selected", "true");
+    expect(column).toHaveTextContent("npm run dev");
     expect(screen.getByTestId("local-chat-composer")).toBeVisible();
 
+    // One column per chat: Changes takes the same slot.
     firePaneControl("Changes");
     await screen.findByText("No changes against this baseline.");
+    expect(
+      within(
+        screen.getByRole("complementary", { name: "Side column" })
+      ).getByRole("tab", { name: /Changes/ })
+    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByText("npm run dev")).toBeNull();
+    // With the column open the switcher carries the other sections; the
+    // header keeps two to three actions.
+    expect(toggle).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Background tasks/ }));
 
     expect(
-      screen.queryByRole("complementary", { name: "Background tasks panel" })
-    ).toBeNull();
-
-    fireEvent.click(toggle);
-
-    expect(
-      screen.queryByRole("complementary", { name: "Changes panel" })
-    ).toBeNull();
-    expect(
-      screen.getByRole("complementary", { name: "Background tasks panel" })
-    ).toBeVisible();
+      screen.getByRole("complementary", { name: "Side column" })
+    ).toHaveTextContent("npm run dev");
+    expect(screen.queryByText("No changes against this baseline.")).toBeNull();
   });
 
   it("hides the background toggle when no background work was reported", () => {

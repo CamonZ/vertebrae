@@ -1,4 +1,13 @@
-import { CHAT_AREA_SHORTCUT, presentChatShortcut } from "./chatShortcuts";
+import {
+  CHAT_AREA_SHORTCUT,
+  SIDE_COLUMN_SHORTCUTS,
+  shortcutText,
+} from "./chatShortcuts";
+import {
+  SIDE_SECTION_LABEL,
+  type SideSection,
+} from "../../stores/chatSideColumnStore";
+import { useDiscussionSummary } from "./selectionDiscussionState";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { StopIcon } from "../panels";
 import { OverflowMenu } from "../molecules/OverflowMenu";
@@ -14,10 +23,14 @@ interface ChatHeaderProps {
   canStopGeneration: boolean;
   onClosePanel?: () => void;
   onStartFresh?: () => void;
-  onToggleChanges?: () => void;
-  changesOpen?: boolean;
-  onToggleBackground?: () => void;
-  backgroundOpen?: boolean;
+  /** The side column's shown section; null while it is closed. */
+  sideSection?: SideSection | null;
+  /** Show a section, or close the column when it is the one shown. */
+  onToggleSection?: (section: SideSection) => void;
+  /** The chat has a checkout, so Changes can open. */
+  changesAvailable?: boolean;
+  /** The chat has background work to list. */
+  backgroundAvailable?: boolean;
   backgroundRunning?: number;
   onClearMessages: () => void;
   onStopGeneration: () => void;
@@ -40,6 +53,8 @@ export interface HeaderAction {
   testId?: string;
   pressed?: boolean;
   badge?: number;
+  /** Something here needs attention (an error); drawn in the alert style. */
+  alert?: boolean;
   icon: React.ReactNode;
   /** Render inside the pane's `⋯` overflow menu instead of inline. */
   menu?: boolean;
@@ -69,6 +84,9 @@ export function SvgIcon({
     </svg>
   );
 }
+
+const TOGGLE_KEYS = shortcutText(SIDE_COLUMN_SHORTCUTS.toggle);
+const AREA_KEYS = shortcutText(CHAT_AREA_SHORTCUT);
 
 interface PaneControlProps {
   onClosePanel?: () => void;
@@ -115,6 +133,7 @@ export function HeaderActionButtons({ actions }: { actions: HeaderAction[] }) {
     <button
       key={action.key}
       className={`hc-ctrl${action.className ? ` ${action.className}` : ""}`}
+      data-alert={action.alert ? "" : undefined}
       onClick={action.onClick}
       disabled={action.disabled}
       title={action.title}
@@ -122,7 +141,9 @@ export function HeaderActionButtons({ actions }: { actions: HeaderAction[] }) {
       data-testid={action.testId}
       aria-pressed={action.pressed}
       aria-expanded={
-        action.key === "changes" || action.key === "background"
+        action.key === "changes" ||
+        action.key === "discussions" ||
+        action.key === "background"
           ? action.pressed
           : undefined
       }
@@ -180,10 +201,10 @@ export function ChatHeader({
   canStopGeneration,
   onClosePanel,
   onStartFresh,
-  onToggleChanges,
-  changesOpen = false,
-  onToggleBackground,
-  backgroundOpen = false,
+  sideSection = null,
+  onToggleSection,
+  changesAvailable = false,
+  backgroundAvailable = false,
   backgroundRunning = 0,
   onClearMessages,
   onStopGeneration,
@@ -280,18 +301,64 @@ export function ChatHeader({
 
   const paneActions = buildPaneActions({ onClosePanel });
 
-  const actions: HeaderAction[] = [
+  const discussions = useDiscussionSummary();
+  const columnOpen = sideSection !== null;
+  /**
+   * A side section's toggle. Toolbar rule (two to three visible actions):
+   * visible while it is the shown section, when it needs attention, or
+   * (column closed) when it has content; otherwise in the overflow menu.
+   * With the column open its switcher reaches the other sections, except
+   * that Discussions stays visible with content (db5160ff constraint 3).
+   */
+  const sectionAction = (
+    section: SideSection,
     {
-      key: "changes",
-      title: changesOpen
-        ? `Hide Changes panel (⌘⇧B) · ${CHAT_AREA_SHORTCUT.label} (${presentChatShortcut(CHAT_AREA_SHORTCUT)?.keys.join("")})`
-        : "Show Changes panel (⌘⇧B when worktree has changes)",
+      show,
+      count = 0,
+      alert = false,
+      ariaLabel,
+      testId,
+      icon,
+      visibleWithContent = false,
+    }: {
+      show: boolean;
+      /** Visible with content even while the column shows another section. */
+      visibleWithContent?: boolean;
+      count?: number;
+      alert?: boolean;
+      ariaLabel: string;
+      testId: string;
+      icon: React.ReactNode;
+    }
+  ): HeaderAction => {
+    const pressed = sideSection === section;
+    const label = SIDE_SECTION_LABEL[section];
+    const keys = shortcutText(SIDE_COLUMN_SHORTCUTS[section]);
+    return {
+      key: section,
+      title: pressed
+        ? `Hide ${label} (${keys}) · ${CHAT_AREA_SHORTCUT.label} (${AREA_KEYS})`
+        : `Show ${label} (${keys}) · ${TOGGLE_KEYS} side column`,
+      ariaLabel,
+      onClick: () => onToggleSection?.(section),
+      show: show && !!onToggleSection,
+      pressed,
+      alert,
+      menu:
+        !pressed &&
+        !alert &&
+        (count === 0 || (columnOpen && !visibleWithContent)),
+      menuLabel: label,
+      badge: count,
+      testId,
+      icon,
+    };
+  };
+
+  const actions: HeaderAction[] = [
+    sectionAction("changes", {
+      show: changesAvailable,
       ariaLabel: "Changes",
-      onClick: onToggleChanges!,
-      show: !!onToggleChanges,
-      pressed: changesOpen,
-      menu: !changesOpen,
-      menuLabel: "Changes",
       testId: "local-chat-view-changes",
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
@@ -299,22 +366,37 @@ export function ChatHeader({
           <path d="M15 4v16M6 9h6M9 6v6M6 16h6" />
         </SvgIcon>
       ),
-    },
-    {
-      key: "background",
-      title: backgroundOpen
-        ? "Hide Background tasks panel"
-        : "Show Background tasks panel",
+    }),
+    sectionAction("discussions", {
+      show: changesAvailable || discussions.count > 0 || discussions.alert,
+      count: discussions.count,
+      alert: discussions.alert,
+      visibleWithContent: true,
+      ariaLabel: [
+        "Discussions",
+        discussions.count > 0 ? `${discussions.count}` : null,
+        discussions.alert ? "anchor error" : null,
+      ]
+        .filter(Boolean)
+        .join(", "),
+      testId: "local-chat-view-discussions",
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M7 8h10M7 12h6m-9 8 3.5-3H18a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v14Z"
+          />
+        </SvgIcon>
+      ),
+    }),
+    sectionAction("background", {
+      show: backgroundAvailable || sideSection === "background",
+      count: backgroundRunning,
       ariaLabel:
         backgroundRunning > 0
           ? `Background tasks, ${backgroundRunning} running`
           : "Background tasks",
-      onClick: onToggleBackground!,
-      show: !!onToggleBackground,
-      pressed: backgroundOpen,
-      menu: !backgroundOpen && backgroundRunning === 0,
-      menuLabel: "Background tasks",
-      badge: backgroundRunning,
       testId: "local-chat-view-background",
       icon: (
         <SvgIcon size="h-3.5 w-3.5">
@@ -322,7 +404,7 @@ export function ChatHeader({
           <path d="M12 8v4l2.5 2.5" />
         </SvgIcon>
       ),
-    },
+    }),
     {
       key: "fresh",
       title: "Start fresh local chat",

@@ -31,12 +31,13 @@ import {
 import { deliverLocalChatTurn } from "../../hooks/useLocalChatEventRouter";
 import {
   SelectionDiscussions,
+  anchorNotice,
+  anchorsInChanges,
   isOutdated,
   discussionTurn,
   selectionLabel,
   type CodeSelection,
   type DiscussionState,
-  type ThreadStatus,
 } from "./selectionDiscussions";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 import { ChatTranscript } from "./ChatMessages";
@@ -60,9 +61,11 @@ import {
 } from "./selectionDiscussionState";
 import { focusKeepProps } from "../../utils/focusKeep";
 import { useKeepFocus } from "../../hooks/useKeepFocus";
+import { OWNS_ESCAPE_ATTRIBUTE } from "../../hooks/useGlassPanel";
 
 export function SelectionDiscussionProvider({
   children,
+  controller,
   worktreePath,
   parentChatId,
   projectPath,
@@ -74,9 +77,17 @@ export function SelectionDiscussionProvider({
   personality,
   onOpen,
   onAttach,
+  snapshot,
 }: {
   children: ReactNode;
+  /** The chat's controller (`useChatDiscussions`). */
+  controller: SelectionDiscussions;
   worktreePath: string;
+  /**
+   * The chat's last loaded review snapshot. Threads re-anchor against it
+   * whether or not any discussion UI is mounted.
+   */
+  snapshot: WorktreeSnapshot | null;
   parentChatId?: string;
   projectPath?: string | null;
   harness: LocalChatHarnessKind;
@@ -85,10 +96,10 @@ export function SelectionDiscussionProvider({
   reasoningEffort?: string | null;
   speedTier?: string | null;
   personality?: string | null;
+  /** Show the chat's Changes, where an inline thread's anchor is. */
   onOpen(): void;
   onAttach(anchor: CodeSelection, outdated?: boolean, question?: string): void;
 }) {
-  const [controller] = useState(() => new SelectionDiscussions());
   const state = useSyncExternalStore(
     controller.subscribe,
     controller.getSnapshot
@@ -217,6 +228,14 @@ export function SelectionDiscussionProvider({
     if (changed) void checkAvailability();
     mapSnapshot(snapshot);
   }, [checkAvailability, controller, mapSnapshot]);
+  // Runs with the review snapshot rather than re-reading files per thread.
+  // Owned here, not by a rendering component, so closing or never opening
+  // the side column does not stop re-anchoring (db5160ff).
+  const reconcileRef = useRef(reconcile);
+  reconcileRef.current = reconcile;
+  useEffect(() => {
+    if (snapshot) reconcileRef.current(snapshot);
+  }, [snapshot]);
 
   const send = useCallback(
     async (id: string, text: string) => {
@@ -351,7 +370,7 @@ export function SelectionDiscussionProvider({
         setFocusRequest(id && options?.focus ? id : null);
         const thread = id ? controller.thread(id) : undefined;
 
-        if (thread?.anchor.home.kind === "worktree" && !thread.anchor.fullFile) callbacks.current.onOpen();
+        if (!options?.inPlace && thread && anchorsInChanges(thread.anchor)) callbacks.current.onOpen();
         if (thread?.sessionId) {
           const store = useChatStore.getState();
           const session = store.sessions[thread.sessionId];
@@ -433,19 +452,6 @@ function closeProcess(sessionId: string, backendSessionId: string) {
   });
 }
 
-function anchorNotice(status: ThreadStatus) {
-  switch (status.kind) {
-    case "inline":
-    case "detached":
-      return null;
-    case "outdated":
-      return { marker: "outdated", label: "Outdated context" };
-    case "unavailable":
-    case "unreadable":
-      return { marker: "anchor unavailable", label: "Anchor unavailable" };
-  }
-}
-
 const collapseKeys = shortcutText(DISCUSSION_COLLAPSE_SHORTCUT);
 const askKeys = shortcutText(DISCUSSION_ASK_SHORTCUT);
 const sendKeys = shortcutText(DISCUSSION_SEND_SHORTCUT);
@@ -488,7 +494,8 @@ export function InlineSelectionDiscussion({
   );
 }
 
-function MiniThread({
+/** An open discussion: its transcript, composer and turn controls. */
+export function MiniThread({
   thread,
   discussion,
   onClosed,
@@ -559,6 +566,8 @@ function MiniThread({
       className="selection-mini-thread"
       aria-label="Selection discussion"
       data-testid="selection-mini-thread"
+      // Esc closes this thread, not the chat workspace around it.
+      {...{ [OWNS_ESCAPE_ATTRIBUTE]: "" }}
       onKeyDown={(event) => {
         if (event.defaultPrevented || event.nativeEvent.isComposing) return;
         if (matchesChatShortcut(event, DISCUSSION_COLLAPSE_SHORTCUT)) {
@@ -780,31 +789,6 @@ function useTurnAnnouncement(
   }, [activeTurn, failed]);
 
   return announcement;
-}
-
-/** Runs with the review snapshot rather than re-reading files for a thread. */
-export function DiscussionSnapshot({
-  snapshot,
-}: {
-  snapshot: WorktreeSnapshot | null;
-}) {
-  const discussion = useContext(SelectionDiscussionContext);
-  const reconcile = useRef(discussion?.reconcile);
-  reconcile.current = discussion?.reconcile;
-
-  useEffect(() => {
-    if (snapshot) reconcile.current?.(snapshot);
-  }, [snapshot]);
-
-  if (!discussion) return null;
-  const detached = discussion.threads.filter((thread) => thread.status.kind !== "inline" && !thread.anchor.fullFile?.turn);
-  if (!discussion.anchorError && !detached.length) return null;
-  return (
-    <div className="selection-discussion-notices">
-      {discussion.anchorError && <p role="alert">{discussion.anchorError}</p>}
-      {detached.map(({ id }) => <InlineSelectionDiscussion key={id} threadId={id} />)}
-    </div>
-  );
 }
 
 /** Shared by the initial comment dialog and each follow-up composer. */

@@ -7,6 +7,7 @@ import {
 } from "react";
 import { isRunPane, useChatStore } from "../../stores/chatStore";
 import type { ChatPane, LocalChatPane } from "../../stores/chatStore";
+import type { SideSection } from "../../stores/chatSideColumnStore";
 import { RunPaneWindow } from "./run/RunChatPane";
 import { ChatWindow } from "./ChatWindow";
 import { chatTabId, chatTabPanelId } from "./chatTabs";
@@ -15,9 +16,16 @@ import {
   saveChatFocusArea,
 } from "../../stores/chatViewMemory";
 
-export type RegisterChangesToggle = (
+/** What ⌘⇧B and ⌘⇧[ ] do to a chat's side column; false when nothing. */
+export interface SideColumnControls {
+  toggle(): boolean;
+  /** Show `section`, or close the column showing it; false if unavailable. */
+  toggleSection(section: SideSection): boolean;
+}
+
+export type RegisterSideColumn = (
   paneId: string,
-  toggle: (() => void) | null
+  controls: SideColumnControls | null
 ) => void;
 
 export type RegisterPaneFind = (
@@ -26,7 +34,7 @@ export type RegisterPaneFind = (
 ) => void;
 
 interface ChatPaneListProps {
-  registerChangesToggle?: RegisterChangesToggle;
+  registerSideColumn?: RegisterSideColumn;
   registerPaneFind?: RegisterPaneFind;
   /** The active tab's chat; null before any chat opens. */
   shownPane: ChatPane | null;
@@ -46,7 +54,7 @@ interface ChatPaneListProps {
  * drafts, scroll and focus are restored on return.
  */
 export const ChatPaneList = memo(function ChatPaneList({
-  registerChangesToggle,
+  registerSideColumn,
   registerPaneFind,
   shownPane: pane,
   tabPanels,
@@ -85,7 +93,7 @@ export const ChatPaneList = memo(function ChatPaneList({
               showProjectContext={showProjectContext}
               projectLabelBySessionId={projectLabelBySessionId}
               renderObserver={renderObserver}
-              registerChangesToggle={registerChangesToggle}
+              registerSideColumn={registerSideColumn}
               registerPaneFind={registerPaneFind}
             />
           )}
@@ -116,7 +124,7 @@ function ChatPaneSlot(props: ComponentPropsWithoutRef<"div">) {
 }
 
 interface ChatPaneWindowProps {
-  registerChangesToggle?: RegisterChangesToggle;
+  registerSideColumn?: RegisterSideColumn;
   registerPaneFind?: RegisterPaneFind;
   pane: LocalChatPane;
   sessionId: string;
@@ -129,7 +137,7 @@ interface ChatPaneWindowProps {
 }
 
 const ChatPaneWindow = memo(function ChatPaneWindow({
-  registerChangesToggle,
+  registerSideColumn,
   registerPaneFind,
   pane,
   sessionId,
@@ -157,9 +165,10 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
     () => void startFreshActiveSession(pane.id),
     [pane.id, startFreshActiveSession]
   );
-  const registerToggle = useCallback(
-    (toggle: (() => void) | null) => registerChangesToggle?.(pane.id, toggle),
-    [pane.id, registerChangesToggle]
+  const registerColumn = useCallback(
+    (controls: SideColumnControls | null) =>
+      registerSideColumn?.(pane.id, controls),
+    [pane.id, registerSideColumn]
   );
   const registerFind = useCallback(
     (openFind: (() => boolean) | null) => registerPaneFind?.(pane.id, openFind),
@@ -202,7 +211,7 @@ const ChatPaneWindow = memo(function ChatPaneWindow({
       <ChatWindow
         key={sessionId}
         sessionId={sessionId}
-        registerChangesToggle={registerToggle}
+        registerSideColumn={registerColumn}
         registerFind={registerFind}
         onClosePanel={closeChatPanel}
         onStartFresh={onStartFresh}

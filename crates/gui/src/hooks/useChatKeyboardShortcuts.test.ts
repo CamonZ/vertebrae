@@ -31,7 +31,8 @@ function makeDispatch(
     startFreshActiveSession: vi.fn(async () => true),
     toggleHistorySelector: vi.fn(() => true),
     toggleHistoryVisibility: vi.fn(),
-    toggleChangesPanel: vi.fn(() => true),
+    toggleSideColumn: vi.fn(() => true),
+    toggleSideSection: vi.fn(() => true),
     ...overrides,
   };
 }
@@ -537,7 +538,7 @@ it("toggles the sidebar on Cmd+B and ignores repeats, composition, and extra mod
   expect(dispatch.toggleHistoryVisibility).toHaveBeenCalledTimes(1);
 });
 
-describe("Changes panel shortcut", () => {
+describe("Side column shortcuts", () => {
   it("dispatches Cmd+Shift+B without toggling the history sidebar", () => {
     const dispatch = makeDispatch();
 
@@ -547,12 +548,12 @@ describe("Changes panel shortcut", () => {
       fireKey({ key: "B", code: "KeyB", metaKey: true, shiftKey: true })
         .defaultPrevented
     ).toBe(true);
-    expect(dispatch.toggleChangesPanel).toHaveBeenCalledOnce();
+    expect(dispatch.toggleSideColumn).toHaveBeenCalledOnce();
     expect(dispatch.toggleHistoryVisibility).not.toHaveBeenCalled();
   });
 
   it("leaves the key alone without an eligible active conversation", () => {
-    const dispatch = makeDispatch({ toggleChangesPanel: vi.fn(() => false) });
+    const dispatch = makeDispatch({ toggleSideColumn: vi.fn(() => false) });
 
     renderShortcutHook(dispatch);
 
@@ -572,6 +573,60 @@ describe("Changes panel shortcut", () => {
     renderShortcutHook(dispatch);
     fireKey({ key: "B", metaKey: true, shiftKey: true, ...extra });
 
-    expect(dispatch.toggleChangesPanel).not.toHaveBeenCalled();
+    expect(dispatch.toggleSideColumn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    // Shift turns the brackets into braces on US layouts; other layouts
+    // report other keys. The physical key decides.
+    { key: "{", code: "BracketLeft", offset: -1 },
+    { key: "[", code: "BracketLeft", offset: -1 },
+    { key: "ü", code: "BracketLeft", offset: -1 },
+    { key: "}", code: "BracketRight", offset: 1 },
+    { key: "+", code: "BracketRight", offset: 1 },
+  ])("Cmd+Shift+$key ($code) switches chat tabs by $offset", ({ key, code, offset }) => {
+    const dispatch = makeDispatch();
+
+    renderShortcutHook(dispatch);
+
+    expect(
+      fireKey({ key, code, metaKey: true, shiftKey: true }).defaultPrevented
+    ).toBe(true);
+    expect(dispatch.focusPaneByOffset).toHaveBeenCalledExactlyOnceWith(offset);
+    expect(dispatch.toggleSideSection).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { code: "Digit1", section: "changes" },
+    { code: "Digit2", section: "discussions" },
+    { code: "Digit3", section: "background" },
+  ])("Ctrl+Cmd+$code toggles the $section section", ({ code, section }) => {
+    const dispatch = makeDispatch();
+
+    renderShortcutHook(dispatch);
+
+    expect(
+      fireKey({ key: code.slice(-1), code, metaKey: true, ctrlKey: true })
+        .defaultPrevented
+    ).toBe(true);
+    expect(dispatch.toggleSideSection).toHaveBeenCalledExactlyOnceWith(section);
+    expect(dispatch.focusPaneByIndex).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { key: "ArrowLeft", offset: -1 },
+    { key: "ArrowRight", offset: 1 },
+  ])("Cmd+Option+$key moves composer ↔ side column, never switching tabs", ({ key, offset }) => {
+    const dispatch = makeDispatch();
+
+    renderShortcutHook(dispatch);
+
+    expect(
+      fireKey({ key, code: key, metaKey: true, altKey: true }).defaultPrevented
+    ).toBe(true);
+    expect(dispatch.focusAreaByOffset).toHaveBeenCalledExactlyOnceWith(offset);
+    expect(dispatch.focusPaneByOffset).not.toHaveBeenCalled();
+    expect(dispatch.moveActivePane).not.toHaveBeenCalled();
+    expect(dispatch.toggleSideSection).not.toHaveBeenCalled();
   });
 });
