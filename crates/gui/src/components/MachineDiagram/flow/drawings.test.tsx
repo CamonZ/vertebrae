@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { PartContext } from "../partContext";
@@ -319,6 +319,17 @@ describe("remaining happy-path gallery stills", () => {
 });
 
 describe("compiled timing and outcomes", () => {
+  it.each([
+    [{}, "Boundary"],
+    [{ region: "Private Network" }, "Private Network"],
+  ])("renders the boundary region for %j", (props, label) => {
+    const diagram = compile("boundary", [], props);
+
+    render(<FlowDiagram diagram={diagram} t={0} reducedMotion />);
+
+    expect(screen.getByText(label)).toBeInTheDocument();
+  });
+
   it("the four-kind chat fixture compiles and retains its mechanisms at every beat", () => {
     const parsed = parseFlowSpec(mechanismSpec);
     if (!parsed.ok) throw new Error("mechanism fixture does not parse");

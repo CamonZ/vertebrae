@@ -159,7 +159,7 @@ export const boundaryMachine: MachinePartDef<BoundaryExtra> = {
     boundaryStory("refused"),
     boundaryStory("partition"),
   ],
-  draw: (t, { cut, region = "SACRUM PROCESS" }) => (
+  draw: (t, { cut, region = "Boundary" }) => (
     <>
       <Rail
         points={[
