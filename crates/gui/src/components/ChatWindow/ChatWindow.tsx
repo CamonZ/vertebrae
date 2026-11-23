@@ -28,10 +28,7 @@ import {
 import "./workspaceTabs.css";
 import { SelectionDiscussionProvider } from "./SelectionDiscussionContext";
 import { useChatDiscussions } from "./selectionDiscussionState";
-import {
-  ChatSideColumn,
-  SIDE_COLUMN_BESIDE_MIN_WIDTH,
-} from "./ChatSideColumn";
+import { ChatSideColumn, SIDE_COLUMN_BESIDE_MIN_WIDTH } from "./ChatSideColumn";
 import { SideDiscussions } from "./SideDiscussions";
 import { useChatSideColumn } from "./useChatSideColumn";
 import {
@@ -69,6 +66,7 @@ import { focusPaneTranscript } from "./chatAreas";
 import { ChatHeader } from "./ChatHeader";
 import { ChatMessages } from "./ChatMessages";
 import { ChatComposer } from "./ChatComposer";
+import { useChatWindowPalette } from "./chatPaletteCommands";
 import { BackgroundActivityPanel } from "./BackgroundActivityPanel";
 import {
   activeBackgroundWorkCount,
@@ -505,12 +503,11 @@ export function ChatWindow({
     annotationWorktree(capture) ??
     turn?.root ??
     null;
-  const worktreePath =
-    changesOpen
-      ? source?.kind === "checkout"
-        ? source.worktreePath
-        : (turnRoot ?? evidenceCheckout)
-      : ownWorktreePath;
+  const worktreePath = changesOpen
+    ? source?.kind === "checkout"
+      ? source.worktreePath
+      : (turnRoot ?? evidenceCheckout)
+    : ownWorktreePath;
 
   const attachSelection = (
     anchor: CodeSelection,
@@ -616,7 +613,9 @@ export function ChatWindow({
   const backgroundWork = chat.session?.backgroundWork;
   const backgroundRunning = activeBackgroundWorkCount(backgroundWork);
   const changedFiles = worktreeSnapshot
-    ? new Set(worktreeSnapshot.files.map((file) => file.newPath ?? file.oldPath)).size
+    ? new Set(
+        worktreeSnapshot.files.map((file) => file.newPath ?? file.oldPath)
+      ).size
     : null;
   const sectionCounts = useMemo(
     () => ({
@@ -652,6 +651,9 @@ export function ChatWindow({
 
   const conversationRef = useRef<HTMLDivElement>(null);
   const find = usePaneFind(conversationRef);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const modelSettingsHandle = useRef<(() => void) | null>(null);
+  useChatWindowPalette(rootRef, chat, association.record, modelSettingsHandle);
   useEffect(() => {
     if (!registerFind) return;
     registerFind(find.openFind);
@@ -673,6 +675,7 @@ export function ChatWindow({
 
   const content = (
     <div
+      ref={rootRef}
       className="chat-association-panel flex h-full min-h-0 flex-col"
       data-testid="local-chat-window"
       data-project-path={chat.session.projectPath ?? ""}
@@ -903,6 +906,7 @@ export function ChatWindow({
               inputValue={chat.inputValue}
               setInputValue={chat.setInputValue}
               inputRef={inputRef}
+              modelSettingsHandle={modelSettingsHandle}
               harnessCatalog={chat.harnessCatalog}
               visibleHarness={chat.visibleHarness}
               providerOptions={chat.providerOptions}

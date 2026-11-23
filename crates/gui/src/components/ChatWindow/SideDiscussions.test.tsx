@@ -12,7 +12,13 @@ import type { ChatAttention } from "../../utils/chatAttention";
 import { OWNS_ESCAPE_ATTRIBUTE } from "../../hooks/useGlassPanel";
 import { ChatHeader } from "./ChatHeader";
 import { ChatSideColumn } from "./ChatSideColumn";
-import { SIDE_COLUMN_SHORTCUTS, shortcutText } from "./chatShortcuts";
+import {
+  DISCUSSION_LIST_KEYS,
+  SIDE_COLUMN_SHORTCUTS,
+  keyHintText,
+  shortcutText,
+} from "./chatShortcuts";
+import { focusedPaletteScopes } from "../CommandPalette/paletteScopes";
 import { SideDiscussions } from "./SideDiscussions";
 import type { SideColumnControls } from "./ChatPaneList";
 import { useChatSideColumn } from "./useChatSideColumn";
@@ -33,7 +39,11 @@ const file = parsePatch(
 )[0];
 const home = { kind: "worktree", wholeBranch: true } as const;
 
-function thread(id: string, line: number, status: ThreadStatus): SelectionThread {
+function thread(
+  id: string,
+  line: number,
+  status: ThreadStatus
+): SelectionThread {
   const anchor = captureCodeSelection(
     file,
     { start: line, end: line, side: "additions" },
@@ -129,11 +139,14 @@ function header() {
   );
 }
 
-const rows = () =>
-  screen.getAllByRole("button", { name: /^Discussion on / });
+const rows = () => screen.getAllByRole("button", { name: /^Discussion on / });
 
 /** A chat's column as ChatWindow wires it: the hook, the switcher, content. */
-function Column({ register }: { register(controls: SideColumnControls | null): void }) {
+function Column({
+  register,
+}: {
+  register(controls: SideColumnControls | null): void;
+}) {
   const panel = useRef<HTMLElement>(null);
   const side = useChatSideColumn({
     sessionId: "chat",
@@ -162,7 +175,11 @@ function Column({ register }: { register(controls: SideColumnControls | null): v
           {side.shownSection === "discussions" ? (
             <SideDiscussions />
           ) : (
-            <section tabIndex={-1} aria-label="Background" data-chat-area="background" />
+            <section
+              tabIndex={-1}
+              aria-label="Background"
+              data-chat-area="background"
+            />
           )}
         </ChatSideColumn>
       )}
@@ -246,7 +263,9 @@ describe("SideDiscussions", () => {
       <Discussions threads={TWO_DETACHED_ONE_INLINE}>
         <ChatHeader
           label="Chat"
-          attention={{ state: "idle", reason: null, since: null } as ChatAttention}
+          attention={
+            { state: "idle", reason: null, since: null } as ChatAttention
+          }
           isClosing={false}
           canStopGeneration={false}
           onClearMessages={vi.fn()}
@@ -262,18 +281,17 @@ describe("SideDiscussions", () => {
   });
 
   it("puts the Discussions toggle in the overflow menu without discussions", () => {
-    render(
-      <Discussions threads={[]}>
-        {header()}
-      </Discussions>
-    );
+    render(<Discussions threads={[]}>{header()}</Discussions>);
 
     expect(screen.queryByTestId("local-chat-view-discussions")).toBeNull();
   });
 
   it("shows the anchor error as an alert and gives the header toggle an alert state (criterion 4)", () => {
     render(
-      <Discussions threads={[]} anchorError="Could not check anchors: git failed">
+      <Discussions
+        threads={[]}
+        anchorError="Could not check anchors: git failed"
+      >
         {header()}
         <SideDiscussions />
       </Discussions>
@@ -363,7 +381,10 @@ describe("SideDiscussions", () => {
     const inChanges = thread("inline", 1, { kind: "inline" });
     const onToolCall: SelectionThread = {
       ...thread("tool", 2, { kind: "inline" }),
-      anchor: { ...inChanges.anchor, home: { kind: "tool_call", toolUseId: "tu-1" } },
+      anchor: {
+        ...inChanges.anchor,
+        home: { kind: "tool_call", toolUseId: "tu-1" },
+      },
     };
     const fullFile: SelectionThread = {
       ...thread("file", 3, { kind: "inline" }),
@@ -375,8 +396,14 @@ describe("SideDiscussions", () => {
       </Discussions>
     );
 
-    const groups = screen.getAllByRole("group").map((g) => g.getAttribute("aria-label"));
-    expect(groups).toEqual(["In Changes, 1", "In the transcript, 1", "In open files, 1"]);
+    const groups = screen
+      .getAllByRole("group")
+      .map((g) => g.getAttribute("aria-label"));
+    expect(groups).toEqual([
+      "In Changes, 1",
+      "In the transcript, 1",
+      "In open files, 1",
+    ]);
     const [changesRow, toolRow, fileRow] = rows();
     for (const row of [toolRow, fileRow]) {
       expect(row).toHaveAttribute("aria-keyshortcuts", "Enter Meta+C");
@@ -387,6 +414,56 @@ describe("SideDiscussions", () => {
     expect(changesRow.title).toContain("show in Changes (o)");
     fireEvent.keyDown(changesRow, { key: "o" });
     expect(reopen).toHaveBeenCalledExactlyOnceWith("inline", { focus: true });
+  });
+
+  it("offers the focused row's keys in the palette's Discussions scope", () => {
+    const reopen = vi.fn();
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <Discussions threads={TWO_DETACHED_ONE_INLINE} reopen={reopen}>
+        <SideDiscussions />
+      </Discussions>
+    );
+    const [outdated, , inline] = rows();
+
+    act(() => inline.focus());
+    const opened = focusedPaletteScopes();
+    expect(opened.initial).toBe("discussions");
+    let contexts = opened.contexts;
+    const items = contexts[0].items;
+    expect(items.map((item) => [item.label, item.access])).toEqual([
+      ["Next discussion", { key: keyHintText(DISCUSSION_LIST_KEYS.move) }],
+      ["Previous discussion", { key: keyHintText(DISCUSSION_LIST_KEYS.move) }],
+      [DISCUSSION_LIST_KEYS.reply.label, { key: "↵" }],
+      [DISCUSSION_LIST_KEYS.showCode.label, { key: "o" }],
+      [
+        DISCUSSION_LIST_KEYS.copy.label,
+        { key: keyHintText(DISCUSSION_LIST_KEYS.copy) },
+      ],
+      ["Fold earlier turns", { key: keyHintText(DISCUSSION_LIST_KEYS.fold) }],
+    ]);
+    act(() =>
+      items.find((item) => item.label === "Previous discussion")!.run()
+    );
+    expect(rows()[1]).toHaveFocus();
+    items
+      .find((item) => item.label === DISCUSSION_LIST_KEYS.showCode.label)!
+      .run();
+    expect(reopen).toHaveBeenCalledExactlyOnceWith("inline", { focus: true });
+
+    // Not in Changes: no "show code"; the copy acts on this row.
+    act(() => outdated.focus());
+    ({ contexts } = focusedPaletteScopes());
+    const labels = contexts[0].items.map((item) => item.label);
+    expect(labels).not.toContain(DISCUSSION_LIST_KEYS.showCode.label);
+    contexts[0].items
+      .find((item) => item.label === DISCUSSION_LIST_KEYS.copy.label)!
+      .run();
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("original outdated");
   });
 
   it("copies the original code with ⌘C and folds with ←/→", () => {

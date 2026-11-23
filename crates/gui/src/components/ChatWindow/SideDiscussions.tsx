@@ -1,8 +1,12 @@
 import { useContext, useRef, type KeyboardEvent } from "react";
-import { CHAT_AREA_ATTRIBUTE, enterFirstRow } from "./chatAreas";
+import type { PaletteItem } from "../CommandPalette/paletteModel";
+import { contextScope, usePaletteScope } from "../CommandPalette/paletteScopes";
+import { CHAT_AREA_ATTRIBUTE, enterFirstRow, stepRow } from "./chatAreas";
+import { keyHintItem, type KeyHintArgs } from "./chatPaletteCommands";
 import {
   DIFF_COPY_SHORTCUT,
   DISCUSSION_LIST_HINTS,
+  DISCUSSION_LIST_KEYS,
   DISCUSSION_OPEN_KEY,
   matchesExactChatShortcut,
 } from "./chatShortcuts";
@@ -22,6 +26,7 @@ import {
 } from "./selectionDiscussionState";
 
 const ROW_ATTRIBUTE = "data-discussion-row";
+const ROW_SELECTOR = `[${ROW_ATTRIBUTE}]`;
 
 const GROUP: Record<ThreadPlace, { title: string; description?: string }> = {
   detached: {
@@ -45,8 +50,81 @@ function copy(text: string) {
   });
 }
 
-function rows(list: HTMLElement): HTMLElement[] {
-  return Array.from(list.querySelectorAll<HTMLElement>(`[${ROW_ATTRIBUTE}]`));
+/** What a row's keys do; the palette offers the same for the focused row. */
+function threadActions(thread: SelectionThread, discussion: DiscussionValue) {
+  return {
+    reply: () => discussion.reopen(thread.id, { focus: true, inPlace: true }),
+    // Not in place: the thread opens at its anchor in Changes.
+    showCode:
+      threadPlace(thread) === "changes"
+        ? () => discussion.reopen(thread.id, { focus: true })
+        : null,
+    copy: () => copy(thread.git.original.code),
+    /** Fold (true) or unfold (false); null when it already is. */
+    fold: (folded: boolean) =>
+      discussion.collapsed.has(thread.id) === folded
+        ? null
+        : () => discussion.toggleCollapsed(thread.id),
+  };
+}
+
+/**
+ * The Discussions scope: ↑/↓ between rows and, on a focused row, what its
+ * keys do, each showing the key the ⌘⇧/ sheet lists.
+ */
+function discussionItems(
+  list: HTMLElement,
+  target: Element,
+  discussion: DiscussionValue
+): PaletteItem[] {
+  const keyed = (...args: KeyHintArgs) => keyHintItem("discussions", ...args);
+  // An inner control may hold focus; act on its row.
+  const row = target.closest(ROW_SELECTOR);
+  const move = DISCUSSION_LIST_KEYS.move;
+  const items =
+    list.querySelectorAll(ROW_SELECTOR).length > 1
+      ? [
+          keyed(
+            "next",
+            move,
+            () => stepRow(list, ROW_SELECTOR, row, 1),
+            "Next discussion"
+          ),
+          keyed(
+            "previous",
+            move,
+            () => stepRow(list, ROW_SELECTOR, row, -1),
+            "Previous discussion"
+          ),
+        ]
+      : [];
+  const id = row?.getAttribute(ROW_ATTRIBUTE);
+  const thread = id ? discussion.threads.find((t) => t.id === id) : null;
+  if (!thread) return items;
+  const actions = threadActions(thread, discussion);
+  const fold = actions.fold(true);
+  const unfold = actions.fold(false);
+  return [
+    ...items,
+    keyed("reply", DISCUSSION_LIST_KEYS.reply, actions.reply),
+    ...(actions.showCode
+      ? [keyed("code", DISCUSSION_LIST_KEYS.showCode, actions.showCode)]
+      : []),
+    keyed("copy", DISCUSSION_LIST_KEYS.copy, actions.copy),
+    ...(fold
+      ? [keyed("fold", DISCUSSION_LIST_KEYS.fold, fold, "Fold earlier turns")]
+      : []),
+    ...(unfold
+      ? [
+          keyed(
+            "unfold",
+            DISCUSSION_LIST_KEYS.fold,
+            unfold,
+            "Unfold earlier turns"
+          ),
+        ]
+      : []),
+  ].map((item) => ({ ...item, hint: selectionLabel(thread.anchor) }));
 }
 
 function focusRow(list: HTMLElement | null, id: string) {
@@ -66,6 +144,16 @@ function focusRow(list: HTMLElement | null, id: string) {
 export function SideDiscussions() {
   const discussion = useContext(SelectionDiscussionContext);
   const listRef = useRef<HTMLElement>(null);
+  usePaletteScope(listRef, (target) =>
+    discussion && listRef.current
+      ? [
+          contextScope(
+            "discussions",
+            discussionItems(listRef.current, target, discussion)
+          ),
+        ]
+      : []
+  );
   if (!discussion) return null;
   const returnTo = (id: string) => focusRow(listRef.current, id);
   const groups = discussionList(discussion.threads);
@@ -75,46 +163,35 @@ export function SideDiscussions() {
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
     const list = event.currentTarget;
     const target = event.target as HTMLElement;
-    const all = rows(list);
     const plain =
       !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
     const step =
       event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
     // From the section itself (⌘⌥→ lands here) the arrows enter the list.
     if (target === list) {
-      if (!plain || !step || all.length === 0) return;
+      if (!plain || !step || list.querySelectorAll(ROW_SELECTOR).length === 0)
+        return;
       event.preventDefault();
-      (step === 1 ? all[0] : all[all.length - 1]).focus();
+      stepRow(list, ROW_SELECTOR, null, step);
       return;
     }
     const id = target.getAttribute(ROW_ATTRIBUTE);
     const thread = id ? discussion.threads.find((t) => t.id === id) : null;
     if (!thread) return;
-    if (plain && step) {
+    const actions = threadActions(thread, discussion);
+    const run = (action: (() => void) | null) => {
+      if (!action) return;
       event.preventDefault();
-      all[Math.min(all.length - 1, Math.max(0, all.indexOf(target) + step))]
-        ?.focus();
-    } else if (plain && event.key === "Enter") {
-      event.preventDefault();
-      discussion.reopen(thread.id, { focus: true, inPlace: true });
-    } else if (
-      plain &&
-      event.key.toLowerCase() === DISCUSSION_OPEN_KEY &&
-      threadPlace(thread) === "changes"
-    ) {
-      event.preventDefault();
-      // Not in place: the thread opens at its anchor in Changes.
-      discussion.reopen(thread.id, { focus: true });
-    } else if (matchesExactChatShortcut(event, DIFF_COPY_SHORTCUT)) {
-      event.preventDefault();
-      copy(thread.git.original.code);
-    } else if (plain && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
-      const collapsed = discussion.collapsed.has(thread.id);
-      if (collapsed !== (event.key === "ArrowLeft")) {
-        event.preventDefault();
-        discussion.toggleCollapsed(thread.id);
-      }
-    }
+      action();
+    };
+    if (plain && step) run(() => stepRow(list, ROW_SELECTOR, target, step));
+    else if (plain && event.key === "Enter") run(actions.reply);
+    else if (plain && event.key.toLowerCase() === DISCUSSION_OPEN_KEY)
+      run(actions.showCode);
+    else if (matchesExactChatShortcut(event, DIFF_COPY_SHORTCUT))
+      run(actions.copy);
+    else if (plain && (event.key === "ArrowLeft" || event.key === "ArrowRight"))
+      run(actions.fold(event.key === "ArrowLeft"));
   };
 
   return (

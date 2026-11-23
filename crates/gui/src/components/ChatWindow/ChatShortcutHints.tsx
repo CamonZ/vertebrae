@@ -1,11 +1,14 @@
 import {
   CHAT_AREA_SHORTCUT,
+  CHAT_FIND_SHORTCUT,
   CHAT_HELP_SHORTCUT,
+  CHAT_SEARCH_SHORTCUT,
   CHAT_HISTORY_SHORTCUT,
   BACKGROUND_LIST_HINTS,
   CHANGES_HINT_GROUPS,
   DISCUSSION_LIST_HINTS,
   SIDE_COLUMN_SHORTCUTS,
+  STOP_GENERATION_SHORTCUT,
   TRANSCRIPT_HINTS,
   WORKSPACE_SHORTCUTS,
   presentChatShortcut,
@@ -48,8 +51,9 @@ export const CHAT_SHORTCUT_SECTIONS = [
       hint(WORKSPACE_SHORTCUTS.toggleExpanded),
       { keys: chatHelpKeys, label: CHAT_HELP_SHORTCUT.label },
       { keys: ["⌘", "⌥", "[ / ]"], label: "Previous/next project" },
-      { keys: ["⌘", "F"], label: "Find in conversation" },
-      { keys: ["⌘", "⇧", "F"], label: "Search chats" },
+      { keys: ["⌘", "K"], label: "Commands for the focused area" },
+      hint(CHAT_FIND_SHORTCUT),
+      hint(CHAT_SEARCH_SHORTCUT),
       hint(CHAT_HISTORY_SHORTCUT),
       hint(SIDE_COLUMN_SHORTCUTS.toggle),
       hint(SIDE_COLUMN_SHORTCUTS.changes),
@@ -66,11 +70,17 @@ export const CHAT_SHORTCUT_SECTIONS = [
   ...changesSections(),
   {
     title: "Discussions",
-    shortcuts: DISCUSSION_LIST_HINTS.map(({ keys, label }) => ({ keys, label })),
+    shortcuts: DISCUSSION_LIST_HINTS.map(({ keys, label }) => ({
+      keys,
+      label,
+    })),
   },
   {
     title: "Background tasks",
-    shortcuts: BACKGROUND_LIST_HINTS.map(({ keys, label }) => ({ keys, label })),
+    shortcuts: BACKGROUND_LIST_HINTS.map(({ keys, label }) => ({
+      keys,
+      label,
+    })),
   },
   {
     title: "Chats",
@@ -102,6 +112,7 @@ export const CHAT_SHORTCUT_SECTIONS = [
       },
       { keys: ["⌘", "⇧", "⌥", "H"], label: "History for active pane" },
       { keys: ["Enter"], label: "Send or queue during an active turn" },
+      hint(STOP_GENERATION_SHORTCUT),
       {
         keys: ["⌃", "Enter"],
         label: "Steer the active turn from the composer",

@@ -153,10 +153,7 @@ describe("ChatComposer", () => {
       />
     );
     const picker = getComposerPicker("local-chat-model-picker");
-    expect(dropdownOptionValues(picker)).toEqual([
-      "",
-      ...ids,
-    ]);
+    expect(dropdownOptionValues(picker)).toEqual(["", ...ids]);
   });
 
   it("keeps a custom provider's default-named model and list order", () => {
@@ -178,11 +175,7 @@ describe("ChatComposer", () => {
       />
     );
     const picker = getComposerPicker("local-chat-model-picker");
-    expect(dropdownOptionValues(picker)).toEqual([
-      "",
-      "default",
-      "sol",
-    ]);
+    expect(dropdownOptionValues(picker)).toEqual(["", "default", "sol"]);
   });
 
   // --- Context bar ---
@@ -241,11 +234,9 @@ describe("ChatComposer", () => {
     render(<ChatComposer {...defaultProps()} />);
     const picker = getComposerPicker("local-chat-provider-picker");
     expect(picker).toBeInTheDocument();
-    expect(
-      dropdownOptions(picker).map(
-        (option) => option.label
-      )
-    ).toEqual(["Anthropic"]);
+    expect(dropdownOptions(picker).map((option) => option.label)).toEqual([
+      "Anthropic",
+    ]);
   });
 
   it("fires onHarnessChange when provider is changed", () => {
@@ -263,7 +254,10 @@ describe("ChatComposer", () => {
       />
     );
 
-    chooseDropdownValue(getComposerPicker("local-chat-provider-picker"), second.id);
+    chooseDropdownValue(
+      getComposerPicker("local-chat-provider-picker"),
+      second.id
+    );
     expect(onHarnessChange).toHaveBeenCalledOnce();
     expect(onHarnessChange.mock.calls[0][0].target.value).toBe(second.id);
   });
@@ -354,11 +348,49 @@ describe("ChatComposer", () => {
     expect(chip).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(chip);
     expect(chip).toHaveAttribute("aria-expanded", "true");
-    fireEvent.keyDown(screen.getByRole("dialog", { name: "Model settings" }), {
+    const dialog = screen.getByRole("dialog", { name: "Model settings" });
+    // Opened from the palette, focus is elsewhere; it must land in the dialog.
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    fireEvent.keyDown(dialog, {
       key: "Escape",
     });
     expect(screen.queryByRole("dialog", { name: "Model settings" })).toBeNull();
     expect(chip).toHaveFocus();
+  });
+
+  it("hands the palette a model settings opener that focuses the dialog", () => {
+    const handle: { current: (() => void) | null } = { current: null };
+    const { unmount } = render(
+      <ChatComposer {...defaultProps()} modelSettingsHandle={handle} />
+    );
+    expect(handle.current).toBeTypeOf("function");
+    act(() => handle.current!());
+    const dialog = screen.getByRole("dialog", { name: "Model settings" });
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    unmount();
+    expect(handle.current).toBeNull();
+  });
+
+  it("closes model settings on Escape after a pick drops focus", () => {
+    render(<ChatComposer {...defaultProps()} />);
+    const chip = screen.getByTestId("local-chat-model-settings");
+    fireEvent.click(chip);
+    // Picking a model re-renders the pickers; focus can land on the body.
+    act(() => (document.activeElement as HTMLElement).blur());
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Model settings" })).toBeNull();
+    expect(chip).toHaveFocus();
+  });
+
+  it("closes an open picker menu before model settings", () => {
+    render(<ChatComposer {...defaultProps()} />);
+    fireEvent.click(screen.getByTestId("local-chat-model-settings"));
+    fireEvent.keyDown(document.activeElement!, { key: "Enter" });
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(
+      screen.getByRole("dialog", { name: "Model settings" })
+    ).toBeInTheDocument();
   });
 
   it("keeps picker controls accessible without visible text labels", () => {
@@ -566,9 +598,10 @@ describe("ChatComposer", () => {
       "default",
       "fast",
     ]);
-    expect(
-      dropdownOptions(picker).map((option) => option.label)
-    ).toEqual(["Standard", "Fast"]);
+    expect(dropdownOptions(picker).map((option) => option.label)).toEqual([
+      "Standard",
+      "Fast",
+    ]);
     expect(picker).toHaveAttribute("data-value", "default");
     chooseDropdownValue(picker, "fast");
     expect(onSpeedTierChange).toHaveBeenCalledOnce();

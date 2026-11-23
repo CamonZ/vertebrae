@@ -4,6 +4,7 @@ import {
   useRef,
   useState,
   type ComponentPropsWithRef,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { ChatInput } from "../ChatInput";
@@ -12,7 +13,6 @@ import type {
   LocalChatHarnessCatalog,
   LocalChatHarnessInfo,
   LocalChatProviderInfo,
-  PermissionMode,
 } from "../../bindings";
 import type { ChatSession } from "../../stores/chatStore";
 import {
@@ -61,43 +61,7 @@ import {
 } from "./chatHelpers";
 import { Dropdown } from "../molecules/Dropdown";
 import { Select } from "../atoms/Select";
-
-type PermissionModeOption = {
-  value: PermissionMode;
-  label: string;
-};
-
-const CLAUDE_PERMISSION_MODE_OPTIONS: PermissionModeOption[] = [
-  { value: "default", label: "Ask before edits" },
-  { value: "accept_edits", label: "Edit automatically" },
-  { value: "plan", label: "Plan mode" },
-  { value: "auto", label: "Auto mode" },
-  { value: "dont_ask", label: "Don't ask" },
-  { value: "bypass_permissions", label: "Bypass permissions" },
-];
-
-const CODEX_PERMISSION_MODE_OPTIONS: PermissionModeOption[] = [
-  { value: "default", label: "Ask for approval" },
-  { value: "auto", label: "Approve for me" },
-  { value: "bypass_permissions", label: "Full access" },
-];
-
-function permissionModeOptions(
-  harness: ChatSession["harness"],
-  catalogOptions?: LocalChatHarnessInfo["permission_modes"]
-) {
-  // New catalogs always report the provider-owned options. Keep the legacy
-  // fallback for older cached/test catalogs that predate permission_modes.
-  if (catalogOptions) {
-    return catalogOptions.map((mode) => ({
-      value: mode.id,
-      label: mode.label,
-    }));
-  }
-  return harness === "codex"
-    ? CODEX_PERMISSION_MODE_OPTIONS
-    : CLAUDE_PERMISSION_MODE_OPTIONS;
-}
+import { permissionModeOptions } from "./permissionModeOptions";
 
 function useHarnessPickerState(
   visibleHarness: LocalChatHarnessInfo | null,
@@ -225,6 +189,8 @@ interface ChatComposerProps {
   ) => void;
   onSpeedTierChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onPermissionModeChange: (value: string) => void;
+  /** Set to the model settings opener while the chip shows, else null. */
+  modelSettingsHandle?: RefObject<(() => void) | null>;
 }
 
 export function ChatComposer({
@@ -271,6 +237,7 @@ export function ChatComposer({
   onReasoningEffortChange,
   onSpeedTierChange,
   onPermissionModeChange,
+  modelSettingsHandle,
 }: ChatComposerProps) {
   const [activeCommentId, setActiveCommentId] = useState<string | null>(null);
   const [pinnedCommentId, setPinnedCommentId] = useState<string | null>(null);
@@ -292,8 +259,31 @@ export function ChatComposer({
         setModelSettingsOpen(false);
       }
     };
+    // Escape closes it wherever focus is: picking a model re-renders the
+    // pickers and can drop focus out of the popover. An open picker menu
+    // stops its own Escape first.
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      setModelSettingsOpen(false);
+      modelSettingsTriggerRef.current?.focus();
+    };
     document.addEventListener("mousedown", dismiss);
-    return () => document.removeEventListener("mousedown", dismiss);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", dismiss);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [modelSettingsOpen]);
+  // The popover is a dialog: focus its first control on open, so it works
+  // from the keyboard (chip or palette) and Escape hands focus back.
+  useEffect(() => {
+    if (!modelSettingsOpen) return;
+    modelSettingsRef.current
+      ?.querySelector<HTMLElement>(
+        ".hc-model-pop :is(button, select, input):not(:disabled)"
+      )
+      ?.focus();
   }, [modelSettingsOpen]);
   useEffect(() => {
     if (!openCommentRequest) return;
@@ -351,6 +341,18 @@ export function ChatComposer({
     supportedReasoningEffortIds,
     supportedSpeedTierIds
   );
+  const hasModelSettings = Boolean(
+    (visibleHarness && picker) || harnessCatalog
+  );
+  useEffect(() => {
+    if (!modelSettingsHandle) return;
+    modelSettingsHandle.current = hasModelSettings
+      ? () => setModelSettingsOpen(true)
+      : null;
+    return () => {
+      modelSettingsHandle.current = null;
+    };
+  }, [hasModelSettings, modelSettingsHandle]);
   const defaultSpeedTierId =
     speedTiers.find((tier) => tier.is_default)?.id ?? speedTiers[0]?.id ?? "";
   const modelSummary = (() => {
@@ -849,7 +851,9 @@ export function ChatComposer({
       </div>
       <div className="p-3">
         {steeringStatus && (
-          <div className="hc-composer-alert mb-2" role="status">{steeringStatus}</div>
+          <div className="hc-composer-alert mb-2" role="status">
+            {steeringStatus}
+          </div>
         )}
         <ChatInput
           ref={inputRef}
@@ -866,7 +870,8 @@ export function ChatComposer({
           }
           disabled={!canUseComposer}
           canSubmit={
-            canUseComposer && !isSteering &&
+            canUseComposer &&
+            !isSteering &&
             (pendingComments.length > 0
               ? canSubmitComments
               : inputValue.trim().length > 0 &&
@@ -912,7 +917,7 @@ export function ChatComposer({
                   {picker.unavailableMessage}
                 </span>
               )}
-              {(visibleHarness && picker) || harnessCatalog ? (
+              {hasModelSettings ? (
                 <div className="hc-model-settings" ref={modelSettingsRef}>
                   <button
                     ref={modelSettingsTriggerRef}
@@ -945,14 +950,6 @@ export function ChatComposer({
                       role="dialog"
                       aria-label="Model settings"
                       data-testid="local-chat-model-settings-popover"
-                      onKeyDown={(event) => {
-                        if (event.key === "Escape") {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setModelSettingsOpen(false);
-                          modelSettingsTriggerRef.current?.focus();
-                        }
-                      }}
                     >
                       {harnessCatalog && (
                         <div className="hc-model-row hc-provider-picker">

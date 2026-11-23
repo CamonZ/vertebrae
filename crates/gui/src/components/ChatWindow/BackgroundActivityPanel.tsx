@@ -1,9 +1,19 @@
-import { useEffect, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import type { PaletteItem } from "../CommandPalette/paletteModel";
+import { contextScope, usePaletteScope } from "../CommandPalette/paletteScopes";
 import { RunChip } from "../shared/HearthPrimitives";
 import { formatElapsed } from "./backgroundActivity";
-import { CHAT_AREA_ATTRIBUTE, enterFirstRow } from "./chatAreas";
+import { CHAT_AREA_ATTRIBUTE, enterFirstRow, stepRow } from "./chatAreas";
+import { keyHintItem, type KeyHintArgs } from "./chatPaletteCommands";
 import {
   BACKGROUND_LIST_HINTS,
+  BACKGROUND_LIST_KEYS,
   DIFF_COPY_SHORTCUT,
   matchesExactChatShortcut,
 } from "./chatShortcuts";
@@ -57,6 +67,37 @@ function hasOutput(record: BackgroundWorkRecord): boolean {
   return !!(record.progress || record.error);
 }
 
+/** The record a focused row shows. */
+function focusedRecord(
+  section: HTMLElement,
+  target: Element,
+  rows: readonly BackgroundWorkRecord[]
+): BackgroundWorkRecord | null {
+  if (!(target instanceof HTMLElement) || !target.matches(ROW_SELECTOR))
+    return null;
+  if (!section.contains(target)) return null;
+  return rows.find((row) => row.workId === target.dataset.workId) ?? null;
+}
+
+/** What a row's keys do; null where the row has nothing to act on. */
+function rowActions(
+  record: BackgroundWorkRecord,
+  toggle: (workId: string) => void
+) {
+  const command = commandText(record);
+  return {
+    output: hasOutput(record) ? () => toggle(record.workId) : null,
+    copy: command
+      ? () =>
+          void navigator.clipboard
+            .writeText(command)
+            .catch((error: unknown) => {
+              console.error("Failed to copy background command", error);
+            })
+      : null,
+  };
+}
+
 /**
  * The list keys (decision 49d12c2c §4.1): ↑/↓ between tasks, ↵ shows or
  * hides a task's output, ⌘C copies its command.
@@ -68,36 +109,71 @@ function onListKeyDown(
 ) {
   if (event.defaultPrevented || event.nativeEvent.isComposing) return;
   const section = event.currentTarget;
-  const items = Array.from(section.querySelectorAll<HTMLElement>(ROW_SELECTOR));
   const target = event.target as HTMLElement;
-  const at = items.indexOf(target);
   const plain =
     !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
   const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
-  if (plain && step && items.length > 0) {
+  if (plain && step && section.querySelector(ROW_SELECTOR)) {
     event.preventDefault();
-    const next =
-      at < 0
-        ? step === 1
-          ? 0
-          : items.length - 1
-        : Math.min(items.length - 1, Math.max(0, at + step));
-    items[next]?.focus();
+    stepRow(section, ROW_SELECTOR, target, step);
     return;
   }
-  const record =
-    at < 0 ? null : rows.find((row) => row.workId === target.dataset.workId);
+  const record = focusedRecord(section, target, rows);
   if (!record) return;
-  const command = commandText(record);
+  const actions = rowActions(record, toggle);
   if (plain && event.key === "Enter") {
     event.preventDefault();
-    if (hasOutput(record)) toggle(record.workId);
-  } else if (command && matchesExactChatShortcut(event, DIFF_COPY_SHORTCUT)) {
+    actions.output?.();
+  } else if (
+    actions.copy &&
+    matchesExactChatShortcut(event, DIFF_COPY_SHORTCUT)
+  ) {
     event.preventDefault();
-    navigator.clipboard.writeText(command).catch((error: unknown) => {
-      console.error("Failed to copy background command", error);
-    });
+    actions.copy();
   }
+}
+
+/**
+ * The Background tasks scope: ↑/↓ between tasks and, on a focused task, its
+ * row keys. "Stop task" (decision 49d12c2c §4.1) is left out: background
+ * work has no backend action that stops it yet.
+ */
+function backgroundItems(
+  section: HTMLElement,
+  target: Element,
+  rows: readonly BackgroundWorkRecord[],
+  toggle: (workId: string) => void
+): PaletteItem[] {
+  const keyed = (...args: KeyHintArgs) => keyHintItem("background", ...args);
+  // An inner control may hold focus; act on its row.
+  const row = target.closest(ROW_SELECTOR);
+  const move = BACKGROUND_LIST_KEYS.move;
+  const items =
+    rows.length > 1
+      ? [
+          keyed(
+            "next",
+            move,
+            () => stepRow(section, ROW_SELECTOR, row, 1),
+            "Next task"
+          ),
+          keyed(
+            "previous",
+            move,
+            () => stepRow(section, ROW_SELECTOR, row, -1),
+            "Previous task"
+          ),
+        ]
+      : [];
+  const record = row && focusedRecord(section, row, rows);
+  if (!record) return items;
+  const { output, copy } = rowActions(record, toggle);
+  const hint = record.description ?? KIND_LABEL[record.kind];
+  return [
+    ...items,
+    ...(output ? [keyed("output", BACKGROUND_LIST_KEYS.output, output)] : []),
+    ...(copy ? [keyed("copy", BACKGROUND_LIST_KEYS.copy, copy)] : []),
+  ].map((item) => ({ ...item, hint }));
 }
 
 interface BackgroundActivityPanelProps {
@@ -126,6 +202,18 @@ export function BackgroundActivityPanel({
       return next;
     });
 
+  const sectionRef = useRef<HTMLElement>(null);
+  usePaletteScope(sectionRef, (target) =>
+    sectionRef.current
+      ? [
+          contextScope(
+            "background",
+            backgroundItems(sectionRef.current, target, rows, toggleOutput)
+          ),
+        ]
+      : []
+  );
+
   useEffect(() => {
     if (!ticking) return;
 
@@ -136,6 +224,7 @@ export function BackgroundActivityPanel({
 
   return (
     <section
+      ref={sectionRef}
       data-testid="background-activity"
       data-active-count={active}
       aria-label="Background tasks"

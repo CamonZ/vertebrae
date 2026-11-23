@@ -17,6 +17,7 @@ import {
 } from "../../bindings";
 import { useDocumentStore } from "./workspace/documentStore";
 import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
+import { focusedPaletteScopes } from "../CommandPalette/paletteScopes";
 import {
   SelectionDiscussionContext,
   type DiscussionValue,
@@ -273,7 +274,9 @@ afterEach(() => {
 
 async function openChangedFile() {
   load.mockResolvedValue({ status: "ok", data: modified });
-  const view = render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
+  const view = render(
+    <WorktreeChanges sessionId="chat" worktreePath="/worktree" />
+  );
   fireEvent.click(
     await screen.findByRole("button", { name: "Open diff src/app.ts" })
   );
@@ -290,13 +293,28 @@ function selectComparison(control: HTMLElement, value: string) {
   fireEvent.click(option);
 }
 
+/** The Changes scope's entries in the open palette. */
+function changesEntries() {
+  return (
+    useCommandPaletteStore
+      .getState()
+      .contexts.find((scope) => scope.id === "changes")?.items ?? []
+  );
+}
+
+/** What the app's ⌘K does with focus at `from`. */
+function openPaletteAt(from: Element) {
+  const { contexts, initial } = focusedPaletteScopes(from);
+  act(() => useCommandPaletteStore.getState().openPalette(initial, contexts));
+}
+
 /** ⌘K from `from`, then run the Changes palette command labelled `label`. */
 async function runChangesCommand(from: HTMLElement, label: string) {
-  fireEvent.keyDown(from, { key: "k", metaKey: true });
+  openPaletteAt(from);
   const palette = useCommandPaletteStore.getState();
   expect(palette.open).toBe(true);
   expect(palette.scope).toBe("changes");
-  const item = palette.contextItems.find((entry) => entry.label === label);
+  const item = changesEntries().find((entry) => entry.label === label);
   if (!item) throw new Error(`Missing Changes command: ${label}`);
   await act(async () => {
     palette.closePalette();
@@ -333,15 +351,21 @@ it("opens the changed-file list and wraps keyboard jumps without capturing edito
 
 it("remounts on the file it left, and still takes the next jump (db5160ff)", async () => {
   load.mockResolvedValue({ status: "ok", data: modified });
-  const first = render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
-  fireEvent.click(await screen.findByRole("button", { name: "Jump to src/app.ts" }));
+  const first = render(
+    <WorktreeChanges sessionId="chat" worktreePath="/worktree" />
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Jump to src/app.ts" })
+  );
   first.unmount();
 
   render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
   const jump = await screen.findByLabelText("Jump target");
   expect(jump).toHaveTextContent("src/app.ts");
   const restored = jump.dataset.nonce;
-  fireEvent.click(await screen.findByRole("button", { name: "Jump to gone.txt" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Jump to gone.txt" })
+  );
 
   expect(jump).toHaveTextContent("gone.txt");
   expect(jump.dataset.nonce).not.toBe(restored);
@@ -359,25 +383,29 @@ it("hides and shows the file list from the Changes palette", async () => {
     "aria-expanded",
     "false"
   );
-  expect(screen.queryByRole("button", { name: "Jump to src/app.ts" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Jump to src/app.ts" })
+  ).toBeNull();
   expect(changes).toHaveFocus();
 
   // Hidden, the palette offers only the way back.
-  fireEvent.keyDown(changes, { key: "k", metaKey: true });
-  const labels = useCommandPaletteStore
-    .getState()
-    .contextItems.map((item) => item.label);
+  openPaletteAt(changes);
+  const labels = changesEntries().map((item) => item.label);
   act(() => useCommandPaletteStore.getState().closePalette());
   expect(labels).not.toContain("Hide file list");
 
   await runChangesCommand(changes, "Show file list");
-  expect(screen.getByRole("button", { name: "Jump to src/app.ts" })).toHaveFocus();
+  expect(
+    screen.getByRole("button", { name: "Jump to src/app.ts" })
+  ).toHaveFocus();
 });
 
 it("moves focus with the arrow keys inside the changed-file list", async () => {
   load.mockResolvedValue({ status: "ok", data: modified });
   render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
-  const first = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+  const first = await screen.findByRole("button", {
+    name: "Jump to src/app.ts",
+  });
   const last = screen.getByRole("button", { name: "Jump to gone.txt" });
   const changes = screen.getByRole("region", { name: "Worktree changes" });
   changes.focus();
@@ -423,7 +451,9 @@ it("opens the focused file in Pierre or the configured external editor", async (
 describe("WorktreeChanges", () => {
   it("retains the diff component on background refresh and resets it for comparison/worktree changes", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
-    const view = render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
+    const view = render(
+      <WorktreeChanges sessionId="chat" worktreePath="/worktree" />
+    );
     const fold = await screen.findByRole("button", { name: "Test fold" });
     fireEvent.click(fold);
     const calls = vi.mocked(useWorktreeWatch).mock.calls;
@@ -654,7 +684,9 @@ describe("WorktreeChanges", () => {
           resolveOld = resolve;
         })
     );
-    const view = render(<WorktreeChanges sessionId="chat" worktreePath="/old" />);
+    const view = render(
+      <WorktreeChanges sessionId="chat" worktreePath="/old" />
+    );
     view.rerender(<WorktreeChanges sessionId="chat" worktreePath="/new" />);
     await screen.findByText("No changes against this baseline.");
     await act(async () =>
@@ -904,7 +936,9 @@ describe("WorktreeChanges", () => {
         screen.queryByRole("button", { name: "Close src/app.ts" })
       ).toBeNull()
     );
-    fireEvent.click(screen.getByRole("button", { name: "Open diff src/app.ts" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open diff src/app.ts" })
+    );
     fireEvent.change(
       await screen.findByRole("textbox", { name: "Edit src/app.ts" }),
       { target: { value: "throwaway\n" } }
@@ -1178,7 +1212,8 @@ describe("WorktreeChanges source references", () => {
       error: { message: "git failed" },
     } as never);
     render(
-      <WorktreeChanges sessionId="chat"
+      <WorktreeChanges
+        sessionId="chat"
         worktreePath="/worktree"
         sourceJump={{ path: "src/app.ts", line: 2, nonce: 1 }}
       />
@@ -1197,7 +1232,9 @@ describe("WorktreeChanges source references", () => {
         ? { status: "ok", data: modified }
         : ({ status: "error", error: { message: "no commit" } } as never)
     );
-    const view = render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
+    const view = render(
+      <WorktreeChanges sessionId="chat" worktreePath="/worktree" />
+    );
     await screen.findByLabelText("Diff for src/app.ts");
     selectComparison(
       screen.getByRole("combobox", { name: "Comparison target" }),
@@ -1212,7 +1249,8 @@ describe("WorktreeChanges source references", () => {
         })
     );
     view.rerender(
-      <WorktreeChanges sessionId="chat"
+      <WorktreeChanges
+        sessionId="chat"
         worktreePath="/worktree"
         sourceJump={{ path: "src/app.ts", line: 1, nonce: 1 }}
       />
@@ -1238,7 +1276,8 @@ describe("WorktreeChanges source references", () => {
   it("scrolls a revealed range once and drops it on the first edit", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     render(
-      <WorktreeChanges sessionId="chat"
+      <WorktreeChanges
+        sessionId="chat"
         worktreePath="/worktree"
         sourceJump={{ path: "src/util.ts", line: 1, nonce: 1 }}
       />
@@ -1271,7 +1310,13 @@ describe("Changes keyboard focus", () => {
   it("resumes the line cursor when Changes is entered", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     const onExit = vi.fn();
-    render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" onExit={onExit} />);
+    render(
+      <WorktreeChanges
+        sessionId="chat"
+        worktreePath="/worktree"
+        onExit={onExit}
+      />
+    );
     await screen.findByRole("button", { name: "Jump to src/app.ts" });
     const cursor = screen.getByRole("group", { name: "Code diff selection" });
 
@@ -1288,7 +1333,9 @@ describe("Changes keyboard focus", () => {
   it("puts the cursor on collapsed lines and back on code", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
-    const cursor = await screen.findByRole("group", { name: "Code diff selection" });
+    const cursor = await screen.findByRole("group", {
+      name: "Code diff selection",
+    });
     act(() => cursor.focus());
 
     fireEvent.keyDown(cursor, { key: "ArrowDown" });
@@ -1310,7 +1357,9 @@ describe("Changes keyboard focus", () => {
       data: { old: text("old\n"), new: text("new\n"), semantic: null },
     });
     render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Load contents" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Load contents" })
+    );
     // The output is always there; wait for the loaded text, not the element.
     await waitFor(() =>
       expect(
@@ -1343,18 +1392,20 @@ describe("Changes palette and viewed files", () => {
   it("opens the palette's Changes scope: / leads with files, ⌘K with commands", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
-    const row = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+    const row = await screen.findByRole("button", {
+      name: "Jump to src/app.ts",
+    });
 
     expect(fireEvent.keyDown(row, { key: "/" })).toBe(false);
     let palette = useCommandPaletteStore.getState();
     expect(palette.scope).toBe("changes");
-    expect(palette.contextItems[0].label).toBe("src/app.ts");
+    expect(changesEntries()[0].label).toBe("src/app.ts");
     palette.closePalette();
 
-    fireEvent.keyDown(row, { key: "k", metaKey: true });
+    openPaletteAt(row);
     palette = useCommandPaletteStore.getState();
-    expect(palette.contextItems[0].label).toBe("Choose base");
-    expect(palette.contextItems.map((item) => item.label)).toContain("gone.txt");
+    expect(changesEntries()[0].label).toBe("Choose base");
+    expect(changesEntries().map((item) => item.label)).toContain("gone.txt");
   });
 
   it("lists every discussion action with its keys", async () => {
@@ -1362,7 +1413,12 @@ describe("Changes palette and viewed files", () => {
     const thread = (id: string, startLine: number, kind = "inline") => ({
       id,
       status: { kind },
-      anchor: { path: "src/app.ts", startLine, endLine: startLine, side: "new" },
+      anchor: {
+        path: "src/app.ts",
+        startLine,
+        endLine: startLine,
+        side: "new",
+      },
     });
     const discussion = {
       threads: [
@@ -1382,32 +1438,36 @@ describe("Changes palette and viewed files", () => {
         <WorktreeChanges sessionId="chat" worktreePath="/worktree" />
       </SelectionDiscussionContext.Provider>
     );
-    const row = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+    const row = await screen.findByRole("button", {
+      name: "Jump to src/app.ts",
+    });
 
-    fireEvent.keyDown(row, { key: "k", metaKey: true });
-    const items = useCommandPaletteStore.getState().contextItems;
+    openPaletteAt(row);
+    const items = changesEntries();
     const listed = (label: string) =>
       items
         .filter((item) => item.label === label)
-        .map(({ hint, detail }) => [hint, detail]);
+        .map(({ hint, access }) => [hint, access]);
     const collapse = shortcutText(DISCUSSION_COLLAPSE_SHORTCUT);
     expect(listed("Show only the latest response")).toEqual([
-      ["src/app.ts:1 (new)", collapse],
+      ["src/app.ts:1 (new)", { key: collapse }],
     ]);
     expect(listed("Ask follow-up")).toEqual([
-      ["src/app.ts:1 (new)", shortcutText(DISCUSSION_ASK_SHORTCUT)],
+      ["src/app.ts:1 (new)", { key: shortcutText(DISCUSSION_ASK_SHORTCUT) }],
     ]);
     expect(listed("Send selection to main chat")).toEqual([
-      ["src/app.ts:1 (new)", shortcutText(DISCUSSION_SEND_SHORTCUT)],
+      ["src/app.ts:1 (new)", { key: shortcutText(DISCUSSION_SEND_SHORTCUT) }],
     ]);
     expect(listed("Highlight selected code")).toEqual([
-      ["src/app.ts:1 (new)", undefined],
+      ["src/app.ts:1 (new)", "palette-only"],
     ]);
     expect(listed("Stop response")).toEqual([]);
-    expect(listed("Close discussion")).toEqual([["src/app.ts:1 (new)", "Esc"]]);
+    expect(listed("Close discussion")).toEqual([
+      ["src/app.ts:1 (new)", { key: "Esc" }],
+    ]);
     expect(listed("Open discussion")).toEqual([
-      ["src/app.ts:2 (new)", "o"],
-      ["src/app.ts:3 (new)", undefined],
+      ["src/app.ts:2 (new)", { key: "o" }],
+      ["src/app.ts:3 (new)", "palette-only"],
     ]);
 
     const run = (label: string) =>
@@ -1422,7 +1482,9 @@ describe("Changes palette and viewed files", () => {
       false
     );
     run("Highlight selected code");
-    expect(discussion.select).toHaveBeenCalledWith(discussion.threads[0].anchor);
+    expect(discussion.select).toHaveBeenCalledWith(
+      discussion.threads[0].anchor
+    );
     run("Show only the latest response");
     expect(discussion.toggleCollapsed).toHaveBeenCalledWith("open");
   });
@@ -1430,7 +1492,9 @@ describe("Changes palette and viewed files", () => {
   it("marks the active file viewed with v and counts viewed files", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
-    const row = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+    const row = await screen.findByRole("button", {
+      name: "Jump to src/app.ts",
+    });
     act(() => row.focus());
 
     fireEvent.keyDown(row, { key: "v" });
@@ -1446,7 +1510,9 @@ describe("Changes palette and viewed files", () => {
   it("unmarks the last viewed file with ⇧V, also from the diff", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
-    const row = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+    const row = await screen.findByRole("button", {
+      name: "Jump to src/app.ts",
+    });
     act(() => row.focus());
     fireEvent.keyDown(row, { key: "v" });
     expect(screen.getByLabelText("Comparison totals")).toHaveTextContent(
@@ -1458,28 +1524,32 @@ describe("Changes palette and viewed files", () => {
     expect(screen.getByLabelText("Comparison totals")).not.toHaveTextContent(
       "viewed"
     );
-    expect(screen.getByRole("status", { name: "Jump target" })).toHaveTextContent(
-      "src/app.ts"
-    );
+    expect(
+      screen.getByRole("status", { name: "Jump target" })
+    ).toHaveTextContent("src/app.ts");
   });
 
   it("lists every viewed file to unmark, and all of them, in the palette", async () => {
     load.mockResolvedValue({ status: "ok", data: modified });
     render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
-    const app = await screen.findByRole("button", { name: "Jump to src/app.ts" });
+    const app = await screen.findByRole("button", {
+      name: "Jump to src/app.ts",
+    });
     act(() => app.focus());
     fireEvent.keyDown(app, { key: "v" });
     const gone = screen.getByRole("button", { name: "Jump to gone.txt" });
     act(() => gone.focus());
     fireEvent.keyDown(gone, { key: "v" });
 
-    fireEvent.keyDown(gone, { key: "k", metaKey: true });
-    const items = useCommandPaletteStore.getState().contextItems;
+    openPaletteAt(gone);
+    const items = changesEntries();
     const unmark = items.filter((item) => item.label === "Unmark file viewed");
     expect(unmark.map((item) => item.hint)).toEqual(["gone.txt", "src/app.ts"]);
     expect(items.map((item) => item.label)).not.toContain("Mark file viewed");
 
-    act(() => items.find((item) => item.label === "Unmark all viewed files")!.run());
+    act(() =>
+      items.find((item) => item.label === "Unmark all viewed files")!.run()
+    );
     expect(screen.getByLabelText("Comparison totals")).not.toHaveTextContent(
       "viewed"
     );
@@ -1491,11 +1561,14 @@ it("always shows the line diff with semantic data, without a mode switch", async
   render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
   await screen.findByLabelText("Diff for src/app.ts");
   expect(screen.queryByRole("group", { name: "Diff mode" })).toBeNull();
-  expect(screen.getByTestId("all-diffs")).toHaveAttribute("data-symbols", "true");
+  expect(screen.getByTestId("all-diffs")).toHaveAttribute(
+    "data-symbols",
+    "true"
+  );
 
   const region = screen.getByRole("region", { name: "Worktree changes" });
-  fireEvent.keyDown(region, { key: "k", metaKey: true });
-  const labels = useCommandPaletteStore.getState().contextItems.map((item) => item.label);
+  openPaletteAt(region);
+  const labels = changesEntries().map((item) => item.label);
   expect(labels).not.toContain("Semantic diff");
   expect(labels).not.toContain("Line diff");
 });
