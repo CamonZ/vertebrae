@@ -20,7 +20,14 @@ import {
   maxHistoryWidthForLayout,
   useChatHistoryPanelLayout,
 } from "../../hooks/useChatHistoryPanelLayout";
-import { useChatKeyboardShortcuts } from "../../hooks/useChatKeyboardShortcuts";
+import {
+  useChatKeyboardShortcuts,
+  type ShortcutDispatchState,
+} from "../../hooks/useChatKeyboardShortcuts";
+import {
+  WorkspaceCommandsContext,
+  type WorkspaceCommands,
+} from "./chatPaletteCommands";
 import { useChildChatSessions } from "../../hooks/useChildChatSessions";
 import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
@@ -667,39 +674,47 @@ export function ChatWindowManager({
     []
   );
 
-  useChatKeyboardShortcuts({
-    open,
-    dispatch: {
-      shortcutsOpen,
-      hasActiveSession: !!activeSessionId,
-      toggleExpanded: toggleFromShortcut,
-      focusPaneByIndex,
-      focusPaneByOffset,
-      focusNeedingYou,
-      moveActivePane,
-      focusAreaByOffset: (offset) =>
-        moveChatArea(document.activeElement, offset),
-      openFreshChat,
-      closeActivePane,
-      historyNavigationEnabled: isMaximized,
-      focusHistorySearch,
-      openPaneFind: () => {
-        const openFind = shownPaneId
-          ? paneFinds.current.get(shownPaneId)
-          : undefined;
-        return openFind ? openFind() : false;
-      },
-      selectHistorySessionByOffset,
-      selectHistoryProjectByOffset,
-      startFreshActiveSession: startFreshActiveSessionForKeyboard,
-      toggleHistorySelector,
-      toggleHistoryVisibility,
-      toggleSideColumn: () => shownSideColumn()?.toggle() ?? false,
-      toggleSideSection: (section) =>
-        shownSideColumn()?.toggleSection(section) ?? false,
+  const dispatch: ShortcutDispatchState = {
+    shortcutsOpen,
+    hasActiveSession: !!activeSessionId,
+    toggleExpanded: toggleFromShortcut,
+    focusPaneByIndex,
+    focusPaneByOffset,
+    focusNeedingYou,
+    moveActivePane,
+    focusAreaByOffset: (offset) => moveChatArea(document.activeElement, offset),
+    openFreshChat,
+    closeActivePane,
+    historyNavigationEnabled: isMaximized,
+    focusHistorySearch,
+    openPaneFind: () => {
+      const openFind = shownPaneId
+        ? paneFinds.current.get(shownPaneId)
+        : undefined;
+      return openFind ? openFind() : false;
     },
-    setShortcutsOpen,
+    selectHistorySessionByOffset,
+    selectHistoryProjectByOffset,
+    startFreshActiveSession: startFreshActiveSessionForKeyboard,
+    toggleHistorySelector,
+    toggleHistoryVisibility,
+    toggleSideColumn: () => shownSideColumn()?.toggle() ?? false,
+    toggleSideSection: (section) =>
+      shownSideColumn()?.toggleSection(section) ?? false,
+  };
+  useChatKeyboardShortcuts({ open, dispatch, setShortcutsOpen });
+  // ⌘K entries run the same handlers as the keys (decision 49d12c2c §4.1).
+  const workspaceCommands = useRef<WorkspaceCommands | null>(null);
+  useLayoutEffect(() => {
+    workspaceCommands.current = {
+      ...dispatch,
+      openShortcutSheet: () => setShortcutsOpen(true),
+    };
   });
+  const getWorkspaceCommands = useCallback(
+    () => workspaceCommands.current!,
+    []
+  );
 
   // Join the shared glass-panel focus model so Escape closes whichever panel is
   // focused. The chat is globally mounted; it's "open" only while showing.
@@ -855,18 +870,20 @@ export function ChatWindowManager({
               onToggleHistory={toggleHistoryVisibility}
               onNextNeedingYou={() => focusNeedingYou(1)}
             />
-            <ChatPaneList
-              registerSideColumn={registerSideColumn}
-              registerPaneFind={registerPaneFind}
-              shownPane={shownPane}
-              tabPanels={isMaximized}
-              focusPane={focusPane}
-              closeChatPanel={closeChatPanel}
-              startFreshActiveSession={startFreshActiveSession}
-              showProjectContext={openChatsSpanProjects}
-              projectLabelBySessionId={projectLabelBySessionId}
-              renderObserver={renderObserver}
-            />
+            <WorkspaceCommandsContext.Provider value={getWorkspaceCommands}>
+              <ChatPaneList
+                registerSideColumn={registerSideColumn}
+                registerPaneFind={registerPaneFind}
+                shownPane={shownPane}
+                tabPanels={isMaximized}
+                focusPane={focusPane}
+                closeChatPanel={closeChatPanel}
+                startFreshActiveSession={startFreshActiveSession}
+                showProjectContext={openChatsSpanProjects}
+                projectLabelBySessionId={projectLabelBySessionId}
+                renderObserver={renderObserver}
+              />
+            </WorkspaceCommandsContext.Provider>
           </div>
         </div>
       )}

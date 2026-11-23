@@ -5337,6 +5337,56 @@ html.light ::selection {
   font-size: var(--text-10);
 }
 
+/* An entry's access: its key, or "palette only" when no key reaches it. */
+.cmdk-item-key {
+  flex-shrink: 0;
+  min-width: 0;
+}
+.cmdk-palette-only {
+  flex-shrink: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-11);
+}
+
+/* The Chats tree (⌘K, Chats scope): project › epic › ticket › task › chats. */
+.cmdk-tree-project .cmdk-label {
+  color: var(--fg);
+  font-weight: 500;
+}
+.cmdk-tree-row {
+  gap: var(--s-2);
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.cmdk-tree-row[data-matched] .cmdk-label {
+  color: var(--fg);
+}
+.cmdk-tree-chevron {
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--fg-mute);
+}
+.cmdk-tree-glyph,
+.cmdk-tree-status {
+  display: inline-flex;
+  width: 14px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+.cmdk-tree-level {
+  width: 48px;
+  flex-shrink: 0;
+  color: var(--fg-mute);
+  font-size: var(--text-11);
+}
+.cmdk-tree-history-dot {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--fg-faint);
+  border-radius: 999px;
+}
+
 /* Page search entry points open the ⌘K palette (one search surface). */
 .palette-search-btn {
   display: inline-flex;

@@ -18,9 +18,36 @@ export function enterFirstRow(
 ) {
   const section = event.currentTarget;
   const from = event.relatedTarget;
-  if (event.target !== section || (from instanceof Node && section.contains(from)))
+  if (
+    event.target !== section ||
+    (from instanceof Node && section.contains(from))
+  )
     return;
-  section.querySelector<HTMLElement>(rowSelector)?.focus({ preventScroll: true });
+  section
+    .querySelector<HTMLElement>(rowSelector)
+    ?.focus({ preventScroll: true });
+}
+
+/**
+ * Focus the row `step` away from `from` among `container`'s rows matching
+ * `rowSelector`, clamped; from outside the rows, the first or last.
+ */
+export function stepRow(
+  container: ParentNode,
+  rowSelector: string,
+  from: Element | null,
+  step: -1 | 1
+) {
+  const rows = Array.from(container.querySelectorAll<HTMLElement>(rowSelector));
+  if (rows.length === 0) return;
+  const at = from instanceof HTMLElement ? rows.indexOf(from) : -1;
+  const next =
+    at < 0
+      ? step === 1
+        ? 0
+        : rows.length - 1
+      : Math.min(rows.length - 1, Math.max(0, at + step));
+  rows[next]?.focus();
 }
 
 /**
@@ -48,7 +75,8 @@ export function moveChatArea(from: Element | null, offset: -1 | 1): boolean {
   const areas = chatAreas(pane);
   if (areas.length <= 1) return false;
   // Anywhere else in the chat (transcript, header) counts as its chat area.
-  const at = !from || !pane.contains(from) ? -1 : areas[1].contains(from) ? 1 : 0;
+  const at =
+    !from || !pane.contains(from) ? -1 : areas[1].contains(from) ? 1 : 0;
   const next =
     at < 0
       ? offset === 1

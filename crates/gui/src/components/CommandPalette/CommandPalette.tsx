@@ -10,9 +10,20 @@ import { NO_FACTORY_SCOPE, factoryNames } from "../../utils/workflowFactory";
 import { useChatStore } from "../../stores/chatStore";
 import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
-import { isReadingPercent, READING_SIZE_PRESETS } from "../../utils/readingAppearance";
-import { ACCENTS, TYPE_PAIRINGS, useUIStore } from "../../stores/uiStore";
 import {
+  isReadingPercent,
+  READING_SIZE_PRESETS,
+} from "../../utils/readingAppearance";
+import { ACCENTS, TYPE_PAIRINGS, useUIStore } from "../../stores/uiStore";
+import { ChatsTreeList } from "./ChatsTree";
+import {
+  CHATS_TREE_ID,
+  openChatFromPalette,
+  useChatsTree,
+} from "./useChatsTree";
+import {
+  CONTEXT_SCOPE_LABEL,
+  type ContextScopeId,
   isPaletteShortcut,
   isTypingTarget,
   labelMatchesQuery,
@@ -21,6 +32,10 @@ import {
   type PaletteItem,
   type PaletteScope,
 } from "./paletteModel";
+import {
+  focusedPaletteScopes,
+  type PaletteContextScope,
+} from "./paletteScopes";
 
 const SCOPES: { id: PaletteScope; label: string }[] = [
   { id: "all", label: "All" },
@@ -32,7 +47,7 @@ const SCOPES: { id: PaletteScope; label: string }[] = [
 ];
 
 const SCOPE_HEADINGS: Record<Exclude<PaletteScope, "all">, string> = {
-  changes: "Changes",
+  ...CONTEXT_SCOPE_LABEL,
   navigate: "Go to",
   tasks: "Tasks",
   chats: "Chats",
@@ -58,7 +73,10 @@ async function startFreshProjectChat() {
   const generation = getProjectScopeGeneration();
   const projectPath = await currentProjectPath();
   const mainWorktree = await loadMainChatWorktree(projectPath);
-  if (generation === getProjectScopeGeneration() && useChatStore.getState().panelOpen) {
+  if (
+    generation === getProjectScopeGeneration() &&
+    useChatStore.getState().panelOpen
+  ) {
     useChatStore
       .getState()
       .startFreshSession("New Chat", projectPath, mainWorktree);
@@ -81,16 +99,52 @@ function defaultScopeForPath(pathname: string): PaletteScope {
   return "all";
 }
 
+const CONTEXT_PLACEHOLDER: Record<ContextScopeId, string> = {
+  chat: "Search this chat's commands…",
+  changes: "Search Changes commands and files…",
+  discussions: "Search discussion commands…",
+  background: "Search background task commands…",
+};
+
+/**
+ * Fixed groups in "All", short lists first so pages and actions are never
+ * buried under the (much longer) task list. Focused-area scopes lead.
+ */
+const GROUP_ORDER: readonly Exclude<PaletteScope, "all">[] = [
+  "navigate",
+  "actions",
+  "chats",
+  "workflows",
+  "tasks",
+];
+
+/**
+ * Tab order: the focused area's scopes (innermost first), then Chats next
+ * to them, then the app scopes (decision 49d12c2c §4: "Tab reaches This
+ * chat, Chats and the app scopes"). Without a focused area, the app order.
+ */
+function scopeTabs(contexts: readonly PaletteContextScope[]) {
+  if (contexts.length === 0) return SCOPES;
+  const chats = SCOPES.find((entry) => entry.id === "chats")!;
+  return [
+    ...contexts.map(({ id, label }) => ({ id, label })),
+    chats,
+    ...SCOPES.filter((entry) => entry !== chats),
+  ];
+}
+
 /**
  * ⌘K command palette: one keyboard entry point to navigate, find tasks,
  * reopen chats (including saved history, matched by their linked ticket),
- * and run app actions. "/" opens it too, scoped to tasks on task pages.
- * Scope tabs narrow the list; the footer shows the key hints.
+ * and run app actions. ⌘K opens on the focused area's scope (This chat,
+ * Changes, Discussions, Background tasks) when it offers one; Tab reaches the
+ * Chats tree. "/" opens it too, scoped to tasks on task pages. Scope tabs
+ * narrow the list; the footer shows the key hints.
  */
 export function CommandPalette() {
   const open = useCommandPaletteStore((state) => state.open);
   const scope = useCommandPaletteStore((state) => state.scope);
-  const contextItems = useCommandPaletteStore((state) => state.contextItems);
+  const contexts = useCommandPaletteStore((state) => state.contexts);
   const togglePalette = useCommandPaletteStore((state) => state.togglePalette);
   const openPalette = useCommandPaletteStore((state) => state.openPalette);
   const closePalette = useCommandPaletteStore((state) => state.closePalette);
@@ -100,7 +154,8 @@ export function CommandPalette() {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isPaletteShortcut(event)) {
         event.preventDefault();
-        togglePalette();
+        const { contexts, initial } = focusedPaletteScopes();
+        togglePalette(initial, contexts);
         return;
       }
       if (
@@ -123,7 +178,7 @@ export function CommandPalette() {
   return (
     <PaletteDialog
       initialScope={scope}
-      contextItems={contextItems}
+      contexts={contexts}
       onClose={closePalette}
     />
   );
@@ -131,25 +186,15 @@ export function CommandPalette() {
 
 function PaletteDialog({
   initialScope,
-  contextItems,
+  contexts,
   onClose,
 }: {
   initialScope: PaletteScope;
-  /** Surface-specific items (Changes) shown under their own scope tab. */
-  contextItems: readonly PaletteItem[];
+  /** The focused area's scopes, each shown under its own scope tab. */
+  contexts: readonly PaletteContextScope[];
   onClose: () => void;
 }) {
-  const scopes = useMemo(
-    () =>
-      contextItems.length
-        ? [
-            SCOPES[0],
-            { id: "changes" as const, label: SCOPE_HEADINGS.changes },
-            ...SCOPES.slice(1),
-          ]
-        : SCOPES,
-    [contextItems.length]
-  );
+  const scopes = useMemo(() => scopeTabs(contexts), [contexts]);
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<PaletteScope>(initialScope);
@@ -178,17 +223,62 @@ function PaletteDialog({
     if (previous instanceof HTMLElement) previous.focus();
   }, [onClose]);
 
+  const chatsTree = useChatsTree(
+    tasks,
+    scope === "chats" ? query : "",
+    (sessionId) => {
+      close();
+      openChatFromPalette(sessionId);
+    }
+  );
+
   useEffect(() => {
     inputRef.current?.focus();
+    // Closed from outside (⌘K again) focus would drop to the body;
+    // hand it back so the next ⌘K still opens on the focused area.
+    const restore = restoreFocusRef.current;
+    return () => {
+      const current = document.activeElement;
+      if (current && current !== document.body) return;
+      if (restore instanceof HTMLElement && restore.isConnected)
+        restore.focus();
+    };
   }, []);
 
   const items = useMemo<PaletteItem[]>(() => {
     const nav: PaletteItem[] = [
-      { id: "nav-tasks", scope: "navigate", label: "Tasks", run: () => navigate("/tasks") },
-      { id: "nav-atlas", scope: "navigate", label: "Workflow atlas", keywords: "design workflows", run: () => navigate("/design") },
-      { id: "nav-artifacts", scope: "navigate", label: "Artifacts", run: () => navigate("/artifacts") },
-      { id: "nav-daemons", scope: "navigate", label: "Daemons", run: () => navigate("/daemons") },
-      { id: "nav-settings", scope: "navigate", label: "Settings", keywords: "preferences providers", run: () => navigate("/settings") },
+      {
+        id: "nav-tasks",
+        scope: "navigate",
+        label: "Tasks",
+        run: () => navigate("/tasks"),
+      },
+      {
+        id: "nav-atlas",
+        scope: "navigate",
+        label: "Workflow atlas",
+        keywords: "design workflows",
+        run: () => navigate("/design"),
+      },
+      {
+        id: "nav-artifacts",
+        scope: "navigate",
+        label: "Artifacts",
+        run: () => navigate("/artifacts"),
+      },
+      {
+        id: "nav-daemons",
+        scope: "navigate",
+        label: "Daemons",
+        run: () => navigate("/daemons"),
+      },
+      {
+        id: "nav-settings",
+        scope: "navigate",
+        label: "Settings",
+        keywords: "preferences providers",
+        run: () => navigate("/settings"),
+      },
     ];
     const actions: PaletteItem[] = [
       {
@@ -224,9 +314,27 @@ function PaletteDialog({
           }
         },
       },
-      { id: "action-theme-dark", scope: "actions", label: "Theme: Dark", keywords: "appearance", run: () => setTheme("dark") },
-      { id: "action-theme-light", scope: "actions", label: "Theme: Light", keywords: "appearance", run: () => setTheme("light") },
-      { id: "action-theme-system", scope: "actions", label: "Theme: System", keywords: "appearance", run: () => setTheme("system") },
+      {
+        id: "action-theme-dark",
+        scope: "actions",
+        label: "Theme: Dark",
+        keywords: "appearance",
+        run: () => setTheme("dark"),
+      },
+      {
+        id: "action-theme-light",
+        scope: "actions",
+        label: "Theme: Light",
+        keywords: "appearance",
+        run: () => setTheme("light"),
+      },
+      {
+        id: "action-theme-system",
+        scope: "actions",
+        label: "Theme: System",
+        keywords: "appearance",
+        run: () => setTheme("system"),
+      },
       ...READING_SIZE_PRESETS.map(
         ({ value, label, percent }): PaletteItem => ({
           id: `action-reading-size-${value}`,
@@ -275,10 +383,7 @@ function PaletteDialog({
       (tasks ?? []).map((task) => [task.id, task.title] as const)
     );
     const chatItems: PaletteItem[] = paletteChatEntries(
-      [
-        ...Object.values(localSessionSummaries),
-        ...Object.values(sessions),
-      ],
+      [...Object.values(localSessionSummaries), ...Object.values(sessions)],
       taskTitles
     ).map((entry) => ({
       id: `chat-${entry.sessionId}`,
@@ -287,15 +392,7 @@ function PaletteDialog({
       hint: entry.hint,
       detail: entry.detail,
       keywords: entry.keywords,
-      run: () => {
-        const chat = useChatStore.getState();
-        chat.setPanelOpen(true);
-        if (entry.open) {
-          chat.focusSession(entry.sessionId);
-        } else {
-          void chat.selectPersistedSession(entry.sessionId);
-        }
-      },
+      run: () => openChatFromPalette(entry.sessionId),
     }));
     const workflowList = workflows ?? [];
     const factoryItems: PaletteItem[] = factoryNames(workflowList).map(
@@ -328,7 +425,9 @@ function PaletteDialog({
         },
       }));
     return [
-      ...contextItems,
+      ...contexts.flatMap((context) =>
+        context.items.map((item) => ({ ...item, scope: context.id }))
+      ),
       ...nav,
       ...taskItems,
       ...chatItems,
@@ -337,7 +436,7 @@ function PaletteDialog({
       ...actions,
     ];
   }, [
-    contextItems,
+    contexts,
     localSessionSummaries,
     navigate,
     openTask,
@@ -353,26 +452,21 @@ function PaletteDialog({
   ]);
 
   const groups = useMemo(() => {
-    // Short, fixed lists first so pages and actions are never buried under
-    // the (much longer) task list.
-    const order: Exclude<PaletteScope, "all">[] = [
-      "changes",
-      "navigate",
-      "actions",
-      "chats",
-      "workflows",
-      "tasks",
-    ];
+    const order = [...contexts.map((context) => context.id), ...GROUP_ORDER];
     const customPercent = Number(
-      /^(?:reading(?: text)? size|font size)\s+(\d{2,3})%?$/i.exec(query.trim())?.[1]
+      /^(?:reading(?: text)? size|font size)\s+(\d{2,3})%?$/i.exec(
+        query.trim()
+      )?.[1]
     );
     const customSize: PaletteItem[] = isReadingPercent(customPercent)
-      ? [{
-          id: "action-reading-size-custom",
-          scope: "actions",
-          label: `Reading text size: ${customPercent}%`,
-          run: () => setReadingTextSize(customPercent),
-        }]
+      ? [
+          {
+            id: "action-reading-size-custom",
+            scope: "actions",
+            label: `Reading text size: ${customPercent}%`,
+            run: () => setReadingTextSize(customPercent),
+          },
+        ]
       : [];
     return order
       .filter((id) => scope === "all" || scope === id)
@@ -381,13 +475,15 @@ function PaletteDialog({
         items: [
           ...(id === "actions" ? customSize : []),
           ...rankByLabel(
-            items.filter((item) => item.scope === id && matchesQuery(item, query)),
+            items.filter(
+              (item) => item.scope === id && matchesQuery(item, query)
+            ),
             query
           ),
         ].slice(0, scope === "all" ? MAX_PER_SCOPE : undefined),
       }))
       .filter((group) => group.items.length > 0);
-  }, [items, query, scope, setReadingTextSize]);
+  }, [contexts, items, query, scope, setReadingTextSize]);
 
   const flat = useMemo(() => groups.flatMap((group) => group.items), [groups]);
 
@@ -401,16 +497,22 @@ function PaletteDialog({
       ?.scrollIntoView?.({ block: "nearest" });
   }, [activeIndex]);
 
+  // Focus goes back where ⌘K was pressed first, so an entry acts on the
+  // row or field the user was on, as its key would.
   const runItem = useCallback(
     (item: PaletteItem | undefined) => {
       if (!item) return;
-      onClose();
+      close();
       void item.run();
     },
-    [onClose]
+    [close]
   );
 
   const onKeyDown = (event: React.KeyboardEvent) => {
+    if (scope === "chats" && chatsTree.onKeyDown(event)) {
+      event.preventDefault();
+      return;
+    }
     if (event.key === "Escape") {
       event.preventDefault();
       close();
@@ -433,9 +535,18 @@ function PaletteDialog({
     }
   };
 
-  const activeId = flat[activeIndex]
-    ? `palette-option-${flat[activeIndex].id}`
-    : undefined;
+  const inTree = scope === "chats";
+  const activeId = inTree
+    ? chatsTree.activeKey
+      ? chatsTree.optionId(chatsTree.activeKey)
+      : undefined
+    : flat[activeIndex]
+      ? `palette-option-${flat[activeIndex].id}`
+      : undefined;
+  const placeholder = inTree
+    ? "Search chats, tickets and epics…"
+    : (CONTEXT_PLACEHOLDER[scope as ContextScopeId] ??
+      "Search tasks, chats, workflows, pages and actions…");
   let index = -1;
 
   return (
@@ -454,19 +565,27 @@ function PaletteDialog({
         onKeyDown={onKeyDown}
       >
         <div className="cmdk-search">
-          <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+          <svg
+            aria-hidden="true"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            viewBox="0 0 24 24"
+          >
             <circle cx="11" cy="11" r="6.5" />
             <path d="m16 16 4 4" />
           </svg>
           <input
             ref={inputRef}
             className="cmdk-input"
-            placeholder="Search tasks, chats, workflows, pages and actions…"
+            placeholder={placeholder}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             role="combobox"
             aria-expanded="true"
-            aria-controls="command-palette-list"
+            aria-haspopup={inTree ? "tree" : "listbox"}
+            aria-controls={inTree ? CHATS_TREE_ID : "command-palette-list"}
             aria-activedescendant={activeId}
             aria-label="Search commands"
             autoComplete="off"
@@ -495,58 +614,94 @@ function PaletteDialog({
             </button>
           ))}
         </div>
-        <div
-          ref={listRef}
-          id="command-palette-list"
-          className="cmdk-list"
-          role="listbox"
-          aria-label="Results"
-        >
-          {flat.length === 0 ? (
-            <div className="cmdk-empty" role="status">
-              No matches
-            </div>
-          ) : (
-            groups.map((group) => (
-              <div key={group.id} role="group" aria-label={SCOPE_HEADINGS[group.id]}>
-                <div className="cmdk-heading" aria-hidden="true">
-                  {SCOPE_HEADINGS[group.id]}
-                </div>
-                {group.items.map((item) => {
-                  index += 1;
-                  const itemIndex = index;
-                  return (
-                    <div
-                      key={item.id}
-                      id={`palette-option-${item.id}`}
-                      role="option"
-                      aria-selected={itemIndex === activeIndex}
-                      data-index={itemIndex}
-                      className="cmdk-item"
-                      onMouseMove={() => setActiveIndex(itemIndex)}
-                      onClick={() => runItem(item)}
-                    >
-                      <span className="cmdk-label">{item.label}</span>
-                      {item.hint && (
-                        <span className="cmdk-hint">{item.hint}</span>
-                      )}
-                      {item.detail && (
-                        <span className="cmdk-detail">{item.detail}</span>
-                      )}
-                    </div>
-                  );
-                })}
+        {inTree ? (
+          <ChatsTreeList tree={chatsTree} />
+        ) : (
+          <div
+            ref={listRef}
+            id="command-palette-list"
+            className="cmdk-list"
+            role="listbox"
+            aria-label="Results"
+          >
+            {flat.length === 0 ? (
+              <div className="cmdk-empty" role="status">
+                No matches
               </div>
-            ))
-          )}
-        </div>
+            ) : (
+              groups.map((group) => (
+                <div
+                  key={group.id}
+                  role="group"
+                  aria-label={SCOPE_HEADINGS[group.id]}
+                >
+                  <div className="cmdk-heading" aria-hidden="true">
+                    {SCOPE_HEADINGS[group.id]}
+                  </div>
+                  {group.items.map((item) => {
+                    index += 1;
+                    const itemIndex = index;
+                    return (
+                      <div
+                        key={item.id}
+                        id={`palette-option-${item.id}`}
+                        role="option"
+                        aria-selected={itemIndex === activeIndex}
+                        data-index={itemIndex}
+                        className="cmdk-item"
+                        onMouseMove={() => setActiveIndex(itemIndex)}
+                        onClick={() => runItem(item)}
+                      >
+                        <span className="cmdk-label">{item.label}</span>
+                        {item.hint && (
+                          <span className="cmdk-hint">{item.hint}</span>
+                        )}
+                        {item.detail && (
+                          <span className="cmdk-detail">{item.detail}</span>
+                        )}
+                        <ItemAccess item={item} />
+                      </div>
+                    );
+                  })}
+                </div>
+              ))
+            )}
+          </div>
+        )}
         <div className="cmdk-foot" aria-hidden="true">
-          <span><kbd className="cmdk-kbd">↑</kbd><kbd className="cmdk-kbd">↓</kbd> navigate</span>
-          <span><kbd className="cmdk-kbd">↵</kbd> open</span>
-          <span><kbd className="cmdk-kbd">tab</kbd> scope</span>
-          <span><kbd className="cmdk-kbd">esc</kbd> close</span>
+          <span>
+            <kbd className="cmdk-kbd">↑</kbd>
+            <kbd className="cmdk-kbd">↓</kbd> navigate
+          </span>
+          {inTree && (
+            <span>
+              <kbd className="cmdk-kbd">←</kbd>
+              <kbd className="cmdk-kbd">→</kbd> collapse · expand
+            </span>
+          )}
+          <span>
+            <kbd className="cmdk-kbd">↵</kbd> open
+          </span>
+          <span>
+            <kbd className="cmdk-kbd">tab</kbd> scope
+          </span>
+          <span>
+            <kbd className="cmdk-kbd">esc</kbd> close
+          </span>
         </div>
       </div>
     </div>
   );
+}
+
+/**
+ * A context action's key, so the palette teaches it, or a "palette only"
+ * mark for an action no key reaches.
+ */
+function ItemAccess({ item }: { item: PaletteItem }) {
+  if (!item.access) return null;
+  if (item.access === "palette-only") {
+    return <span className="cmdk-palette-only">palette only</span>;
+  }
+  return <kbd className="cmdk-kbd cmdk-item-key">{item.access.key}</kbd>;
 }

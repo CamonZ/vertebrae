@@ -2,6 +2,8 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BackgroundActivityPanel } from "./BackgroundActivityPanel";
 import { formatElapsed } from "./backgroundActivity";
+import { BACKGROUND_LIST_KEYS, keyHintText } from "./chatShortcuts";
+import { focusedPaletteScopes } from "../CommandPalette/paletteScopes";
 import {
   applyBackgroundUpdate,
   EMPTY_BACKGROUND_WORK,
@@ -169,7 +171,6 @@ describe("formatElapsed", () => {
     [3_720_000, "1h 02m"],
     [-5_000, "0s"],
   ])("%d ms → %s", (ms, text) => expect(formatElapsed(ms)).toBe(text));
-
 });
 
 describe("BackgroundActivityPanel list keys", () => {
@@ -182,7 +183,11 @@ describe("BackgroundActivityPanel list keys", () => {
     render(
       <BackgroundActivityPanel
         work={state(
-          { workId: "dev", description: "npm run dev", progress: "ready on :1420" },
+          {
+            workId: "dev",
+            description: "npm run dev",
+            progress: "ready on :1420",
+          },
           { workId: "lint", description: "npm run lint", progress: "checking" }
         )}
       />
@@ -209,6 +214,59 @@ describe("BackgroundActivityPanel list keys", () => {
     fireEvent.keyDown(first, { key: "c", code: "KeyC", metaKey: true });
     expect(writeText).toHaveBeenCalledOnce();
     expect(first).toHaveTextContent(writeText.mock.calls[0][0]);
+  });
+
+  it("offers the focused task's keys in the palette's Background tasks scope", () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    render(
+      <BackgroundActivityPanel
+        work={state(
+          {
+            workId: "dev",
+            description: "npm run dev",
+            progress: "ready on :1420",
+          },
+          { workId: "quiet", description: "npm run build" }
+        )}
+      />
+    );
+    const [dev, quiet] = screen.getAllByTestId("background-activity-row");
+
+    act(() => dev.focus());
+    const { contexts, initial } = focusedPaletteScopes();
+    expect(initial).toBe("background");
+    const move = { key: keyHintText(BACKGROUND_LIST_KEYS.move) };
+    expect(
+      contexts[0].items.map((item) => [item.label, item.access, item.hint])
+    ).toEqual([
+      ["Next task", move, "npm run dev"],
+      ["Previous task", move, "npm run dev"],
+      [BACKGROUND_LIST_KEYS.output.label, { key: "↵" }, "npm run dev"],
+      [
+        BACKGROUND_LIST_KEYS.copy.label,
+        { key: keyHintText(BACKGROUND_LIST_KEYS.copy) },
+        "npm run dev",
+      ],
+    ]);
+    const run = (label: string) =>
+      act(() => contexts[0].items.find((item) => item.label === label)!.run());
+    run(BACKGROUND_LIST_KEYS.output.label);
+    expect(dev).toHaveAttribute("aria-expanded", "true");
+    run(BACKGROUND_LIST_KEYS.copy.label);
+    expect(writeText).toHaveBeenCalledExactlyOnceWith("npm run dev");
+    run("Next task");
+    expect(quiet).toHaveFocus();
+
+    // No output to show on this one; there is no "Stop task" (no backend action).
+    const labels = focusedPaletteScopes().contexts[0].items.map(
+      (item) => item.label
+    );
+    expect(labels).not.toContain(BACKGROUND_LIST_KEYS.output.label);
+    expect(labels.join(" ")).not.toMatch(/stop/i);
   });
 
   it("offers only what a row has: no output to show, no command to copy", () => {

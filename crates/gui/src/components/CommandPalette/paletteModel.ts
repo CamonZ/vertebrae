@@ -1,4 +1,10 @@
 import type { LocalChatDiscussionBinding } from "../../bindings";
+/**
+ * Scopes of the focused area in the chat workspace (decision 49d12c2c §4.1):
+ * ⌘K opens on the innermost one; the others follow on Tab.
+ */
+export type ContextScopeId = "chat" | "changes" | "discussions" | "background";
+
 export type PaletteScope =
   | "all"
   | "navigate"
@@ -6,7 +12,20 @@ export type PaletteScope =
   | "chats"
   | "workflows"
   | "actions"
-  | "changes";
+  | ContextScopeId;
+
+export const CONTEXT_SCOPE_LABEL: Record<ContextScopeId, string> = {
+  chat: "This chat",
+  changes: "Changes",
+  discussions: "Discussions",
+  background: "Background tasks",
+};
+
+/**
+ * How a context action is reached outside the palette: the key that does the
+ * same where focus is (shown, so the palette teaches it), or nothing else.
+ */
+type PaletteAccess = { key: string } | "palette-only";
 
 export interface PaletteItem {
   id: string;
@@ -18,6 +37,8 @@ export interface PaletteItem {
   hint?: string;
   /** Extra words that should match the query but are not displayed. */
   keywords?: string;
+  /** Context actions only: their key, or marked palette-only. */
+  access?: PaletteAccess;
   run: () => void | Promise<void>;
 }
 
@@ -25,13 +46,18 @@ export interface PaletteItem {
 export function matchesQuery(item: PaletteItem, query: string): boolean {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return true;
+  const key =
+    item.access && item.access !== "palette-only" ? item.access.key : "";
   const haystack =
-    `${item.label} ${item.hint ?? ""} ${item.detail ?? ""} ${item.keywords ?? ""}`.toLowerCase();
+    `${item.label} ${item.hint ?? ""} ${item.detail ?? ""} ${key} ${item.keywords ?? ""}`.toLowerCase();
   return tokens.every((token) => haystack.includes(token));
 }
 
 export function isPaletteShortcut(
-  event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey">
+  event: Pick<
+    KeyboardEvent,
+    "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey"
+  >
 ): boolean {
   return (
     (event.metaKey || event.ctrlKey) &&
@@ -66,6 +92,7 @@ export interface PaletteChatSource {
   label: string;
   title?: string | null;
   association?: unknown;
+  projectPath?: string | null;
   updatedAt?: string;
   status?: "open" | "closed";
   hasUserMessage?: boolean;
@@ -82,10 +109,21 @@ export interface PaletteChatEntry {
   detail?: string;
   keywords: string;
   open: boolean;
+  projectPath: string | null;
+  ticketId: string | null;
+  /** The linked ticket's title (association or task list), else empty. */
+  ticketTitle: string;
+  updatedAt: string | null;
 }
 
-function chatTicket(association: unknown): { id: string; title: string } | null {
-  if (!association || typeof association !== "object" || Array.isArray(association)) {
+function chatTicket(
+  association: unknown
+): { id: string; title: string } | null {
+  if (
+    !association ||
+    typeof association !== "object" ||
+    Array.isArray(association)
+  ) {
     return null;
   }
   const record = association as Record<string, unknown>;
@@ -132,6 +170,10 @@ export function paletteChatEntries(
         detail: ticket ? ticket.id.slice(0, 8) : undefined,
         keywords: [chat.label, ticket?.id ?? "", ticketTitle].join(" "),
         open: chat.status === "open",
+        projectPath: chat.projectPath ?? null,
+        ticketId: ticket?.id ?? null,
+        ticketTitle,
+        updatedAt: chat.updatedAt ?? null,
       };
     });
 }

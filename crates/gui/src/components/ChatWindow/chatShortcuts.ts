@@ -137,6 +137,33 @@ export const CHAT_HISTORY_SHORTCUT = {
   label: "Show or hide chat history",
 } as const satisfies ChatShortcutDefinition;
 
+/** ⌘F finds within the active chat's transcript. */
+export const CHAT_FIND_SHORTCUT = {
+  modifiers: ["meta"],
+  keys: ["f", "F"],
+  codes: ["KeyF"],
+  displayKey: "F",
+  label: "Find in conversation",
+} as const satisfies ChatShortcutDefinition;
+
+/** ⌘⇧F searches chat history. */
+export const CHAT_SEARCH_SHORTCUT = {
+  modifiers: ["meta", "shift"],
+  keys: ["f", "F"],
+  codes: ["KeyF"],
+  displayKey: "F",
+  label: "Search chats",
+} as const satisfies ChatShortcutDefinition;
+
+/** ⌘. stops the active turn (handled by the chat while it can stop). */
+export const STOP_GENERATION_SHORTCUT = {
+  modifiers: ["meta"],
+  keys: ["."],
+  codes: ["Period"],
+  displayKey: ".",
+  label: "Stop generation",
+} as const satisfies ChatShortcutDefinition;
+
 const BACKSLASH = { keys: ["\\", "|"], codes: ["Backslash"], displayKey: "\\" };
 
 /**
@@ -369,7 +396,10 @@ const ARIA_MODIFIER: Record<ChatShortcutModifier, string> = {
 
 /** The `aria-keyshortcuts` form of a shortcut, e.g. `Meta+Shift+B`. */
 export function ariaKeyShortcut(shortcut: ChatShortcutDefinition): string {
-  return [...shortcut.modifiers.map((m) => ARIA_MODIFIER[m]), shortcut.displayKey].join("+");
+  return [
+    ...shortcut.modifiers.map((m) => ARIA_MODIFIER[m]),
+    shortcut.displayKey,
+  ].join("+");
 }
 
 export interface KeyHint {
@@ -392,9 +422,14 @@ const AREA_HINT: KeyHint = {
   keys: modifierKeys(CHAT_AREA_SHORTCUT),
   label: CHAT_AREA_SHORTCUT.label,
 };
+/** ⌥⇧↑/↓: previous / next file heading in Changes. */
+export const CHANGES_FILE_JUMP_KEYS = {
+  previous: { keys: ["⌥", "⇧", "↑"], label: "Previous file" },
+  next: { keys: ["⌥", "⇧", "↓"], label: "Next file" },
+} as const satisfies Record<string, KeyHint>;
 const FILE_JUMP_HINTS: KeyHint[] = [
-  { keys: ["⌥", "⇧", "↑"], label: "Previous file" },
-  { keys: ["⌥", "⇧", "↓"], label: "Next file" },
+  CHANGES_FILE_JUMP_KEYS.previous,
+  CHANGES_FILE_JUMP_KEYS.next,
 ];
 const PALETTE_HINTS: KeyHint[] = [
   { keys: ["/"], label: "Find file" },
@@ -516,20 +551,31 @@ export const CHANGES_HINT_GROUPS: readonly {
 ];
 
 /** The Discussions section's list (one row per selection thread). */
-export const DISCUSSION_LIST_HINTS: readonly KeyHint[] = [
-  { keys: ["↑", "↓"], label: "Previous / next discussion" },
-  { keys: ["↵"], label: "Open and reply" },
-  { keys: [DISCUSSION_OPEN_KEY], label: "Show its code in Changes" },
-  { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: "Copy original code" },
-  { keys: ["← / →"], label: "Fold / unfold earlier turns" },
-];
+export const DISCUSSION_LIST_KEYS = {
+  move: { keys: ["↑", "↓"], label: "Previous / next discussion" },
+  reply: { keys: ["↵"], label: "Open and reply" },
+  showCode: { keys: [DISCUSSION_OPEN_KEY], label: "Show its code in Changes" },
+  copy: { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: "Copy original code" },
+  fold: { keys: ["← / →"], label: "Fold / unfold earlier turns" },
+} as const satisfies Record<string, KeyHint>;
+
+export const DISCUSSION_LIST_HINTS: readonly KeyHint[] =
+  Object.values(DISCUSSION_LIST_KEYS);
 
 /** The Background tasks section's list. */
-export const BACKGROUND_LIST_HINTS: readonly KeyHint[] = [
-  { keys: ["↑", "↓"], label: "Previous / next task" },
-  { keys: ["↵"], label: "Show or hide output" },
-  { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: "Copy command" },
-];
+export const BACKGROUND_LIST_KEYS = {
+  move: { keys: ["↑", "↓"], label: "Previous / next task" },
+  output: { keys: ["↵"], label: "Show or hide output" },
+  copy: { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: "Copy command" },
+} as const satisfies Record<string, KeyHint>;
+
+export const BACKGROUND_LIST_HINTS: readonly KeyHint[] =
+  Object.values(BACKGROUND_LIST_KEYS);
+
+/** The text a key hint shows, e.g. `↑↓` or `⌘C`: palette and sheet agree. */
+export function keyHintText(hint: Pick<KeyHint, "keys">): string {
+  return hint.keys.join("");
+}
 
 /** Opens the comment card for a selection in assistant text. */
 export const TRANSCRIPT_COMMENT_SHORTCUT = {
