@@ -63,18 +63,21 @@ describe("chat catalog recovery", () => {
     await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(2));
   });
 
-  it("delivers the outbox on startup and reconnect without a recovery read", async () => {
+  it("delivers the outbox on startup and recovers missed catalog changes on reconnect", async () => {
     renderHook(useChatCatalogSync);
     await waitFor(() => expect(mocks.deliver).toHaveBeenCalledTimes(1));
 
-    act(() =>
-      mocks.handlers.get("websocket-state-changed")!({ payload: "disconnected" })
-    );
-    act(() =>
-      mocks.handlers.get("websocket-state-changed")!({ payload: "connected" })
-    );
+    const onStateChange = mocks.handlers.get("websocket-state-changed")!;
+    act(() => onStateChange({ payload: "connected" }));
     await waitFor(() => expect(mocks.deliver).toHaveBeenCalledTimes(2));
     expect(mocks.refresh).not.toHaveBeenCalled();
+
+    act(() => onStateChange({ payload: "reconnecting" }));
+    expect(mocks.refresh).not.toHaveBeenCalled();
+    act(() => onStateChange({ payload: "connected" }));
+
+    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+    expect(mocks.deliver).toHaveBeenCalledTimes(2);
   });
 
   it("coalesces duplicate events but reads again after an in-flight snapshot", async () => {
