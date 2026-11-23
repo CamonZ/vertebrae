@@ -1,8 +1,14 @@
-import { createContext } from "react";
-import type {
-  CodeSelection,
-  DiscussionState,
-  ThreadAnchor,
+import {
+  createContext,
+  useContext,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import {
+  SelectionDiscussions,
+  type CodeSelection,
+  type DiscussionState,
+  type ThreadAnchor,
 } from "./selectionDiscussions";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 
@@ -12,8 +18,11 @@ export interface DiscussionActions {
   select(anchor: CodeSelection | null): void;
   discuss(anchor: CodeSelection, question: string): Promise<boolean>;
   attach(anchor: CodeSelection, outdated?: boolean, question?: string): void;
-  /** `focus` puts the caret in the opened discussion's composer. */
-  reopen(id: string | null, options?: { focus?: boolean }): void;
+  /**
+   * `focus` puts the caret in the opened discussion's composer. `inPlace`
+   * opens it where it is listed instead of showing its anchor in Changes.
+   */
+  reopen(id: string | null, options?: { focus?: boolean; inPlace?: boolean }): void;
   send(id: string, text: string): void;
   cancel(id: string): void;
   reconcile(snapshot: WorktreeSnapshot): void;
@@ -54,3 +63,37 @@ export const SelectionDiscussionModelContext = createContext<{
   label: string;
   error: string | null;
 } | null>(null);
+
+/** What the header's Discussions toggle and the switcher count show. */
+export function useDiscussionSummary(): { count: number; alert: boolean } {
+  const discussion = useContext(SelectionDiscussionContext);
+  return {
+    count: discussion?.threads.length ?? 0,
+    alert: !!discussion?.anchorError,
+  };
+}
+
+/**
+ * The chat's discussion controller, made anew when `key` (its checkout and
+ * chat) changes, and its thread count: the side column's Discussions count
+ * is needed outside the provider, by the chat's shortcuts.
+ */
+export function useChatDiscussions(key: string): {
+  controller: SelectionDiscussions;
+  count: number;
+} {
+  const [owned, setOwned] = useState(() => ({
+    key,
+    controller: new SelectionDiscussions(),
+  }));
+  let { controller } = owned;
+  if (owned.key !== key) {
+    controller = new SelectionDiscussions();
+    setOwned({ key, controller });
+  }
+  const count = useSyncExternalStore(
+    controller.subscribe,
+    () => controller.getSnapshot().threads.length
+  );
+  return { controller, count };
+}

@@ -118,14 +118,14 @@ export function presentChatShortcut(
 }
 
 /**
- * Moves focus along the row of chat areas: chat 1 · its Changes · chat 2 ·
- * its Changes … wrapping at the ends.
+ * Moves focus inside the active chat: its composer ↔ its side column's shown
+ * section, wrapping. It never switches tabs (decision 49d12c2c §4).
  */
 export const CHAT_AREA_SHORTCUT = {
   modifiers: ["meta", "alt"],
   keys: ["ArrowLeft", "ArrowRight"],
   displayKey: "← / →",
-  label: "Move between chats and Changes",
+  label: "Move between composer and side column",
 } as const satisfies ChatShortcutDefinition;
 
 /** ⌘B shows or hides chat history; from the compact panel it expands. */
@@ -161,6 +161,21 @@ export const WORKSPACE_SHORTCUTS = {
     keys: ["Tab"],
     displayKey: "Tab",
     label: "Previous chat",
+  },
+  // The macOS previous / next tab keys. Brackets match on codes: ⇧[ types {.
+  nextChatTab: {
+    modifiers: ["meta", "shift"],
+    keys: ["]", "}"],
+    codes: ["BracketRight"],
+    displayKey: "]",
+    label: "Next chat tab",
+  },
+  previousChatTab: {
+    modifiers: ["meta", "shift"],
+    keys: ["[", "{"],
+    codes: ["BracketLeft"],
+    displayKey: "[",
+    label: "Previous chat tab",
   },
   chatByNumber: {
     modifiers: ["meta", "alt"],
@@ -208,6 +223,44 @@ export const WORKSPACE_SHORTCUTS = {
 } as const satisfies Record<string, ChatShortcutDefinition>;
 
 export type WorkspaceShortcutId = keyof typeof WORKSPACE_SHORTCUTS;
+
+/**
+ * The chat's side column (Changes · Discussions · Background tasks): ⌘⇧B
+ * for the column, ⌃⌘1–3 for a section by its place in the switcher (⌘⇧3–5
+ * belong to macOS screenshots). Digits match on codes.
+ */
+export const SIDE_COLUMN_SHORTCUTS = {
+  toggle: {
+    modifiers: ["meta", "shift"],
+    keys: ["b", "B"],
+    codes: ["KeyB"],
+    displayKey: "B",
+    label: "Show or hide the side column",
+  },
+  changes: {
+    modifiers: ["ctrl", "meta"],
+    keys: ["1"],
+    codes: ["Digit1"],
+    displayKey: "1",
+    label: "Show or hide Changes",
+  },
+  discussions: {
+    modifiers: ["ctrl", "meta"],
+    keys: ["2"],
+    codes: ["Digit2"],
+    displayKey: "2",
+    label: "Show or hide Discussions",
+  },
+  background: {
+    modifiers: ["ctrl", "meta"],
+    keys: ["3"],
+    codes: ["Digit3"],
+    displayKey: "3",
+    label: "Show or hide Background tasks",
+  },
+} as const satisfies Record<string, ChatShortcutDefinition>;
+
+export type SideColumnShortcutId = keyof typeof SIDE_COLUMN_SHORTCUTS;
 
 /** Tooltip text: `Label · ⌘⌥J`. */
 export function shortcutTooltip(
@@ -305,6 +358,18 @@ export const DISCUSSION_COLLAPSE_SHORTCUT = {
 /** Display string for a modifier shortcut, e.g. `⌘⇧↵`. */
 export function shortcutText(shortcut: ChatShortcutDefinition): string {
   return presentChatShortcut(shortcut)?.keys.join("") ?? "";
+}
+
+const ARIA_MODIFIER: Record<ChatShortcutModifier, string> = {
+  ctrl: "Control",
+  meta: "Meta",
+  alt: "Alt",
+  shift: "Shift",
+};
+
+/** The `aria-keyshortcuts` form of a shortcut, e.g. `Meta+Shift+B`. */
+export function ariaKeyShortcut(shortcut: ChatShortcutDefinition): string {
+  return [...shortcut.modifiers.map((m) => ARIA_MODIFIER[m]), shortcut.displayKey].join("+");
 }
 
 export interface KeyHint {
@@ -448,6 +513,22 @@ export const CHANGES_HINT_GROUPS: readonly {
       { keys: ["Esc"], label: "Close and return to line" },
     ],
   },
+];
+
+/** The Discussions section's list (one row per selection thread). */
+export const DISCUSSION_LIST_HINTS: readonly KeyHint[] = [
+  { keys: ["↑", "↓"], label: "Previous / next discussion" },
+  { keys: ["↵"], label: "Open and reply" },
+  { keys: [DISCUSSION_OPEN_KEY], label: "Show its code in Changes" },
+  { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: "Copy original code" },
+  { keys: ["← / →"], label: "Fold / unfold earlier turns" },
+];
+
+/** The Background tasks section's list. */
+export const BACKGROUND_LIST_HINTS: readonly KeyHint[] = [
+  { keys: ["↑", "↓"], label: "Previous / next task" },
+  { keys: ["↵"], label: "Show or hide output" },
+  { keys: modifierKeys(DIFF_COPY_SHORTCUT), label: "Copy command" },
 ];
 
 /** Opens the comment card for a selection in assistant text. */

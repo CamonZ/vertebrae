@@ -241,6 +241,9 @@ async fn selection_fixture(world: &mut GuiWorld, unborn: bool, source_link: &str
         .expect("the fixture chat composer should mount after opening chat");
 
     gui_acceptance::wait_actionable(&composer).await;
+    if !unborn {
+        widen_chat_for_side_column(&client).await;
+    }
 
     composer
         .send_keys("Initial fixture conversation")
@@ -346,13 +349,42 @@ async fn selection_fixture(world: &mut GuiWorld, unborn: bool, source_link: &str
     wait_for_changes_diff(&client, "real diff mounted").await;
 }
 
+/// Expand the chat workspace without its history column, so the side column
+/// opens beside the transcript (≥1100px) rather than in its place.
+async fn widen_chat_for_side_column(client: &fantoccini::Client) {
+    client.set_window_rect(0, 0, 1280, 1024).await.unwrap();
+    gui_acceptance::click_when_ready(
+        client,
+        Locator::Css("button[aria-label='Expand chat workspace']"),
+        "expand chat workspace",
+    )
+    .await;
+    gui_acceptance::wait_for_js(
+        client,
+        "chat wide enough for a side column beside the transcript",
+        r#"
+        const history = document.querySelector("[data-testid=chat-tabs-history][aria-pressed=true]");
+        if (history) { history.click(); return false; }
+        const chat = document.querySelector(".chat-with-changes");
+        const panel = document.querySelector(".hc-panel");
+        const moving = panel?.getAnimations({ subtree: true }).some((animation) =>
+          animation.playState === "running" &&
+          Number.isFinite(animation.effect?.getComputedTiming().endTime));
+        return !moving && !!chat && chat.getBoundingClientRect().width >= 1100;
+        "#,
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+}
+
 /// Wait until Changes shows the fixture's added line and its layout has
 /// settled: semantic results arrive after the diff mounts and insert label
 /// rows that shift lines, so a gesture measured earlier can miss its target.
 async fn wait_for_changes_diff(client: &fantoccini::Client, description: &str) {
     let script = format!(
         r#"{DEEP}
-            const changes = document.querySelector('[aria-label="Changes panel"]');
+            const changes = document.querySelector('[data-chat-area="changes"]');
             const line = changes && deep(
               changes,
               '[data-column-number="2"][data-line-type="change-addition"]',
@@ -498,7 +530,7 @@ async fn scroll_into_earlier_history(client: &fantoccini::Client) {
 }
 
 async fn gesture(world: &mut GuiWorld, drag: bool, shift: bool) {
-    gesture_on(world, "[aria-label='Changes panel']", drag, shift).await;
+    gesture_on(world, "[data-chat-area='changes']", drag, shift).await;
 }
 
 async fn gesture_on(world: &mut GuiWorld, surface: &str, drag: bool, shift: bool) {
@@ -608,7 +640,7 @@ async fn gestures(world: &mut GuiWorld) {
 
     let region = client
         .find(Locator::Css(
-            "[aria-label='Changes panel'] [aria-label='Code diff selection']",
+            "[data-chat-area='changes'] [aria-label='Code diff selection']",
         ))
         .await
         .unwrap();
@@ -626,7 +658,7 @@ async fn passive(world: &mut GuiWorld) {
 
     let passive_selection_script = format!(
         r#"{DEEP}
-            const panel = document.querySelector('[aria-label="Changes panel"]');
+            const panel = document.querySelector('[data-chat-area="changes"]');
             const selectedLine = deep(panel, "[data-line][data-selected-line]");
 
             return (
@@ -766,7 +798,7 @@ async fn main_context(_world: &mut GuiWorld) {
 }
 
 async fn open_comment_dialog(world: &mut GuiWorld) {
-    open_comment_dialog_on(world, "[aria-label='Changes panel']").await;
+    open_comment_dialog_on(world, "[data-chat-area='changes']").await;
 }
 
 async fn open_comment_dialog_on(world: &mut GuiWorld, surface: &str) {
@@ -1130,7 +1162,7 @@ async fn remount_changes(world: &mut GuiWorld) {
     gui_acceptance::wait_for_js(
         &client,
         "Changes is unmounted",
-        "return !document.querySelector('[aria-label=\"Changes panel\"]');",
+        "return !document.querySelector('[data-chat-area=\"changes\"]');",
         vec![],
         Duration::from_secs(10),
     )
@@ -1299,7 +1331,7 @@ async fn verify_resume_after_restart(world: &mut GuiWorld, outdated: bool) {
     )
     .await;
     if client
-        .find(Locator::Css("[aria-label='Changes panel']"))
+        .find(Locator::Css("[data-chat-area='changes']"))
         .await
         .is_err()
     {
@@ -1310,12 +1342,28 @@ async fn verify_resume_after_restart(world: &mut GuiWorld, outdated: bool) {
         )
         .await;
     }
-    gui_acceptance::click_when_ready(
-        &client,
-        Locator::Css("[aria-label='Reopen selection discussion']"),
-        "reopen the saved discussion",
-    )
-    .await;
+    if outdated {
+        // A detached discussion is listed in Discussions, not on the diff.
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::XPath("//*[@role='tab' and starts-with(normalize-space(.), 'Discussions')]"),
+            "show Discussions",
+        )
+        .await;
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::Css("button[aria-label^='Discussion on selection.ts']"),
+            "reopen the saved discussion",
+        )
+        .await;
+    } else {
+        gui_acceptance::click_when_ready(
+            &client,
+            Locator::Css("[aria-label='Reopen selection discussion']"),
+            "reopen the saved discussion",
+        )
+        .await;
+    }
     if outdated {
         gui_acceptance::wait_for_js(
             &client,
@@ -1496,7 +1544,7 @@ async fn protected(world: &mut GuiWorld) {
     .await;
 
     let panel_open_script = r#"
-            return !!document.querySelector('[aria-label="Changes panel"]');
+            return !!document.querySelector('[data-chat-area="changes"]');
         "#;
 
     let result = client.execute(panel_open_script, vec![]).await.unwrap();
@@ -2292,6 +2340,22 @@ async fn moved_and_outdated_discussion(world: &mut GuiWorld) {
     .await;
 
     std::fs::write(&file, original.replace("42", "43")).unwrap();
+    // Changes re-maps the thread against the edit; outdated, it leaves
+    // Changes for the Discussions section.
+    gui_acceptance::wait_for_js(
+        &client,
+        "outdated discussion leaves Changes",
+        r#"return !document.querySelector('[data-testid="selection-mini-thread"]');"#,
+        vec![],
+        Duration::from_secs(10),
+    )
+    .await;
+    gui_acceptance::click_when_ready(
+        &client,
+        Locator::XPath("//*[@role='tab' and starts-with(normalize-space(.), 'Discussions')]"),
+        "show Discussions",
+    )
+    .await;
     gui_acceptance::wait_for_js(
         &client,
         "outdated discussion displays the original snippet",
@@ -2309,37 +2373,27 @@ async fn moved_and_outdated_discussion(world: &mut GuiWorld) {
 
 #[then("Changes and tool patches offer inline Ask only after the first commit")]
 async fn first_commit_enables_inline_ask(world: &mut GuiWorld) {
-    const CHANGES: &str = "[aria-label='Changes panel']";
+    const CHANGES: &str = "[data-chat-area='changes']";
     const TOOL: &str = "[data-testid='tool-change-block']";
+    const TOGGLE: &str = "[data-testid=local-chat-view-changes]";
     let wd = world.webdriver.as_ref().unwrap().clone();
     {
         let client = wd.lock().await;
-        // This fixture exercises both panes together. Keep the tool patch and
-        // Changes panel inside the WebDriver viewport before selecting a line.
         client.set_window_rect(0, 0, 1280, 1024).await.unwrap();
-        gui_acceptance::click_when_ready(
-            &client,
-            Locator::Css(".tool-activity-summary[aria-expanded='false']"),
-            "expand recorded tool activity",
-        )
-        .await;
-        let ready = format!(
-            r#"{DEEP}
-            const changes = document.querySelector(arguments[0]);
-            const tool = document.querySelector(arguments[1]);
-            return !!changes?.querySelector('[role="alert"]') &&
-                !changes.querySelector('[aria-label="All file diffs"]') &&
-                !!tool && !!deep(tool, '[data-column-number="2"][data-line-type="change-addition"]');
-        "#
-        );
         gui_acceptance::wait_for_js(
             &client,
-            "unborn Changes and recorded tool patch",
-            &ready,
-            vec![json!(CHANGES), json!(TOOL)],
+            "unborn Changes reports no baseline",
+            r#"const changes = document.querySelector(arguments[0]);
+            return !!changes?.querySelector('[role="alert"]') &&
+                !changes.querySelector('[aria-label="All file diffs"]');"#,
+            vec![json!(CHANGES)],
             Duration::from_secs(15),
         )
         .await;
+        // A narrow chat shows Changes in place of the transcript; close it
+        // to reach the tool patch.
+        gui_acceptance::click_pane_action(&client, TOGGLE, "close Changes").await;
+        expand_tool_patch(&client).await;
     }
     gesture_on(world, TOOL, false, false).await;
     open_comment_dialog_on(world, TOOL).await;
@@ -2382,19 +2436,16 @@ async fn first_commit_enables_inline_ask(world: &mut GuiWorld) {
         "const first = 1;\nconst selected = 42;\nconst third = 3;\n",
     )
     .unwrap();
-    {
-        let client = wd.lock().await;
-        for name in ["close Changes", "reopen Changes"] {
-            gui_acceptance::click_pane_action(
-                &client,
-                "[data-testid=local-chat-view-changes]",
-                name,
-            )
-            .await;
-        }
-        wait_for_changes_diff(&client, "first-commit Changes diff").await;
-    }
     for surface in [CHANGES, TOOL] {
+        {
+            let client = wd.lock().await;
+            gui_acceptance::click_pane_action(&client, TOGGLE, "toggle Changes").await;
+            if surface == CHANGES {
+                wait_for_changes_diff(&client, "first-commit Changes diff").await;
+            } else {
+                expand_tool_patch(&client).await;
+            }
+        }
         gesture_on(world, surface, false, false).await;
         open_comment_dialog_on(world, surface).await;
         let client = wd.lock().await;
@@ -2410,6 +2461,38 @@ async fn first_commit_enables_inline_ask(world: &mut GuiWorld) {
         )
         .await;
     }
+}
+
+/// Expand the recorded tool activity (once) and wait for its patch's line.
+async fn expand_tool_patch(client: &fantoccini::Client) {
+    if client
+        .find(Locator::Css(
+            ".tool-activity-summary[aria-expanded='false']",
+        ))
+        .await
+        .is_ok()
+    {
+        gui_acceptance::click_when_ready(
+            client,
+            Locator::Css(".tool-activity-summary[aria-expanded='false']"),
+            "expand recorded tool activity",
+        )
+        .await;
+    }
+    let ready = format!(
+        r#"{DEEP}
+        const tool = document.querySelector("[data-testid='tool-change-block']");
+        return !!tool && !!deep(tool, '[data-column-number="2"][data-line-type="change-addition"]');
+    "#
+    );
+    gui_acceptance::wait_for_js(
+        client,
+        "recorded tool patch",
+        &ready,
+        vec![],
+        Duration::from_secs(15),
+    )
+    .await;
 }
 
 #[when("I save a tool-patch anchor without starting a discussion")]

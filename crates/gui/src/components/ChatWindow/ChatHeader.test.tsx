@@ -388,29 +388,57 @@ describe("ChatHeader", () => {
     expect(menuItem("Clear messages").className).toContain("danger");
   });
 
-  it("keeps changes and background inline while they are open or busy", () => {
+  it("keeps the shown section and busy background inline", () => {
     renderHeader({
-      onToggleChanges: vi.fn(),
-      changesOpen: true,
-      onToggleBackground: vi.fn(),
+      onToggleSection: vi.fn(),
+      changesAvailable: true,
+      sideSection: "changes",
+      backgroundAvailable: true,
       backgroundRunning: 2,
     });
     expect(screen.getByTestId("local-chat-view-changes")).toHaveAttribute(
       "aria-pressed",
       "true"
     );
+    // The open column's switcher reaches the other sections.
     expect(
-      screen.getByRole("button", { name: "Background tasks, 2 running" })
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Background tasks, 2 running" })
+    ).toBeNull();
   });
 
-  it("moves idle changes and background toggles into the overflow menu", () => {
-    const onToggleChanges = vi.fn();
-    renderHeader({ onToggleChanges, onToggleBackground: vi.fn() });
+  it("shows sections with content inline while the column is closed", () => {
+    renderHeader({
+      onToggleSection: vi.fn(),
+      changesAvailable: true,
+      backgroundAvailable: true,
+      backgroundRunning: 2,
+    });
+    expect(
+      screen.getByRole("button", { name: "Background tasks, 2 running" })
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("moves idle section toggles into the overflow menu", () => {
+    const onToggleSection = vi.fn();
+    renderHeader({
+      onToggleSection,
+      changesAvailable: true,
+      backgroundAvailable: true,
+    });
     expect(screen.queryByTestId("local-chat-view-changes")).toBeNull();
+    expect(screen.queryByTestId("local-chat-view-discussions")).toBeNull();
     openPaneMenu();
     fireEvent.click(menuItem("Changes"));
-    expect(onToggleChanges).toHaveBeenCalledTimes(1);
+    expect(onToggleSection).toHaveBeenLastCalledWith("changes");
+    openPaneMenu();
+    fireEvent.click(menuItem("Discussions"));
+    expect(onToggleSection).toHaveBeenLastCalledWith("discussions");
+  });
+
+  it("offers no Discussions toggle without a checkout or discussions", () => {
+    renderHeader({ onToggleSection: vi.fn(), changesAvailable: false });
+    openPaneMenu();
+    expect(screen.queryByRole("menuitem", { name: "Discussions" })).toBeNull();
   });
 
   it("closes the overflow menu on Escape and returns focus to the trigger", () => {

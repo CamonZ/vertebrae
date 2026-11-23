@@ -4,6 +4,7 @@ import { afterEach, vi } from "vitest";
 import { queryClient } from "../query/queryClient";
 import { usePendingCommentsStore } from "../stores/pendingCommentsStore";
 import { useComposerDraftStore } from "../stores/composerDraftStore";
+import { useChatSideColumnStore } from "../stores/chatSideColumnStore";
 
 const createStorageMock = (): Storage => {
   let store: Record<string, string> = {};
@@ -83,6 +84,7 @@ afterEach(() => {
   localStorage.clear();
   usePendingCommentsStore.setState({ byScope: {} });
   useComposerDraftStore.setState({ bySession: {} });
+  useChatSideColumnStore.getState().forget();
 });
 
 // Mock Tauri APIs

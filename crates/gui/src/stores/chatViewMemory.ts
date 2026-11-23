@@ -1,3 +1,5 @@
+import { useChatSideColumnStore } from "./chatSideColumnStore";
+
 /**
  * Per-chat view state that outlives a hidden tab or pane (ticket 736f94f3):
  * hidden chats unmount, so returning restores the transcript position and
@@ -55,13 +57,14 @@ export function restoreChatScroll(
 }
 
 /** The chat areas focus can return to. */
-export type ChatFocusArea = "composer" | "transcript" | "changes";
+/** `side`: the chat's side column (its shown section). */
+export type ChatFocusArea = "composer" | "transcript" | "side";
 
 const focusAreas = new Map<string, ChatFocusArea>();
 
 /** The area holding `target` inside a chat pane, if any. */
 export function chatFocusAreaOf(target: Element): ChatFocusArea | null {
-  if (target.closest('[data-chat-area="changes"]')) return "changes";
+  if (target.closest("[data-chat-area]")) return "side";
   if (target.closest("[data-transcript-viewport]")) return "transcript";
   if (target.closest('[data-testid="local-chat-composer"]')) return "composer";
   return null;
@@ -77,6 +80,7 @@ export function chatFocusArea(sessionId: string): ChatFocusArea {
 }
 
 export function forgetChatView(sessionId?: string) {
+  useChatSideColumnStore.getState().forget(sessionId);
   if (sessionId === undefined) {
     positions.clear();
     focusAreas.clear();

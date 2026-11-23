@@ -4672,7 +4672,7 @@ describe("chatStore", () => {
 
     it("forgets every saved view on reset", () => {
       const id = useChatStore.getState().openSession("Chat", "/repo");
-      saveChatFocusArea(id, "changes");
+      saveChatFocusArea(id, "side");
       useChatStore.getState().reset();
       expect(chatFocusArea(id)).toBe("composer");
     });

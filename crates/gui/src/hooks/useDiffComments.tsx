@@ -4,7 +4,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type Dispatch,
   type ReactNode,
+  type SetStateAction,
   type HTMLAttributes,
   type KeyboardEvent,
   type RefObject,
@@ -16,6 +18,7 @@ import {
 } from "../components/ChatWindow/selectionDiscussionState";
 import {
   captureCodeSelection,
+  drawnOn,
   type CodeSelection,
 } from "../components/ChatWindow/selectionDiscussions";
 import { supportsInlineDiscussion } from "../components/ChatWindow/reviewAnchors";
@@ -137,6 +140,19 @@ export interface DiffCursorOptions {
   context?(path: string): FileContext | undefined;
   /** ↵ on a gap: show these lines of gap `gap`. */
   onRevealGap?(path: string, gap: number, reveal: GapReveal): void;
+  /**
+   * The line cursor and its selection as a state pair, when the caller keeps
+   * it (a surface that remounts in place); else the hook holds its own.
+   */
+  selectionState?: readonly [
+    DiffSelection | null,
+    Dispatch<SetStateAction<DiffSelection | null>>,
+  ];
+}
+
+export interface DiffSelection {
+  path: string;
+  range: SelectedLineRange;
 }
 
 /** ↵ reveals a section toward the arrival, ⌥↵ one at the other end. */
@@ -180,6 +196,7 @@ export function useDiffComments(
     page,
     context,
     onRevealGap,
+    selectionState,
   } = cursor;
   const view: CursorView = {
     layout,
@@ -193,10 +210,8 @@ export function useDiffComments(
   const [draft, setDraft] = useState<Draft | null>(null);
   const currentDraft = useRef(draft);
   currentDraft.current = draft;
-  const [selection, setSelection] = useState<{
-    path: string;
-    range: SelectedLineRange;
-  } | null>(null);
+  const ownSelection = useState<DiffSelection | null>(null);
+  const [selection, setSelection] = selectionState ?? ownSelection;
   // The cursor on a collapsed gap; the line selection is empty meanwhile.
   const [gapCursor, setGapCursor] = useState<GapCursor | null>(null);
   // After ↵ revealed lines of a gap that is still collapsed, the cursor sits
@@ -211,6 +226,11 @@ export function useDiffComments(
   const ignoreSelection = useRef(false);
   const placements = review?.placements;
   const toolUseId = surface.kind === "tool_call" ? surface.toolUseId : null;
+  // `surface` by value, so memos keyed on its fields can use it.
+  const here = useMemo<ReviewSurface>(
+    () => (toolUseId === null ? { kind: "worktree" } : { kind: "tool_call", toolUseId }),
+    [toolUseId]
+  );
   // Closing a discussion puts the cursor back on its anchor; set each render
   // so the memoized annotation renderer calls the current cursor state.
   const returnToAnchor = useRef<(anchor: CodeSelection) => void>(() => {});
@@ -243,13 +263,7 @@ export function useDiffComments(
       );
     }
     for (const thread of threadAnchors) {
-      const home = thread.anchor.home;
-      if (
-        thread.anchor.fullFile || home.kind !== surface.kind ||
-        (home.kind === "tool_call" && home.toolUseId !== toolUseId)
-      )
-        continue;
-      if (thread.detached) continue;
+      if (!drawnOn(thread, here)) continue;
       const metadata = at(
         thread.anchor.path,
         thread.anchor.side === "old" ? "deletions" : "additions",
@@ -267,7 +281,7 @@ export function useDiffComments(
     return new Map<string, ReviewDiffAnnotation[]>(
       [...byPath].map(([path, lines]) => [path, [...lines.values()]])
     );
-  }, [placements, surface.kind, toolUseId, draft, threadAnchors]);
+  }, [placements, surface.kind, toolUseId, here, draft, threadAnchors]);
 
   const annotationsFor = useCallback(
     (path: string) => annotationsByPath.get(path) ?? NONE,
@@ -296,15 +310,9 @@ export function useDiffComments(
         active: placement.commentId === activeCommentId,
       });
     }
-    for (const { anchor, detached } of threadAnchors) {
-      const home = anchor.home;
-      if (
-        detached ||
-        anchor.fullFile ||
-        home.kind !== surface.kind ||
-        (home.kind === "tool_call" && home.toolUseId !== toolUseId)
-      )
-        continue;
+    for (const thread of threadAnchors) {
+      if (!drawnOn(thread, here)) continue;
+      const { anchor } = thread;
       add(anchor.path, {
         side: anchor.side === "old" ? "deletions" : "additions",
         start: anchor.startLine,
@@ -313,7 +321,7 @@ export function useDiffComments(
       });
     }
     return byPath;
-  }, [placements, threadAnchors, surface.kind, toolUseId, activeCommentId]);
+  }, [placements, threadAnchors, surface.kind, toolUseId, here, activeCommentId]);
 
   const commentedRangesFor = useCallback(
     (path: string) => rangesByPath.get(path) ?? NO_RANGES,
@@ -356,7 +364,7 @@ export function useDiffComments(
         discussion?.select(anchor);
       }
     },
-    [files, home, discussion]
+    [files, home, discussion, setSelection]
   );
 
   const onSelectionChange = useCallback(
@@ -372,7 +380,7 @@ export function useDiffComments(
 
       discussion?.select(anchor);
     },
-    [files, home, discussion, draft]
+    [files, home, discussion, draft, setSelection]
   );
 
   const clearInteraction = useCallback(
@@ -383,7 +391,7 @@ export function useDiffComments(
       ignoreSelection.current = false;
       if (sharedSelection?.path === path) discussion?.select(null);
     },
-    [sharedSelection, discussion]
+    [sharedSelection, discussion, setSelection]
   );
 
   const renderAnnotation = useCallback(
@@ -436,7 +444,7 @@ export function useDiffComments(
         />
       );
     },
-    [addComment, draft, discussion, onExit]
+    [addComment, draft, discussion, onExit, setSelection]
   );
 
   const selectedFile =

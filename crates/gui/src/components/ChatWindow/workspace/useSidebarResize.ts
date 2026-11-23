@@ -4,7 +4,9 @@ import {
   useRef,
   useState,
   type HTMLAttributes,
+  type KeyboardEvent,
 } from "react";
+import { isEditableShortcutTarget } from "../../../utils/keyboard";
 
 const CHANGES_SPLITTER_WIDTH = 2;
 const WIDTH_PRESETS = [1 / 3, 1 / 2, 2 / 3];
@@ -157,5 +159,54 @@ export function useSidebarResize(
     easeTo(presets.find((preset) => preset > width + 1) ?? presets[0]);
   };
 
-  return { containerRef, width, easing, handleProps, resizeBy, cycleWidth };
+  return {
+    containerRef,
+    /** The observed container width. */
+    available,
+    width,
+    easing,
+    handleProps,
+    resizeBy,
+    cycleWidth,
+  };
+}
+
+/**
+ * ⌥←/⌥→ and ⌥= resize a right-hand panel while focus is inside `region`
+ * (not in an editor, open combobox or modal). For a capture listener on the
+ * panel's container.
+ */
+export function resizeFromRegionKey(
+  event: KeyboardEvent,
+  region: HTMLElement | null,
+  resize: Pick<ReturnType<typeof useSidebarResize>, "resizeBy" | "cycleWidth">
+) {
+  const origin = event.nativeEvent.composedPath()[0];
+  if (
+    !region ||
+    !(origin instanceof HTMLElement) ||
+    !region.contains(origin) ||
+    isEditableShortcutTarget(origin) ||
+    event.defaultPrevented ||
+    event.nativeEvent.isComposing ||
+    !event.altKey ||
+    event.metaKey ||
+    event.ctrlKey ||
+    event.shiftKey ||
+    origin.closest('[role="combobox"][aria-expanded="true"]') ||
+    document.querySelector('[role="dialog"][aria-modal="true"]')
+  )
+    return;
+  const apply =
+    event.key === "ArrowLeft"
+      ? () => resize.resizeBy(1)
+      : event.key === "ArrowRight"
+        ? () => resize.resizeBy(-1)
+        : event.code === "Equal"
+          ? resize.cycleWidth
+          : null;
+  if (!apply) return;
+  event.preventDefault();
+  event.stopPropagation();
+  apply();
 }

@@ -34,11 +34,15 @@ import {
 } from "../../hooks/useLocalChatEventRouter";
 import {
   SelectionDiscussionProvider,
-  DiscussionSnapshot,
   InlineSelectionDiscussion,
 } from "./SelectionDiscussionContext";
-import { captureCodeSelection, isOutdated } from "./selectionDiscussions";
+import {
+  SelectionDiscussions,
+  captureCodeSelection,
+  isOutdated,
+} from "./selectionDiscussions";
 import { parsePatch } from "../thread/toolChange/diffLineMapper";
+import { SideDiscussions } from "./SideDiscussions";
 
 const transport = vi.hoisted(() => ({
   text: null as ((event: { payload: LocalChatTextEvent }) => void) | null,
@@ -165,7 +169,8 @@ function Router() {
 
 function fixture(scope = "A", onAttach = vi.fn(), parentChatId = `parent-${scope}`, projectPath = "/project") {
   return (
-    <SelectionDiscussionProvider
+    <SelectionDiscussionProvider controller={controllerFor(scope)}
+      snapshot={null}
       key={scope}
       worktreePath={`/${scope}`}
       parentChatId={parentChatId}
@@ -265,7 +270,17 @@ function end(
   });
 }
 
+// One chat's discussions per test and scope, kept across rerenders and
+// made anew for a new scope, like ChatWindow's.
+let controller: SelectionDiscussions;
+let byScope: Map<string, SelectionDiscussions>;
+function controllerFor(scope: string) {
+  if (!byScope.has(scope)) byScope.set(scope, new SelectionDiscussions());
+  return byScope.get(scope)!;
+}
 beforeEach(() => {
+  controller = new SelectionDiscussions();
+  byScope = new Map();
   vi.clearAllMocks();
   useChatStore.getState().reset();
   resetLocalChatTurnRoutingForTests();
@@ -566,7 +581,8 @@ function codeFixture(
   side?: "additions" | "deletions"
 ) {
   return (
-    <SelectionDiscussionProvider
+    <SelectionDiscussionProvider controller={controller}
+      snapshot={null}
       worktreePath="/A"
       parentChatId={parentChatId ?? "code-fixture"}
       projectPath="/project"
@@ -913,6 +929,7 @@ it("generated provider journeys observe command dispatch and retire responses ac
         commands.closeLocalChatSession,
       ])
         vi.mocked(command).mockClear();
+      byScope = new Map();
 
       const sequence = tc.draw(
         gs.arrays(gs.integers({ minValue: 0, maxValue: 168 }), {
@@ -1552,7 +1569,8 @@ it("restores each discussion's range when switching between two comments", async
   const onOpen = vi.fn();
   const onAttach = vi.fn();
   const view = (
-    <SelectionDiscussionProvider
+    <SelectionDiscussionProvider controller={controller}
+      snapshot={null}
       worktreePath="/A"
       parentChatId="two-spans"
       projectPath="/project"
@@ -2409,8 +2427,10 @@ it("moves a Git-anchored discussion and displays the captured lines when outdate
   const shifted = parsePatch(
     "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,1 +1,3 @@\n-old\n+first\n+second\n+selected\n"
   );
-  const tree = (files: typeof fixtureFiles) => (
-    <SelectionDiscussionProvider
+  // Changes and Discussions are one side column section at a time.
+  const tree = (files: typeof fixtureFiles, section: "changes" | "discussions" = "changes") => (
+    <SelectionDiscussionProvider controller={controller}
+      snapshot={null}
       worktreePath="/A"
       parentChatId="main-chat"
       projectPath="/project"
@@ -2419,8 +2439,11 @@ it("moves a Git-anchored discussion and displays the captured lines when outdate
       onAttach={vi.fn()}
     >
       <Controls showThreads={false} />
-      <CodeFixture surface="worktree" files={files} />
-      <DiscussionSnapshot snapshot={null} />
+      {section === "changes" ? (
+        <CodeFixture surface="worktree" files={files} />
+      ) : (
+        <SideDiscussions />
+      )}
     </SelectionDiscussionProvider>
   );
   const view = render(tree(fixtureFiles));
@@ -2438,12 +2461,64 @@ it("moves a Git-anchored discussion and displays the captured lines when outdate
   const edited = parsePatch(
     "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,1 +1,3 @@\n-old\n+edited\n+second\n+first\n"
   );
-  view.rerender(tree(edited));
+  view.rerender(tree(edited, "discussions"));
   await act(async () => liveDiscussion.reconcile({ wholeBranch: false, files: edited }));
   expect(await screen.findByText("Outdated context")).toBeVisible();
   const snippet = screen.getByLabelText("Original selected code");
   expect(snippet).toHaveTextContent("selected");
-  expect(screen.getByTestId("code-fixture")).not.toContainElement(snippet);
+  expect(screen.queryByTestId("code-fixture")).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("group", { name: "Detached, 1" })
+  ).toContainElement(snippet);
+});
+
+it("re-anchors a thread on a snapshot change while no side column is mounted", async () => {
+  vi.mocked(commands.checkReviewAnchorWorktree).mockResolvedValue({
+    status: "ok",
+    data: null,
+  });
+  vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
+    status: "ok",
+    data: { originalCommitId: "commit", originalBlobId: "blob" },
+  });
+  vi.mocked(commands.mapReviewThreads)
+    .mockReset()
+    .mockImplementation(async (_worktree, [request]) => ({
+      status: "ok",
+      data: [{ threadId: request.threadId, status: "open", startLine: 3, line: 3 }],
+    }));
+  const shifted = parsePatch(
+    "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1,1 +1,3 @@\n-old\n+first\n+second\n+selected\n"
+  );
+  // Only the provider and its controls: neither Changes nor Discussions.
+  const tree = (snapshot: { wholeBranch: boolean; files: typeof fixtureFiles } | null) => (
+    <SelectionDiscussionProvider controller={controller}
+      snapshot={snapshot}
+      worktreePath="/A"
+      parentChatId="main-chat"
+      projectPath="/project"
+      harness="claude"
+      onOpen={vi.fn()}
+      onAttach={vi.fn()}
+    >
+      <Controls showThreads={false} />
+    </SelectionDiscussionProvider>
+  );
+  const view = render(tree({ wholeBranch: false, files: fixtureFiles }));
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+  fireEvent.click(screen.getByRole("button", { name: "Select fixture" }));
+  fireEvent.click(screen.getByRole("button", { name: "Open mini" }));
+  await waitFor(() => expect(liveDiscussion.threads).toHaveLength(1));
+  expect(liveDiscussion.threads[0].anchor.startLine).toBe(1);
+  vi.mocked(commands.mapReviewThreads).mockClear();
+
+  view.rerender(tree({ wholeBranch: false, files: shifted }));
+
+  await waitFor(() =>
+    expect(liveDiscussion.threads[0].anchor.startLine).toBe(3)
+  );
+  expect(commands.mapReviewThreads).toHaveBeenCalled();
+  expect(liveDiscussion.threads[0].status.kind).toBe("inline");
 });
 
 it("keeps the newest mapping and clears a transient mapping error", async () => {

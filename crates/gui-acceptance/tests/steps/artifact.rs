@@ -547,7 +547,7 @@ async fn exercise_statechart_viewport(client: &fantoccini::Client) {
     let ratio = before_resize["widthRatio"].as_f64().unwrap();
 
     assert!(
-        ratio <= 0.901 && ratio >= 0.899,
+        (0.899..=0.901).contains(&ratio),
         "90% width: {before_resize}"
     );
     assert_eq!(before_resize["centered"], true);

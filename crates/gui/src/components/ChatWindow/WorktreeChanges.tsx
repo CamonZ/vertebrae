@@ -82,6 +82,10 @@ import { STATUS_LETTER } from "./workspace/status";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import type { JumpTarget } from "./workspace/AllChangesView";
 import {
+  useChangesView,
+  useChatSideColumnStore,
+} from "../../stores/chatSideColumnStore";
+import {
   loadChangeSides,
   loadChangedSymbols,
   sharedChangedSymbols,
@@ -217,6 +221,21 @@ function changesDiscussionItems(
  * save, on request, or after filesystem notifications. Drafts survive
  * unmounting in the per-worktree store.
  */
+/**
+ * Jump nonces, each jump handled once: references count up from 1, jumps
+ * made inside Changes down from -1, and 0 restores a remounted view's file.
+ */
+const RESTORE_JUMP_NONCE = 0;
+
+/** Focus the diff's line cursor inside `section`; false if none yet. */
+function resumeLineCursor(section: HTMLElement): boolean {
+  const cursor = section.querySelector<HTMLElement>(
+    `[${DIFF_CURSOR_HOST_ATTRIBUTE}]`
+  );
+  cursor?.focus({ preventScroll: true });
+  return !!cursor;
+}
+
 export function WorktreeChanges({
   ref,
   worktreePath,
@@ -226,8 +245,14 @@ export function WorktreeChanges({
   onTurnDismiss,
   onTurnVersionChange,
   onExit,
+  sessionId,
 }: {
   ref?: Ref<HTMLElement>;
+  /**
+   * The chat whose Changes this is: the comparison, active file and line
+   * cursor live in its side column store, so a remount finds them in place.
+   */
+  sessionId: string;
   /** Hand focus back to the chat input (Esc from the line cursor). */
   onExit?(): void;
   worktreePath: string;
@@ -270,10 +295,24 @@ export function WorktreeChanges({
   }, []);
   const openPalette = useCommandPaletteStore((state) => state.openPalette);
   const discussion = useContext(SelectionDiscussionContext);
-  const [base, setBase] = useState<ComparisonEndpoint | null>(null);
-  const [target, setTarget] = useState<ComparisonEndpoint>({
-    kind: "working_tree",
-  });
+  const changesKey = useMemo(
+    () => ({ sessionId, worktreePath }),
+    [sessionId, worktreePath]
+  );
+  const { base, target, activePath } = useChangesView(changesKey);
+  const saveChanges = useChatSideColumnStore((state) => state.saveChanges);
+  const saveView = useCallback(
+    (patch: Parameters<typeof saveChanges>[2]) =>
+      saveChanges(sessionId, worktreePath, patch),
+    [saveChanges, sessionId, worktreePath]
+  );
+  const setBase = (base: ComparisonEndpoint | null) => saveView({ base });
+  const setTarget = (target: ComparisonEndpoint) => saveView({ target });
+  const setActivePath = useCallback(
+    (activePath: string | null) => saveView({ activePath }),
+    [saveView]
+  );
+
   const preferredDiffOptions = usePierreDiffOptions();
   const [diffStyle, setDiffStyle] = useState(preferredDiffOptions.diffStyle);
   const wholeBranch = base?.kind !== "head";
@@ -328,11 +367,21 @@ export function WorktreeChanges({
   // Background refreshes keep the current list visible while Git runs.
   const [refresh, setRefresh] = useState({ count: 0, background: false });
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  // Changes entered before its diff loaded: the cursor takes the keys once
+  // the diff is there, unless focus has moved on meanwhile.
+  const diffReady = state.status === "ready";
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (diffReady && section && section.ownerDocument.activeElement === section)
+      resumeLineCursor(section);
+  }, [diffReady]);
   const [generation, setGeneration] = useState(0);
   const [filesOpen, setFilesOpen] = useState(true);
   const [mode, setMode] = useState<SidebarMode>("changes");
-  const [activePath, setActivePath] = useState<string | null>(null);
-  const [jumpTarget, setJumpTarget] = useState<JumpTarget | null>(null);
+  // Back on Changes: scroll to the file the chat left it on.
+  const [jumpTarget, setJumpTarget] = useState<JumpTarget | null>(() =>
+    activePath ? { path: activePath, nonce: RESTORE_JUMP_NONCE } : null
+  );
   // A reference's lines: scrolled to once, highlighted until the first edit
   // or manual navigation.
   const [reveal, setReveal] = useState<
@@ -354,11 +403,13 @@ export function WorktreeChanges({
     // References name the working copy and open beside a collapsed explorer.
     setFilesOpen(false);
     setHistoricalDocument(null);
-    setTarget((current) =>
-      current.kind === "working_tree" ? current : { kind: "working_tree" }
+    saveView((current) =>
+      current.target.kind === "working_tree"
+        ? {}
+        : { target: { kind: "working_tree" } }
     );
     setPendingSource(sourceJump);
-  }, [sourceJump]);
+  }, [sourceJump, saveView]);
   // Route only on a working-copy result: a ready or failed past-commit load
   // may still be shown while the working copy loads. A failed working-copy
   // load still opens the referenced file.
@@ -389,7 +440,7 @@ export function WorktreeChanges({
         sourceRoute.reveal && { ...sourceRoute.reveal, scrolled: false }
       );
     }
-  }, [sourceRoute, worktreePath]);
+  }, [sourceRoute, worktreePath, setActivePath]);
   // Publish a routed diff in this render, before switching from an open
   // document can mount the viewport with the previous request.
   const effectiveJumpTarget =
@@ -967,6 +1018,7 @@ export function WorktreeChanges({
             )}
             diffStyle={diffStyle}
             onCursorFile={setActivePath}
+            chatChanges={changesKey}
             onExit={onExit}
             viewedPaths={viewedPaths}
             onViewedChange={setViewed}
@@ -1000,13 +1052,7 @@ export function WorktreeChanges({
           )
         ) {
           // Entering Changes resumes the line cursor where it was left.
-          const cursor = section.querySelector<HTMLElement>(
-            `[${DIFF_CURSOR_HOST_ATTRIBUTE}]`
-          );
-          if (cursor) {
-            cursor.focus({ preventScroll: true });
-            return;
-          }
+          if (resumeLineCursor(section)) return;
         }
         if (!(event.target instanceof HTMLElement)) return;
         const path = event.target.closest<HTMLElement>("[data-changes-path]")

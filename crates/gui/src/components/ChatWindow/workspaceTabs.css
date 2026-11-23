@@ -305,3 +305,191 @@ button:has(> .selection-chip-label) {
 .selection-mini-close[aria-pressed="true"] {
   color: var(--color-fg);
 }
+
+/* A chat's side column (db5160ff): Changes · Discussions · Background tasks. */
+.chat-side-column {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.chat-side-switcher {
+  display: flex;
+  flex-shrink: 0;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0 4px 0 8px;
+  border-bottom: 1px solid var(--color-line);
+}
+.chat-side-switcher .workspace-tabs {
+  flex: 1;
+  border-bottom: 0;
+}
+.workspace-tabs > button[aria-selected="true"] {
+  border-bottom-color: var(--color-fg-mute);
+  color: var(--color-fg);
+}
+.workspace-tabs > button[data-alert] .changes-files-count,
+.workspace-tabs > button[data-alert]::after {
+  color: var(--color-err);
+}
+.workspace-tabs > button[data-alert]::after {
+  content: "!";
+  font-weight: 700;
+}
+.chat-side-close {
+  display: grid;
+  align-self: center;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-lg);
+  background: transparent;
+  color: var(--color-fg-mute);
+  cursor: pointer;
+}
+.chat-side-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg);
+}
+.chat-side-section {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+}
+.chat-side-section > section {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Narrower than 1100px the column is the chat's view; the composer stays. */
+.chat-with-changes[data-side-placement="view"][data-changes-open="true"] {
+  flex-direction: column;
+}
+.chat-with-changes[data-side-placement="view"][data-changes-open="true"]
+  > .changes-side-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.chat-with-changes[data-side-placement="view"][data-changes-open="true"]
+  > .main-conversation {
+  flex: 0 0 auto;
+}
+.chat-with-changes[data-side-placement="view"][data-changes-open="true"]
+  > .main-conversation
+  > :not(.hc-foot) {
+  display: none;
+}
+
+/* The header's Discussions toggle when an anchor could not be checked. */
+.chat-association-panel .hc-ctrl[data-alert] {
+  color: var(--color-err);
+}
+
+.side-discussions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+.side-discussions-alert {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--color-err) 45%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--color-err) 10%, transparent);
+  color: var(--color-err);
+  font-size: 12px;
+}
+.side-discussions-empty {
+  margin: 0;
+  color: var(--color-fg-soft);
+  font-size: 12px;
+}
+.side-discussions-group ul {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.side-discussions-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  color: var(--color-fg-mute);
+  font: 600 11px/1.4 var(--font-sans);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.side-discussion .selection-mini-thread {
+  margin: 0;
+}
+.side-discussion-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-1);
+  color: var(--color-fg-soft);
+  font: 400 12px/1.4 var(--font-mono);
+  text-align: left;
+  cursor: pointer;
+}
+.side-discussion-row:hover {
+  border-color: var(--color-line-strong);
+  background: var(--color-bg-hover);
+  color: var(--color-fg);
+}
+.side-discussion-anchor {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side-discussion-code {
+  max-height: 160px;
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-2);
+  color: var(--color-fg-soft);
+  font: 400 11px/1.5 var(--font-mono);
+}
+
+/* Each section's keys, listed at its foot. */
+.side-section-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: auto;
+  padding-top: 8px;
+  color: var(--color-fg-mute);
+  font-size: 11px;
+}
+.side-section-hints kbd {
+  font: 500 11px/1 var(--font-sans);
+  color: var(--color-fg-soft);
+}
+.background-activity-row {
+  font: inherit;
+  color: inherit;
+}
+.background-activity-row[aria-expanded] {
+  cursor: pointer;
+}
+.background-activity-row:hover,
+.background-activity-row:focus-visible {
+  background: var(--color-bg-hover);
+}

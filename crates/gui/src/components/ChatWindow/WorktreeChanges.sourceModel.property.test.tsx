@@ -20,6 +20,7 @@ import type {
   JumpTarget,
 } from "./workspace/AllChangesView";
 import type { DocumentEditorProps } from "./workspace/DocumentEditor";
+import { useChatSideColumnStore } from "../../stores/chatSideColumnStore";
 import {
   filePatch,
   numbered,
@@ -416,10 +417,10 @@ test(
             };
           });
 
-          const view = render(<WorktreeChanges worktreePath="/worktree" />);
+          const view = render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
           m.rerender = (sourceJump) =>
             view.rerender(
-              <WorktreeChanges
+              <WorktreeChanges sessionId="chat"
                 worktreePath="/worktree"
                 sourceJump={sourceJump}
               />
@@ -430,6 +431,8 @@ test(
             await hegel.stateful.runAsync(tc, machine, m, { stepCount: 20 });
           } finally {
             view.unmount();
+            // Each case is a fresh chat: Changes keeps its view in the store.
+            useChatSideColumnStore.getState().forget();
           }
         },
         { testCases: 50 }

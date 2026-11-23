@@ -110,7 +110,7 @@ it("publishes parsed metadata atomically and keeps the diff viewport mounted dur
     .mockResolvedValueOnce(loaded("a.ts"))
     .mockResolvedValueOnce(loaded("b.ts"));
 
-  render(<WorktreeChanges worktreePath="/worktree" />);
+  render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
   await waitFor(() => expect(state.jobs).toHaveLength(1));
   await finish(0);
   expect(await screen.findByTestId("diff-view")).toHaveTextContent("a.ts:a.ts");
@@ -133,10 +133,10 @@ it("aborts worker preparation on worktree replacement and rejects its late resul
     .mockResolvedValueOnce(loaded("old.ts"))
     .mockResolvedValueOnce(loaded("new.ts"));
 
-  const view = render(<WorktreeChanges worktreePath="/old" />);
+  const view = render(<WorktreeChanges sessionId="chat" worktreePath="/old" />);
   await waitFor(() => expect(state.jobs).toHaveLength(1));
 
-  view.rerender(<WorktreeChanges worktreePath="/new" />);
+  view.rerender(<WorktreeChanges sessionId="chat" worktreePath="/new" />);
   await waitFor(() => expect(state.jobs).toHaveLength(2));
   expect(state.jobs[0].signal.aborted).toBe(true);
 

@@ -21,6 +21,10 @@ import type { CodeViewRenderedItem, SelectedLineRange } from "@pierre/diffs";
 import type { WorktreeChange } from "../../../bindings";
 import { usePierreDiffOptions } from "../../../hooks/useCodeAppearance";
 import { useDiffComments } from "../../../hooks/useDiffComments";
+import {
+  useChangesCursor,
+  type ChangesKey,
+} from "../../../stores/chatSideColumnStore";
 import { DIFF_CURSOR_ENTRY_ATTRIBUTE } from "../../thread/toolChange/diffCursor";
 import { GAP_BATCH } from "../../thread/toolChange/diffGaps";
 import { canonicalPath, type FilePatch } from "../../thread/toolChange/diffLineMapper";
@@ -90,9 +94,15 @@ export interface AllChangesViewProps {
   loadSides?: LoadSides;
   symbolGraphRequest?: SymbolGraphRequest;
   onRelatedJump?(location: SourceLocation): void;
+  /**
+   * The chat's Changes this view shows: its line cursor lives in the store,
+   * read here so a cursor move re-renders only this view.
+   */
+  chatChanges?: ChangesKey;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
+const NO_CHANGES: ChangesKey = { sessionId: "", worktreePath: "" };
 
 /** Why a file is folded: marked viewed, or folded by hand. */
 type FoldReason = "viewed" | "hand";
@@ -163,6 +173,7 @@ export default function AllChangesView({
   loadSides,
   symbolGraphRequest,
   onRelatedJump,
+  chatChanges,
 }: AllChangesViewProps): ReactNode {
   const onToggleViewed = onViewedChange
     ? (path: string) => onViewedChange(path, !viewedPaths.has(path))
@@ -294,6 +305,8 @@ export default function AllChangesView({
   });
   const { fileDiffFor, onPostRender: onGapsPostRender } = gaps;
   const lastCursorMove = useRef(-Infinity);
+  // Read unconditionally (hooks); unused without a chat's Changes.
+  const heldCursor = useChangesCursor(chatChanges ?? NO_CHANGES);
   const review = useDiffComments({ kind: "worktree" }, patchFiles, undefined, {
     layout,
     onExit,
@@ -304,6 +317,7 @@ export default function AllChangesView({
       ),
     context: gaps.context,
     onRevealGap: gaps.reveal,
+    selectionState: chatChanges ? heldCursor : undefined,
     onCursorMove: (path, lineNumber, side) => {
       const now = performance.now();
       const behavior = changesCursorScrollBehavior(now - lastCursorMove.current);
