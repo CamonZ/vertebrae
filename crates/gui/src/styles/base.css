@@ -270,6 +270,12 @@
   .markdown-content pre {
     font-family: var(--font-mono);
   }
+  /* Message bodies break anywhere, which shrinks a cell's min-content to one
+     character: auto table layout then squeezes short columns to a letter
+     per line. break-word still breaks overlong words. */
+  .markdown-content :is(th, td) {
+    overflow-wrap: break-word;
+  }
 
   /* Legacy global eyebrow → section label. */
   .eyebrow {
