@@ -487,15 +487,16 @@ describe("ChatWindow", () => {
       expect(handle).toHaveAttribute("aria-valuenow", "1218");
       act(() => current.notify(1150));
       expect(handle).toHaveAttribute("aria-valuenow", "968");
-      // Narrower than 1100px the column replaces the transcript: no splitter.
+      // Changes never replaces the transcript: narrower than 1100px it stays
+      // beside the conversation (the chat expands for it).
       act(() => current.notify(900));
-      expect(
-        screen.queryByRole("separator", { name: "Resize side column" })
-      ).toBeNull();
       expect(container.querySelector(".chat-with-changes")).toHaveAttribute(
         "data-side-placement",
-        "view"
+        "beside"
       );
+      expect(
+        screen.getByRole("separator", { name: "Resize side column" })
+      ).toBeInTheDocument();
       act(() => current.notify(1600));
       handle = screen.getByRole("separator", { name: "Resize side column" });
       expect(handle).toHaveAttribute("aria-valuenow", "1218");

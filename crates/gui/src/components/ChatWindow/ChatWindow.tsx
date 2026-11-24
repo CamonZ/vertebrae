@@ -666,9 +666,13 @@ export function ChatWindow({
 
   const isEmpty = chat.session.messages.length === 0;
   const hasBackgroundWork = backgroundWorkRows(backgroundWork).length > 0;
-  // Narrow, the column replaces the transcript as the chat's view.
+  // The side column always sits beside the transcript (shown, it expands the
+  // chat). Narrow, source evidence replaces the transcript as the chat's view.
   const sidePlacement =
-    panelResize.available >= SIDE_COLUMN_BESIDE_MIN_WIDTH ? "beside" : "view";
+    shownSection ||
+    panelResize.available >= SIDE_COLUMN_BESIDE_MIN_WIDTH
+      ? "beside"
+      : "view";
   const panelProps = {
     className: `changes-side-panel${panelResize.easing ? " is-easing" : ""}`,
     style:
@@ -731,16 +735,12 @@ export function ChatWindow({
               }}
               available={side.available}
               onSection={side.select}
-              onReselect={
-                sidePlacement === "view" ? side.toggle : undefined
-              }
             >
               {shownSection === "changes" && worktreePath ? (
                 <WorktreeChanges
                   key={`${sessionId}:${worktreePath}`}
                   worktreePath={worktreePath}
                   sessionId={sessionId}
-                  compact={sidePlacement === "view"}
                   onChangesLoaded={
                     worktreePath === evidenceCheckout
                       ? handleWorktreeLoaded

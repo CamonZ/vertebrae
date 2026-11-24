@@ -383,7 +383,8 @@ button:has(> .selection-chip-label) {
   min-height: 0;
 }
 
-/* Narrower than 1100px the column is the chat's view; the composer stays. */
+/* Narrower than 1100px source evidence is the chat's view; the composer
+   stays. The side column expands the chat instead. */
 .chat-with-changes[data-side-placement="view"][data-changes-open="true"] {
   flex-direction: column;
 }

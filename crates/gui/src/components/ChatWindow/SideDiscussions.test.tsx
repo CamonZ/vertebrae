@@ -186,29 +186,19 @@ function Column({
   );
 }
 
-describe("ChatSideColumn reselect", () => {
+describe("ChatSideColumn tabs", () => {
   const props = {
     counts: { changes: null, background: null },
     available: () => true,
   };
 
-  it("sends a click on the shown tab to onReselect when given", () => {
+  it("shows the clicked section with the keyboard in it", () => {
     const onSection = vi.fn();
-    const onReselect = vi.fn();
     render(
-      <ChatSideColumn
-        {...props}
-        section="discussions"
-        onSection={onSection}
-        onReselect={onReselect}
-      >
+      <ChatSideColumn {...props} section="discussions" onSection={onSection}>
         <div />
       </ChatSideColumn>
     );
-
-    fireEvent.click(screen.getByRole("tab", { name: /Discussions/ }));
-    expect(onReselect).toHaveBeenCalledWith("discussions");
-    expect(onSection).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("tab", { name: /Background tasks/ }));
     expect(onSection).toHaveBeenCalledWith("background", true);

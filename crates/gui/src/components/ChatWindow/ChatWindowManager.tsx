@@ -742,10 +742,15 @@ export function ChatWindowManager({
     }
     return true;
   }, []);
+  // Escape from a side column that expanded the chat returns to the compact
+  // chat.
+  const escapeChatPanel = () => {
+    if (!shownSideColumn()?.leaveExpanded()) closeChatPanel();
+  };
   const { isFocused, focusProps } = useGlassPanel({
     id: "chat",
     isOpen: open,
-    onClose: closeChatPanel,
+    onClose: escapeChatPanel,
     shouldHandleEscape: shouldHandleChatPanelEscape,
   });
 

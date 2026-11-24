@@ -3011,7 +3011,7 @@ describe("ChatWindowManager", () => {
     expect(screen.getAllByTestId("chat-pane")).toHaveLength(1);
   });
 
-  it("keeps each chat's side column through tab switches and Cmd+\\ (db5160ff)", () => {
+  it("keeps each chat's side column through tab switches; Cmd+\\ collapsing closes it (db5160ff, 69c30538)", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
       value: 1800,
@@ -3121,15 +3121,20 @@ describe("ChatWindowManager", () => {
     expect(useChatStore.getState().activeSessionId).toBe(first);
     expect(selectedTab()).toHaveTextContent("Discussions");
 
+    // The column holds the chat expanded (69c30538): ⌘\\ collapsing the chat
+    // closes it, since a compact chat never shows the column.
+    expect(useShellStore.getState().chatPanelPresentation).toBe("expanded");
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
-    fireEvent.keyDown(window, { key: "\\", metaKey: true });
-    expect(selectedTab()).toHaveTextContent("Discussions");
+    expect(useShellStore.getState().chatPanelPresentation).toBe("compact");
+    expect(sideColumn()).toBeNull();
 
+    // Reopens on its last section, expanding the chat again.
+    key({ key: "B", code: "KeyB" });
+    expect(selectedTab()).toHaveTextContent("Discussions");
+    expect(useShellStore.getState().chatPanelPresentation).toBe("expanded");
     key({ key: "B", code: "KeyB" });
     expect(sideColumn()).toBeNull();
-    // Reopens on its last section.
-    key({ key: "B", code: "KeyB" });
-    expect(selectedTab()).toHaveTextContent("Discussions");
+    expect(useShellStore.getState().chatPanelPresentation).toBe("compact");
   });
 
   it("does not prevent app shortcuts when chat pane shortcuts cannot run", () => {
@@ -4345,6 +4350,36 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
     // Registered itself and became the focused panel.
     expect(usePanelFocusStore.getState().stack).toContain("chat");
+
+    await user.keyboard("{Escape}");
+    expect(useChatStore.getState().panelOpen).toBe(false);
+  });
+
+  it("returns to the compact chat on Escape when the side column expanded it (69c30538)", async () => {
+    const user = userEvent.setup();
+    const s1 = createSession({ id: "s1", label: "Task A" });
+    seedChats({ sessions: { s1 }, activeSessionId: "s1", panelOpen: true });
+    render(<ChatWindowManager />);
+    fireEvent.keyDown(window, {
+      key: "2",
+      code: "Digit2",
+      metaKey: true,
+      ctrlKey: true,
+    });
+    expect(
+      screen.getByRole("complementary", { name: "Side column" })
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("chat-window-manager")).toHaveAttribute(
+      "data-maximized",
+      "true"
+    );
+
+    await user.keyboard("{Escape}");
+    expect(
+      screen.queryByRole("complementary", { name: "Side column" })
+    ).toBeNull();
+    expect(useShellStore.getState().chatPanelPresentation).toBe("compact");
+    expect(useChatStore.getState().panelOpen).toBe(true);
 
     await user.keyboard("{Escape}");
     expect(useChatStore.getState().panelOpen).toBe(false);
