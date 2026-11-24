@@ -509,13 +509,14 @@
   flex-shrink: 0;
 }
 
-.c-id-chip:hover .copy-mark {
+.c-id-chip:hover .copy-mark,
+.c-id-chip:focus-visible .copy-mark {
   opacity: 1;
 }
 
-.c-id-chip .ok-mark {
+.c-id-chip .ok-mark,
+.c-id-chip .error-mark {
   display: none;
-  color: var(--ok);
   flex-shrink: 0;
 }
 
@@ -524,13 +525,19 @@
   color: var(--ok);
 }
 
-.c-id-chip.copied .copy-mark {
+.c-id-chip.copied .copy-mark,
+.c-id-chip.failed .copy-mark {
   display: none;
 }
 
 .c-id-chip.copied .ok-mark {
   display: inline-block;
-  opacity: 1;
+  color: var(--ok);
+}
+
+.c-id-chip.failed .error-mark {
+  display: inline-block;
+  color: var(--err);
 }
 
 .app-toggle:disabled {

@@ -9,7 +9,7 @@ import {
 import { ArtifactEntityEmbed } from "./ArtifactEntityEmbed";
 import { useInRouterContext, useNavigate } from "react-router-dom";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
-import { CopyIdButton } from "./EntityId";
+import { ClipboardIconButton } from "./ClipboardIconButton";
 import { LevelMark } from "./LevelMark";
 import type { VtbEntityTarget } from "./vtbEntityLinkTarget";
 
@@ -115,7 +115,13 @@ export function VtbEntityLink({
   return copyable ? (
     <span className="inline-flex items-center gap-1 align-baseline">
       {link}
-      <CopyIdButton id={target.id} label={target.type} />
+      <ClipboardIconButton
+        text={target.id}
+        label={`Copy full ${target.type} ID`}
+        className="inline-flex h-4 w-4 cursor-pointer items-center justify-center rounded text-fg-mute hover:bg-bg-hover hover:text-fg"
+        iconSize="h-3 w-3"
+        tooltipPlacement="top"
+      />
     </span>
   ) : (
     link

@@ -798,6 +798,7 @@ export function MiniThread({
       )}
       <p
         className="sr-only"
+        data-testid="selection-mini-announcement"
         role="status"
         aria-live="polite"
         aria-atomic="true"

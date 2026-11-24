@@ -42,8 +42,9 @@ describe("chat entity references", () => {
       await user.keyboard("{Enter}");
       await user.keyboard(" ");
       expect(writeText.mock.calls).toEqual([[ID], [ID], [ID]]);
-      expect(copy).toHaveAccessibleName(`Copied ${type} ID`);
-      expect(copy).toHaveAttribute("title", "Copied");
+      expect(copy).toHaveAccessibleName(`Copy full ${type} ID`);
+      expect(copy).toHaveAttribute("data-copy-status", "copied");
+      expect(screen.getByRole("status")).toHaveTextContent("Copied");
       expect(onOpen).not.toHaveBeenCalled();
       expect(surroundingClick).not.toHaveBeenCalled();
       expect(surroundingKey).not.toHaveBeenCalled();
@@ -83,7 +84,6 @@ describe("chat entity references", () => {
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(
       new Error("denied")
     );
-    const error = vi.spyOn(console, "error").mockImplementation(() => {});
     render(
       <VtbEntityCopyProvider>
         <VtbEntityLink
@@ -97,15 +97,11 @@ describe("chat entity references", () => {
     const copy = screen.getByRole("button");
     await user.click(copy);
     expect(copy).toHaveAccessibleName("Copy full artifact ID");
-    expect(copy).not.toHaveAttribute("title", "Copied");
-    expect(error).toHaveBeenCalledWith(
-      "Failed to copy entity ID",
-      expect.any(Error)
-    );
-    error.mockRestore();
+    expect(copy).toHaveAttribute("data-copy-status", "failed");
+    expect(screen.getByRole("status")).toHaveTextContent("Could not copy");
   });
 
-  it("resets established copied feedback after 1200ms", async () => {
+  it("resets established copied feedback after 2000ms", async () => {
     userEvent.setup();
     vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
     vi.useFakeTimers();
@@ -123,13 +119,11 @@ describe("chat entity references", () => {
       await act(async () => {
         fireEvent.click(screen.getByRole("button"));
       });
-      expect(screen.getByRole("button")).toHaveAccessibleName("Copied step ID");
+      expect(screen.getByRole("button")).toHaveAttribute("data-copy-status", "copied");
       act(() => {
-        vi.advanceTimersByTime(1200);
+        vi.advanceTimersByTime(2000);
       });
-      expect(screen.getByRole("button")).toHaveAccessibleName(
-        "Copy full step ID"
-      );
+      expect(screen.getByRole("button")).toHaveAttribute("data-copy-status", "idle");
     } finally {
       vi.useRealTimers();
     }

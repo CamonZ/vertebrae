@@ -961,7 +961,7 @@ async fn ask(world: &mut GuiWorld) {
         let discussion_completed_script = r#"
             const thread = document.querySelector("[data-testid=selection-mini-thread]");
             const replies = thread?.querySelectorAll(".selection-mini-messages .evrow--agent");
-            const status = thread?.querySelector('[role="status"]');
+            const status = thread?.querySelector('[data-testid="selection-mini-announcement"]');
             const expectedReplies = arguments[0];
 
             return (
@@ -1744,7 +1744,7 @@ async fn ask_to_explain(world: &mut GuiWorld) {
 
     let answered = r#"
         const thread = document.querySelector("[data-testid=selection-mini-thread]");
-        const status = thread?.querySelector('[role="status"]');
+        const status = thread?.querySelector('[data-testid="selection-mini-announcement"]');
 
         return !!thread &&
           thread.textContent.includes("The file declares three constants") &&

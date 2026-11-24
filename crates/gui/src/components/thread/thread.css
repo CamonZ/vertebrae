@@ -495,6 +495,21 @@
   letter-spacing: var(--tracking-wide);
   text-transform: none;
 }
+.ev-reply-copy {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--fg-mute);
+  cursor: pointer;
+}
+
+.ev-reply-copy:hover {
+  background: var(--bg-3);
+  color: var(--fg);
+}
+
 .ev-tools {
   display: flex;
   flex-direction: column;

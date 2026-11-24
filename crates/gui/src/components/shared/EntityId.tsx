@@ -63,10 +63,10 @@ function kindLabel(kind: EntityIdKind): string {
   return capitalize(kind);
 }
 
-function CopyIcon(): ReactNode {
+export function CopyIcon({ className = "h-3 w-3" }: { className?: string } = {}): ReactNode {
   return (
     <svg
-      className="h-3 w-3"
+      className={className}
       fill="none"
       stroke="currentColor"
       viewBox="0 0 24 24"

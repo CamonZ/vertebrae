@@ -262,6 +262,8 @@ export interface AgentMessage extends BaseMessage {
   prose?: ReactNode;
   /** String prose defaults to markdown unless a source explicitly marks it plain. */
   proseFormat?: "markdown" | "plain";
+  /** Provider thinking may be displayed as prose in run transcripts. */
+  reasoning?: boolean;
   /**
    * Tools emitted within this agent turn, rendered above the prose. NOTE:
    * tools may alternatively be standalone ToolMessages in the turn series;

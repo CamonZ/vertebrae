@@ -557,6 +557,7 @@ function agentMessage(
       : speaker,
     model,
     prose: text,
+    ...(reasoning ? { reasoning } : {}),
     ...(itemId ? { itemId } : {}),
     ...(lifecycle
       ? {

@@ -19,6 +19,7 @@ import { ToolActivityGroup } from "./toolActivity/ToolActivityGroup";
 
 import { useId, useState, type ReactNode } from "react";
 
+import { ClipboardIconButton } from "../shared/ClipboardIconButton";
 import { IdChip, RunChip } from "../shared/HearthPrimitives";
 import { Card } from "../molecules/Card";
 import { MarkdownContent, PlainTextContent } from "../shared/MarkdownContent";
@@ -450,6 +451,7 @@ function AgentBody({
   model,
   prose,
   proseFormat,
+  reasoning,
   lifecycle,
   tools = [],
   streaming,
@@ -460,6 +462,7 @@ function AgentBody({
   model?: string;
   prose?: ReactNode;
   proseFormat?: AgentMessage["proseFormat"];
+  reasoning?: boolean;
   lifecycle?: AgentMessage["lifecycle"];
   tools?: ToolMessage[];
   streaming?: boolean;
@@ -476,6 +479,16 @@ function AgentBody({
         )}
         {speaker || "Backend"}
         {model ? <span className="model">{model}</span> : null}
+        {!reasoning &&
+        typeof prose === "string" &&
+        (lifecycle ? lifecycle === "completed" : !streaming) ? (
+          <ClipboardIconButton
+            text={prose}
+            label="Copy raw Markdown"
+            className="ev-reply-copy"
+            wrapperClassName="ms-auto"
+          />
+        ) : null}
       </div>
       {tools.length ? (
         <div className="ev-tools">
@@ -567,6 +580,7 @@ export function EventRow(props: EventRowProps): ReactNode {
         model={m.model}
         prose={m.prose}
         proseFormat={m.proseFormat}
+        reasoning={m.reasoning}
         lifecycle={m.lifecycle}
         tools={m.tools}
         streaming={m.streaming}
