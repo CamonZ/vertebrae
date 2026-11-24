@@ -34,6 +34,7 @@ export function permissionModeOptions(
       label: mode.label,
     }));
   }
+  if (harness === "acp") return [];
   return harness === "codex"
     ? CODEX_PERMISSION_MODE_OPTIONS
     : CLAUDE_PERMISSION_MODE_OPTIONS;

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../bindings";
 import type { ChatMessage } from "../../stores/chatStore";
@@ -77,6 +78,84 @@ describe("UserQuestionTurn", () => {
     const radios = screen.getAllByRole("radio");
     expect(radios).toHaveLength(2);
     radios.forEach((radio) => expect(radio).toHaveClass("sr-only"));
+  });
+
+  it("requires an offered option for a fixed-choice agent question", async () => {
+    const user = userEvent.setup();
+    render(<UserQuestionTurn message={message({ presentation: "fixed_choice" })} sessionAvailable onResolved={vi.fn()} />);
+    expect(screen.getByText("Agent needs your input")).toBeVisible();
+    expect(screen.queryByLabelText("Other answer (optional)")).not.toBeInTheDocument();
+    const submit = screen.getByRole("button", { name: "Submit answers" });
+    expect(submit).toBeDisabled();
+    for (const group of screen.getAllByRole("group")) {
+      const choices = group.querySelectorAll<HTMLInputElement>('input[type="radio"], input[type="checkbox"]');
+      if (choices[0]) await user.click(choices[0]);
+    }
+    expect(submit).toBeEnabled();
+  });
+
+  it("submits an ACP approval choice using the existing permission command", async () => {
+    const user = userEvent.setup();
+    const approval = message({
+      presentation: "approval",
+      questions: [
+        {
+          question: "Read fixture",
+          header: "Agent permission",
+          multi_select: false,
+          options: [
+            { label: "Allow once", description: "" },
+            { label: "Reject", description: "" },
+          ],
+        },
+      ],
+    });
+    const { rerender } = render(
+      <UserQuestionTurn
+        message={approval}
+        sessionAvailable
+        onResolved={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Agent approval required")).toBeVisible();
+    expect(
+      screen.queryByLabelText("Other answer (optional)")
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "Reject" }));
+    await user.click(screen.getByRole("button", { name: "Confirm choice" }));
+    await waitFor(() =>
+      expect(resolvePermissionRequest).toHaveBeenCalledWith({
+        request_id: approval.requestId,
+        behavior: "allow",
+        message: null,
+        updated_input: {
+          questions: approval.originalQuestions,
+          answers: { "Read fixture": "Reject" },
+        },
+      })
+    );
+    rerender(
+      <UserQuestionTurn
+        message={{ ...approval, status: "resolved" }}
+        sessionAvailable
+        onResolved={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Choice sent")).toBeVisible();
+    rerender(
+      <UserQuestionTurn
+        message={{ ...approval, status: "unavailable" }}
+        sessionAvailable={false}
+        onResolved={vi.fn()}
+      />
+    );
+    expect(
+      screen.getByText("This approval is no longer available.")
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Confirm choice" })
+    ).toBeDisabled();
   });
 
   it("serializes multi-select in display order, single-select, and free text", async () => {

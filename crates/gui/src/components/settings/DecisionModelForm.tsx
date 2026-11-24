@@ -17,7 +17,7 @@ export function DecisionModelForm({
 }: {
   draft: DecisionDraft;
   settings: SharedSettings;
-  change: (draft: SettingsEdit) => void;
+  change: (draft: DecisionDraft) => void;
 }) {
   const [catalog, setCatalog] = useState<LocalChatHarnessCatalog | null>(null);
   useEffect(() => {

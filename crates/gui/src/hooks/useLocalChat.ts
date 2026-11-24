@@ -1,3 +1,4 @@
+import { localChatCapabilities } from "../components/ChatWindow/chatHelpers";
 import { loadMainChatWorktree } from "../utils/chatAssociation/defaultWorktree";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
 import { flushPendingLocalChatText } from "../utils/localChatTextBatch";
@@ -267,6 +268,7 @@ function inferSessionTitleInBackground(
   ) => void
 ) {
   if (
+    !localChatCapabilities(session.harness).inferTitle ||
     !setSessionTitleCandidate ||
     !shouldInferSessionTitle(session, userMessages)
   ) {
@@ -537,6 +539,7 @@ export function handleSacrumPermissionRequestEvent(
       toolUseId: payload.tool_use_id,
       questions: payload.questions ?? [],
       originalQuestions,
+      ...(payload.question_presentation ? { presentation: payload.question_presentation } : {}),
       inputError:
         payload.input_error ??
         (payload.questions
@@ -1327,6 +1330,14 @@ export function useLocalChat(sessionId: string | null) {
         ? session.lifecycle
         : "streaming";
     if (!markActiveTurnStopping(sessionId)) return false;
+    if (localChatCapabilities(session.harness).interruptInPlace) {
+      const result = await commands
+        .interruptLocalChatTurn(session.backendSessionId)
+        .catch(() => null);
+      if (result?.status === "ok") return true;
+      restoreActiveTurn(sessionId, activeTurn.localId);
+      return false;
+    }
     return doCloseSession(
       session.backendSessionId,
       sessionId,
@@ -1353,6 +1364,7 @@ export function useLocalChat(sessionId: string | null) {
   }, [
     session?.backendSessionId,
     session?.activeTurn,
+    session?.harness,
     session?.lifecycle,
     sessionId,
     markActiveTurnStopping,

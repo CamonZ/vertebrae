@@ -1,13 +1,16 @@
+import { flushNextQueuedMessage } from "./localChatTurnDelivery";
 import {
   getProjectScopeGeneration,
   isCurrentProjectScopeGeneration,
 } from "../stores/projectScopedStores";
+import { localChatCapabilities } from "../components/ChatWindow/chatHelpers";
 import { recoveredSpeedTier } from "../utils/localChatSpeedTier";
 import { createLocalChatTextBatch } from "../utils/localChatTextBatch";
 import { useEffect } from "react";
 import { commands, events } from "../bindings";
 import type {
   LocalChatAnnotationEvent,
+  LocalChatHarnessKind,
   LocalChatBackgroundRosterEvent,
   LocalChatBackgroundWorkEvent,
   LocalChatSessionEndEvent,
@@ -32,11 +35,7 @@ import {
   useChatStore,
 } from "../stores/chatStore";
 import {
-  currentActiveTurnLocalId,
-  currentBackendSessionId,
   pendingLocalChatSteering,
-  doSendMessage,
-  doStartSession,
   handleEndEvent,
   handleErrorEvent,
   handleInitEvent,
@@ -92,7 +91,7 @@ function resolveSessionId(backendSessionId: string | null | undefined) {
 
 type ChildScopedEvent = CorrelatedEvent & {
   backend_session_id: string;
-  harness: "claude" | "codex";
+  harness: LocalChatHarnessKind;
   thread_id?: string | null;
 };
 
@@ -569,7 +568,14 @@ export function routeLocalChatSessionEndEvent(
     });
   // A stop that interrupted the turn without closing the process ends here;
   // a closing stop settles the lifecycle when the close returns.
-  if (wasStopping && !closing) store.setSessionLifecycle(sessionId, "idle");
+  const recoverQueue = localChatCapabilities(payload.harness).recoverQueue;
+  if (recoverQueue && (wasStopping || payload.is_error)) {
+    store.setQueuePaused(sessionId, true);
+  }
+  if (wasStopping && !closing) {
+    if (!recoverQueue) store.clearQueuedMessages(sessionId);
+    store.setSessionLifecycle(sessionId, "idle");
+  }
 
   if (!wasStopping) void flushNextQueuedMessage(sessionId);
 
@@ -641,7 +647,11 @@ export function routeLocalChatSessionErrorEvent(
     undefined,
     store.interruptStreamingAssistant
   );
-  store.clearQueuedMessages(sessionId);
+  if (localChatCapabilities(payload.harness).recoverQueue) {
+    store.setQueuePaused(sessionId, true);
+  } else {
+    store.clearQueuedMessages(sessionId);
+  }
 
   return true;
 }
@@ -741,75 +751,6 @@ export function routeLocalChatAnnotationEvent(
   }
   store.applyToolAnnotation(payload.session_id, payload.annotation);
   return true;
-}
-
-export async function flushNextQueuedMessage(
-  sessionId: string
-): Promise<boolean> {
-  const initial = useChatStore.getState();
-  const session = initial.sessions[sessionId];
-  if (
-    !session ||
-    getLocalChatLifecycle(session) !== "idle" ||
-    (session.backendSessionId && pendingLocalChatSteering.has(session.backendSessionId))
-  ) return false;
-
-  const content = initial.shiftQueuedMessage(sessionId);
-  if (!content) return false;
-
-  return deliverLocalChatTurn(sessionId, content);
-}
-
-/**
- * Deliver `content` as the next turn of a session whose user message is
- * already in the transcript: into the live process, or by starting one that
- * resumes the provider conversation.
- */
-export async function deliverLocalChatTurn(
-  sessionId: string,
-  content: string
-): Promise<boolean> {
-  const store = useChatStore.getState();
-  const latestSession = store.sessions[sessionId];
-  if (!latestSession) return false;
-
-  if (latestSession.backendSessionId) {
-    return doSendMessage(
-      latestSession.backendSessionId,
-      sessionId,
-      content,
-      {
-        addMessage: store.addMessage,
-        setSessionLifecycle: store.setSessionLifecycle,
-        markStreamingIfSending: store.markStreamingIfSending,
-        beginActiveTurn: store.beginActiveTurn,
-        settleActiveTurn: store.settleActiveTurn,
-        setBackendSessionId: store.setBackendSessionId,
-        getActiveTurnLocalId: currentActiveTurnLocalId,
-        getBackendSessionId: currentBackendSessionId,
-      },
-      { addUserMessage: false }
-    );
-
-  }
-
-  return doStartSession(
-    latestSession,
-    sessionId,
-    {
-      setBackendSessionId: store.setBackendSessionId,
-      addMessage: store.addMessage,
-      setSessionTitleCandidate: store.setSessionTitleCandidate,
-      setSessionLifecycle: store.setSessionLifecycle,
-      beginActiveTurn: store.beginActiveTurn,
-      settleActiveTurn: store.settleActiveTurn,
-      getActiveTurnLocalId: currentActiveTurnLocalId,
-      getBackendSessionId: currentBackendSessionId,
-    },
-    content,
-    { addUserMessage: false }
-  );
-
 }
 
 function releaseRouterSubscription(subscription: RouterSubscription) {

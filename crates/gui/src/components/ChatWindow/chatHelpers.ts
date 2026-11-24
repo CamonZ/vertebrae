@@ -5,9 +5,27 @@ import type {
 import type { LocalChatLifecycle } from "../../stores/chatStore";
 
 export const LOCAL_CHAT_UNAVAILABLE_MESSAGE =
-  "Local chat unavailable because neither Claude nor Codex was found.";
+  "No local chat provider is available. Check Settings → Providers & Models.";
 export const LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE =
   "This chat session's harness is no longer available.";
+
+const externalAgentCapabilities = {
+  inferTitle: false,
+  interruptInPlace: true,
+  nativeSettings: true,
+  recoverQueue: true,
+};
+
+const managedHarnessCapabilities = {
+  inferTitle: true,
+  interruptInPlace: false,
+  nativeSettings: false,
+  recoverQueue: false,
+};
+
+export function localChatCapabilities(harness: LocalChatHarnessKind) {
+  return harness === "acp" ? externalAgentCapabilities : managedHarnessCapabilities;
+}
 
 export function harnessDisplayName(harness: LocalChatHarnessKind): string {
   switch (harness) {
@@ -15,6 +33,8 @@ export function harnessDisplayName(harness: LocalChatHarnessKind): string {
       return "Claude";
     case "codex":
       return "Codex";
+    case "acp":
+      return "ACP agent";
   }
 }
 
@@ -44,8 +64,9 @@ export function lifecycleLabel(lifecycle: LocalChatLifecycle): string {
 export function isSessionHarnessLocked(session: {
   backendSessionId: string | null;
   providerResumeId: string | null;
+  queuedMessages?: readonly string[];
 }): boolean {
-  return !!session.backendSessionId || !!session.providerResumeId;
+  return !!session.backendSessionId || !!session.providerResumeId || !!session.queuedMessages?.length;
 }
 
 export function isHarnessSelectable(

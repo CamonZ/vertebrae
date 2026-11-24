@@ -53,6 +53,7 @@ pub(super) fn decode_control_request(
         is_root: Some(true),
         request: control_request,
         presentation: Some(ControlPresentation {
+            question_presentation: None,
             tool_name: Some(tool_name.to_owned()),
             tool_call_id,
             input: raw_input,

@@ -1,6 +1,7 @@
 //! Form-oriented, redacted access to this machine's shared configuration.
 use serde::{Deserialize, Serialize};
 use vertebrae_core::{ProviderId, ProviderProfile, StepHarness};
+use vertebrae_harness::{HarnessFactoryConfig, HarnessRuntimeFactory};
 use vertebrae_sacrum_client::{config::ObservabilityConfig, VertebraeConfigFile};
 
 #[path = "settings_credentials.rs"]
@@ -60,6 +61,14 @@ pub struct DecisionModelSettings {
 }
 
 #[derive(Clone, Serialize, Deserialize, specta::Type)]
+pub struct AcpAgentSettings {
+    pub id: String,
+    pub name: String,
+    pub executable: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Clone, Serialize, Deserialize, specta::Type)]
 pub struct SharedSettings {
     pub decision_model: DecisionModelSettings,
     pub revision: String,
@@ -77,12 +86,20 @@ pub struct SharedSettings {
     pub typesafe_key_override: bool,
     pub typesafe_url_override: bool,
     pub providers: Vec<ProviderSettings>,
+    #[specta(optional)]
+    pub local_chat_acp_agents: Vec<AcpAgentSettings>,
     pub observability: ObservabilitySettings,
 }
 
 #[derive(Clone, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "section", rename_all = "snake_case")]
 pub enum SettingsEdit {
+    AcpAgent {
+        settings: AcpAgentSettings,
+    },
+    RemoveAcpAgent {
+        id: String,
+    },
     DecisionModel {
         enabled: bool,
         provider: String,
@@ -280,6 +297,15 @@ fn snapshot(config: &VertebraeConfigFile) -> Result<SharedSettings, CommandError
                     .unwrap_or_default(),
             })
             .collect(),
+        local_chat_acp_agents: config
+            .acp_agents()
+            .map(|(id, agent)| AcpAgentSettings {
+                id: id.into(),
+                name: agent.display_name(id).into(),
+                executable: agent.executable.to_string_lossy().into_owned(),
+                args: agent.args.clone(),
+            })
+            .collect(),
         observability: serde_json::from_value(obs)
             .map_err(|_| invalid("Could not read observability settings."))?,
     })
@@ -287,6 +313,43 @@ fn snapshot(config: &VertebraeConfigFile) -> Result<SharedSettings, CommandError
 
 fn apply(config: &mut VertebraeConfigFile, edit: SettingsEdit) -> Result<(), CommandError> {
     match edit {
+        SettingsEdit::AcpAgent { settings } => {
+            let id = &settings.id;
+            if id.is_empty()
+                || id.len() > 64
+                || !id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+            {
+                return Err(invalid("Invalid ACP connection ID."));
+            }
+            let executable = std::path::PathBuf::from(&settings.executable);
+            if settings.executable.trim().is_empty() {
+                return Err(invalid("Enter an executable for the ACP connection."));
+            }
+            let name = nonblank(settings.name)
+                .ok_or_else(|| invalid("Enter a name for the ACP connection."))?;
+            let shell = crate::shell_environment::user_shell_environment();
+            HarnessRuntimeFactory::new(HarnessFactoryConfig {
+                search_path: Some(shell.path.into()),
+                ..Default::default()
+            })
+            .create_acp_chat(&executable, settings.args.clone())
+            .map_err(|error| invalid(&error.to_string()))?;
+            config.local_chat_acp_agents.insert(
+                settings.id.clone(),
+                vertebrae_sacrum_client::config::LocalChatAcpSection {
+                    name: Some(name),
+                    executable,
+                    args: settings.args,
+                },
+            );
+        }
+        SettingsEdit::RemoveAcpAgent { id } => {
+            if config.local_chat_acp_agents.remove(&id).is_none() {
+                return Err(invalid("ACP connection does not exist."));
+            }
+        }
         SettingsEdit::DecisionModel {
             enabled,
             provider,
@@ -483,6 +546,58 @@ pub async fn save_shared_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acp_settings_preserve_arguments_and_reject_invalid_replacements() {
+        let mut config = VertebraeConfigFile::default();
+        let edit = |id: &str, executable: &str, args: Vec<String>| SettingsEdit::AcpAgent {
+            settings: AcpAgentSettings {
+                id: id.into(),
+                name: if executable.is_empty() && args.is_empty() {
+                    String::new()
+                } else {
+                    format!("Agent {id}")
+                },
+                executable: executable.into(),
+                args,
+            },
+        };
+        let executable = std::env::current_exe().unwrap();
+        let args = vec!["two words".into(), String::new()];
+        apply(
+            &mut config,
+            edit("legacy", executable.to_str().unwrap(), args.clone()),
+        )
+        .unwrap();
+        apply(
+            &mut config,
+            edit(
+                "second",
+                executable.to_str().unwrap(),
+                vec!["second".into()],
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            snapshot(&config).unwrap().local_chat_acp_agents[0].args,
+            args
+        );
+        assert!(apply(&mut config, edit("legacy", "", vec!["acp".into()])).is_err());
+        assert!(apply(&mut config, edit("legacy", "./relative/agent", vec![])).is_err());
+        assert_eq!(
+            config.local_chat_acp_agents["legacy"].executable,
+            executable
+        );
+        apply(
+            &mut config,
+            SettingsEdit::RemoveAcpAgent {
+                id: "legacy".into(),
+            },
+        )
+        .unwrap();
+        assert!(!config.local_chat_acp_agents.contains_key("legacy"));
+        assert_eq!(config.local_chat_acp_agents["second"].args, ["second"]);
+    }
 
     #[test]
     fn decision_role_validates_and_reports_stale_provider_without_breaking_settings() {

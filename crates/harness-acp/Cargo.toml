@@ -1,0 +1,22 @@
+[package]
+name = "vertebrae-harness-acp"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[dependencies]
+async-trait = "0.1"
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+tokio = { version = "1", features = ["io-util", "macros", "process", "rt", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+uuid = { version = "1", features = ["v4"] }
+vertebrae-harness-core = { path = "../harness-core" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+hegeltest = "0.50.3"

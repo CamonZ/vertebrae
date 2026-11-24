@@ -79,6 +79,7 @@ function chipDiffLabel(comment: PendingDiffComment): string {
 import {
   LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE,
   LOCAL_CHAT_UNAVAILABLE_MESSAGE,
+  localChatCapabilities,
 } from "./chatHelpers";
 import { Dropdown } from "../molecules/Dropdown";
 import { Select } from "../atoms/Select";
@@ -377,6 +378,10 @@ export function ChatComposer({
       modelSettingsHandle.current = null;
     };
   }, [hasModelSettings, modelSettingsHandle]);
+  const canEditModel = visibleHarness && (
+    !localChatCapabilities(visibleHarness.harness).nativeSettings ||
+    !!visibleHarness.models?.length || !!visibleHarness.default_model_id
+  );
   const defaultSpeedTierId =
     speedTiers.find((tier) => tier.is_default)?.id ?? speedTiers[0]?.id ?? "";
   const modelSummary = (() => {
@@ -395,7 +400,11 @@ export function ChatComposer({
     const selectedTier = speedTiers.find(
       (tier) => tier.id === session.selectedSpeedTier
     );
-    const parts = [modelLabel];
+    const parts = [
+      localChatCapabilities(visibleHarness.harness).nativeSettings && !canEditModel
+        ? "Agent defaults"
+        : modelLabel,
+    ];
     if (selectedEffort) parts.push(selectedEffort.label);
     if (selectedTier && selectedTier.id !== defaultSpeedTierId) {
       parts.push(selectedTier.label);
@@ -919,22 +928,24 @@ export function ChatComposer({
           textareaTestId="local-chat-composer"
           inputAccessory={commentsAccessory}
           footerLeft={
-            <div className="hc-chat-controls">
-              <span className="hc-permission-picker">
-                <Dropdown
-                  variant="quiet"
-                  placement="up"
-                  aria-label="Local chat permission mode"
-                  data-testid="local-chat-permission-mode-picker"
-                  value={session.permissionMode ?? "default"}
-                  onChange={onPermissionModeChange}
-                  options={availablePermissionModes.map((mode) => ({
-                    value: mode.value,
-                    label: mode.label,
-                  }))}
-                />
-              </span>
-            </div>
+            availablePermissionModes.length > 0 && (
+              <div className="hc-chat-controls">
+                <span className="hc-permission-picker">
+                  <Dropdown
+                    variant="quiet"
+                    placement="up"
+                    aria-label="Local chat permission mode"
+                    data-testid="local-chat-permission-mode-picker"
+                    value={session.permissionMode ?? "default"}
+                    onChange={onPermissionModeChange}
+                    options={availablePermissionModes.map((mode) => ({
+                      value: mode.value,
+                      label: mode.label,
+                    }))}
+                  />
+                </span>
+              </div>
+            )
           }
           footerRight={
             <div className="hc-chat-controls right">
@@ -1003,7 +1014,7 @@ export function ChatComposer({
                           />
                         </div>
                       )}
-                      {visibleHarness && picker && (
+                      {visibleHarness && picker && canEditModel && (
                         <>
                           <div className="hc-model-row hc-model-picker">
                             <span>Model</span>
@@ -1077,8 +1088,10 @@ export function ChatComposer({
                                       value: effort.id,
                                       label:
                                         effort.label +
-                                        (effort.id ===
-                                        visibleHarness.default_reasoning_effort
+                                        (effort.id === visibleHarness.default_reasoning_effort &&
+                                        (!localChatCapabilities(visibleHarness.harness).nativeSettings ||
+                                          !session.selectedModelId ||
+                                          session.selectedModelId === visibleHarness.default_model_id)
                                           ? " (default)"
                                           : ""),
                                     })

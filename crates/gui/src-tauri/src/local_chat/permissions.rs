@@ -687,6 +687,7 @@ impl PermissionBridge {
             (None, None)
         };
         let event = PermissionRequestEvent {
+            question_presentation: None,
             request_id: request.request_id.clone(),
             session_id: Some(session_id),
             turn_id: None,
@@ -988,6 +989,16 @@ fn harness_permission_event(
     };
     let presentation = request.presentation.as_ref();
     Ok(crate::events::PermissionRequestEvent {
+        question_presentation: presentation
+            .and_then(|value| value.question_presentation)
+            .map(|kind| match kind {
+                vertebrae_harness_core::QuestionPresentation::Approval => {
+                    crate::events::QuestionPresentation::Approval
+                }
+                vertebrae_harness_core::QuestionPresentation::FixedChoice => {
+                    crate::events::QuestionPresentation::FixedChoice
+                }
+            }),
         request_id: request.request_id.to_string(),
         session_id: Some(backend_session_id.to_string()),
         turn_id: request.turn_id.as_ref().map(ToString::to_string),
@@ -1027,14 +1038,17 @@ fn validate_harness_question_decision(
         return Err("question validation received a non-question request".into());
     };
     for question in questions {
-        if !answers
+        let answer = answers
             .get(&question.prompt)
-            .is_some_and(serde_json::Value::is_string)
-        {
-            return Err(format!(
-                "AskUserQuestion answer for exact question text {:?} must be a string",
-                question.prompt
-            ));
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                format!(
+                    "AskUserQuestion answer for exact question text {:?} must be a string",
+                    question.prompt
+                )
+            })?;
+        if !question.free_form && !question.options.iter().any(|option| option.label == answer) {
+            return Err("Select one of the choices supplied by the agent.".into());
         }
     }
     Ok(())
@@ -1135,13 +1149,24 @@ fn local_decision_to_control_resolution(
                 ControlDecision::QuestionsAnswered(
                     questions
                         .iter()
-                        .map(|question| QuestionAnswer {
-                            question_id: question.id.clone(),
-                            selected_option_ids: Vec::new(),
-                            free_form: answers
+                        .map(|question| {
+                            let answer = answers
                                 .get(&question.prompt)
-                                .and_then(serde_json::Value::as_str)
-                                .map(str::to_owned),
+                                .and_then(serde_json::Value::as_str);
+                            QuestionAnswer {
+                                question_id: question.id.clone(),
+                                selected_option_ids: if question.free_form {
+                                    Vec::new()
+                                } else {
+                                    question
+                                        .options
+                                        .iter()
+                                        .filter(|option| Some(option.label.as_str()) == answer)
+                                        .map(|option| option.id.clone())
+                                        .collect()
+                                },
+                                free_form: answer.filter(|_| question.free_form).map(str::to_owned),
+                            }
                         })
                         .collect(),
                 )

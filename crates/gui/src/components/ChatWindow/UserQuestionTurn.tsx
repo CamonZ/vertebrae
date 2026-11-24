@@ -5,6 +5,29 @@ import type { ChatMessage } from "../../stores/chatStore";
 
 type UserQuestionMessage = Extract<ChatMessage, { kind: "user_question" }>;
 
+const approvalCopy = {
+  heading: "Agent approval required",
+  errorAction: "Return error to agent",
+  submit: "Confirm choice",
+  resolved: "Choice sent",
+  unavailable: "This approval is no longer available.",
+};
+
+const questionCopy = {
+  heading: "Claude needs your input",
+  errorAction: "Return error to Claude",
+  submit: "Submit answers",
+  resolved: "Answered",
+  unavailable: "This Claude session is no longer available.",
+};
+
+const fixedChoiceCopy = {
+  ...questionCopy,
+  heading: "Agent needs your input",
+  errorAction: "Return error to agent",
+  unavailable: "This question is no longer available.",
+};
+
 export function UserQuestionTurn({
   message,
   sessionAvailable,
@@ -16,6 +39,7 @@ export function UserQuestionTurn({
   onResolved: (requestId: string) => void;
   onUnavailable?: (requestId: string) => void;
 }) {
+  const copy = message.presentation === "approval" ? approvalCopy : message.presentation === "fixed_choice" ? fixedChoiceCopy : questionCopy;
   const [selections, setSelections] = useState<Record<number, string[]>>({});
   const [freeText, setFreeText] = useState<Record<number, string>>({});
   const [submission, setSubmission] = useState<"idle" | "submitting" | "error">(
@@ -147,7 +171,7 @@ export function UserQuestionTurn({
       }
     >
       <header className="needs-you-head">
-        <p className="needs-you-eyebrow">Claude needs your input</p>
+        <p className="needs-you-eyebrow">{copy.heading}</p>
       </header>
 
       {message.inputError ? (
@@ -164,7 +188,7 @@ export function UserQuestionTurn({
           >
             {submission === "submitting"
               ? "Returning error..."
-              : "Return error to Claude"}
+              : copy.errorAction}
           </button>
         </div>
       ) : (
@@ -214,6 +238,7 @@ export function UserQuestionTurn({
                   );
                 })}
               </div>
+              {!message.presentation && (
               <label className="block text-xs text-[var(--color-fg-soft)]">
                 Other answer (optional)
                 <input
@@ -229,6 +254,7 @@ export function UserQuestionTurn({
                   className="needs-you-field mt-1"
                 />
               </label>
+              )}
             </fieldset>
           ))}
           <button
@@ -238,7 +264,7 @@ export function UserQuestionTurn({
             className="needs-you-btn"
             data-primary=""
           >
-            {submission === "submitting" ? "Submitting..." : "Submit answers"}
+            {submission === "submitting" ? "Submitting..." : copy.submit}
           </button>
         </div>
       )}
@@ -250,11 +276,11 @@ export function UserQuestionTurn({
         </p>
       )}
       {message.status === "resolved" && (
-        <p className="needs-you-status">Answered</p>
+        <p className="needs-you-status">{copy.resolved}</p>
       )}
       {message.status === "unavailable" && (
         <p className="needs-you-status">
-          This Claude session is no longer available.
+          {copy.unavailable}
         </p>
       )}
     </section>

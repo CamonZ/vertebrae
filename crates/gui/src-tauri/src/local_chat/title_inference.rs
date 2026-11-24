@@ -62,6 +62,7 @@ pub async fn infer_session_title(
         LocalChatHarnessKind::Codex => {
             infer_with_codex(&prompts, input.working_dir, custom_provider).await
         }
+        LocalChatHarnessKind::Acp => Err("ACP title inference is unavailable.".into()),
     }
 }
 

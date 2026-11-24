@@ -113,6 +113,7 @@ fn installed_harness_capabilities(
             crate::local_chat::LocalChatHarnessKind::Claude => {
                 capabilities.claude_installed = harness.available;
             }
+            crate::local_chat::LocalChatHarnessKind::Acp => {}
         }
     }
     capabilities
@@ -807,6 +808,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -858,6 +860,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         })
         .unwrap();
@@ -936,6 +939,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         })
         .unwrap();
@@ -981,6 +985,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         })
         .unwrap();
@@ -1062,6 +1067,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         })
         .unwrap();
@@ -1115,6 +1121,7 @@ mod tests {
             observability: Default::default(),
             daemon: Default::default(),
             decision_model: Default::default(),
+            local_chat_acp_agents: Default::default(),
             source_revision: None,
         })
         .unwrap();

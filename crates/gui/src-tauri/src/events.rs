@@ -375,8 +375,18 @@ pub struct UserQuestion {
     pub multi_select: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum QuestionPresentation {
+    Approval,
+    FixedChoice,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
 pub struct PermissionRequestEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub question_presentation: Option<QuestionPresentation>,
     pub request_id: String,
     pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

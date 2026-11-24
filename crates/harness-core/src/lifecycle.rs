@@ -1,4 +1,6 @@
-use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeMap, future::Future, path::PathBuf, pin::Pin, sync::Arc, time::Duration,
+};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -400,6 +402,10 @@ pub trait SessionHandle: Send + Sync {
         Err(HarnessError::Operation(
             "Manual compaction is unsupported".into(),
         ))
+    }
+    /// Observe termination without keeping the session handle alive or requesting shutdown.
+    fn termination(&self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>> {
+        None
     }
     async fn close(&self) -> Result<SessionCloseOutcome, HarnessError>;
 }

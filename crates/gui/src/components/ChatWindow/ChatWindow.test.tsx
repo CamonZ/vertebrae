@@ -166,6 +166,9 @@ vi.mock("../../bindings", async () => {
       steerLocalChatTurn: vi.fn(),
       sendLocalChatMessage: vi.fn().mockResolvedValue({ status: "ok" }),
       closeLocalChatSession: vi.fn().mockResolvedValue({ status: "ok" }),
+      interruptLocalChatTurn: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: null }),
       resolvePermissionRequest: vi.fn().mockResolvedValue({ status: "ok" }),
       getTask: vi.fn().mockResolvedValue({ status: "ok", data: null }),
       getStep: vi.fn().mockResolvedValue({ status: "ok", data: null }),
@@ -1490,6 +1493,67 @@ describe("ChatWindow", () => {
     });
   });
 
+  it("starts the selected named ACP connection", async () => {
+    const user = userEvent.setup();
+    const ids = ["local:acp:one", "local:acp:two"];
+    mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        default_harness: "acp",
+        default_provider: ids[0],
+        harnesses: [{
+          harness: "acp",
+          label: "ACP agent",
+          available: true,
+          unavailable_reason: null,
+          default_model_id: null,
+          default_reasoning_effort: null,
+          reasoning_efforts: [],
+          supports_resume: false,
+          models: [],
+          permission_modes: [],
+        }],
+        providers: ids.map((id, index) => ({
+          id,
+          label: index === 0 ? "First connection" : "Second connection",
+          harness: "acp",
+          custom: true,
+          available: true,
+          unavailable_reason: null,
+          models: null,
+          default_model_id: null,
+          discovered: {
+            harness: "acp",
+            label: "ACP connection",
+            available: true,
+            unavailable_reason: null,
+            supports_resume: false,
+            default_model_id: "native-model",
+            models: [{ id: "native-model", label: "Native model" }],
+            default_reasoning_effort: "low",
+            reasoning_efforts: [{ id: "low", label: "Low" }],
+            permission_modes: [],
+          },
+        })),
+      },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": createSession({ harness: "acp", providerId: ids[0] }) },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+    chooseDropdownValue(await findComposerPicker("local-chat-provider-picker"), ids[1]);
+    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "native-model");
+    chooseDropdownValue(await findComposerPicker("local-chat-effort-picker"), "low");
+    await user.type(screen.getByTestId("local-chat-composer"), "Hello{Enter}");
+    await waitFor(() =>
+      expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
+        expect.objectContaining({ harness: "acp", provider_id: ids[1], initial_prompt: "Hello", model_id: "native-model", reasoning_effort: "low" })
+      )
+    );
+  });
+
   it("selects Codex provider models from the catalog and starts with neutral commands", async () => {
     const user = userEvent.setup();
     mockedCommands.getSupportedLocalChatHarnesses.mockResolvedValueOnce({
@@ -1812,7 +1876,7 @@ describe("ChatWindow", () => {
     expect(
       await screen.findByTestId("local-chat-provider-unavailable")
     ).toHaveTextContent(
-      "Local chat unavailable because neither Claude nor Codex was found."
+      "No local chat provider is available. Check Settings → Providers & Models."
     );
     expect(screen.getByTestId("local-chat-composer")).toBeEnabled();
     expect(screen.getByTitle("Start session")).toBeDisabled();
@@ -2542,6 +2606,91 @@ describe("ChatWindow", () => {
       lifecycle: "idle",
       backendSessionId: null,
     });
+  });
+
+  it("shows recovered queue contents and lets the user discard them", async () => {
+    const user = userEvent.setup();
+    useChatStore.setState({
+      sessions: {
+        "test-session": createSession({
+          harness: "acp",
+          providerResumeId: "acp-conversation",
+          providerId: "local:acp:test-connection",
+          queuedMessages: ["First unsent prompt", "Second unsent prompt"],
+          queuePaused: true,
+        }),
+      },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+    await user.click(screen.getByText("2 queued · Paused"));
+    expect(screen.getByRole("list", { name: "Queued messages" })).toHaveTextContent(
+      "First unsent prompt"
+    );
+    expect(screen.getByRole("button", { name: "Resume queue" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Discard queue" }));
+    expect(screen.queryByText("2 queued · Paused")).not.toBeInTheDocument();
+    expect(useChatStore.getState().sessions["test-session"].queuePaused).toBe(false);
+  });
+
+  it("stops ACP generation and sends the follow-up to the same backend", async () => {
+    const user = userEvent.setup();
+    const session = createSession({
+      harness: "acp",
+      backendSessionId: "acp-stop",
+      lifecycle: "streaming",
+      activeTurn: {
+        localId: "local-turn",
+        turnId: "acp-turn",
+        phase: "active",
+      },
+    });
+    useChatStore.setState({
+      sessions: { "test-session": session },
+      activeSessionId: "test-session",
+      panelOpen: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+
+    await user.click(screen.getByTestId("local-chat-stop-generation"));
+    expect(mockedCommands.interruptLocalChatTurn).toHaveBeenCalledWith(
+      "acp-stop"
+    );
+    expect(mockedCommands.closeLocalChatSession).not.toHaveBeenCalled();
+
+    act(() => {
+      expect(
+        routeLocalChatSessionEndEvent({
+          backend_session_id: "acp-stop",
+          harness: "acp",
+          turn_id: "acp-turn",
+          thread_id: "acp-stop",
+          is_root: true,
+          duration_ms: 1,
+          cost_usd: 0,
+          num_turns: 1,
+          result: "",
+          is_error: true,
+          completion_status: "interrupted",
+          context_tokens: 0,
+          context_window: 0,
+        })
+      ).toBe(true);
+    });
+
+    await user.type(
+      screen.getByTestId("local-chat-composer"),
+      "Follow up{Enter}"
+    );
+    await waitFor(() =>
+      expect(mockedCommands.sendLocalChatMessage).toHaveBeenCalledWith(
+        "acp-stop",
+        "Follow up",
+        expect.anything()
+      )
+    );
+    expect(mockedCommands.createLocalChatSession).not.toHaveBeenCalled();
   });
 
   it("disables Stop while a clear is already closing the session", async () => {

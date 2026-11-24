@@ -254,6 +254,7 @@ impl EventSink for LocalChatHarnessEventSink {
                     match harness {
                         LocalChatHarnessKind::Claude => "Claude default",
                         LocalChatHarnessKind::Codex => "Codex default",
+                        LocalChatHarnessKind::Acp => "Agent default",
                     }
                     .to_string()
                 } else {

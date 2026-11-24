@@ -1,5 +1,6 @@
 import type {
   SettingsEdit,
+  AcpAgentSettings,
   SharedSettings,
   ProviderSettings,
 } from "../../bindings";
@@ -11,10 +12,46 @@ export type ConfigSection =
   | "connection"
   | "observability"
   | "decision_model";
+export interface AcpAgentDraft {
+  id: string;
+  name: string;
+  executable: string;
+  args: { id: string; value: string }[];
+}
+
+export type SettingsDraft =
+  | Exclude<SettingsEdit, { section: "acp_agent" | "remove_acp_agent" }>
+  | { section: "acp_agent"; settings: AcpAgentDraft; remove?: boolean };
+
+export function acpAgentDraft(agent?: AcpAgentSettings | null): SettingsDraft {
+  return {
+    section: "acp_agent",
+    settings: {
+      id: agent?.id ?? crypto.randomUUID(),
+      name: agent?.name ?? "",
+      executable: agent?.executable ?? "",
+      args: (agent?.args ?? []).map((value) => ({
+        id: crypto.randomUUID(),
+        value,
+      })),
+    },
+  };
+}
+
+export function settingsEdit(draft: SettingsDraft): SettingsEdit {
+  if (draft.section !== "acp_agent") return draft;
+  if (draft.remove) return { section: "remove_acp_agent", id: draft.settings.id };
+  const { args, ...settings } = draft.settings;
+  return {
+    section: "acp_agent",
+    settings: { ...settings, args: args.map(({ value }) => value) },
+  };
+}
+
 export function draftFor(
   section: ConfigSection,
   settings: SharedSettings
-): SettingsEdit {
+): SettingsDraft {
   if (section === "decision_model")
     return {
       section,
@@ -74,6 +111,32 @@ export function validateSettingsDraft(
       return { field: "Decision model", message: "Select a decision model." };
   }
   const error = (field: string, message: string) => ({ field, message });
+  if (edit.section === "acp_agent") {
+    const { name, executable, args } = edit.settings;
+    if ((executable.trim() || args.length) && !name.trim()) {
+      return error("Connection name", "Enter a name for the ACP connection.");
+    }
+    const absolute = /^(?:[/]|[A-Za-z]:[/\\]|\\\\)/.test(executable);
+    const command =
+      executable !== "." && executable !== ".." && !/[/\\]/.test(executable);
+    if (
+      (!executable.trim() && (name.trim() || args.length > 0)) ||
+      executable.includes("\0") ||
+      (executable.trim() && !absolute && !command)
+    ) {
+      return error(
+        "Agent executable",
+        "Enter a command on PATH or an absolute executable path."
+      );
+    }
+    const invalidArgument = args.findIndex((arg) => arg.includes("\0"));
+    return invalidArgument < 0
+      ? null
+      : error(
+          `Argument ${invalidArgument + 1}`,
+          "Arguments cannot contain a NUL character."
+        );
+  }
   const secret =
     edit.section === "connection"
       ? edit.token

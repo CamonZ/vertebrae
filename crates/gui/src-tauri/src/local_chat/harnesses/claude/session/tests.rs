@@ -268,6 +268,7 @@ fn input(session_id: &str, initial_prompt: Option<&str>) -> HarnessCreateSession
         speed_tier: None,
         permission_mode: Some(PermissionMode::Plan),
         personality: None,
+        provider_id: None,
         provider: None,
         gate: None,
     }

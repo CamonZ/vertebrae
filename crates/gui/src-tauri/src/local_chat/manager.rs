@@ -1,3 +1,4 @@
+use crate::local_chat::harnesses::acp::AcpLocalChatHarness;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -55,6 +56,7 @@ impl LocalChatSessionManager {
             vec![
                 Arc::new(ClaudeLocalChatHarness::new()),
                 Arc::new(CodexLocalChatHarness::new()),
+                Arc::new(AcpLocalChatHarness::new(None)),
             ],
             PermissionBridge::new(),
         )
@@ -71,6 +73,9 @@ impl LocalChatSessionManager {
                 )),
                 Arc::new(CodexLocalChatHarness::with_shell_environment(
                     startup_capabilities.shell_environment.clone(),
+                )),
+                Arc::new(AcpLocalChatHarness::new(
+                    vertebrae_sacrum_client::config_path(),
                 )),
             ],
             PermissionBridge::new(),
@@ -174,8 +179,11 @@ impl LocalChatSessionManager {
             .with_provider_profiles(|profiles| Ok(profiles.clone()))
             .await?;
         let mut harnesses = Vec::with_capacity(self.harnesses.len());
+        let mut extra_providers = Vec::new();
         for harness in self.harnesses.values() {
-            harnesses.push(harness.info().await);
+            let (info, additional) = harness.catalog_entries().await?;
+            extra_providers.extend(additional);
+            harnesses.push(info);
         }
         harnesses.sort_by_key(|info| info.harness);
         let default_harness = harnesses
@@ -185,10 +193,18 @@ impl LocalChatSessionManager {
             .or_else(|| harnesses.first().map(|info| info.harness))
             .unwrap_or(LocalChatHarnessKind::Claude);
 
-        let providers = provider_catalog(&harnesses, &profiles);
+        let mut providers = provider_catalog(&harnesses, &profiles);
+        providers.extend(extra_providers);
         let default_provider = providers
             .iter()
-            .find(|provider| !provider.custom && provider.harness == default_harness)
+            .find(|provider| {
+                provider.harness == default_harness
+                    && if default_harness == LocalChatHarnessKind::Acp {
+                        provider.available
+                    } else {
+                        !provider.custom
+                    }
+            })
             .map(|provider| provider.id.clone())
             .unwrap_or_else(|| BuiltinProvider::Anthropic.as_str().to_string());
 
@@ -208,6 +224,9 @@ impl LocalChatSessionManager {
         harness: LocalChatHarnessKind,
         provider_id: Option<&str>,
     ) -> Result<Option<LocalChatProviderSelection>, LocalChatSessionError> {
+        if harness == LocalChatHarnessKind::Acp {
+            return Ok(None);
+        }
         let provider_id = provider_id.map(str::to_owned);
         self.with_provider_profiles(move |profiles| {
             Self::provider_selection_from_profiles(profiles, harness, provider_id.as_deref())
@@ -224,7 +243,8 @@ impl LocalChatSessionManager {
             return Ok(None);
         };
         let id = ProviderId::new(provider_id).map_err(LocalChatSessionError::StartFailed)?;
-        let expected = step_harness(harness);
+        let expected =
+            step_harness(harness).ok_or(LocalChatSessionError::UnsupportedHarness(harness))?;
         if let Some(builtin) = id.builtin() {
             if builtin.harness() != expected {
                 return Err(LocalChatSessionError::StartFailed(format!(
@@ -749,10 +769,11 @@ impl Default for LocalChatSessionManager {
 #[cfg(test)]
 mod tests;
 
-fn step_harness(harness: LocalChatHarnessKind) -> StepHarness {
+fn step_harness(harness: LocalChatHarnessKind) -> Option<StepHarness> {
     match harness {
-        LocalChatHarnessKind::Claude => StepHarness::Claude,
-        LocalChatHarnessKind::Codex => StepHarness::Codex,
+        LocalChatHarnessKind::Claude => Some(StepHarness::Claude),
+        LocalChatHarnessKind::Codex => Some(StepHarness::Codex),
+        LocalChatHarnessKind::Acp => None,
     }
 }
 
@@ -791,6 +812,8 @@ fn provider_catalog(
             unavailable_reason: info.unavailable_reason.clone(),
             models: None,
             default_model_id: info.default_model_id.clone(),
+            discovered: None,
+            supports_steering: None,
         });
     }
     for (id, profile) in profiles {
@@ -833,6 +856,8 @@ fn provider_catalog(
                     .collect(),
             ),
             default_model_id: profile.resolve_model(id, None).ok(),
+            discovered: None,
+            supports_steering: None,
         });
     }
     providers

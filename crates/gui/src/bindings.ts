@@ -1224,6 +1224,30 @@ async saveLocalChatSessionIndex(input: SaveLocalChatSessionIndexInput) : Promise
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Persist unsent input independently of the chat catalog. Catalog sync may
+ * be offline or contended by another instance while a live chat is usable.
+ */
+async saveLocalChatQueue(sessionId: string, session: LocalChatSessionIndexEntry | null) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_local_chat_queue", { sessionId, session }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Return only outstanding queues. These snapshots can restore a paused
+ * conversation even when its normal catalog row is temporarily inaccessible.
+ */
+async loadLocalChatQueues() : Promise<Result<LocalChatSessionIndexEntry[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_local_chat_queues") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async checkReviewAnchorWorktree(worktree: string) : Promise<Result<null, ReviewAnchorError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("check_review_anchor_worktree", { worktree }) };
@@ -1761,6 +1785,7 @@ worktreeChangedEvent: "worktree-changed-event"
 
 /** user-defined types **/
 
+export type AcpAgentSettings = { id: string; name: string; executable: string; args: string[] }
 export type ActivityAnalysis = { operations: Operation[] }
 export type ActivityInput = { name: string; input: Partial<{ [key in string]: JsonValue }> }
 /**
@@ -2639,7 +2664,7 @@ attempt: number;
 verdict?: JsonValue | null }
 export type LocalChatHarnessCatalog = { default_harness: LocalChatHarnessKind; harnesses: LocalChatHarnessInfo[]; default_provider: string; providers: LocalChatProviderInfo[] }
 export type LocalChatHarnessInfo = { harness: LocalChatHarnessKind; label: string; available: boolean; unavailable_reason: string | null; default_model_id: string | null; models: LocalChatModelOption[]; default_reasoning_effort: string | null; reasoning_efforts: LocalChatReasoningEffortOption[]; speed_tiers?: LocalChatSpeedTierOption[]; permission_modes?: LocalChatPermissionModeOption[] | null; personality_options?: LocalChatPersonalityOption[] | null; supports_resume: boolean }
-export type LocalChatHarnessKind = "claude" | "codex"
+export type LocalChatHarnessKind = "claude" | "codex" | "acp"
 export type LocalChatModelOption = { id: string; label: string; supported_reasoning_effort_ids?: string[] | null; supported_speed_tier_ids?: string[] | null; supports_personality?: boolean | null }
 export type LocalChatPermissionModeOption = { id: PermissionMode; label: string; is_default?: boolean }
 export type LocalChatPersonalityOption = { id: string; label: string; is_default?: boolean }
@@ -2653,7 +2678,7 @@ export type LocalChatProviderInfo = { id: string; label: string; harness: LocalC
 /**
  * `None` means "use the harness's model catalog".
  */
-models: LocalChatModelOption[] | null; default_model_id: string | null }
+models: LocalChatModelOption[] | null; default_model_id: string | null; discovered?: LocalChatHarnessInfo | null; supports_steering?: boolean | null }
 export type LocalChatReasoningEffortOption = { id: string; label: string }
 export type LocalChatSessionEndEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id: string; thread_id?: string | null; is_root: boolean; duration_ms: number; cost_usd: number; num_turns: number; result: string; is_error: boolean; context_tokens: number; context_window: number; item_id?: string | null; completion_status?: string | null }
 export type LocalChatSessionError = { SessionExists: string } | { SessionNotFound: string } | { SendFailed: string } | { CompactionFailed: string } | { SpawnFailed: string } | { StartFailed: string } | { UnavailableHarness: { harness: LocalChatHarnessKind; reason: string | null } } | { UnsupportedHarness: LocalChatHarnessKind } | { InvalidChatSessionId: string } | { InvalidRecordingWorktree: string }
@@ -2671,7 +2696,7 @@ providerId?: string | null; model: string | null; selectedModelId: string | null
 /**
  * Local steering attribution for provider transcripts without turn boundaries.
  */
-steeringTurnIds?: Partial<{ [key in string]: string }> | null;
+steeringTurnIds?: Partial<{ [key in string]: string }> | null; queuedMessages?: string[] | null;
 /**
  * Provider lineage used to group history without opening conversations.
  */
@@ -2760,7 +2785,7 @@ export type PermissionDecisionBehavior = "allow" | "deny"
  * Permission mode for agent sessions - mirrors db::PermissionMode
  */
 export type PermissionMode = "accept_edits" | "auto" | "bypass_permissions" | "default" | "dont_ask" | "plan"
-export type PermissionRequestEvent = { request_id: string; session_id: string | null; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_name: string; tool_use_id: string; input: JsonValue; message: string | null; questions?: UserQuestion[] | null; input_error?: string | null }
+export type PermissionRequestEvent = { question_presentation?: QuestionPresentation | null; request_id: string; session_id: string | null; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_name: string; tool_use_id: string; input: JsonValue; message: string | null; questions?: UserQuestion[] | null; input_error?: string | null }
 /**
  * Workflow step entry in the pipeline summary payload, including the
  * resolver-computed `pipeline_counts`/`active_count` aggregates and the
@@ -2819,6 +2844,7 @@ export type PipelineWorkflowTransition = { id: string; from_workflow_id: string;
  */
 export type ProviderId = string
 export type ProviderSettings = { id: string; harness: string; endpoint: string; endpoint_hidden: boolean; models: string[]; default_model: string; api_key_env: string; has_api_key: boolean; key_storage: string; credential_override: boolean; environment_names: string[]; wire_api: string }
+export type QuestionPresentation = "approval" | "fixed_choice"
 /**
  * One use of a symbol's name that may refer to it.
  */
@@ -3057,8 +3083,8 @@ export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string
  * How an llm_inference destination enters its provider conversation.
  */
 export type SessionMode = "new" | "resume" | "fork"
-export type SettingsEdit = { section: "decision_model"; enabled: boolean; provider: string; model: string } | { section: "connection"; url: string; token: SecretEdit } | { section: "typesafe"; url: string; key: SecretEdit } | { section: "provider"; id: string; create: boolean; harness: string; endpoint: string; models: string[]; default_model: string; api_key_env: string; key: SecretEdit; environment: EnvironmentEdit[]; wire_api: string } | { section: "observability"; settings: ObservabilitySettings }
-export type SharedSettings = { decision_model: DecisionModelSettings; revision: string; path: string; connection_url: string; has_connection_token: boolean; effective_connection_url: string; connection_url_override: boolean; connection_token_override: boolean; typesafe_url: string; typesafe_endpoint_hidden: boolean; has_typesafe_key: boolean; typesafe_key_storage: string; credential_warning: string | null; typesafe_key_override: boolean; typesafe_url_override: boolean; providers: ProviderSettings[]; observability: ObservabilitySettings }
+export type SettingsEdit = { section: "acp_agent"; settings: AcpAgentSettings } | { section: "remove_acp_agent"; id: string } | { section: "decision_model"; enabled: boolean; provider: string; model: string } | { section: "connection"; url: string; token: SecretEdit } | { section: "typesafe"; url: string; key: SecretEdit } | { section: "provider"; id: string; create: boolean; harness: string; endpoint: string; models: string[]; default_model: string; api_key_env: string; key: SecretEdit; environment: EnvironmentEdit[]; wire_api: string } | { section: "observability"; settings: ObservabilitySettings }
+export type SharedSettings = { decision_model: DecisionModelSettings; revision: string; path: string; connection_url: string; has_connection_token: boolean; effective_connection_url: string; connection_url_override: boolean; connection_token_override: boolean; typesafe_url: string; typesafe_endpoint_hidden: boolean; has_typesafe_key: boolean; typesafe_key_storage: string; credential_warning: string | null; typesafe_key_override: boolean; typesafe_url_override: boolean; providers: ProviderSettings[]; local_chat_acp_agents?: AcpAgentSettings[]; observability: ObservabilitySettings }
 export type Side = "old" | "new"
 /**
  * A point in a file, 1-based.

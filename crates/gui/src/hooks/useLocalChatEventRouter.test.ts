@@ -1,3 +1,4 @@
+import { flushNextQueuedMessage } from "./localChatTurnDelivery";
 import { EMPTY_WORKSPACE } from "../stores/chatWorkspace";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -667,6 +668,60 @@ describe("useLocalChatEventRouter route functions", () => {
     });
   });
 
+  it("holds an ACP queue on Stop and only removes the head after resumed delivery", async () => {
+    resetChatStore({
+      local: makeSession({
+        id: "local",
+        harness: "acp",
+        backendSessionId: "backend-local",
+        lifecycle: "streaming",
+        queuedMessages: ["first queued", "second queued"],
+      }),
+    });
+    startTurn("backend-local", "turn-stopping");
+    expect(useChatStore.getState().markActiveTurnStopping("local")).toBe(true);
+    expect(
+      routeLocalChatSessionEndEvent({
+        backend_session_id: "backend-local",
+        harness: "acp",
+        turn_id: "turn-stopping",
+        is_root: true,
+        duration_ms: 1,
+        cost_usd: 0,
+        num_turns: 1,
+        result: "",
+        is_error: true,
+        context_tokens: 0,
+        context_window: 0,
+        completion_status: "interrupted",
+      })
+    ).toBe(true);
+
+    expect(useChatStore.getState().sessions.local).toMatchObject({
+      lifecycle: "idle",
+      queuePaused: true,
+      queuedMessages: ["first queued", "second queued"],
+    });
+    expect(await flushNextQueuedMessage("local")).toBe(false);
+    mockedCommands.sendLocalChatMessage.mockRejectedValueOnce(
+      new Error("offline")
+    );
+    expect(await flushNextQueuedMessage("local", true)).toBe(false);
+    expect(useChatStore.getState().sessions.local.queuedMessages).toEqual([
+      "first queued",
+      "second queued",
+    ]);
+    expect(await flushNextQueuedMessage("local", true)).toBe(true);
+    expect(mockedCommands.sendLocalChatMessage).toHaveBeenLastCalledWith(
+      "backend-local",
+      "first queued",
+      DEFAULT_TURN_SETTINGS
+    );
+    expect(useChatStore.getState().sessions.local.queuedMessages).toEqual([
+      "second queued",
+    ]);
+  });
+
   it("routes interleaved multi-session events without transcript cross-talk", () => {
     resetChatStore({
       left: makeSession({
@@ -769,7 +824,7 @@ describe("useLocalChatEventRouter route functions", () => {
     expect(local.lifecycle).toBe("streaming");
   });
 
-  it("routes an AskUserQuestion permission into the owning session store", () => {
+  it.each(["approval", "fixed_choice"] as const)("routes a permission question as %s", (presentation) => {
     resetChatStore({
       local: makeSession({
         id: "local",
@@ -796,8 +851,12 @@ describe("useLocalChatEventRouter route functions", () => {
         message: null,
         questions,
         input_error: null,
+        question_presentation: presentation,
       })
     ).toBe(true);
+    expect(useChatStore.getState().sessions.local.messages[0]).toMatchObject(
+      { kind: "user_question", presentation }
+    );
     expect(useChatStore.getState().sessions.local.messages).toEqual([
       expect.objectContaining({
         kind: "user_question",

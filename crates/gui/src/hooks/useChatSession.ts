@@ -32,11 +32,13 @@ import {
   resolvePersonalityDefault,
   sessionProviderId,
   resolvePermissionDefault,
+  reasoningEffortsForModel,
   speedTiersForModel,
   useLocalChatDefaultsStore,
 } from "../utils/localChatDefaults";
 import {
   harnessDisplayName,
+  localChatCapabilities,
   lifecycleLabel,
   isSessionHarnessLocked,
 } from "../components/ChatWindow/chatHelpers";
@@ -125,6 +127,7 @@ export function useChatSession(sessionId: string) {
   // providers (Anthropic, OpenAI) use their harness's model catalog, custom
   // providers list exactly their configured models.
   const selectedHarness = session?.harness ?? DEFAULT_LOCAL_CHAT_HARNESS;
+  const capabilities = localChatCapabilities(selectedHarness);
   const selectedProviderId = sessionProviderId({
     harness: selectedHarness,
     providerId: session?.providerId,
@@ -227,7 +230,7 @@ export function useChatSession(sessionId: string) {
   const reasoningEfforts = useMemo(() => {
     const efforts = visibleHarness?.reasoning_efforts ?? [];
     const selectedModel = visibleHarness?.models.find(
-      (model) => model.id === selectedModelId
+      (model) => model.id === (selectedModelId ?? visibleHarness.default_model_id)
     );
     const supportedEffortIds = selectedModel?.supported_reasoning_effort_ids;
     if (!supportedEffortIds) return efforts;
@@ -251,19 +254,21 @@ export function useChatSession(sessionId: string) {
   // --- Lifecycle derived flags ---
   const lifecycle = getLocalChatLifecycle(session);
   const isBusy = isLocalChatLifecycleBusy(lifecycle);
-  const hasPendingUserQuestion =
-    session?.messages.some(
-      (message) =>
-        message.kind === "user_question" && message.status === "pending"
-    ) ?? false;
+  const pendingQuestion = session?.messages.find(
+    (message) =>
+      message.kind === "user_question" && message.status === "pending"
+  );
+  const hasPendingUserQuestion = !!pendingQuestion;
   const canQueueMessage =
     !!session?.backendSessionId &&
     (lifecycle === "sending" || lifecycle === "streaming");
   const hasResume = !!session?.providerResumeId;
   const selectedHarnessAvailable =
-    !harnessCatalog || selectedHarnessInfo?.available === true;
+    (capabilities.nativeSettings && isActive) ||
+    !harnessCatalog ||
+    selectedHarnessInfo?.available === true;
   const canUseComposer =
-    !hasPendingUserQuestion &&
+    (!hasPendingUserQuestion || (capabilities.recoverQueue && canQueueMessage)) &&
     (isActive ||
       selectedSpeedTier != null ||
       session?.providerReplay?.loading !== "initial") &&
@@ -468,9 +473,10 @@ export function useChatSession(sessionId: string) {
       ? "Stopping..."
       : "Thinking...";
 
-  const assistantLabel = session
-    ? harnessDisplayName(session.harness)
-    : "Assistant";
+  const assistantLabel =
+    (capabilities.nativeSettings && selectedHarnessInfo?.available
+      ? selectedHarnessInfo.label
+      : undefined) ?? (session ? harnessDisplayName(session.harness) : "Assistant");
 
   // --- Stop generation ---
   // "closing" covers a Clear that is already tearing this backend session
@@ -479,6 +485,7 @@ export function useChatSession(sessionId: string) {
     !!session?.backendSessionId &&
     lifecycle !== "closing" &&
     activeTurn !== null &&
+    (!capabilities.interruptInPlace || !!activeTurn.turnId) &&
     activeTurn.phase !== "stopping";
   // Stop stays in the header for the whole turn (disabled while stopping or
   // closing) and leaves it once the turn ends.
@@ -539,10 +546,12 @@ export function useChatSession(sessionId: string) {
   }, [steeringForSession]);
   const canSteer =
     canSendMessage &&
+    !hasPendingUserQuestion &&
     lifecycle === "streaming" &&
     session?.activeTurn?.phase === "active" &&
     !!session.activeTurn.turnId &&
-    (session.harness === "codex" || session.harness === "claude");
+    (harnessCatalog?.providers.find((provider) => provider.id === selectedProviderId)
+      ?.supports_steering ?? !localChatCapabilities(session.harness).nativeSettings);
 
   const handleSteer = useCallback(async () => {
     const backendSessionId = session?.backendSessionId;
@@ -690,9 +699,22 @@ export function useChatSession(sessionId: string) {
 
   const handleModelChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
-      setSessionSelectedModel(sessionId, event.target.value || null);
+      const model = event.target.value || null;
+      setSessionSelectedModel(sessionId, model);
+      if (capabilities.nativeSettings && visibleHarness) {
+        const effectiveModel = model ?? visibleHarness.default_model_id;
+        if (selectedReasoningEffort && !reasoningEffortsForModel(visibleHarness, effectiveModel)
+          .some((effort) => effort.id === selectedReasoningEffort)) {
+          setSessionReasoningEffort(sessionId, null);
+        }
+        if (selectedSpeedTier && !speedTiersForModel(visibleHarness, effectiveModel)
+          .some((tier) => tier.id === selectedSpeedTier)) {
+          setSessionSpeedTier(sessionId, null);
+        }
+      }
     },
-    [sessionId, setSessionSelectedModel]
+    [capabilities.nativeSettings, selectedReasoningEffort, selectedSpeedTier, sessionId,
+      setSessionReasoningEffort, setSessionSelectedModel, setSessionSpeedTier, visibleHarness]
   );
   const handleReasoningEffortChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -743,8 +765,12 @@ export function useChatSession(sessionId: string) {
           : hasResume || lifecycle === "closed" || lifecycle === "error"
             ? "Resume session"
             : "Start session";
-  const composerPlaceholder = hasPendingUserQuestion
-    ? "Answer Claude's question above to continue..."
+  const composerPlaceholder = hasPendingUserQuestion && !(capabilities.recoverQueue && canQueueMessage)
+    ? pendingQuestion?.kind === "user_question" && pendingQuestion.presentation === "approval"
+      ? "Choose an approval option above to continue..."
+      : pendingQuestion?.kind === "user_question" && pendingQuestion.presentation === "fixed_choice"
+        ? "Answer the question above to continue..."
+        : "Answer Claude's question above to continue..."
     : canQueueMessage
       ? "Type a message to queue..."
       : isBusy
@@ -786,6 +812,7 @@ export function useChatSession(sessionId: string) {
     composerPlaceholder,
     canStopGeneration,
     isGenerating,
+    canRegenerateTitle: capabilities.inferTitle,
     isWaiting,
     activityLabel,
     compactionSummary: session?.compactionSummary ?? null,
