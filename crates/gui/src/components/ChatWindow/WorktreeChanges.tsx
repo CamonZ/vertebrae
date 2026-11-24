@@ -620,7 +620,7 @@ export function WorktreeChanges({
       tabIndex={-1}
       aria-label="Worktree changes"
       {...{ [CHAT_AREA_ATTRIBUTE]: "changes" }}
-      className="changes-keyboard-region flex min-h-0 flex-1 flex-col gap-2 p-3 text-sm"
+      className="changes-keyboard-region flex min-h-0 flex-1 flex-col gap-2 p-3 text-content"
       onKeyDownCapture={onKeyDownCapture}
       onFocusCapture={(event) => {
         const section = event.currentTarget;

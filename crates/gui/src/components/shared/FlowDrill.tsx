@@ -190,7 +190,7 @@ function Breadcrumb({
   return (
     <nav
       aria-label="Diagram levels"
-      className="flex flex-wrap items-center gap-2 text-xs"
+      className="flex flex-wrap items-center gap-2 text-secondary"
       data-testid="flow-breadcrumb"
     >
       <Button
@@ -264,7 +264,7 @@ function DrillError({ children }: { children: ReactNode }) {
   return (
     <div
       role="alert"
-      className="text-sm text-err"
+      className="text-content text-err"
       data-testid="flow-drill-error"
     >
       {children}

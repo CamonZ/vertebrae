@@ -362,7 +362,7 @@ export function KindChip({
       data-kind={hearthKindValue}
       aria-label={`Step kind: ${display}`}
       className={classNames(
-        "c-kind-chip inline-flex h-6 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-2 font-mono text-2xs font-medium uppercase tracking-[0.12em]",
+        "c-kind-chip inline-flex h-6 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-2 font-mono text-meta font-medium uppercase tracking-[0.12em]",
         `kind-${hearthKindValue}`,
         className
       )}
@@ -458,7 +458,7 @@ export function StateBreakdown({
   return (
     <span
       className={classNames(
-        "c-breakdown inline-flex items-center gap-1.5 font-mono text-2xs",
+        "c-breakdown inline-flex items-center gap-1.5 font-mono text-meta",
         className
       )}
       aria-label={`State breakdown: ${done} done, ${running} running, ${waiting} waiting, ${queued} queued`}
@@ -528,7 +528,7 @@ export function DetailHeader({
       <h2 className="dh-title font-serif text-3xl leading-tight text-[var(--color-fg)]">
         {markedTitle}
       </h2>
-      <div className="dh-crumb mt-2 flex flex-wrap items-center gap-2 font-mono text-2xs text-[var(--color-fg-mute)]">
+      <div className="dh-crumb mt-2 flex flex-wrap items-center gap-2 font-mono text-meta text-[var(--color-fg-mute)]">
         {id && <IdChip id={id} kind="task" />}
         {crumbs.map((crumb, index) => (
           <span key={index} className="inline-flex items-center gap-2">
@@ -605,17 +605,17 @@ export function HeroStatus({
           />
         )}
         {label && typeof label !== "string" && (
-          <span className="state font-mono text-2xs uppercase tracking-[0.12em] text-[var(--color-fg-soft)]">
+          <span className="state font-mono text-meta uppercase tracking-[0.12em] text-[var(--color-fg-soft)]">
             {label}
           </span>
         )}
         {runtime && (
-          <span className="runtime font-mono text-2xs text-[var(--color-accent)]">
+          <span className="runtime font-mono text-meta text-[var(--color-accent)]">
             · {runtime}
           </span>
         )}
         {step && (
-          <span className="at font-mono text-2xs text-[var(--color-fg-mute)]">
+          <span className="at font-mono text-meta text-[var(--color-fg-mute)]">
             · at step{" "}
             <em
               className="font-serif italic"
@@ -627,7 +627,7 @@ export function HeroStatus({
           </span>
         )}
         {finished && (
-          <span className="font-mono text-2xs text-[var(--color-fg-mute)]">
+          <span className="font-mono text-meta text-[var(--color-fg-mute)]">
             · {finished}
           </span>
         )}
@@ -684,13 +684,13 @@ export function CompactTaskCard({
       <div className="space-y-2">
         <div className="bc-title flex items-start gap-2">
           <Glyph level={level} accent={runStatus === "executing"} />
-          <span className="ttl min-w-0 flex-1 truncate text-sm font-medium text-[var(--color-fg)]">
+          <span className="ttl min-w-0 flex-1 truncate text-content font-medium text-[var(--color-fg)]">
             {title}
           </span>
           {priority && (
             <span
               title={`${priority} priority`}
-              className="bc-pri font-mono text-xs text-[var(--color-fg-faint)]"
+              className="bc-pri font-mono text-secondary text-[var(--color-fg-faint)]"
             >
               {priority === "hi" ? "↑" : priority === "md" ? "→" : "↓"}
             </span>
@@ -702,7 +702,7 @@ export function CompactTaskCard({
         ) : null}
         {breakdown && <StateBreakdown {...breakdown} />}
         {tags.length > 0 && (
-          <div className="bc-tags flex flex-wrap gap-1.5 font-mono text-2xs text-[var(--color-fg-faint)]">
+          <div className="bc-tags flex flex-wrap gap-1.5 font-mono text-meta text-[var(--color-fg-faint)]">
             {tags.slice(0, 2).map((tag) => (
               <span
                 key={tag}
@@ -718,7 +718,7 @@ export function CompactTaskCard({
           <RunChip status={runStatus} small />
           {id && <IdChip id={id} kind="task" level={level} />}
           {when && (
-            <span className="when ml-auto font-mono text-2xs text-[var(--color-fg-faint)]">
+            <span className="when ml-auto font-mono text-meta text-[var(--color-fg-faint)]">
               {when}
             </span>
           )}
@@ -753,7 +753,7 @@ export function CompactRunCard({
           {id && <IdChip id={id} kind="task run" />}
         </div>
         {(when || reason) && (
-          <div className="when font-mono text-2xs text-[var(--color-fg-faint)]">
+          <div className="when font-mono text-meta text-[var(--color-fg-faint)]">
             {when}
             {reason && (
               <span className="err text-[var(--color-err)]"> · {reason}</span>
@@ -798,11 +798,11 @@ export function WorkflowRailItem({
         className
       )}
     >
-      <div className="name truncate font-serif italic text-sm text-[var(--color-fg)]">
+      <div className="name truncate font-serif italic text-content text-[var(--color-fg)]">
         {name}
       </div>
       <Pipeline className="mt-2" width="100%" segments={shape} />
-      <div className="meta mt-2 flex flex-wrap items-center gap-1.5 font-mono text-2xs text-[var(--color-fg-faint)]">
+      <div className="meta mt-2 flex flex-wrap items-center gap-1.5 font-mono text-meta text-[var(--color-fg-faint)]">
         {meta.map((item, index) => (
           <span key={index} className="inline-flex items-center gap-1.5">
             {index > 0 && (
@@ -830,12 +830,12 @@ export function RecentItem({
       )}
     >
       <StepDot variant={variant === "done" ? "done" : variant} />
-      <span className="ri-title min-w-0 flex-1 truncate text-xs text-[var(--color-fg)]">
+      <span className="ri-title min-w-0 flex-1 truncate text-secondary text-[var(--color-fg)]">
         {title}
       </span>
       <span
         className={classNames(
-          "ri-when font-mono text-2xs",
+          "ri-when font-mono text-meta",
           variant === "running"
             ? "text-[var(--color-accent)]"
             : "text-[var(--color-fg-faint)]"

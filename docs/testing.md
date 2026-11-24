@@ -277,6 +277,9 @@ npm run test:coverage
 
 # Resolve the layered stylesheet cascade for described elements
 npm run test:cascade
+
+# Check the font-size lint rules against known violations
+npm run test:font-size
 ```
 
 `test:cascade` loads `src/index.css` with its layered imports through
@@ -284,6 +287,12 @@ npm run test:cascade
 base and modifiers sit in different cascade layers. jsdom does not apply
 cascade layers, so these checks do not use it. Add a case there when moving a
 rule between stylesheets or layers changes which rule wins.
+
+`npm run lint:css` also enforces the type scale: the
+`vertebrae/no-font-size-literals` Stylelint rule rejects px/rem font sizes
+outside `src/styles/tokens.css`, and `scripts/check-font-size-classes.mjs`
+rejects `text-[Npx]` classes, retired size utilities and literal inline font
+sizes in TypeScript sources. `test:font-size` covers both checks.
 
 ### Native macOS GUI verification
 

@@ -27,7 +27,7 @@ export function UnsavedChangesDialog({
       hideClose
       preventClose={busy}
     >
-      <p className="text-sm text-[var(--color-fg-mute)]">
+      <p className="text-content text-[var(--color-fg-mute)]">
         {many
           ? `${paths?.length} files have unsaved changes.`
           : `${paths?.[0] ?? "This file"} has unsaved changes.`}

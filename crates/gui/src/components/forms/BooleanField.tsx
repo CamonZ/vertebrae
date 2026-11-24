@@ -115,9 +115,9 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
 
     // Size classes
     const sizeClasses = {
-      sm: "h-6 w-11 text-xs",
-      md: "h-8 w-14 text-sm",
-      lg: "h-10 w-20 text-base",
+      sm: "h-6 w-11 text-secondary",
+      md: "h-8 w-14 text-content",
+      lg: "h-10 w-20 text-content",
     };
 
     // Toggle switch classes based on value and state
@@ -142,7 +142,7 @@ export const BooleanField = forwardRef<HTMLButtonElement, BooleanFieldProps>(
     // If variant is checkbox, render a button with checkbox appearance
     if (variant === "checkbox") {
       const checkboxButtonClasses = `
-        flex items-center gap-2 px-4 py-2 text-sm font-medium
+        flex items-center gap-2 px-4 py-2 text-content font-medium
         border border-border rounded-md
         ${value
           ? "bg-accent text-on-primary border-accent"

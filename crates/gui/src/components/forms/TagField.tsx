@@ -273,13 +273,13 @@ export const TagField = forwardRef<HTMLDivElement, TagFieldProps>(
           {/* Tag chips */}
           <div className="flex flex-wrap gap-2 min-h-[40px]">
             {value.length === 0 ? (
-              <span className="text-fg-mute text-sm">{emptyText}</span>
+              <span className="text-fg-mute text-content">{emptyText}</span>
             ) : (
               value.map((tag, index) => (
                 <div
                   key={`${tag}-${index}`}
                   className={`
-                    inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm
+                    inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-content
                     bg-accent/10 text-accent border border-accent/20
                     ${tagClassName || ""}
                   `}
@@ -313,7 +313,7 @@ export const TagField = forwardRef<HTMLDivElement, TagFieldProps>(
 
           {/* Tag count */}
           {showCount && value.length > 0 && (
-            <div className="text-xs text-fg-mute">
+            <div className="text-secondary text-fg-mute">
               {value.length}{maxTags && `/${maxTags}`} {value.length === 1 ? 'tag' : 'tags'}
             </div>
           )}

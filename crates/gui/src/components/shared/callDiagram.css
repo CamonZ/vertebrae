@@ -11,7 +11,7 @@
 .call-diagram-title,
 .call-diagram-columns {
   color: var(--color-fg-mute);
-  font: 500 11px/16px var(--font-sans);
+  font: 500 var(--text-meta)/1rem var(--font-sans);
 }
 
 .call-diagram-title {
@@ -32,14 +32,14 @@
   max-height: 24rem;
   overflow: auto;
   padding-block-end: 8px;
-  font: 12px/20px var(--font-mono);
+  font: var(--text-code)/1.25rem var(--font-mono);
 }
 
 .call-diagram-body > p {
   margin: 0;
   padding: 8px 12px;
   color: var(--color-fg-mute);
-  font: 12px/1.4 var(--font-sans);
+  font: var(--text-secondary)/1.4 var(--font-sans);
 }
 
 /* Keep Markdown prose list spacing out of diagrams. */
@@ -63,7 +63,7 @@
 .call-diagram-branch summary {
   cursor: pointer;
   color: var(--color-fg-mute);
-  font: 11px/16px var(--font-mono);
+  font: var(--text-meta)/1rem var(--font-mono);
 }
 
 .call-diagram-split {

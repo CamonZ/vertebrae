@@ -19,7 +19,7 @@ const SCHEMA_TYPE_COLORS: Record<string, string> = {
 function SchemaTypeBadge({ type }: { type: string }) {
   return (
     <span
-      className={`font-mono text-xs ${SCHEMA_TYPE_COLORS[type] ?? "text-[var(--color-fg-soft)]"}`}
+      className={`font-mono text-secondary ${SCHEMA_TYPE_COLORS[type] ?? "text-[var(--color-fg-soft)]"}`}
     >
       {type}
     </span>
@@ -58,7 +58,7 @@ function SchemaNode({
     typeDisplay = (
       <>
         <SchemaTypeBadge type={itemType} />
-        <span className="font-mono text-xs text-[var(--color-fg-mute)]">
+        <span className="font-mono text-secondary text-[var(--color-fg-mute)]">
           {"[]"}
         </span>
       </>
@@ -75,7 +75,7 @@ function SchemaNode({
       {/* Node row */}
       <div className="flex items-baseline gap-1 py-px">
         {depth > 0 && (
-          <span className="select-none whitespace-pre font-mono text-xs text-[var(--color-fg-faint)]">
+          <span className="select-none whitespace-pre font-mono text-secondary text-[var(--color-fg-faint)]">
             {connector}
           </span>
         )}
@@ -103,12 +103,12 @@ function SchemaNode({
 
         {/* Property name */}
         {name && (
-          <span className="font-mono text-xs font-medium text-[var(--color-fg)]">
+          <span className="font-mono text-secondary font-medium text-[var(--color-fg)]">
             {name}
           </span>
         )}
         {name && (
-          <span className="font-mono text-xs text-[var(--color-fg-mute)]">:</span>
+          <span className="font-mono text-secondary text-[var(--color-fg-mute)]">:</span>
         )}
 
         {/* Type */}
@@ -117,7 +117,7 @@ function SchemaNode({
         {/* Required marker */}
         {required && (
           <span
-            className="font-mono text-2xs text-[var(--color-err)]"
+            className="font-mono text-meta text-[var(--color-err)]"
             title="required"
           >
             *
@@ -126,7 +126,7 @@ function SchemaNode({
 
         {/* Root title */}
         {title && depth === 0 && (
-          <span className="ml-1 text-xs text-[var(--color-fg-mute)]">
+          <span className="ml-1 text-secondary text-[var(--color-fg-mute)]">
             — {title}
           </span>
         )}
@@ -135,7 +135,7 @@ function SchemaNode({
       {/* Description */}
       {description && depth > 0 && (
         <div className="ml-8 pl-1">
-          <span className="text-xs italic leading-tight text-[var(--color-fg-mute)]">
+          <span className="text-secondary italic leading-tight text-[var(--color-fg-mute)]">
             {description}
           </span>
         </div>

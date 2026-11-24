@@ -42,7 +42,7 @@ export function FilterBar({
           <button
             type="button"
             onClick={onClearAll}
-            className="ml-auto text-xs text-[var(--color-fg-mute)] hover:text-[var(--color-accent)]"
+            className="ml-auto text-secondary text-[var(--color-fg-mute)] hover:text-[var(--color-accent)]"
           >
             ✕ Clear filters
           </button>

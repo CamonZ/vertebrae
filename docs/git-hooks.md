@@ -30,7 +30,7 @@ The `.githooks/pre-commit` script runs these checks:
 3. `cargo llvm-cov --quiet --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance --fail-under-lines 75` — tests pass with >= 75% line coverage
 
 **GUI (React):**
-4. `npm run lint:css` (in `crates/gui`) runs Biome and verifies that CSS color literals live in `src/styles/tokens.css`.
+4. `npm run lint:css` (in `crates/gui`) runs Biome and verifies that CSS color literals and font sizes live in `src/styles/tokens.css`, and that TypeScript sources use the type-scale size classes.
 5. `npm run test` (in `crates/gui`) runs the React and TypeScript tests.
 
 ## Bypassing Hooks

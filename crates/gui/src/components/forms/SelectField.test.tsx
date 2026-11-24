@@ -340,7 +340,7 @@ describe("SelectField", () => {
         />
       );
       const select = screen.getByRole("combobox");
-      expect(select).toHaveClass("text-sm");
+      expect(select).toHaveClass("text-content");
     });
 
     it("renders medium select", () => {
@@ -354,7 +354,7 @@ describe("SelectField", () => {
         />
       );
       const select = screen.getByRole("combobox");
-      expect(select).toHaveClass("text-base");
+      expect(select).toHaveClass("text-content");
     });
 
     it("renders large select", () => {

@@ -96,7 +96,7 @@ export function Panel({
         className="absolute left-0 top-0 h-full w-1 cursor-col-resize bg-transparent hover:bg-[var(--color-accent)]"
       />
       <header className="flex items-center justify-between gap-3 border-b border-[var(--color-line)] px-4 py-3">
-        <div className="min-w-0 flex-1 truncate font-sans text-sm font-semibold text-[var(--color-fg)]">
+        <div className="min-w-0 flex-1 truncate font-sans text-content font-semibold text-[var(--color-fg)]">
           {title}
         </div>
         <div className="flex shrink-0 items-center gap-1">

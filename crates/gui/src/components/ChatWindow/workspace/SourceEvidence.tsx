@@ -105,7 +105,7 @@ export function SourceEvidence({
   return (
     <section
       aria-label={`Evidence ${path}`}
-      className="flex min-h-0 flex-1 flex-col gap-2 p-3 text-sm"
+      className="flex min-h-0 flex-1 flex-col gap-2 p-3 text-content"
     >
       <div className="document-toolbar">
         {!commit && (

@@ -55,7 +55,7 @@ export function RunsInChatButton({ taskId }: RunsInChatButtonProps) {
         </span>
       </button>
       {error && (
-        <p role="alert" className="mt-1 text-xs text-[var(--color-err)]">
+        <p role="alert" className="mt-1 text-secondary text-[var(--color-err)]">
           {error}
         </p>
       )}

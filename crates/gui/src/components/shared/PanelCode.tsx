@@ -43,7 +43,7 @@ export function PanelCode(props: PanelCodeProps) {
     <pre className="p-3 whitespace-pre-wrap">{props.source}</pre>
   );
   return (
-    <div className="min-w-0 max-w-full max-h-96 overflow-auto rounded-md border border-border bg-bg text-xs">
+    <div className="min-w-0 max-w-full max-h-96 overflow-auto rounded-md border border-border bg-bg text-secondary">
       <CodeBoundary fallback={fallback}>
         <Suspense fallback={fallback}>
           <PierrePanelCode {...props} />

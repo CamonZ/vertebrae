@@ -19,7 +19,7 @@ export function ChatQueue({
     return null;
 
   return (
-    <div className="flex flex-wrap items-start justify-between gap-2 px-3 py-1 text-xs text-[var(--color-fg-soft)]">
+    <div className="flex flex-wrap items-start justify-between gap-2 px-3 py-1 text-secondary text-[var(--color-fg-soft)]">
       <div className="min-w-0 flex-1">
         <Button
           size="sm"

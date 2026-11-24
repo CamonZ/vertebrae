@@ -36,7 +36,7 @@ export function KanbanColumn({
 
       <div className="flex flex-1 flex-col gap-2 overflow-y-auto p-3">
         {isEmpty ? (
-          <div className="flex flex-1 items-center justify-center px-4 py-6 text-center font-serif text-sm italic text-[var(--color-fg-faint)]">
+          <div className="flex flex-1 items-center justify-center px-4 py-6 text-center font-serif text-content italic text-[var(--color-fg-faint)]">
             Nothing here
           </div>
         ) : (

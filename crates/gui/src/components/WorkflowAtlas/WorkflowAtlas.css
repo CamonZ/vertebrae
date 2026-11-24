@@ -38,7 +38,7 @@
 }
 .uv-name .crumb {
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -72,7 +72,7 @@
 }
 .uv-name h1 {
   font-family: var(--serif);
-  font-size: var(--text-22);
+  font-size: var(--text-lede);
   font-style: italic;
   font-weight: 400;
   color: var(--fg);
@@ -161,7 +161,7 @@
 .factory-index-title {
   margin: 0;
   font-family: var(--serif);
-  font-size: 1.125rem;
+  font-size: var(--text-xl);
   font-style: italic;
   font-weight: 400;
   color: var(--fg);
@@ -169,7 +169,7 @@
 }
 .factory-index-count {
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   color: var(--fg-mute);
   font-variant-numeric: tabular-nums;
 }
@@ -177,7 +177,7 @@
   margin: var(--s-1) 0 0;
   padding: 0 var(--s-5) var(--s-4);
   border-bottom: 1px solid var(--line-soft);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   line-height: 1.45;
   color: var(--fg-mute);
 }
@@ -251,7 +251,7 @@
 .factory-index-name {
   display: -webkit-box;
   overflow: hidden;
-  font-size: var(--text-13);
+  font-size: var(--text-content);
   line-height: 1.35;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
@@ -266,7 +266,7 @@
   column-gap: var(--s-2);
   row-gap: 2px;
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-mute);
   font-variant-numeric: tabular-nums;
 }
@@ -299,7 +299,7 @@
   gap: var(--s-2);
   margin: var(--s-6) var(--s-5);
   color: var(--fg-soft);
-  font-size: var(--text-13);
+  font-size: var(--text-content);
 }
 .factory-index-empty q {
   color: var(--fg);
@@ -307,7 +307,7 @@
 }
 .factory-index-empty small {
   color: var(--fg-mute);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   line-height: 1.45;
 }
 
@@ -401,7 +401,7 @@
   position: absolute;
   top: 14px;
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -488,7 +488,7 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   font-weight: 450;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -496,7 +496,7 @@
 .factory-overview-meta {
   flex: none;
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-mute);
   font-variant-numeric: tabular-nums;
 }
@@ -514,7 +514,7 @@
   place-items: center;
   color: var(--fg-faint);
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -530,7 +530,7 @@
   gap: var(--s-3);
   color: var(--fg-faint);
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
@@ -647,7 +647,7 @@
   flex-shrink: 0;
   margin-left: auto;
   font-family: var(--mono);
-  font-size: var(--text-8);
+  font-size: var(--text-meta);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 0 var(--s-1);
@@ -659,7 +659,7 @@
 .uv-final {
   flex-shrink: 0;
   font-family: var(--mono);
-  font-size: var(--text-8);
+  font-size: var(--text-meta);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 0 var(--s-1);
@@ -673,7 +673,7 @@
   min-width: 0;
   font-family: var(--serif);
   font-style: italic;
-  font-size: calc(var(--text-15) * var(--reading-scale));
+  font-size: var(--text-content);
   color: var(--fg);
   letter-spacing: -0.01em;
   line-height: 1.2;
@@ -693,7 +693,7 @@
   align-items: center;
   gap: var(--s-1h);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   white-space: nowrap;
   overflow: hidden;
@@ -715,7 +715,7 @@
 }
 .uv-tasks {
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   color: var(--fg-mute);
   background: var(--bg-2);
   border: 1px solid var(--line-strong);
@@ -728,7 +728,7 @@
   align-items: center;
   gap: var(--s-1);
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   color: var(--accent);
   background: var(--accent-wash);
   border: 1px solid color-mix(in oklch, var(--accent) 32%, transparent);
@@ -749,7 +749,7 @@
 /* compact variant on the smaller step nodes */
 .uv-tc-step .uv-tasks,
 .uv-tc-step .uv-running {
-  font-size: var(--text-8);
+  font-size: var(--text-meta);
   padding: 0 2px;
 }
 .uv-tc-step .uv-running .pulse {
@@ -785,7 +785,7 @@
   position: absolute;
   z-index: 1;
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--fg-faint);
@@ -806,7 +806,7 @@
   z-index: 4;
   transform: translate(-50%, -50%);
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   letter-spacing: 0.02em;
   color: var(--fg-mute);
   background: color-mix(in oklch, var(--bg) 88%, transparent);
@@ -871,7 +871,7 @@
   border: none;
   border-bottom: 1px solid var(--line);
   color: var(--fg-mute);
-  font-size: var(--text-14);
+  font-size: var(--text-content);
   cursor: pointer;
   transition: all var(--t-fast) var(--ease);
   display: flex;
@@ -880,7 +880,7 @@
 }
 .uv-zoom button:last-child {
   border-bottom: none;
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
 }
 .uv-zoom button:hover {
   color: var(--accent);
@@ -897,7 +897,7 @@
   border-top: 1px solid var(--line);
   background: var(--bg);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
 }
 .uv-legend .lg-item {
@@ -964,7 +964,7 @@
   gap: var(--s-1h);
   white-space: nowrap;
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   font-weight: 500;
   color: var(--fg-mute);
 }
@@ -980,7 +980,7 @@
 .wfd-badge {
   flex-shrink: 0;
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   padding: 1px var(--s-1h);
@@ -992,7 +992,7 @@
 .wfd-status {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   padding: 1px var(--s-1h);
@@ -1043,7 +1043,7 @@
 .wfd-title {
   margin-top: var(--s-2h);
   font-family: var(--sans);
-  font-size: calc(var(--text-16) * var(--reading-scale));
+  font-size: var(--text-lg);
   font-weight: 600;
   color: var(--fg);
   line-height: 1.28;
@@ -1051,13 +1051,13 @@
 }
 .wfd-title.mono {
   font-family: var(--mono);
-  font-size: calc(var(--text-15) * var(--reading-scale));
+  font-size: var(--text-content);
   font-weight: 500;
 }
 .wfd-sub {
   margin-top: var(--s-1h);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   display: flex;
   align-items: center;
@@ -1098,14 +1098,14 @@
   align-items: center;
   gap: var(--s-2);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   font-weight: 600;
   color: var(--fg-soft);
   margin-bottom: var(--s-2);
 }
 .wfd-lbl .n {
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   font-weight: 400;
   color: var(--fg-faint);
 }
@@ -1136,7 +1136,7 @@
   background: transparent;
   color: var(--fg-mute);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   cursor: pointer;
 }
 .wfd-action:hover,
@@ -1166,7 +1166,7 @@
   gap: var(--s-1);
   color: var(--fg-mute);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
 }
 .wfd-editor input,
 .wfd-editor select,
@@ -1178,7 +1178,7 @@
   border-radius: var(--r-xs);
   background-color: var(--bg-2);
   color: var(--fg);
-  font: var(--text-11) var(--sans);
+  font: var(--text-meta) var(--sans);
   letter-spacing: normal;
   text-transform: none;
 }
@@ -1188,7 +1188,7 @@
 }
 .wfd-editor .wfd-help {
   color: var(--fg-ghost);
-  font-size: var(--text-8);
+  font-size: var(--text-meta);
   letter-spacing: normal;
   text-transform: none;
 }
@@ -1205,7 +1205,7 @@
   background: var(--accent-wash);
   color: var(--accent);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   cursor: pointer;
 }
 .wfd-save:disabled {
@@ -1215,11 +1215,11 @@
 .wfd-error {
   color: var(--err);
   font-family: var(--sans);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
 }
 .wfd-text {
   font-family: var(--sans);
-  font-size: calc(var(--text-12) * var(--reading-scale));
+  font-size: var(--text-secondary);
   color: var(--fg-soft);
   line-height: 1.55;
 }
@@ -1240,7 +1240,7 @@
 }
 .wfd-stat .k {
   font-family: var(--sans);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   color: var(--fg-mute);
 }
 .wfd-stat .k::first-letter {
@@ -1249,7 +1249,7 @@
 .wfd-stat .v {
   margin-top: 2px;
   font-family: var(--sans);
-  font-size: var(--text-16);
+  font-size: var(--text-lg);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--fg);
@@ -1257,7 +1257,7 @@
 }
 .wfd-stat .v.sm {
   font-family: var(--mono);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg-soft);
 }
 
@@ -1295,14 +1295,14 @@
   background: color-mix(in oklch, var(--kc) 22%, transparent);
   color: var(--kf);
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   font-weight: 600;
 }
 .wfd-step .nm {
   flex: 1;
   min-width: 0;
   font-family: var(--mono);
-  font-size: calc(var(--text-11) * var(--reading-scale));
+  font-size: var(--text-meta);
   color: var(--fg);
   white-space: nowrap;
   overflow: hidden;
@@ -1312,7 +1312,7 @@
   flex-shrink: 0;
   padding: 0 var(--s-1h);
   font-family: var(--mono);
-  font-size: var(--text-8);
+  font-size: var(--text-meta);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--kf);
@@ -1323,7 +1323,7 @@
   flex-shrink: 0;
   color: var(--fg-ghost);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
 }
 
 /* ── Transitions (flow rows) ── */
@@ -1379,7 +1379,7 @@
   align-items: center;
   gap: var(--s-1h);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-soft);
   white-space: nowrap;
   overflow: hidden;
@@ -1395,7 +1395,7 @@
   margin-left: auto;
   flex-shrink: 0;
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   color: var(--accent);
   padding: 1px var(--s-1h);
   border-radius: var(--r-xs);
@@ -1415,12 +1415,12 @@
 
 .wfd-empty {
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg-faint);
 }
 .wfd-placeholder {
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg-faint);
 }
 
@@ -1440,7 +1440,7 @@
   justify-content: center;
   border-radius: var(--r-sm);
   font-family: var(--mono);
-  font-size: var(--text-13);
+  font-size: var(--text-content);
   font-weight: 600;
   color: var(--kf, var(--accent));
   background: var(--kw, var(--accent-wash));
@@ -1455,7 +1455,7 @@
 .wfd-hash {
   margin-top: 1px;
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-ghost);
 }
 
@@ -1467,7 +1467,7 @@
   background: color-mix(in oklch, var(--bg) 30%, transparent);
   border: 1px solid color-mix(in oklch, var(--fg) 9%, transparent);
   font-family: var(--mono);
-  font-size: calc(var(--text-11) * var(--reading-scale));
+  font-size: var(--text-meta);
   line-height: 1.55;
   color: var(--fg-soft);
   white-space: pre-wrap;
@@ -1491,14 +1491,14 @@
 }
 .wfd-row .rk {
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg-mute);
   white-space: nowrap;
 }
 .wfd-row .rv {
   margin-left: auto;
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg-soft);
 }
 .wfd-row .wfd-pill,
@@ -1509,7 +1509,7 @@
 
 .wfd-pill {
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg);
   padding: 2px var(--s-2);
   background: color-mix(in oklch, var(--bg) 34%, transparent);
@@ -1519,7 +1519,7 @@
 }
 .wfd-tag {
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--kf, var(--fg));
@@ -1537,7 +1537,7 @@
 .wfd-error {
   margin-top: var(--s-1h);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--err, var(--accent));
 }
 
@@ -1549,7 +1549,7 @@
 }
 .wfd-chip {
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-soft);
   padding: 2px var(--s-2);
   background: color-mix(in oklch, var(--bg) 30%, transparent);
@@ -1562,7 +1562,7 @@
   align-items: center;
   gap: var(--s-1h);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   /* brighter accent foreground — matches the route badges in WorkflowInspector
      (.wfd-tr .lab), not the muddy --accent-mute. */
   color: var(--accent);
@@ -1766,19 +1766,19 @@
   border-radius: 8px;
   background: var(--color-bg-1);
   font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-size: var(--text-secondary);
   line-height: 1.45;
   color: var(--color-fg);
 }
 .uv-connections-title {
   margin: 0 0 8px;
-  font-size: 14px;
+  font-size: var(--text-content);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 .uv-connections h4 {
   margin: 10px 0 4px;
-  font-size: 12px;
+  font-size: var(--text-secondary);
   font-weight: 400;
   color: var(--color-fg-mute);
 }

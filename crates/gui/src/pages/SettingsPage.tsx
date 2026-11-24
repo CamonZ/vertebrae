@@ -52,12 +52,12 @@ import {
 } from "../stores/uiStore";
 import { THINKING_LINE_VARIANTS } from "../components/ThinkingLine/shaders";
 import {
-  isReadingPercent,
-  MAX_READING_PERCENT,
-  MIN_READING_PERCENT,
-  READING_SIZE_PRESETS,
-  readingPercent,
-  resolveReadingTextSize,
+  isTextSizePercent,
+  MAX_TEXT_SIZE_PERCENT,
+  MIN_TEXT_SIZE_PERCENT,
+  TEXT_SIZE_PRESETS,
+  textSizePercent,
+  resolveTextSize,
   TYPEFACE_ROLES,
 } from "../utils/readingAppearance";
 import { CustomTypefaceSettings } from "../components/settings/CustomTypefaceSettings";
@@ -140,12 +140,12 @@ function SettingRow({
     <div className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1fr)_minmax(220px,320px)] sm:items-center sm:gap-8">
       <div>
         <p
-          className="text-sm font-medium text-[var(--color-fg)]"
+          className="text-content font-medium text-[var(--color-fg)]"
           data-settings-anchor={anchor ? "" : undefined}
         >
           {label}
         </p>
-        <p className="mt-1 text-sm leading-5 text-[var(--color-fg-soft)]">
+        <p className="mt-1 text-content leading-5 text-[var(--color-fg-soft)]">
           {description}
         </p>
       </div>
@@ -154,7 +154,7 @@ function SettingRow({
   );
 }
 
-function CustomReadingScale({
+function CustomTextScale({
   percent,
   onChange,
 }: {
@@ -164,17 +164,17 @@ function CustomReadingScale({
   const [draft, setDraft] = useState<string | null>(null);
 
   return (
-    <label className="mt-2 grid gap-1 text-xs text-fg-soft">
+    <label className="mt-2 grid gap-1 text-secondary text-fg-soft">
       Scale (%)
       <NumberInput
         aria-label="Scale (%)"
         value={draft ?? String(percent)}
-        min={MIN_READING_PERCENT}
-        max={MAX_READING_PERCENT}
+        min={MIN_TEXT_SIZE_PERCENT}
+        max={MAX_TEXT_SIZE_PERCENT}
         onValueChange={(text) => {
           setDraft(text);
           const next = Number(text);
-          if (isReadingPercent(next) && next !== percent) onChange(next);
+          if (isTextSizePercent(next) && next !== percent) onChange(next);
         }}
         onBlur={() => setDraft(null)}
       />
@@ -484,7 +484,7 @@ function CodeAppearanceSettings({ onSaved }: { onSaved: () => void }) {
       </SettingRow>
       <section
         aria-label="Code preview"
-        className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 text-sm text-[var(--color-fg)]"
+        className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 text-content text-[var(--color-fg)]"
         data-testid="settings-code-preview"
       >
         <MarkdownContent text={CODE_PREVIEW_MARKDOWN} />
@@ -576,7 +576,7 @@ function DiffSettings({ onSaved }: { onSaved: () => void }) {
       >
         <Suspense
           fallback={
-            <div className="px-3 py-3 font-mono text-eyebrow text-fg-mute">
+            <div className="px-3 py-3 font-mono text-meta text-fg-mute">
               Loading diff preview…
             </div>
           }
@@ -592,7 +592,7 @@ function SaveIndicator({ visible }: { visible: boolean }) {
   if (!visible) return null;
   return (
     <span
-      className="inline-flex items-center gap-1.5 text-xs text-[var(--color-ok)]"
+      className="inline-flex items-center gap-1.5 text-secondary text-[var(--color-ok)]"
       data-testid="settings-saved-indicator"
       role="status"
     >
@@ -719,7 +719,7 @@ function HarnessDefaultsSection({
             {info.label}
           </h2>
           <span
-            className={`rounded-full px-2 py-0.5 font-mono text-[length:var(--text-9)] uppercase tracking-[0.08em] ${
+            className={`rounded-full px-2 py-0.5 font-mono text-meta uppercase tracking-[0.08em] ${
               info.available
                 ? "bg-[var(--color-ok-wash)] text-[var(--color-ok)]"
                 : "bg-[var(--color-warn-wash)] text-[var(--color-warn)]"
@@ -735,21 +735,21 @@ function HarnessDefaultsSection({
               resetProvider(providerId);
               onSaved();
             }}
-            className="shrink-0 text-xs font-medium text-[var(--color-accent)] hover:underline"
+            className="shrink-0 text-secondary font-medium text-[var(--color-accent)] hover:underline"
             data-testid={`reset-harness-defaults-${testIdPrefix}`}
           >
             Reset
           </button>
         )}
       </div>
-      <p className="mt-1 max-w-2xl text-sm leading-5 text-[var(--color-fg-soft)]">
+      <p className="mt-1 max-w-2xl text-content leading-5 text-[var(--color-fg-soft)]">
         Defaults for new {info.label} chats. Running and resumed sessions keep
         their existing configuration.
       </p>
 
       {!info.available && info.unavailable_reason && (
         <p
-          className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
+          className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-secondary text-[var(--color-warn)]"
           data-testid={`harness-unavailable-${testIdPrefix}`}
         >
           {info.unavailable_reason}
@@ -796,7 +796,7 @@ function HarnessDefaultsSection({
             ]}
           />
           {staleModel && (
-            <p className="mt-1 text-xs text-[var(--color-warn)]">
+            <p className="mt-1 text-secondary text-[var(--color-warn)]">
               Saved model is unavailable; new chats use{" "}
               {modelLabel(info, effectiveModelId)}.
             </p>
@@ -841,7 +841,7 @@ function HarnessDefaultsSection({
               ]}
             />
             {staleSpeedTier && (
-              <p className="mt-1 text-xs text-[var(--color-warn)]">
+              <p className="mt-1 text-secondary text-[var(--color-warn)]">
                 Saved speed tier is unavailable for the selected model; new
                 chats use the provider default.
               </p>
@@ -890,13 +890,13 @@ function HarnessDefaultsSection({
             ]}
           />
           {stalePersonality && (
-            <p className="mt-1 text-xs text-[var(--color-warn)]">
+            <p className="mt-1 text-secondary text-[var(--color-warn)]">
               Saved {info.harness === "claude" ? "style" : "personality"} is
               unavailable; new chats use the provider default.
             </p>
           )}
           {!info.available && personalityOptions.length === 0 && (
-            <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
+            <p className="mt-1 text-secondary text-[var(--color-fg-mute)]">
               Unavailable until this harness is installed and its capabilities
               are discovered.
             </p>
@@ -948,7 +948,7 @@ function HarnessDefaultsSection({
               ]}
             />
             {staleReasoningEffort && (
-              <p className="mt-1 text-xs text-[var(--color-warn)]">
+              <p className="mt-1 text-secondary text-[var(--color-warn)]">
                 Saved effort is unavailable for the selected model; new chats
                 use the provider default.
               </p>
@@ -998,7 +998,7 @@ function HarnessDefaultsSection({
             ]}
           />
           {stalePermission && (
-            <p className="mt-1 text-xs text-[var(--color-warn)]">
+            <p className="mt-1 text-secondary text-[var(--color-warn)]">
               Saved policy is unavailable; new chats use{" "}
               {permissionLabel(info, effectivePermissionMode)}.
             </p>
@@ -1146,7 +1146,7 @@ function UpdateChannelSelector({ state }: { state: GuiUpdateState }) {
         />
         {!selectedState.available && selectedState.error && (
           <p
-            className="mt-2 text-xs text-[var(--color-warn)]"
+            className="mt-2 text-secondary text-[var(--color-warn)]"
             data-testid="settings-update-channel-unavailable"
             role="status"
           >
@@ -1173,7 +1173,7 @@ function UpdateStateMessage({
   return (
     <div
       className={[
-        "mt-8 rounded-[var(--radius-md)] border p-5 text-sm",
+        "mt-8 rounded-[var(--radius-md)] border p-5 text-content",
         intent === "alert"
           ? "border-[var(--color-err)]/30 bg-[var(--color-err-wash)] text-[var(--color-err)]"
           : "border-dashed border-[var(--color-line-strong)] text-[var(--color-fg-mute)]",
@@ -1227,7 +1227,7 @@ function UpdateApplyStatus({ apply }: { apply: GuiUpdateApplyState }) {
       <p className="t-label text-[var(--color-fg-mute)]">
         {failed ? "Update needs attention" : "Update complete"}
       </p>
-      <p className="mt-2 text-sm leading-6 text-[var(--color-fg-soft)]">
+      <p className="mt-2 text-content leading-6 text-[var(--color-fg-soft)]">
         {failed
           ? (result.recovery_action ??
             "The previous active components were preserved. You can retry after correcting the release.")
@@ -1239,7 +1239,7 @@ function UpdateApplyStatus({ apply }: { apply: GuiUpdateApplyState }) {
       >
         {result.progress.map((component) => (
           <li
-            className="flex items-center justify-between gap-3 px-3 py-2 text-xs"
+            className="flex items-center justify-between gap-3 px-3 py-2 text-secondary"
             key={component.component}
           >
             <span className="font-mono text-[var(--color-fg)]">
@@ -1253,7 +1253,7 @@ function UpdateApplyStatus({ apply }: { apply: GuiUpdateApplyState }) {
       </ul>
       {relaunchAvailable && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-line)] pt-4">
-          <span className="text-xs text-[var(--color-fg-mute)]">
+          <span className="text-secondary text-[var(--color-fg-mute)]">
             The new GUI will take effect after a relaunch.
           </span>
           <Button
@@ -1407,7 +1407,7 @@ function LocalBackendAdoptionSection({
               : "Adopt existing backend"}
         </Button>
       </div>
-      <div className="mt-5 space-y-2 text-sm leading-6 text-[var(--color-fg-soft)]">
+      <div className="mt-5 space-y-2 text-content leading-6 text-[var(--color-fg-soft)]">
         <p>
           Adoption preserves the existing PostgreSQL 17 volume, database
           account, and configured API token. It may reconcile the backend
@@ -1470,14 +1470,14 @@ function AdoptLocalBackendDialog({
       className="max-w-[calc(100vw-2rem)]"
     >
       <div className="space-y-5">
-        <p className="text-sm leading-6 text-[var(--color-fg-soft)]">
+        <p className="text-content leading-6 text-[var(--color-fg-soft)]">
           This is an explicit adoption of the existing backend. Vertebrae will
           preserve the PostgreSQL 17 volume, database account, and configured
           API token. It may reconcile the Docker container, but it will not
           initialize a project, reseed data, or replace/delete the volume.
         </p>
         {message && (
-          <p className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 text-sm leading-6 text-[var(--color-fg-soft)]">
+          <p className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 text-content leading-6 text-[var(--color-fg-soft)]">
             {message}
           </p>
         )}
@@ -1520,42 +1520,42 @@ function ReviewLocalBackendUpdateDialog({
       className="max-w-[calc(100vw-2rem)]"
     >
       <div className="space-y-5">
-        <p className="text-sm leading-6 text-[var(--color-fg-soft)]">
+        <p className="text-content leading-6 text-[var(--color-fg-soft)]">
           Review the verified local backend release before approving it. No
           Docker image will be downloaded or restarted until you approve.
         </p>
         <dl className="grid gap-3 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 sm:grid-cols-2">
           <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
-            <dd className="mt-1 text-sm text-[var(--color-fg)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">Channel</dt>
+            <dd className="mt-1 text-content text-[var(--color-fg)]">
               {channelLabel(update.channel)}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">
               Target version
             </dt>
-            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
               {update.version}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">Build</dt>
+            <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
               {update.build}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">
               Image digest
             </dt>
-            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
               {imageDigest(update.imageRef)}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">Published</dt>
-            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">Published</dt>
+            <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
               {backendImageTimestamp(update.generatedAt)}
             </dd>
           </div>
@@ -1615,36 +1615,36 @@ function LocalBackendUpdateSection({
       </div>
       <dl className="mt-6 grid gap-4 border-y border-[var(--color-line)] py-4 sm:grid-cols-4">
         <div className="min-w-0">
-          <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
-          <dd className="mt-1 text-sm text-[var(--color-fg)]">
+          <dt className="text-secondary text-[var(--color-fg-mute)]">Channel</dt>
+          <dd className="mt-1 text-content text-[var(--color-fg)]">
             {channelLabel(update.channel)}
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-[var(--color-fg-mute)]">Current image</dt>
-          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+          <dt className="text-secondary text-[var(--color-fg-mute)]">Current image</dt>
+          <dd className="mt-1 break-all font-mono text-content text-[var(--color-fg)]">
             {imageDigest(update.currentImageRef)}
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+          <dt className="text-secondary text-[var(--color-fg-mute)]">Build</dt>
+          <dd className="mt-1 break-all font-mono text-content text-[var(--color-fg)]">
             {update.build}
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-[var(--color-fg-mute)]">
+          <dt className="text-secondary text-[var(--color-fg-mute)]">
             Current published
           </dt>
-          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-content text-[var(--color-fg)]">
             {backendImageTimestamp(update.currentImageCreatedAt)}
           </dd>
         </div>
         <div className="min-w-0">
-          <dt className="text-xs text-[var(--color-fg-mute)]">
+          <dt className="text-secondary text-[var(--color-fg-mute)]">
             Target published
           </dt>
-          <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 break-all font-mono text-content text-[var(--color-fg)]">
             {backendImageTimestamp(update.generatedAt)}
           </dd>
         </div>
@@ -1667,7 +1667,7 @@ function UpdateComponents({ update }: { update: GuiUpdateInfo }) {
         >
           Components
         </h3>
-        <span className="text-xs text-[var(--color-fg-mute)]">
+        <span className="text-secondary text-[var(--color-fg-mute)]">
           Current → target
         </span>
       </div>
@@ -1683,10 +1683,10 @@ function UpdateComponents({ update }: { update: GuiUpdateInfo }) {
               <span className="font-medium text-[var(--color-fg)]">
                 {item.label}
               </span>
-              <span className="font-mono text-xs text-[var(--color-fg-soft)]">
+              <span className="font-mono text-secondary text-[var(--color-fg-soft)]">
                 {row.currentVersion} → {row.targetVersion}
               </span>
-              <span className="text-xs text-[var(--color-fg-mute)]">
+              <span className="text-secondary text-[var(--color-fg-mute)]">
                 {row.status}
               </span>
             </li>
@@ -1726,13 +1726,13 @@ function ReviewUpdateDialog({
     >
       <div className="space-y-5">
         <div>
-          <p className="text-sm leading-6 text-[var(--color-fg-soft)]">
+          <p className="text-content leading-6 text-[var(--color-fg-soft)]">
             Review the verified release before approving it. This screen does
             not download, install, restart, or relaunch anything.
           </p>
           {stale && (
             <p
-              className="mt-3 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
+              className="mt-3 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-secondary text-[var(--color-warn)]"
               data-testid="settings-review-stale"
               role="status"
             >
@@ -1744,30 +1744,30 @@ function ReviewUpdateDialog({
 
         <dl className="grid gap-3 rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-1)] p-4 sm:grid-cols-2">
           <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">
               Current version
             </dt>
-            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
               {update.currentVersion}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">
               Target version
             </dt>
-            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
               {update.version}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
-            <dd className="mt-1 text-sm text-[var(--color-fg)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">Channel</dt>
+            <dd className="mt-1 text-content text-[var(--color-fg)]">
               {update.channel ?? GUI_UPDATE_CHANNEL}
             </dd>
           </div>
           <div>
-            <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-            <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">Build</dt>
+            <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
               {update.build ?? NOT_PROVIDED}
             </dd>
           </div>
@@ -1785,31 +1785,31 @@ function ReviewUpdateDialog({
           </h3>
           <dl className="mt-3 divide-y divide-[var(--color-line)] rounded-[var(--radius-md)] border border-[var(--color-line)]">
             <div className="flex items-center justify-between gap-4 px-4 py-3">
-              <dt className="text-sm text-[var(--color-fg-soft)]">Signature</dt>
-              <dd className="text-right text-sm text-[var(--color-ok)]">
+              <dt className="text-content text-[var(--color-fg-soft)]">Signature</dt>
+              <dd className="text-right text-content text-[var(--color-ok)]">
                 {verification?.signature ??
                   "Verified by signed updater metadata"}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-4 px-4 py-3">
-              <dt className="text-sm text-[var(--color-fg-soft)]">Preflight</dt>
-              <dd className="text-right text-sm text-[var(--color-ok)]">
+              <dt className="text-content text-[var(--color-fg-soft)]">Preflight</dt>
+              <dd className="text-right text-content text-[var(--color-ok)]">
                 {verification?.preflight ?? "Ready for review"}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-4 px-4 py-3">
-              <dt className="text-sm text-[var(--color-fg-soft)]">
+              <dt className="text-content text-[var(--color-fg-soft)]">
                 Compatibility
               </dt>
-              <dd className="text-right text-sm text-[var(--color-fg)]">
+              <dd className="text-right text-content text-[var(--color-fg)]">
                 {verification?.compatibility ?? "Not provided"}
               </dd>
             </div>
             <div className="flex items-center justify-between gap-4 px-4 py-3">
-              <dt className="text-sm text-[var(--color-fg-soft)]">
+              <dt className="text-content text-[var(--color-fg-soft)]">
                 Component metadata
               </dt>
-              <dd className="text-right text-sm text-[var(--color-fg)]">
+              <dd className="text-right text-content text-[var(--color-fg)]">
                 {verification?.componentManifest ??
                   (hasComponentMetadata ? "Available" : "Not available")}
               </dd>
@@ -1849,28 +1849,28 @@ function BackendCurrentDetails({ state }: { state: GuiUpdateState }) {
       data-testid="settings-backend-current"
     >
       <div className="min-w-0">
-        <dt className="text-xs text-[var(--color-fg-mute)]">Current version</dt>
-        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+        <dt className="text-secondary text-[var(--color-fg-mute)]">Current version</dt>
+        <dd className="mt-1 break-all font-mono text-content text-[var(--color-fg)]">
           {backend.currentVersion ?? NOT_PROVIDED}
         </dd>
       </div>
       <div className="min-w-0">
-        <dt className="text-xs text-[var(--color-fg-mute)]">Image</dt>
-        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+        <dt className="text-secondary text-[var(--color-fg-mute)]">Image</dt>
+        <dd className="mt-1 break-all font-mono text-content text-[var(--color-fg)]">
           {backend.currentImageRef
             ? imageDigest(backend.currentImageRef)
             : NOT_PROVIDED}
         </dd>
       </div>
       <div className="min-w-0">
-        <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+        <dt className="text-secondary text-[var(--color-fg-mute)]">Build</dt>
+        <dd className="mt-1 break-all font-mono text-content text-[var(--color-fg)]">
           {backend.currentBuild ?? NOT_PROVIDED}
         </dd>
       </div>
       <div className="min-w-0">
-        <dt className="text-xs text-[var(--color-fg-mute)]">Published</dt>
-        <dd className="mt-1 break-all font-mono text-sm text-[var(--color-fg)]">
+        <dt className="text-secondary text-[var(--color-fg-mute)]">Published</dt>
+        <dd className="mt-1 break-all font-mono text-content text-[var(--color-fg)]">
           {backendImageTimestamp(backend.currentImageCreatedAt)}
         </dd>
       </div>
@@ -1908,16 +1908,16 @@ function FrontendUpdatesSection({
         data-testid="settings-frontend-current"
       >
         <div>
-          <dt className="text-xs text-[var(--color-fg-mute)]">
+          <dt className="text-secondary text-[var(--color-fg-mute)]">
             Current version
           </dt>
-          <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+          <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
             {state.currentVersion ?? NOT_PROVIDED}
           </dd>
         </div>
         <div>
-          <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
-          <dd className="mt-1 text-sm text-[var(--color-fg)]">
+          <dt className="text-secondary text-[var(--color-fg-mute)]">Channel</dt>
+          <dd className="mt-1 text-content text-[var(--color-fg)]">
             {channelLabel(state.selectedChannel ?? GUI_UPDATE_CHANNEL)}
           </dd>
         </div>
@@ -1928,7 +1928,7 @@ function FrontendUpdatesSection({
         <div className="mt-6" data-testid="settings-updates-available">
           {stale && (
             <p
-              className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
+              className="mb-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-secondary text-[var(--color-warn)]"
               data-testid="settings-updates-stale"
               role="status"
             >
@@ -1937,7 +1937,7 @@ function FrontendUpdatesSection({
           )}
           {state.checking && (
             <p
-              className="mb-4 text-xs text-[var(--color-fg-mute)]"
+              className="mb-4 text-secondary text-[var(--color-fg-mute)]"
               data-testid="settings-updates-checking"
               role="status"
             >
@@ -1968,28 +1968,28 @@ function FrontendUpdatesSection({
 
             <dl className="mt-6 grid gap-4 border-y border-[var(--color-line)] py-4 sm:grid-cols-4">
               <div>
-                <dt className="text-xs text-[var(--color-fg-mute)]">Channel</dt>
-                <dd className="mt-1 text-sm text-[var(--color-fg)]">
+                <dt className="text-secondary text-[var(--color-fg-mute)]">Channel</dt>
+                <dd className="mt-1 text-content text-[var(--color-fg)]">
                   {update.channel ?? GUI_UPDATE_CHANNEL}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-[var(--color-fg-mute)]">Version</dt>
-                <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+                <dt className="text-secondary text-[var(--color-fg-mute)]">Version</dt>
+                <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
                   {update.version}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-[var(--color-fg-mute)]">Build</dt>
-                <dd className="mt-1 font-mono text-sm text-[var(--color-fg)]">
+                <dt className="text-secondary text-[var(--color-fg-mute)]">Build</dt>
+                <dd className="mt-1 font-mono text-content text-[var(--color-fg)]">
                   {update.build ?? NOT_PROVIDED}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-[var(--color-fg-mute)]">
+                <dt className="text-secondary text-[var(--color-fg-mute)]">
                   Published
                 </dt>
-                <dd className="mt-1 text-sm text-[var(--color-fg)]">
+                <dd className="mt-1 text-content text-[var(--color-fg)]">
                   {publicationDate(update) ?? NOT_PROVIDED}
                 </dd>
               </div>
@@ -2006,7 +2006,7 @@ function FrontendUpdatesSection({
               >
                 Release notes
               </h3>
-              <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-[var(--color-fg-soft)]">
+              <p className="mt-3 whitespace-pre-wrap text-content leading-6 text-[var(--color-fg-soft)]">
                 {notes ?? "No release notes were provided for this release."}
               </p>
             </section>
@@ -2260,8 +2260,8 @@ export function SettingsPage({
   );
   const theme = useUIStore((state) => state.theme);
   const setTheme = useUIStore((state) => state.setTheme);
-  const readingTextSize = useUIStore((state) => state.readingTextSize);
-  const setReadingTextSize = useUIStore((state) => state.setReadingTextSize);
+  const textSize = useUIStore((state) => state.textSize);
+  const setTextSize = useUIStore((state) => state.setTextSize);
   const typePairing = useUIStore((state) => state.typePairing);
   const setTypePairing = useUIStore((state) => state.setTypePairing);
   const useCustomTypeface = useUIStore((state) => state.useCustomTypeface);
@@ -2452,7 +2452,7 @@ export function SettingsPage({
           />
           {externalEditorsError && (
             <p
-              className="mt-2 text-xs text-[var(--color-warn)]"
+              className="mt-2 text-secondary text-[var(--color-warn)]"
               role="status"
               data-testid="settings-external-editor-error"
             >
@@ -2553,7 +2553,7 @@ export function SettingsPage({
               <h1 className="font-serif text-4xl text-[var(--color-fg)]">
                 {SETTINGS_COPY[activeSection].title}
               </h1>
-              <p className="mt-3 text-base leading-7 text-[var(--color-fg-soft)]">
+              <p className="mt-3 text-content leading-7 text-[var(--color-fg-soft)]">
                 {SETTINGS_COPY[activeSection].description}
               </p>
             </div>
@@ -2576,7 +2576,7 @@ export function SettingsPage({
             onClose={() => setPendingSection(null)}
             title="Unsaved settings"
           >
-            <p className="mb-5 text-sm">
+            <p className="mb-5 text-content">
               Discard your unsaved settings changes and switch sections?
             </p>
             <div className="flex gap-3">
@@ -2597,7 +2597,7 @@ export function SettingsPage({
           </Modal>
           {activeSection === "chat" && storageWarning && (
             <p
-              className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
+              className="mt-4 rounded-[var(--radius-md)] border border-[var(--color-warn)]/30 bg-[var(--color-warn-wash)] px-3 py-2 text-secondary text-[var(--color-warn)]"
               role="status"
               data-testid="settings-storage-warning"
             >
@@ -2628,10 +2628,10 @@ export function SettingsPage({
                 />
               </SettingRow>
               <div className="border-b border-[var(--color-line)] py-5">
-                <p className="text-sm font-medium text-[var(--color-fg)]" data-settings-anchor>
+                <p className="text-content font-medium text-[var(--color-fg)]" data-settings-anchor>
                   Accent
                 </p>
-                <p className="mb-3 mt-1 text-sm text-[var(--color-fg-mute)]">
+                <p className="mb-3 mt-1 text-content text-[var(--color-fg-mute)]">
                   Marks selection, focus and primary actions. Each accent is
                   tuned to look the same on standard and HDR displays.
                 </p>
@@ -2664,49 +2664,49 @@ export function SettingsPage({
               </div>
               <SettingRow
                 anchor
-                label="Reading text size"
-                description="Adjust text in chat, tasks, workflows, and Changes."
+                label="Text size"
+                description="Scales all text in the app."
               >
                 <Select
-                  aria-label="Reading text size"
-                  value={typeof readingTextSize === "number" ? "custom" : readingTextSize}
+                  aria-label="Text size"
+                  value={typeof textSize === "number" ? "custom" : textSize}
                   onChange={(event) => {
                     const next = event.target.value;
-                    setReadingTextSize(
+                    setTextSize(
                       next === "custom"
-                        ? readingPercent(readingTextSize)
-                        : resolveReadingTextSize(next)
+                        ? textSizePercent(textSize)
+                        : resolveTextSize(next)
                     );
                     setSavedFeedback(true);
                   }}
                   options={[
-                    ...READING_SIZE_PRESETS.map(({ value, label, percent }) => ({
+                    ...TEXT_SIZE_PRESETS.map(({ value, label, percent }) => ({
                       value,
                       label: `${label} · ${percent}%`,
                     })),
-                    { value: "custom", label: typeof readingTextSize === "number" ? `Custom · ${readingTextSize}%` : "Custom" },
+                    { value: "custom", label: typeof textSize === "number" ? `Custom · ${textSize}%` : "Custom" },
                   ]}
                 />
-                {typeof readingTextSize === "number" && (
-                  <CustomReadingScale
-                    percent={readingTextSize}
+                {typeof textSize === "number" && (
+                  <CustomTextScale
+                    percent={textSize}
                     onChange={(percent) => {
-                      setReadingTextSize(percent);
+                      setTextSize(percent);
                       setSavedFeedback(true);
                     }}
                   />
                 )}
               </SettingRow>
               <div className="mb-2 grid gap-2 rounded-lg bg-bg-2 px-4 py-3" aria-label="Typography preview" role="group">
-                <p className="text-[length:var(--chat-user-size)] text-fg">What changed in this run?</p>
+                <p className="text-content text-fg">What changed in this run?</p>
                 <p className="t-prose text-fg-soft">The run paused at review. Two findings need a decision.</p>
-                <code className="font-mono text-xs text-fg-mute">review.ts</code>
+                <code className="font-mono text-secondary text-fg-mute">review.ts</code>
               </div>
               <div className="border-b border-[var(--color-line)] py-5">
-                <p className="text-sm font-medium text-[var(--color-fg)]" data-settings-anchor>
+                <p className="text-content font-medium text-[var(--color-fg)]" data-settings-anchor>
                   Typeface
                 </p>
-                <p className="mb-3 mt-1 text-sm text-[var(--color-fg-mute)]">
+                <p className="mb-3 mt-1 text-content text-[var(--color-fg-mute)]">
                   Each pairing sets the UI, reading text (chat replies,
                   descriptions), titles and code.
                 </p>
@@ -2748,13 +2748,13 @@ export function SettingsPage({
                     }}
                   >
                     <span className="type-card-display">Custom</span>
-                    <span className="text-xs text-fg-soft">
+                    <span className="text-secondary text-fg-soft">
                       Based on {TYPE_PAIRINGS.find(({ value }) => value === (customTypefaceBase ?? typePairing))?.label}
                     </span>
                     {TYPEFACE_ROLES.map(({ id, label }) => {
                       const name = customTypefaces[id];
                       return name && (
-                        <span key={id} className="truncate text-xs text-fg-mute" title={name}>
+                        <span key={id} className="truncate text-secondary text-fg-mute" title={name}>
                           {label} · {name}
                         </span>
                       );
@@ -2840,21 +2840,21 @@ export function SettingsPage({
 
               {isLoading ? (
                 <div
-                  className="mt-8 text-sm text-[var(--color-fg-mute)]"
+                  className="mt-8 text-content text-[var(--color-fg-mute)]"
                   role="status"
                 >
                   Loading harness capabilities…
                 </div>
               ) : error ? (
                 <div
-                  className="mt-8 rounded-[var(--radius-md)] border border-[var(--color-err)]/30 bg-[var(--color-err-wash)] p-4 text-sm text-[var(--color-err)]"
+                  className="mt-8 rounded-[var(--radius-md)] border border-[var(--color-err)]/30 bg-[var(--color-err-wash)] p-4 text-content text-[var(--color-err)]"
                   role="alert"
                   data-testid="settings-error"
                 >
                   {error}
                 </div>
               ) : providerSections.length === 0 ? (
-                <div className="mt-8 rounded-[var(--radius-md)] border border-dashed border-[var(--color-line-strong)] p-6 text-sm text-[var(--color-fg-mute)]">
+                <div className="mt-8 rounded-[var(--radius-md)] border border-dashed border-[var(--color-line-strong)] p-6 text-content text-[var(--color-fg-mute)]">
                   No local chat harnesses are available.
                 </div>
               ) : (

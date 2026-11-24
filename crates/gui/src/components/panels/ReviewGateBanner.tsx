@@ -61,16 +61,16 @@ export function ReviewGateBanner({
           <div className="flex items-center gap-2">
             <span
               aria-hidden
-              className="text-[var(--color-warn)] text-base"
+              className="text-[var(--color-warn)] text-lg"
             >
               👁
             </span>
-            <span className="font-serif text-base text-[var(--color-fg)]">
+            <span className="font-serif text-lg text-[var(--color-fg)]">
               {title}
             </span>
           </div>
           {description && (
-            <div className="mt-1 font-serif text-sm font-light italic text-[var(--color-fg-soft)]">
+            <div className="mt-1 font-serif text-content font-light italic text-[var(--color-fg-soft)]">
               {description}
             </div>
           )}
@@ -103,7 +103,7 @@ export function ReviewGateBanner({
           className={[
             "w-full resize-none rounded-[var(--radius-md)] border px-2 py-1.5",
             "border-[var(--color-line-strong)] bg-[var(--color-bg-1)]",
-            "font-sans text-sm text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)]",
+            "font-sans text-content text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)]",
           ].join(" ")}
         />
       )}

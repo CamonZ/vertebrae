@@ -1,8 +1,9 @@
 import {
+  migrateLegacyTextSize,
   resolveCustomTypefaces,
-  resolveReadingTextSize,
+  resolveTextSize,
   type CustomTypefaces,
-  type ReadingTextSize,
+  type TextSize,
 } from "../utils/readingAppearance";
 import {
   readInlineDiscussionPreference,
@@ -112,17 +113,9 @@ export function resolveThinkingIndicatorStyle(
     : DEFAULT_THINKING_INDICATOR_STYLE;
 }
 
-/**
- * Density preference for the typography scale.
- * - 'auto':        Let useDensity() decide based on scaleFactor + window width.
- * - 'comfortable': Pin to comfortable mode (lifts small tokens ~1 step).
- * - 'default':     Pin to base token values (no data-density attribute).
- * - 'compact':     Pin to compact mode (shrinks small tokens ~1 step).
- */
-export type DensityPreference = "auto" | "comfortable" | "default" | "compact";
-
 interface UIState {
-  readingTextSize: ReadingTextSize;
+  /** Scales the whole type scale (Settings → Appearance → Text size). */
+  textSize: TextSize;
   customTypefaces: CustomTypefaces;
   useCustomTypeface: boolean;
   customTypefaceBase: TypePairing | null;
@@ -135,8 +128,6 @@ interface UIState {
   accent: Accent;
   /** Current assistant thinking indicator style */
   thinkingIndicatorStyle: ThinkingIndicatorStyle;
-  /** Current density preference */
-  density: DensityPreference;
   /** Application name or path used to open local file references. */
   externalEditor: string;
   /** Stalled user turns before a gate chat is steered back to its draft. */
@@ -154,7 +145,7 @@ interface UIState {
 }
 
 interface UIActions {
-  setReadingTextSize: (size: ReadingTextSize) => void;
+  setTextSize: (size: TextSize) => void;
   setCustomTypefaces: (fonts: CustomTypefaces) => void;
   selectCustomTypeface: () => void;
   setCustomTypefaceBase: (base: TypePairing) => void;
@@ -169,8 +160,6 @@ interface UIActions {
   setAccent: (accent: Accent) => void;
   /** Set the assistant thinking indicator style */
   setThinkingIndicatorStyle: (style: ThinkingIndicatorStyle) => void;
-  /** Set the density preference */
-  setDensity: (density: DensityPreference) => void;
   /** Set the application used to open local file references. */
   setExternalEditor: (externalEditor: string) => void;
   /** Set when stalled gate chats are steered. */
@@ -191,6 +180,17 @@ interface UIActions {
 
 export type UIStore = UIState & UIActions;
 
+/**
+ * Upgrade saved preferences to the current version. Version 0 stored
+ * `density` and `readingTextSize`; both fold into `textSize`.
+ */
+export function migrateUIPreferences(persisted: unknown, version: number): unknown {
+  if (!persisted || typeof persisted !== "object") return persisted;
+  if (version >= 1) return persisted;
+  const { density, readingTextSize, ...rest } = persisted as Record<string, unknown>;
+  return { ...rest, textSize: migrateLegacyTextSize(readingTextSize, density) };
+}
+
 export const useUIStore = create<UIStore>()(
   persist(
     (set) => ({
@@ -206,9 +206,8 @@ export const useUIStore = create<UIStore>()(
       thinkingIndicatorStyle: DEFAULT_THINKING_INDICATOR_STYLE,
       setThinkingIndicatorStyle: (thinkingIndicatorStyle) =>
         set({ thinkingIndicatorStyle }),
-      readingTextSize: "default",
-      setReadingTextSize: (size) =>
-        set({ readingTextSize: resolveReadingTextSize(size) }),
+      textSize: "default",
+      setTextSize: (size) => set({ textSize: resolveTextSize(size) }),
       customTypefaces: {},
       useCustomTypeface: false,
       customTypefaceBase: null,
@@ -219,8 +218,6 @@ export const useUIStore = create<UIStore>()(
         })),
       setCustomTypefaceBase: (customTypefaceBase) => set({ customTypefaceBase }),
       setCustomTypefaces: (fonts) => set({ customTypefaces: resolveCustomTypefaces(fonts) }),
-      density: "auto",
-      setDensity: (density) => set({ density }),
       externalEditor: "",
       setExternalEditor: (externalEditor) => set({ externalEditor }),
       gateSteeringThresholds: DEFAULT_GATE_STEERING_THRESHOLDS,
@@ -250,6 +247,9 @@ export const useUIStore = create<UIStore>()(
     }),
     {
       name: "vertebrae-ui-storage",
+      // v1: Text size replaced Density and Reading text size.
+      version: 1,
+      migrate: (persisted, version) => migrateUIPreferences(persisted, version),
       // Only persist UI preferences, not transient state
       partialize: (state) => ({
         inlineDiscussionPreference: state.inlineDiscussionPreference,
@@ -257,11 +257,10 @@ export const useUIStore = create<UIStore>()(
         typePairing: state.typePairing,
         accent: state.accent,
         thinkingIndicatorStyle: state.thinkingIndicatorStyle,
-        readingTextSize: state.readingTextSize,
+        textSize: state.textSize,
         customTypefaces: state.customTypefaces,
         useCustomTypeface: state.useCustomTypeface,
         customTypefaceBase: state.customTypefaceBase,
-        density: state.density,
         externalEditor: state.externalEditor,
         gateSteeringThresholds: state.gateSteeringThresholds,
         codeThemeDark: state.codeThemeDark,
@@ -286,7 +285,7 @@ export const useUIStore = create<UIStore>()(
           thinkingIndicatorStyle: resolveThinkingIndicatorStyle(
             stored.thinkingIndicatorStyle
           ),
-          readingTextSize: resolveReadingTextSize(stored.readingTextSize),
+          textSize: resolveTextSize(stored.textSize),
           customTypefaces,
           useCustomTypeface: typeof stored.useCustomTypeface === "boolean"
             ? stored.useCustomTypeface

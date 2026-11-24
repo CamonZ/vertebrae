@@ -64,7 +64,7 @@ export const FormField = forwardRef<HTMLDivElement, FormFieldProps>(
         {/* Label with required indicator */}
         <label
           htmlFor={inputId}
-          className="flex items-baseline gap-1 text-xs font-medium text-fg-soft"
+          className="flex items-baseline gap-1 text-secondary font-medium text-fg-soft"
         >
           {label}
           {required && (
@@ -77,7 +77,7 @@ export const FormField = forwardRef<HTMLDivElement, FormFieldProps>(
         {/* Optional help text — Hearth field hint: small muted serif italic
             (cursive role C). */}
         {helpText && (
-          <small className="font-serif text-13 italic text-fg-mute">
+          <small className="font-serif text-content italic text-fg-mute">
             {helpText}
           </small>
         )}
@@ -88,7 +88,7 @@ export const FormField = forwardRef<HTMLDivElement, FormFieldProps>(
 
         {/* Error message */}
         {error && (
-          <small className="flex items-center gap-1 text-2xs text-err" role="alert">
+          <small className="flex items-center gap-1 text-meta text-err" role="alert">
             <svg
               className="h-3 w-3 flex-shrink-0"
               fill="none"

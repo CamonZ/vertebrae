@@ -179,15 +179,15 @@ export function ChatEmptyState({
       </div>
       {notice ?? (
         <>
-          <p className="text-sm text-[var(--color-fg-soft)]">
+          <p className="text-content text-[var(--color-fg-soft)]">
             Create, edit, and delete tasks, steps, and workflows
           </p>
-          <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
+          <p className="mt-1 text-secondary text-[var(--color-fg-mute)]">
             Or run a task through a workflow
           </p>
           {shortcut ? (
             <p
-              className="mt-3 text-xs text-[var(--color-fg-mute)]"
+              className="mt-3 text-secondary text-[var(--color-fg-mute)]"
               data-testid="chat-help-shortcut-hint"
               aria-label={`Press ${shortcut.ariaLabel} to show keyboard shortcuts`}
             >
@@ -199,7 +199,7 @@ export function ChatEmptyState({
             </p>
           ) : (
             <p
-              className="mt-3 text-xs text-[var(--color-fg-mute)]"
+              className="mt-3 text-secondary text-[var(--color-fg-mute)]"
               data-testid="chat-help-shortcut-fallback"
             >
               Use the chat panel&apos;s keyboard shortcuts for help
@@ -1124,7 +1124,7 @@ export function ChatMessages({
           >
             {isLoadingInitialHistory && (
               <div
-                className="text-center text-xs text-[var(--color-fg-mute)]"
+                className="text-center text-secondary text-[var(--color-fg-mute)]"
                 role="status"
               >
                 Loading conversation history…
@@ -1132,7 +1132,7 @@ export function ChatMessages({
             )}
             {isLoadingOlderMessages && (
               <div
-                className="text-center text-xs text-[var(--color-fg-mute)]"
+                className="text-center text-secondary text-[var(--color-fg-mute)]"
                 role="status"
               >
                 Loading older messages…
@@ -1140,7 +1140,7 @@ export function ChatMessages({
             )}
             {replayError && (
               <div
-                className="text-center text-xs text-[var(--color-warn)]"
+                className="text-center text-secondary text-[var(--color-warn)]"
                 role="status"
               >
                 {replayError}
@@ -1179,7 +1179,7 @@ export function ChatMessages({
                 role="status"
                 aria-live="polite"
               >
-                <span className="text-xs text-[var(--color-fg-mute)]">
+                <span className="text-secondary text-[var(--color-fg-mute)]">
                   Conversation compacted
                   {compactionSummary.trigger
                     ? ` (${compactionSummary.trigger})`

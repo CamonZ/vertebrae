@@ -8,10 +8,10 @@ export function FlowSpecErrors({
 }) {
   return (
     <div role="alert" data-testid="flow-errors">
-      <div className="mb-1 text-sm font-medium text-err">
+      <div className="mb-1 text-content font-medium text-err">
         Flow spec has {errors.length} {errors.length === 1 ? "error" : "errors"}
       </div>
-      <ul className="list-disc pl-5 font-mono text-xs text-fg">
+      <ul className="list-disc pl-5 font-mono text-secondary text-fg">
         {errors.map((e, i) => (
           <li key={i} data-path={e.path}>
             {formatFlowError(e)}
@@ -31,7 +31,7 @@ export function FlowSpecProgress({
   return (
     <div
       aria-busy="true"
-      className="font-mono text-xs text-[var(--color-fg-mute)]"
+      className="font-mono text-secondary text-[var(--color-fg-mute)]"
       data-testid="flow-laying-out"
     >
       {children}

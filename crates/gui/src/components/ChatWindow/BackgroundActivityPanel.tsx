@@ -234,7 +234,7 @@ export function BackgroundActivityPanel({
       {...{ [CHAT_AREA_ATTRIBUTE]: "background" }}
       onKeyDown={(event) => onListKeyDown(event, rows, toggleOutput)}
       onFocus={(event) => enterFirstRow(event, ROW_SELECTOR)}
-      className="flex min-h-0 flex-1 flex-col text-xs text-[var(--color-fg-soft)]"
+      className="flex min-h-0 flex-1 flex-col text-secondary text-[var(--color-fg-soft)]"
     >
       {/* The tab already names this section; the header is status only. */}
       {(rows.length > 0 || onClose) && (

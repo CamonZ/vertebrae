@@ -130,7 +130,7 @@ export function NotificationsPanel() {
           data-testid="notification-list"
         >
           {orderedNotifications.length === 0 ? (
-            <p className="px-4 py-10 text-center font-mono text-xs text-[var(--color-fg-mute)]">
+            <p className="px-4 py-10 text-center font-mono text-secondary text-[var(--color-fg-mute)]">
               No activity yet.
             </p>
           ) : (
@@ -186,7 +186,7 @@ function NotificationItem({
       <div className="flex items-start gap-3">
         <span
           aria-hidden="true"
-          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] font-mono text-xs ${config.colorClass}`}
+          className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] font-mono text-secondary ${config.colorClass}`}
         >
           {config.icon}
         </span>
@@ -206,20 +206,20 @@ function NotificationItem({
             <span className="t-label text-[var(--color-fg-mute)]">
               {notification.entity}
             </span>
-            <span className="ml-auto shrink-0 font-mono text-2xs text-[var(--color-fg-mute)]">
+            <span className="ml-auto shrink-0 font-mono text-meta text-[var(--color-fg-mute)]">
               {formatNotificationAge(notification.timestamp)}
             </span>
           </div>
           {durable ? (
             <div
-              className="mt-1 min-w-0 text-sm leading-5 text-[var(--color-fg-soft)]"
+              className="mt-1 min-w-0 text-content leading-5 text-[var(--color-fg-soft)]"
               data-testid={`notification-markdown-${notification.id}`}
               onClickCapture={handleMessageClick}
             >
               <MarkdownContent text={notification.message} />
             </div>
           ) : (
-            <p className="mt-1 text-sm leading-5 text-[var(--color-fg-soft)]">
+            <p className="mt-1 text-content leading-5 text-[var(--color-fg-soft)]">
               {notification.message}
             </p>
           )}

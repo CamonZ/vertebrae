@@ -207,13 +207,13 @@ export function StoryNavigator({
       data-open={open}
       data-mode={watching ? "watch" : "browse"}
       data-playing={playing}
-      className="flow-story pointer-events-auto absolute top-2 bottom-2 flex min-h-0 flex-col bg-[var(--color-bg-1)] break-words text-xs text-fg"
+      className="flow-story pointer-events-auto absolute top-2 bottom-2 flex min-h-0 flex-col bg-[var(--color-bg-1)] break-words text-secondary text-fg"
       style={{ left: ZOOM_GUTTER, width }}
     >
       <button
         ref={toggle}
         type="button"
-        className="flex min-h-10 shrink-0 items-center px-3 text-left text-[13px] font-medium"
+        className="flex min-h-10 shrink-0 items-center px-3 text-left text-content font-medium"
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={`${id}-content`}
@@ -237,7 +237,7 @@ export function StoryNavigator({
         hidden={!open}
         className={open ? "flex min-h-0 flex-1 flex-col" : "hidden"}
       >
-        <div className="flex items-center justify-between px-3 pb-2 text-[11px] text-fg-mute">
+        <div className="flex items-center justify-between px-3 pb-2 text-meta text-fg-mute">
           <span>
             {watching
               ? `${playing ? "Playing" : "Paused"} · beat ${current + 1}`
@@ -382,12 +382,12 @@ export function StoryNavigator({
             className="flow-story-selection max-h-[40%] shrink-0 overflow-y-auto bg-[var(--color-bg-2)] p-3"
             data-testid="flow-story-inspectors"
           >
-            <div className="mb-2 text-[11px] text-fg-mute">Selected</div>
+            <div className="mb-2 text-meta text-fg-mute">Selected</div>
             {inspectors}
           </div>
         )}
         <div
-          className="shrink-0 px-3 py-2 text-[11px] leading-5 text-fg-mute"
+          className="shrink-0 px-3 py-2 text-meta leading-5 text-fg-mute"
           aria-label="Story keyboard shortcuts"
         >
           ↑↓ navigate · Enter open

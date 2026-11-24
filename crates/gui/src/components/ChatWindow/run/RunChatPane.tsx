@@ -225,7 +225,7 @@ export const RunPaneWindow = memo(function RunPaneWindow({
     body = (
       <div
         data-testid="run-pane-error"
-        className="m-4 rounded-[var(--radius-md)] border border-[var(--color-err)]/40 bg-[var(--color-err-wash)] p-4 text-sm text-[var(--color-err)]"
+        className="m-4 rounded-[var(--radius-md)] border border-[var(--color-err)]/40 bg-[var(--color-err-wash)] p-4 text-content text-[var(--color-err)]"
       >
         Failed to load run: {error}
       </div>
@@ -234,7 +234,7 @@ export const RunPaneWindow = memo(function RunPaneWindow({
     body = (
       <div
         data-testid="run-pane-loading"
-        className="flex h-full items-center justify-center p-8 text-sm text-[var(--color-fg-mute)]"
+        className="flex h-full items-center justify-center p-8 text-content text-[var(--color-fg-mute)]"
       >
         Loading run…
       </div>
@@ -243,7 +243,7 @@ export const RunPaneWindow = memo(function RunPaneWindow({
     body = (
       <div
         data-testid="run-pane-empty"
-        className="p-8 text-center text-sm text-[var(--color-fg-mute)]"
+        className="p-8 text-center text-content text-[var(--color-fg-mute)]"
       >
         {focusThreadId
           ? "This subagent is no longer part of the run."
@@ -305,7 +305,7 @@ export const RunPaneWindow = memo(function RunPaneWindow({
             <PaneControls leading={leading} onClosePanel={closeChatPanel} />
           </div>
           <div
-            className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 pt-1 font-mono text-2xs text-[var(--color-fg-mute)]"
+            className="flex flex-wrap items-center gap-x-2 gap-y-1 px-1 pt-1 font-mono text-meta text-[var(--color-fg-mute)]"
             data-testid="run-pane-meta"
           >
             <span className="uppercase tracking-wider">

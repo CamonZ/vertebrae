@@ -23,7 +23,7 @@ function ResolvedArtifactEmbed({
     <span>
       {children}
       {error && (
-        <span className="block text-sm" role="alert">
+        <span className="block text-content" role="alert">
           Unable to load artifact.{" "}
           <button type="button" onClick={refetch}>
             Retry artifact

@@ -63,7 +63,7 @@ function Group({
 }) {
   return (
     <>
-      <span className="ml-3 text-xs text-[var(--color-fg-mute)] first:ml-0">
+      <span className="ml-3 text-secondary text-[var(--color-fg-mute)] first:ml-0">
         {label}
       </span>
       {children}
@@ -159,7 +159,7 @@ export function ThinkingLinesGalleryPage() {
           {paused ? "paused" : "pause"}
         </Chip>
         <span
-          className="ml-auto font-mono text-xs tabular-nums text-[var(--color-fg-mute)]"
+          className="ml-auto font-mono text-secondary tabular-nums text-[var(--color-fg-mute)]"
           data-testid="thinking-lines-stats"
         >
           {stats.fps.toFixed(0)} fps · {stats.frameMs.toFixed(2)} ms/frame CPU ·{" "}
@@ -213,13 +213,13 @@ function VariantRow({
   return (
     <section data-testid={`thinking-line-row-${variant.id}`}>
       <div className="mb-1.5 flex items-baseline gap-2">
-        <h2 className="text-sm font-medium text-[var(--color-fg)]">
+        <h2 className="text-content font-medium text-[var(--color-fg)]">
           <span className="mr-1.5 font-mono text-[var(--color-fg-mute)]">
             {String(index).padStart(2, "0")}
           </span>
           {variant.name}
         </h2>
-        <span className="truncate text-xs text-[var(--color-fg-mute)]">
+        <span className="truncate text-secondary text-[var(--color-fg-mute)]">
           {variant.blurb}
         </span>
       </div>
@@ -233,7 +233,7 @@ function VariantRow({
           text={phrase}
           style={{ height }}
         />
-        <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] text-[var(--color-fg-mute)]">
+        <div className="mt-1 flex items-center justify-end gap-1.5 text-meta text-[var(--color-fg-mute)]">
           compact
           <span className="inline-block w-10 overflow-hidden rounded-sm bg-[var(--color-bg-2)]">
             <ThinkingLine
@@ -248,7 +248,7 @@ function VariantRow({
         </div>
       </div>
       {error && (
-        <pre className="mt-1 whitespace-pre-wrap text-xs text-[var(--color-err)]">
+        <pre className="mt-1 whitespace-pre-wrap text-secondary text-[var(--color-err)]">
           {error}
         </pre>
       )}

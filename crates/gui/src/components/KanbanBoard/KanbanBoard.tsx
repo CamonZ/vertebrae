@@ -225,7 +225,7 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
               <button
                 type="button"
                 onClick={handleClearFilters}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-bg-2/50 px-3 py-1.5 text-xs text-fg-mute transition-all hover:border-err/30 hover:bg-err/10 hover:text-err"
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-bg-2/50 px-3 py-1.5 text-secondary text-fg-mute transition-all hover:border-err/30 hover:bg-err/10 hover:text-err"
               >
                 <svg
                   className="h-3.5 w-3.5"
@@ -247,7 +247,7 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
 
             {totalFiltered > 0 && (
               <span
-                className="text-eyebrow text-[var(--color-fg-mute)]"
+                className="text-meta text-[var(--color-fg-mute)]"
                 data-testid="board-task-count"
               >
                 <b className="font-semibold text-[var(--color-fg)]">
@@ -265,13 +265,13 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
                 <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-                <p className="text-sm text-fg-mute">Loading board...</p>
+                <p className="text-content text-fg-mute">Loading board...</p>
               </div>
             </div>
           ) : error ? (
             <div className="flex h-full items-center justify-center">
               <div className="text-center">
-                <p className="text-sm text-err">{error}</p>
+                <p className="text-content text-err">{error}</p>
               </div>
             </div>
           ) : columnOrder.length === 0 ? (
@@ -291,10 +291,10 @@ export function KanbanBoard({ factoryName }: KanbanBoardProps) {
                     d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2"
                   />
                 </svg>
-                <p className="text-sm text-fg-mute">
+                <p className="text-content text-fg-mute">
                   No tasks with kanban columns assigned
                 </p>
-                <p className="mt-1 text-xs text-fg-mute">
+                <p className="mt-1 text-secondary text-fg-mute">
                   Assign workflows with kanban columns to see tasks on the board
                 </p>
               </div>

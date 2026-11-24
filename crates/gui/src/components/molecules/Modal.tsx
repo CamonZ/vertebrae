@@ -97,7 +97,7 @@ export function Modal(props: ModalProps) {
       >
         {(title || showClose) && (
           <div className="flex items-center justify-between gap-3 border-b border-[var(--color-line)] px-5 py-3.5">
-            <div className="min-w-0 flex-1 truncate font-sans text-base font-semibold text-[var(--color-fg)]">
+            <div className="min-w-0 flex-1 truncate font-sans text-content font-semibold text-[var(--color-fg)]">
               {title}
             </div>
             {showClose && (
@@ -115,7 +115,7 @@ export function Modal(props: ModalProps) {
         )}
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {isConfirm(props) ? (
-            <p className="text-sm text-[var(--color-fg-soft)]">
+            <p className="text-content text-[var(--color-fg-soft)]">
               {props.description}
             </p>
           ) : (

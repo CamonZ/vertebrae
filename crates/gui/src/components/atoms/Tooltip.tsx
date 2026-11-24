@@ -165,7 +165,7 @@ export function Tooltip({
         "pointer-events-none max-w-[220px] whitespace-nowrap",
         // Portal tooltips must clear the fixed chat surface (z-index: 70).
         portal ? "z-[100]" : "z-50",
-        "px-2 py-1 font-sans text-xs leading-tight",
+        "px-2 py-1 font-sans text-secondary leading-tight",
         "bg-[var(--color-bg-3)] text-[var(--color-fg)] border border-[var(--color-line-strong)]",
         "rounded-[var(--radius-sm)] shadow-[var(--shadow-2)]",
         "transition-opacity duration-[var(--t-fast)] ease-[var(--ease-default)]",

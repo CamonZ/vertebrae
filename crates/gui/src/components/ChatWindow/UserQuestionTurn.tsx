@@ -227,10 +227,10 @@ export function UserQuestionTurn({
                         }
                       />
                       <span>
-                        <span className="block text-sm text-[var(--color-fg)]">
+                        <span className="block text-content text-[var(--color-fg)]">
                           {option.label}
                         </span>
-                        <span className="block text-xs text-[var(--color-fg-soft)]">
+                        <span className="block text-secondary text-[var(--color-fg-soft)]">
                           {option.description}
                         </span>
                       </span>
@@ -239,7 +239,7 @@ export function UserQuestionTurn({
                 })}
               </div>
               {!message.presentation && (
-              <label className="block text-xs text-[var(--color-fg-soft)]">
+              <label className="block text-secondary text-[var(--color-fg-soft)]">
                 Other answer (optional)
                 <input
                   type="text"

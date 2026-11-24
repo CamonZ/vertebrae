@@ -43,7 +43,7 @@ export function ConversationLogViewer({
 
   if (events.length === 0) {
     return (
-      <div className="text-sm text-fg-mute text-center py-4">
+      <div className="text-content text-fg-mute text-center py-4">
         No conversation data available
       </div>
     );
@@ -55,7 +55,7 @@ export function ConversationLogViewer({
     >
       <div className="space-y-1">
         <div className="flex justify-end mb-2">
-          <span className="text-2xs text-fg-mute">
+          <span className="text-meta text-fg-mute">
             Click timestamps to toggle:{" "}
             {timeMode === "absolute" ? "HH:MM:SS.mmm" : "time before"}
           </span>
@@ -74,7 +74,7 @@ export function ConversationLogViewer({
         {hasMore && (
           <button
             onClick={() => setLimit((l) => l + 50)}
-            className="w-full py-2 text-sm text-accent hover:text-accent-deep text-center"
+            className="w-full py-2 text-content text-accent hover:text-accent-deep text-center"
           >
             Show more ({events.length - limit} remaining)
           </button>

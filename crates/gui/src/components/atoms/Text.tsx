@@ -40,14 +40,14 @@ const variantClass: Record<TextVariant, string> = {
   "heading-xl": "font-serif text-5xl leading-none tracking-tight font-normal",
   "heading-lg": "font-serif text-4xl leading-[1.05] tracking-tight font-normal",
   "heading-md": "font-sans text-xl leading-tight font-medium",
-  lede: "font-serif text-[length:var(--text-22)] leading-[1.45] font-light italic",
-  body: "font-sans text-base leading-relaxed font-normal",
-  "body-sm": "font-sans text-sm leading-snug font-normal",
-  label: "font-sans text-sm leading-snug font-medium",
-  caption: "font-sans text-xs leading-snug font-normal",
+  lede: "font-serif text-lede leading-[1.45] font-light italic",
+  body: "font-sans text-content leading-relaxed font-normal",
+  "body-sm": "font-sans text-content leading-snug font-normal",
+  label: "font-sans text-content leading-snug font-medium",
+  caption: "font-sans text-secondary leading-snug font-normal",
   eyebrow: "t-label",
-  mono: "font-mono text-sm leading-relaxed font-normal",
-  "mono-sm": "font-mono text-xs leading-snug font-normal",
+  mono: "font-mono text-content leading-relaxed font-normal",
+  "mono-sm": "font-mono text-secondary leading-snug font-normal",
 };
 
 const colorClass: Record<TextColor, string> = {

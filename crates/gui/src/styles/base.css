@@ -69,14 +69,14 @@
   }
 
   .caption {
-    font-size: var(--text-xs); /* 12px */
+    font-size: var(--text-secondary);
     color: var(--color-fg-mute);
   }
 
   /* Lede / subtitle — muted, light-weight serif italic (cursive role c). */
   .lede {
     font-family: var(--font-serif);
-    font-size: var(--text-22); /* 22px */
+    font-size: var(--text-lede);
     font-weight: 300;
     font-style: italic;
     line-height: 1.45;
@@ -87,7 +87,7 @@
   /* Plate / figure marker — mono eyebrow with a serif-italic numeral. */
   .plate-num {
     font-family: var(--font-mono);
-    font-size: var(--text-eyebrow); /* 11px */
+    font-size: var(--text-meta);
     color: var(--color-accent);
     letter-spacing: 0.14em;
     text-transform: uppercase;
@@ -120,8 +120,10 @@
      on 1x displays it drops macOS stroke dilation and glyphs turn thin and
      jagged, so 1x keeps the platform default. Never synthesize bold or italic
      (faux styles look smeared); faces render in the weights they ship. */
+  /* One type scale: every font token is rem, so Settings → Text size scales
+     the whole interface through this root size alone. */
   html {
-    font-size: 16px;
+    font-size: calc(var(--text-root) * var(--text-scale));
     -webkit-font-smoothing: auto;
     -moz-osx-font-smoothing: auto;
     text-rendering: optimizeLegibility;
@@ -137,17 +139,9 @@
     }
   }
 
-  /* Larger base on big Retina screens only: at 1x a 17px root puts rem-based
-     text on fractional pixel sizes, which render soft. */
-  @media (width >= 1600px) and (min-resolution: 2dppx) {
-    html {
-      font-size: 17px;
-    }
-  }
-
   body {
     font-family: var(--font-sans);
-    font-size: var(--text-base);
+    font-size: var(--text-content);
     font-weight: 400;
     line-height: 1.6;
     letter-spacing: -0.005em;
@@ -211,7 +205,7 @@
 
   .eyebrow {
     font-family: var(--font-mono);
-    font-size: var(--text-eyebrow);
+    font-size: var(--text-meta);
     font-weight: 500;
     letter-spacing: 0.16em;
     text-transform: uppercase;
@@ -233,7 +227,7 @@
      tracked caps; mono is for data only. */
   .t-label {
     font-family: var(--font-sans);
-    font-size: var(--text-12);
+    font-size: var(--text-secondary);
     font-weight: 600;
     letter-spacing: 0;
     text-transform: none;
@@ -241,12 +235,12 @@
   }
   .t-meta {
     font-family: var(--font-mono);
-    font-size: var(--text-11);
+    font-size: var(--text-meta);
     letter-spacing: 0;
   }
   .t-prose {
     font-family: var(--font-prose);
-    font-size: calc(var(--prose-base-size) * var(--reading-scale));
+    font-size: var(--text-content);
     line-height: var(--prose-leading);
   }
 
@@ -256,7 +250,7 @@
   }
   .markdown-content p,
   .markdown-content li {
-    font-size: calc(var(--prose-base-size) * var(--reading-scale));
+    font-size: var(--text-content);
     line-height: var(--prose-leading);
   }
   .markdown-content h1,
@@ -280,7 +274,7 @@
   /* Legacy global eyebrow → section label. */
   .eyebrow {
     font-family: var(--font-sans);
-    font-size: var(--text-12);
+    font-size: var(--text-secondary);
     font-weight: 600;
     letter-spacing: 0;
     text-transform: none;

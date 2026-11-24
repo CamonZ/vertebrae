@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { useUIStore } from "./uiStore";
+import { migrateUIPreferences, useUIStore } from "./uiStore";
 import { DEFAULT_DIFF_PREFERENCES } from "../utils/codeAppearance";
 
 describe("uiStore", () => {
@@ -9,11 +9,10 @@ describe("uiStore", () => {
       inlineDiscussionPreference: { mode: "follow" },
       theme: "system",
       thinkingIndicatorStyle: "shimmer",
-      readingTextSize: "default",
+      textSize: "default",
       customTypefaces: {},
       useCustomTypeface: false,
       customTypefaceBase: null,
-      density: "auto",
       externalEditor: "",
       codeThemeDark: "pierre-dark",
       codeThemeLight: "pierre-light",
@@ -34,9 +33,8 @@ describe("uiStore", () => {
       expect(state.thinkingIndicatorStyle).toBe("shimmer");
     });
 
-    it("has auto density by default", () => {
-      const state = useUIStore.getState();
-      expect(state.density).toBe("auto");
+    it("uses the default text size by default", () => {
+      expect(useUIStore.getState().textSize).toBe("default");
     });
 
     it("uses the operating system default editor by default", () => {
@@ -110,33 +108,18 @@ describe("uiStore", () => {
     });
   });
 
-  describe("setDensity", () => {
-    it("sets density to comfortable", () => {
-      useUIStore.getState().setDensity("comfortable");
+  describe("setTextSize", () => {
+    it("stores presets and in-range percentages", () => {
+      useUIStore.getState().setTextSize("large");
+      expect(useUIStore.getState().textSize).toBe("large");
 
-      expect(useUIStore.getState().density).toBe("comfortable");
+      useUIStore.getState().setTextSize(112);
+      expect(useUIStore.getState().textSize).toBe(112);
     });
 
-    it("sets density to compact", () => {
-      useUIStore.getState().setDensity("compact");
-
-      expect(useUIStore.getState().density).toBe("compact");
-    });
-
-    it("sets density to default", () => {
-      useUIStore.setState({ density: "comfortable" });
-
-      useUIStore.getState().setDensity("default");
-
-      expect(useUIStore.getState().density).toBe("default");
-    });
-
-    it("sets density to auto", () => {
-      useUIStore.setState({ density: "compact" });
-
-      useUIStore.getState().setDensity("auto");
-
-      expect(useUIStore.getState().density).toBe("auto");
+    it("falls back to the default for out-of-range values", () => {
+      useUIStore.getState().setTextSize(400);
+      expect(useUIStore.getState().textSize).toBe("default");
     });
   });
 
@@ -153,40 +136,49 @@ describe("uiStore", () => {
   });
 
   describe("persistence", () => {
-    it("rehydrates reading size independently of typeface and density", async () => {
-      useUIStore.getState().setReadingTextSize("extra-large");
+    it("rehydrates text size independently of typeface", async () => {
+      useUIStore.getState().setTextSize("extra-large");
       useUIStore.getState().setTypePairing("technical");
-      useUIStore.getState().setDensity("compact");
       await useUIStore.persist.rehydrate();
 
       expect(useUIStore.getState()).toMatchObject({
-        readingTextSize: "extra-large",
+        textSize: "extra-large",
         typePairing: "technical",
-        density: "compact",
       });
 
       localStorage.setItem(
         "vertebrae-ui-storage",
-        JSON.stringify({ state: { typePairing: "editorial" }, version: 0 })
+        JSON.stringify({ state: { typePairing: "editorial" }, version: 1 })
       );
       await useUIStore.persist.rehydrate();
-      expect(useUIStore.getState().readingTextSize).toBe("default");
+      expect(useUIStore.getState().textSize).toBe("default");
     });
 
-    it("restores custom reading scale and font overrides from storage", async () => {
+    it("resets a corrupt stored text size to the default", async () => {
+      localStorage.setItem(
+        "vertebrae-ui-storage",
+        JSON.stringify({ state: { textSize: "huge" }, version: 1 })
+      );
+      await useUIStore.persist.rehydrate();
+      expect(useUIStore.getState().textSize).toBe("default");
+    });
+
+    it("migrates a version 0 reading size and drops density", async () => {
       localStorage.setItem(
         "vertebrae-ui-storage",
         JSON.stringify({
-          state: { readingTextSize: 112, customTypefaces: { prose: " Georgia ", mono: 42 } },
+          state: { readingTextSize: 112, density: "compact", customTypefaces: { prose: " Georgia ", mono: 42 } },
           version: 0,
         })
       );
       await useUIStore.persist.rehydrate();
       expect(useUIStore.getState()).toMatchObject({
-        readingTextSize: 112,
+        textSize: 112,
         customTypefaces: { prose: "Georgia" },
         useCustomTypeface: true,
       });
+      expect(useUIStore.getState()).not.toHaveProperty("readingTextSize");
+      expect(useUIStore.getState()).not.toHaveProperty("density");
       expect(useUIStore.getState().customTypefaces.mono).toBeUndefined();
     });
 
@@ -206,11 +198,10 @@ describe("uiStore", () => {
         typePairing: "editorial",
         accent: "orchid",
         thinkingIndicatorStyle: "uplink",
-        readingTextSize: "default",
+        textSize: "default",
         customTypefaces: {},
         useCustomTypeface: false,
         customTypefaceBase: null,
-        density: "auto",
         externalEditor: "",
         gateSteeringThresholds: { soft: 3, form: 6, escape: 9 },
         codeThemeDark: "pierre-dark",
@@ -381,4 +372,29 @@ it("persists and rehydrates inline discussion choice without changing main chat 
   const legacyState = useUIStore.getState();
 
   expect(legacyState.inlineDiscussionPreference).toEqual({ mode: "follow" });
+});
+
+describe("migrateUIPreferences", () => {
+  it.each([
+    [{ readingTextSize: "larger", density: "compact" }, "larger"],
+    [{ readingTextSize: "small", density: "auto" }, 95],
+    [{ readingTextSize: 140 }, 140],
+    [{ readingTextSize: "default", density: "comfortable" }, "medium"],
+    [{ readingTextSize: "default", density: "compact" }, "small"],
+    [{ density: "default" }, "default"],
+    [{ density: "auto" }, "default"],
+    [{ readingTextSize: "constructor", density: 7 }, "default"],
+    [{}, "default"],
+  ])("maps %j to text size %j", (legacy, textSize) => {
+    expect(migrateUIPreferences({ theme: "dark", ...legacy }, 0)).toEqual({
+      theme: "dark",
+      textSize,
+    });
+  });
+
+  it("leaves current and unreadable state alone", () => {
+    const current = { textSize: "large", density: "compact" };
+    expect(migrateUIPreferences(current, 1)).toBe(current);
+    expect(migrateUIPreferences(null, 0)).toBeNull();
+  });
 });

@@ -28,6 +28,9 @@ typography:
   family-sans: "Geist"
   family-mono: "JetBrains Mono"
   family-serif: "Newsreader"
+  size-content: "14px"
+  size-secondary: "13px"
+  size-meta: "12px"
 rounded:
   xs: "2px"
   sm: "3px"
@@ -98,7 +101,36 @@ Theme is toggled by adding `light` or `dark` to `<html>` (see
 | Data | JetBrains Mono 400/500 | IDs, timestamps, token/context counts, model IDs, paths, code, step-type values |
 | Display | Newsreader | Brand wordmark and project monogram, empty-state marks, Hearth "cursive roles" (accent numerals, ledes, field hints, inline `<em>`) |
 
-- Base interface size is 13px (`--text-13`), secondary 12px, meta 11px.
+
+### Type scale
+
+One scale on a 14px content base. Every font size uses one of its tokens, defined
+in `crates/gui/src/styles/tokens.css`; text of equal importance uses the same
+token on every surface.
+
+| Token | Default | Use |
+| --- | --- | --- |
+| `--text-content` (`text-content`) | 14px | Chat prose, user turns, the composer, file names, table cells, task titles, body copy |
+| `--text-code` (`text-code`) | = content | Code blocks, Pierre diffs (`--diffs-font-size`), `CodeSnippet`, `PierrePanelCode`, call trees |
+| `--text-secondary` (`text-secondary`) | 13px | Supporting text, controls, labels, descriptions, inline code within content |
+| `--text-meta` (`text-meta`) | 12px | Timestamps, counts, IDs, badges, key hints, eyebrows; the smallest text size |
+| `--text-lg` … `--text-5xl`, `--text-lede`, `--text-hero`, `--text-display` | 16–56px, clamp | Headings, ledes and display moments |
+
+- **One scaling mechanism.** Settings → Appearance → Text size (75–150%) sets
+  `--text-scale`, and the root font size is `16px × --text-scale`. All tokens
+  are rem, so every surface scales together. There is no density mode, no
+  per-surface reading scale and no screen- or width-dependent root size.
+- **No literal font sizes.** Stylelint's `vertebrae/no-font-size-literals`
+  rejects px/rem font sizes (including the `font` shorthand and
+  `--*font-size` properties) outside `tokens.css`;
+  `scripts/check-font-size-classes.mjs` rejects `text-[Npx]` classes, retired
+  Tailwind sizes (`text-xs`, `text-sm`, `text-base`, …) and literal inline
+  `fontSize` values. Both run in `npm run lint:css`. Relative sizes (`em`, `%`)
+  are allowed for fixed relationships to the surrounding text.
+- **Exception: SVG user units.** SVG text laid out in diagram user units keeps
+  numeric sizes because the diagram's zoom scales it: the statechart viewer
+  (`Artifacts/StatechartViewer.tsx`) and machine-diagram parts
+  (`MachineDiagram/SvgText.tsx`, `MIN_TEXT_SIZE`).
 - **Mono is for data, not labels.** Speaker labels, section headings and menu
   items are sans; do not set them in caps-mono.
 - **Serif is never chrome.** Pane titles, panel/modal titles and breadcrumbs

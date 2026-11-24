@@ -127,7 +127,7 @@ export function Timestamp({
           toggle();
         }
       }}
-      className="text-xs text-fg-mute hover:text-accent font-mono cursor-pointer flex-shrink-0 transition-colors"
+      className="text-secondary text-fg-mute hover:text-accent font-mono cursor-pointer flex-shrink-0 transition-colors"
       title={
         mode === "absolute"
           ? "Click for differential time"
@@ -302,7 +302,7 @@ export function FileEditBlock({
             const hasDiff =
               typeof change.diff === "string" && change.diff.length > 0;
             return (
-              <div key={`${change.path}-${idx}`} className="text-sm">
+              <div key={`${change.path}-${idx}`} className="text-content">
                 <button
                   type="button"
                   className="flex items-center gap-2 w-full text-left py-0.5"
@@ -314,7 +314,7 @@ export function FileEditBlock({
                   >
                     {change.kind}
                   </span>
-                  <span className="font-mono text-xs text-fg truncate">
+                  <span className="font-mono text-secondary text-fg truncate">
                     {change.path}
                   </span>
                   {hasDiff && (
@@ -326,7 +326,7 @@ export function FileEditBlock({
                   )}
                 </button>
                 {isOpen && hasDiff && (
-                  <pre className="mt-1 ml-4 p-2 bg-bg-2 rounded text-xs font-mono whitespace-pre-wrap break-words">
+                  <pre className="mt-1 ml-4 p-2 bg-bg-2 rounded text-secondary font-mono whitespace-pre-wrap break-words">
                     {renderDiffLines(change.diff!)}
                   </pre>
                 )}
@@ -407,7 +407,7 @@ export function TodoListBlock({
           {event.items.map((row, i) => (
             <li
               key={`${i}-${row.text}`}
-              className="flex items-start gap-2 text-sm"
+              className="flex items-start gap-2 text-content"
               data-completed={row.completed}
             >
               <span
@@ -444,7 +444,7 @@ export function ToolResult({ event }: { event: ToolResultEvent }) {
         className="mt-0.5"
       />
       <span
-        className={`text-xs whitespace-pre-wrap break-words ${event.isError ? "text-err" : "text-fg-mute"}`}
+        className={`text-secondary whitespace-pre-wrap break-words ${event.isError ? "text-err" : "text-fg-mute"}`}
       >
         {event.result}
       </span>

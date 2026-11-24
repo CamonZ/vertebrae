@@ -129,10 +129,10 @@ export function HumanInputGate({
             />
           </svg>
           <div className="min-w-0">
-            <p className="text-sm font-medium text-[var(--color-fg)]">
+            <p className="text-content font-medium text-[var(--color-fg)]">
               Waiting on human input
             </p>
-            <p className="mt-0.5 text-xs text-[var(--color-fg-soft)]">
+            <p className="mt-0.5 text-secondary text-[var(--color-fg-soft)]">
               {stepName ? (
                 <>
                   Step{" "}
@@ -158,7 +158,7 @@ export function HumanInputGate({
               onResolve ? onResolve(context) : void resolveGateInChat(context)
             }
             disabled={!resolvable}
-            className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-info)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-info)]/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-info)] px-2.5 py-1.5 text-secondary font-medium text-white transition-colors hover:bg-[var(--color-info)]/90 disabled:cursor-not-allowed disabled:opacity-50"
             title={
               resolvable
                 ? "Resolve this gate in a chat"
@@ -187,7 +187,7 @@ export function HumanInputGate({
               data-testid="human-input-gate-answer-directly"
               aria-expanded={answering}
               onClick={() => setAnswering((open) => !open)}
-              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-info)]/60 px-2.5 py-1.5 text-xs font-medium text-[var(--color-info)] transition-colors hover:bg-[var(--color-info)]/10"
+              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--color-info)]/60 px-2.5 py-1.5 text-secondary font-medium text-[var(--color-info)] transition-colors hover:bg-[var(--color-info)]/10"
               title="Answer this gate in a form, without a chat"
             >
               <span>Answer directly</span>
@@ -199,7 +199,7 @@ export function HumanInputGate({
               data-testid="human-input-gate-stop"
               onClick={onStop}
               disabled={isStopping}
-              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-err)] px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-[var(--color-err)]/90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="cursor-pointer flex shrink-0 items-center gap-1.5 rounded-md bg-[var(--color-err)] px-2.5 py-1.5 text-secondary font-medium text-white transition-colors hover:bg-[var(--color-err)]/90 disabled:cursor-not-allowed disabled:opacity-50"
               aria-label="Stop waiting run"
               title="Stop the orchestrator for this waiting run"
             >
@@ -236,7 +236,7 @@ export function HumanInputGate({
           />
         </div>
       )}
-      <dl className="mt-3 grid grid-cols-1 gap-2 text-eyebrow sm:grid-cols-2">
+      <dl className="mt-3 grid grid-cols-1 gap-2 text-meta sm:grid-cols-2">
         <div>
           <dt className="font-mono uppercase tracking-wider text-[var(--color-fg-mute)]">
             Run
@@ -245,7 +245,7 @@ export function HumanInputGate({
             <DiagnosticId
               id={run.id}
               kind="task run"
-              className="text-eyebrow"
+              className="text-meta"
               testId="human-input-gate-run-id"
             />
           </dd>
@@ -258,7 +258,7 @@ export function HumanInputGate({
             <DiagnosticId
               id={execution?.id}
               kind="step execution"
-              className="text-eyebrow"
+              className="text-meta"
               testId="human-input-gate-execution-id"
               emptyValue="—"
             />
@@ -271,7 +271,7 @@ export function HumanInputGate({
             <Disclosure label="Role" testIdBase="human-input-gate-role">
               <div
                 data-testid="human-input-gate-role"
-                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)]"
+                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-content text-[var(--color-fg)]"
               >
                 <MarkdownContent text={role as string} />
               </div>
@@ -281,7 +281,7 @@ export function HumanInputGate({
             <Disclosure label="Question" testIdBase="human-input-gate-question">
               <div
                 data-testid="human-input-gate-question"
-                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)]"
+                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-content text-[var(--color-fg)]"
               >
                 <MarkdownContent text={question as string} />
               </div>
@@ -291,12 +291,12 @@ export function HumanInputGate({
             <Disclosure label="Fields" testIdBase="human-input-gate-fields">
               <ul
                 data-testid="human-input-gate-fields"
-                className="mt-1 max-h-96 space-y-1 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-sm text-[var(--color-fg)]"
+                className="mt-1 max-h-96 space-y-1 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 text-content text-[var(--color-fg)]"
               >
                 {fields.map((field) => (
                   <li key={field.name} data-testid="human-input-gate-field">
                     <span className="font-mono">{field.name}</span>{" "}
-                    <span className="text-xs text-[var(--color-fg-mute)]">
+                    <span className="text-secondary text-[var(--color-fg-mute)]">
                       ({field.required ? "required" : "optional"}, {field.type})
                     </span>
                     {field.question && <>: {field.question}</>}
@@ -312,7 +312,7 @@ export function HumanInputGate({
             >
               <pre
                 data-testid="human-input-gate-schema"
-                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 font-mono text-eyebrow text-[var(--color-fg)]"
+                className="mt-1 max-h-96 overflow-auto rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2 font-mono text-meta text-[var(--color-fg)]"
               >
                 {schemaJson}
               </pre>

@@ -35,19 +35,19 @@ export function Field({
     : child;
   return (
     <div className="space-y-2">
-      <label htmlFor={id} className="block text-sm font-medium">
+      <label htmlFor={id} className="block text-content font-medium">
         {label}
       </label>
       {control}
       {error && (
-        <p id={`${id}-error`} className="text-xs text-[var(--color-err)]">
+        <p id={`${id}-error`} className="text-secondary text-[var(--color-err)]">
           {error}
         </p>
       )}
       {hint && (
         <p
           id={`${id}-hint`}
-          className="text-xs leading-5 text-[var(--color-fg-mute)]"
+          className="text-secondary leading-5 text-[var(--color-fg-mute)]"
         >
           {hint}
         </p>
@@ -161,7 +161,7 @@ export function SecretField({
         }
       />
       {storage !== undefined && (
-        <p className="text-xs leading-5 text-[var(--color-fg-mute)]">
+        <p className="text-secondary leading-5 text-[var(--color-fg-mute)]">
           {storage === "config"
             ? "The existing key is in config.toml. Move it to the OS credential store without retyping it, or enter a replacement."
             : storage === "os"
@@ -196,7 +196,7 @@ export function SecretField({
 }
 export function Notice({ children }: { children: ReactNode }) {
   return (
-    <p className="rounded-[var(--radius-md)] bg-[var(--color-bg-2)] p-3 text-sm leading-6 text-[var(--color-fg-soft)]">
+    <p className="rounded-[var(--radius-md)] bg-[var(--color-bg-2)] p-3 text-content leading-6 text-[var(--color-fg-soft)]">
       {children}
     </p>
   );

@@ -79,5 +79,7 @@ export function washColor(role: WashRole): string {
   return `var(--md-${role}-wash)`;
 }
 
-/** Text never drops below 18 px in the 640×400 logical part space (VL-04). */
+/** Text never drops below 18 px in the 640×400 logical part space (VL-04).
+ *  These are SVG user units, a documented type-scale exception: diagram text
+ *  scales with the canvas zoom, not the CSS type tokens. */
 export const MIN_TEXT_SIZE = 18;

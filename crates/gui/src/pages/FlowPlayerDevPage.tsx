@@ -76,7 +76,7 @@ function DevFlow({
   }, [name, source, autoLayout]);
   const state = useLaidOutFlow(spec, { registry });
   if (state.status === "pending")
-    return <div className="font-mono text-xs">laying out {name}…</div>;
+    return <div className="font-mono text-secondary">laying out {name}…</div>;
   if (!state.result.ok) throw new Error(`${name} does not compile`);
   return <FlowPlayer flow={state.result.flow} onActivatePart={onActivate} />;
 }
@@ -86,7 +86,7 @@ export function FlowPlayerDevPage() {
   const [activated, setActivated] = useState<string[]>([]);
   return (
     <div className="flex h-full flex-col gap-6 overflow-auto p-4">
-      <div className="font-mono text-xs text-[var(--color-fg-mute)]">
+      <div className="font-mono text-secondary text-[var(--color-fg-mute)]">
         activated: {activated.join(", ") || "—"}
       </div>
       {SPECS.map(([name, source, autoLayout]) => (
@@ -94,7 +94,7 @@ export function FlowPlayerDevPage() {
           key={name}
           className="max-w-[1100px] rounded-md border border-[var(--color-line)] bg-[var(--color-bg)] p-3"
         >
-          <h2 className="mb-2 font-mono text-sm">{name}</h2>
+          <h2 className="mb-2 font-mono text-content">{name}</h2>
           <DevFlow
             name={name}
             source={source}

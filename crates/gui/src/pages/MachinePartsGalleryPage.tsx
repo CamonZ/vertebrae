@@ -184,7 +184,7 @@ function GalleryCell({
           reducedMotion={reducedMotion}
         />
       </MachineDiagram>
-      <figcaption className="text-xs text-[var(--color-fg-mute)]">
+      <figcaption className="text-secondary text-[var(--color-fg-mute)]">
         {caption}
       </figcaption>
     </figure>
@@ -223,13 +223,13 @@ export function MachinePartsGalleryPage() {
         role="toolbar"
         aria-label="Gallery controls"
       >
-        <span className="text-xs text-[var(--color-fg-mute)]">Theme</span>
+        <span className="text-secondary text-[var(--color-fg-mute)]">Theme</span>
         {THEMES.map((t) => (
           <ToggleChip key={t} active={theme === t} onClick={() => setTheme(t)}>
             {t}
           </ToggleChip>
         ))}
-        <span className="ml-3 text-xs text-[var(--color-fg-mute)]">Mark</span>
+        <span className="ml-3 text-secondary text-[var(--color-fg-mute)]">Mark</span>
         {(["all", ...CHANGE_MARKS] as const).map((m) => (
           <ToggleChip
             key={m}
@@ -324,7 +324,7 @@ export function MachinePartsGalleryPage() {
             className="mb-8"
             data-testid={`gallery-part-${name}`}
           >
-            <h2 className="mb-2 text-sm font-medium text-[var(--color-fg)]">
+            <h2 className="mb-2 text-content font-medium text-[var(--color-fg)]">
               {name}{" "}
               <span className="text-[var(--color-fg-mute)]">
                 · {def.part.job} · {def.family} · {def.footprint}

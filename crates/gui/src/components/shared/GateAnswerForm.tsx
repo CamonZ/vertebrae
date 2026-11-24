@@ -118,7 +118,7 @@ export function GateAnswerForm({
         <p
           role="alert"
           data-testid={`${testId}-error`}
-          className="text-xs text-[var(--color-err)]"
+          className="text-secondary text-[var(--color-err)]"
         >
           {submitError}
         </p>
@@ -159,13 +159,13 @@ function GateFieldInput({
   const inputTestId = `gate-answer-input-${field.name}`;
   const control = fieldControl(field);
   const label = (
-    <span className="block text-sm text-[var(--color-fg)]">
+    <span className="block text-content text-[var(--color-fg)]">
       <span className="font-mono">{field.name}</span>
       {field.required && (
         <span className="text-[var(--color-fg-mute)]"> (required)</span>
       )}
       {field.question && (
-        <span className="mt-0.5 block text-xs text-[var(--color-fg-soft)]">
+        <span className="mt-0.5 block text-secondary text-[var(--color-fg-soft)]">
           {field.question}
         </span>
       )}
@@ -200,7 +200,7 @@ function GateFieldInput({
           className="flex flex-wrap gap-3"
         >
           {(field.choices ?? []).map((choice) => (
-            <label key={choice} className="flex items-center gap-1.5 text-sm">
+            <label key={choice} className="flex items-center gap-1.5 text-content">
               <input
                 type="checkbox"
                 data-testid={`${inputTestId}-${choice}`}
@@ -267,7 +267,7 @@ function GateFieldInput({
       break;
     default:
       body = (
-        <p className="text-xs text-[var(--color-fg-mute)]">
+        <p className="text-secondary text-[var(--color-fg-mute)]">
           Answer this field in the chat.
         </p>
       );
@@ -287,7 +287,7 @@ function GateFieldInput({
         </label>
       )}
       {error && (
-        <p role="alert" className="mt-1 text-xs text-[var(--color-err)]">
+        <p role="alert" className="mt-1 text-secondary text-[var(--color-err)]">
           {error}
         </p>
       )}

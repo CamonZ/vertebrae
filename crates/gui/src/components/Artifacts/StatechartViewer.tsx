@@ -115,17 +115,17 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
       data-testid="statechart-viewer"
     >
       <span className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
-        <span className="mr-auto font-mono text-xs text-fg-mute">
+        <span className="mr-auto font-mono text-secondary text-fg-mute">
           XState · read-only statechart
         </span>
-        <span className="text-xs text-fg-mute">
+        <span className="text-secondary text-fg-mute">
           Ctrl + scroll or pinch to zoom
         </span>
         <select
           aria-label="Transition colors"
           value={colorMode}
           onChange={(event) => setColorMode(event.target.value)}
-          className="rounded border border-border bg-bg px-2 py-1 text-xs"
+          className="rounded border border-border bg-bg px-2 py-1 text-secondary"
         >
           <option value="event">Colors by event</option>
           <option value="single">Single color</option>
@@ -138,7 +138,7 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
         >
           −
         </button>
-        <span className="text-xs tabular-nums">{Math.round(zoom * 100)}%</span>
+        <span className="text-secondary tabular-nums">{Math.round(zoom * 100)}%</span>
         <button
           type="button"
           aria-label="Zoom in statechart"
@@ -151,21 +151,21 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
           type="button"
           onClick={fit}
           aria-label="Fit statechart"
-          className="rounded border border-border px-2 text-xs"
+          className="rounded border border-border px-2 text-secondary"
         >
           Fit
         </button>
         <button
           type="button"
           onClick={() => setZoom(1, true)}
-          className="rounded border border-border px-2 text-xs"
+          className="rounded border border-border px-2 text-secondary"
         >
           Reset zoom
         </button>
       </span>
       {colorMode === "event" && (
         <span
-          className="flex max-h-20 shrink-0 flex-wrap gap-x-4 gap-y-1 overflow-auto border-b border-border px-3 py-2 text-xs"
+          className="flex max-h-20 shrink-0 flex-wrap gap-x-4 gap-y-1 overflow-auto border-b border-border px-3 py-2 text-secondary"
           aria-label="Transition color legend"
         >
           {[...eventColors].map(([event, { color }]) => (
@@ -192,6 +192,9 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
         }}
         {...viewport.panHandlers}
       >
+        {/* Type-scale exception: label sizes below are SVG user units. The
+            layout measures nodes in those units and the viewer's zoom scales
+            them, so they must not follow the CSS type tokens. */}
         <svg
           ref={zoomState.diagramRef}
           role="group"
@@ -414,7 +417,7 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
         </svg>
       </span>
       <span
-        className="block min-h-0 max-h-36 overflow-auto border-t border-border px-3 py-2 text-sm"
+        className="block min-h-0 max-h-36 overflow-auto border-t border-border px-3 py-2 text-content"
         aria-live="polite"
         data-testid="statechart-inspection"
       >
@@ -432,7 +435,7 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
               </span>
             )}
             {selectedTransitions.map((transition) => (
-              <span className="block font-mono text-xs" key={transition.id}>
+              <span className="block font-mono text-secondary" key={transition.id}>
                 {transition.event}
                 {transition.guard ? ` [${transition.guard}]` : ""} →{" "}
                 {transition.target}

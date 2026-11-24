@@ -58,7 +58,7 @@ export function EditableList({
   return (
     <div className="space-y-1">
       {items.length === 0 ? (
-        <p className="text-xs italic text-fg-mute py-1">{emptyText}</p>
+        <p className="text-secondary italic text-fg-mute py-1">{emptyText}</p>
       ) : (
         <ul className="space-y-1">
           {items.map((item, index) => {
@@ -67,13 +67,13 @@ export function EditableList({
             return (
               <li
                 key={`${item}-${index}`}
-                className="group flex items-start gap-2 text-sm text-fg-soft rounded-md p-2 hover:bg-bg-2 transition-colors"
+                className="group flex items-start gap-2 text-content text-fg-soft rounded-md p-2 hover:bg-bg-2 transition-colors"
               >
                 {variant === "step" ? (
                   <button
                     type="button"
                     onClick={() => onToggleDone?.(index)}
-                    className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-xs font-medium cursor-pointer transition-colors ${
+                    className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-secondary font-medium cursor-pointer transition-colors ${
                       isDone
                         ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
                         : "bg-bg-2 text-fg-mute hover:border hover:border-accent"
@@ -114,7 +114,7 @@ export function EditableList({
                     title="Click to edit"
                   >
                     <span
-                      className={`${monospace ? "font-mono text-xs" : ""} ${
+                      className={`${monospace ? "font-mono text-secondary" : ""} ${
                         isDone ? "line-through opacity-60" : ""
                       }`}
                     >

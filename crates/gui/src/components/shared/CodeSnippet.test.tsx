@@ -83,7 +83,7 @@ describe("CodeSnippet", () => {
 
     expect(lastProps().style).toMatchObject({
       "--diffs-font-family": "var(--font-mono)",
-      "--diffs-font-size": "var(--text-13)",
+      "--diffs-font-size": "var(--text-code)",
     });
   });
 

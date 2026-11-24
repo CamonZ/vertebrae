@@ -29,10 +29,10 @@ type SetupView = "saved" | "backend" | "project" | "ignition";
 type BackendChoice = "remote" | "local";
 
 const secondaryButtonClass =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--line-strong)] bg-transparent px-4 text-sm font-medium text-[var(--fg)] transition-colors hover:border-[var(--line-strong)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--line-strong)] bg-transparent px-4 text-content font-medium text-[var(--fg)] transition-colors hover:border-[var(--line-strong)] hover:text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50";
 
 const primaryButtonClass =
-  "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--line-strong)] bg-[var(--accent)] px-4 text-sm font-semibold text-[var(--bg)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--accent-deep)] disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-9 items-center justify-center gap-2 rounded-[var(--r-md)] border border-[var(--line-strong)] bg-[var(--accent)] px-4 text-content font-semibold text-[var(--bg)] transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--accent-deep)] disabled:cursor-not-allowed disabled:opacity-50";
 
 function projectNameFromPath(path: string): string {
   const parts = path.split(/[\\/]/).filter(Boolean);
@@ -581,10 +581,10 @@ export function ProjectSetupPage() {
             className="mb-4 rounded-lg border border-border bg-bg-2 p-3"
             data-testid="local-backend-progress"
           >
-            <div className="text-sm font-medium text-fg">
+            <div className="text-content font-medium text-fg">
               {localProgress.message}
             </div>
-            <div className="mt-2 grid grid-cols-4 gap-1 text-[0.65rem] uppercase tracking-[0.12em] text-fg-mute">
+            <div className="mt-2 grid grid-cols-4 gap-1 text-meta uppercase tracking-[0.12em] text-fg-mute">
               {(["pulling", "migrating", "health", "seeding"] as const).map(
                 (stage) => (
                   <span
@@ -626,7 +626,7 @@ export function ProjectSetupPage() {
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-fg">{project.slug}</span>
                   </div>
-                  <div className="mt-1 truncate text-sm text-fg-mute">
+                  <div className="mt-1 truncate text-content text-fg-mute">
                     {project.path || project.project_id}
                   </div>
                 </div>
@@ -806,7 +806,7 @@ export function ProjectSetupPage() {
             <div className="font-medium text-fg">
               Use an existing backend
             </div>
-            <div className="mt-1 text-sm text-fg-mute">
+            <div className="mt-1 text-content text-fg-mute">
               Connect to a backend URL with an API token you already have.
             </div>
           </button>
@@ -828,7 +828,7 @@ export function ProjectSetupPage() {
             <div className="font-medium text-fg">
               Run a local backend with Docker or Podman
             </div>
-            <div className="mt-1 text-sm text-fg-mute">
+            <div className="mt-1 text-content text-fg-mute">
               Keep the backend on this computer and let Vertebrae manage its stack.
             </div>
           </button>

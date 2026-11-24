@@ -16,7 +16,7 @@ interface ChipProps {
 
 const base =
   "inline-flex items-center gap-1.5 h-6 px-2.5 max-w-full truncate " +
-  "font-sans text-xs font-medium rounded-[var(--radius-sm)] " +
+  "font-sans text-secondary font-medium rounded-[var(--radius-sm)] " +
   "border transition-[background-color,border-color,color] duration-[var(--t-fast)] ease-[var(--ease-default)]";
 
 const variantClasses: Record<ChipVariant, string> = {

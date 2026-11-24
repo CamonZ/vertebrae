@@ -87,29 +87,29 @@ function CodeRefItem({
             reference={fileReference}
             projectRoot={projectRoot}
           >
-            <code className="truncate font-mono text-xs text-[var(--color-fg-soft)]">
+            <code className="truncate font-mono text-secondary text-[var(--color-fg-soft)]">
               {codeRef.path.split("/").pop() ?? codeRef.path}
             </code>
             {lineRange && (
-              <span className="flex-shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-accent-wash)] px-1 py-0.5 font-mono text-2xs text-[var(--color-accent)]">
+              <span className="flex-shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-accent-wash)] px-1 py-0.5 font-mono text-meta text-[var(--color-accent)]">
                 {lineRange}
               </span>
             )}
           </LocalFileReferenceLink>
         ) : (
           <>
-            <code className="truncate font-mono text-xs text-[var(--color-fg-soft)]">
+            <code className="truncate font-mono text-secondary text-[var(--color-fg-soft)]">
               {codeRef.path.split("/").pop() ?? codeRef.path}
             </code>
             {lineRange && (
-              <span className="flex-shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-accent-wash)] px-1 py-0.5 font-mono text-2xs text-[var(--color-accent)]">
+              <span className="flex-shrink-0 rounded-[var(--radius-sm)] bg-[var(--color-accent-wash)] px-1 py-0.5 font-mono text-meta text-[var(--color-accent)]">
                 {lineRange}
               </span>
             )}
           </>
         )}
         {codeRef.name && (
-          <span className="truncate text-xs text-[var(--color-fg-mute)]">
+          <span className="truncate text-secondary text-[var(--color-fg-mute)]">
             {codeRef.name}
           </span>
         )}
@@ -162,7 +162,7 @@ export function CodeRefsSummary({ codeRefs, projectRoot }: CodeRefsSummaryProps)
   if (codeRefs.length === 0) {
     return (
       <div className="px-4 py-3">
-        <p className="text-sm text-[var(--color-fg-mute)] italic">
+        <p className="text-content text-[var(--color-fg-mute)] italic">
           No code references
         </p>
       </div>

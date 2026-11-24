@@ -47,7 +47,7 @@ export function ToolCallBlock({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-xs text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)]"
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left font-mono text-secondary text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)]"
       >
         <span
           className={[
@@ -67,12 +67,12 @@ export function ToolCallBlock({
       {open && (
         <div className="grid gap-2 border-t border-[var(--color-line)] bg-[var(--color-bg)] px-3 py-2">
           {input !== undefined && (
-            <pre className="max-h-40 overflow-auto rounded-[var(--radius-xs)] bg-[var(--color-bg-2)] p-2 font-mono text-eyebrow text-[var(--color-fg-soft)]">
+            <pre className="max-h-40 overflow-auto rounded-[var(--radius-xs)] bg-[var(--color-bg-2)] p-2 font-mono text-meta text-[var(--color-fg-soft)]">
               {input}
             </pre>
           )}
           {result !== undefined && (
-            <pre className="max-h-[200px] overflow-auto rounded-[var(--radius-xs)] bg-[var(--color-bg-2)] p-2 font-mono text-eyebrow text-[var(--color-fg)]">
+            <pre className="max-h-[200px] overflow-auto rounded-[var(--radius-xs)] bg-[var(--color-bg-2)] p-2 font-mono text-meta text-[var(--color-fg)]">
               {result}
             </pre>
           )}

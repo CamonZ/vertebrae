@@ -68,7 +68,7 @@ function StatusIndicator({ status }: { status: CriterionStatus }) {
  */
 function ValidationBadge() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-info-wash)] px-2 py-0.5 text-2xs font-medium text-[var(--color-info)]">
+    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-info-wash)] px-2 py-0.5 text-meta font-medium text-[var(--color-info)]">
       <svg
         className="h-2.5 w-2.5"
         fill="none"
@@ -102,7 +102,7 @@ function CriterionRefsList({ refs }: { refs: CodeRef[] }) {
         return (
           <span
             key={`${ref.path}-${i}`}
-            className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-1.5 py-0.5 font-mono text-2xs text-[var(--color-fg-mute)]"
+            className="inline-flex items-center gap-1 rounded-[var(--radius-sm)] bg-[var(--color-bg-2)] px-1.5 py-0.5 font-mono text-meta text-[var(--color-fg-mute)]"
             title={ref.description ?? ref.path}
           >
             {ref.path.split("/").pop()}
@@ -150,7 +150,7 @@ function CriterionItem({
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
           <p
-            className={`text-sm leading-relaxed ${
+            className={`text-content leading-relaxed ${
               status === "met"
                 ? "text-[var(--color-fg-mute)] line-through"
                 : "text-[var(--color-fg)]"
@@ -203,7 +203,7 @@ export function AcceptanceCriteria({
   if (totalCount === 0) {
     return (
       <div className="px-4 py-3">
-        <p className="text-sm text-[var(--color-fg-mute)] italic">
+        <p className="text-content text-[var(--color-fg-mute)] italic">
           No test criteria defined
         </p>
       </div>
@@ -226,7 +226,7 @@ export function AcceptanceCriteria({
               style={{ width: `${progressPercent}%` }}
             />
           </div>
-          <span className="font-mono text-2xs text-[var(--color-fg-mute)]">
+          <span className="font-mono text-meta text-[var(--color-fg-mute)]">
             {progressPercent}%
           </span>
         </div>

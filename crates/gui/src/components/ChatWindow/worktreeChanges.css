@@ -35,7 +35,7 @@
   padding: 1px 5px;
   border-radius: var(--radius-sm);
   background: var(--color-bg);
-  font: 500 11px/1.4 var(--font-sans);
+  font: 500 var(--text-meta)/1.4 var(--font-sans);
   font-variant-numeric: tabular-nums;
   color: var(--color-fg-mute);
 }
@@ -88,7 +88,7 @@
   min-height: 32px;
   padding: 0 12px;
   border-radius: 0;
-  font: 400 calc(13px * var(--reading-scale)) / 1.4 var(--font-sans);
+  font: 400 var(--text-content) / 1.4 var(--font-sans);
   color: var(--color-fg-soft);
   text-align: left;
   cursor: pointer;
@@ -115,7 +115,7 @@
 .changes-file-status {
   flex-shrink: 0;
   width: 14px;
-  font: 500 11px/1.4 var(--font-mono);
+  font: 500 var(--text-meta)/1.4 var(--font-mono);
   text-align: center;
   color: var(--color-accent);
 }
@@ -158,7 +158,7 @@
 .changes-file-directory {
   flex: 1 1 0;
   min-width: 0;
-  font-size: calc(12px * var(--reading-scale));
+  font-size: var(--text-secondary);
   color: var(--color-fg-mute);
 }
 
@@ -166,7 +166,7 @@
   display: flex;
   flex-shrink: 0;
   gap: 5px;
-  font: 500 11px/1.4 var(--font-mono);
+  font: 500 var(--text-meta)/1.4 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -178,7 +178,7 @@
   border-radius: var(--radius-lg);
   background: var(--color-bg-1);
   color: var(--color-fg-mute);
-  font-size: 12px;
+  font-size: var(--text-secondary);
 }
 
 .changes-refresh {
@@ -228,7 +228,7 @@
 .changes-open-button,
 .changes-viewed-button {
   padding: 2px 8px;
-  font: 500 12px/1.4 var(--font-sans);
+  font: 500 var(--text-secondary)/1.4 var(--font-sans);
 }
 
 /* Open in an external editor sits among them (and in the document toolbar)
@@ -237,7 +237,7 @@
 .document-toolbar .evidence-action {
   padding: 2px 8px;
   border-color: transparent;
-  font: 500 12px/1.4 var(--font-sans);
+  font: 500 var(--text-secondary)/1.4 var(--font-sans);
 }
 
 /* Viewed is status, not an action: a quiet 10%-tint pill when set. */
@@ -354,7 +354,7 @@
 .files-tree-note {
   padding-top: 4px;
   padding-bottom: 4px;
-  font-size: 12px;
+  font-size: var(--text-secondary);
   color: var(--color-fg-mute);
 }
 
@@ -369,14 +369,14 @@
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  font: 400 calc(13px * var(--reading-scale))/1.5 var(--font-sans);
+  font: 400 var(--text-content)/1.5 var(--font-sans);
   color: var(--color-fg-soft);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .document-dirty {
-  font-size: 11px;
+  font-size: var(--text-meta);
   color: var(--color-accent);
 }
 
@@ -390,7 +390,7 @@
 .document-save {
   padding: 2px 8px;
   border-radius: var(--radius-md);
-  font: 500 12px/1.4 var(--font-sans);
+  font: 500 var(--text-secondary)/1.4 var(--font-sans);
   color: var(--color-accent);
   cursor: pointer;
 }
@@ -411,7 +411,7 @@
   border: 1px solid color-mix(in oklch, var(--color-err) 45%, transparent);
   border-radius: var(--radius-lg);
   background: color-mix(in oklch, var(--color-err) 10%, transparent);
-  font-size: 12px;
+  font-size: var(--text-secondary);
 }
 
 .document-conflict button {
@@ -443,7 +443,7 @@
 .changes-workspace {
   /* Type tiers: 13px content (code, file names, paths), 12px secondary
      (directories, notes, tabs, actions), 11px meta (status, counts). */
-  --diffs-font-size: calc(13px * var(--reading-scale));
+  --diffs-font-size: var(--text-code);
   gap: 0;
   min-width: 0;
 }
@@ -508,7 +508,7 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 12px;
-  font-size: calc(13px * var(--reading-scale));
+  font-size: var(--text-content);
   font-weight: 600;
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
@@ -533,13 +533,13 @@
 
 .changes-total-viewed,
 .changes-total-binary {
-  font-size: calc(12px * var(--reading-scale));
+  font-size: var(--text-secondary);
   font-weight: 400;
   color: var(--color-fg-soft);
 }
 
 .changes-summary-note {
-  font-size: calc(12px * var(--reading-scale));
+  font-size: var(--text-secondary);
   line-height: 1.5;
   color: var(--color-fg-soft);
 }
@@ -562,7 +562,7 @@
   min-width: 0;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--text-secondary);
 }
 
 .comparison-select {
@@ -577,7 +577,7 @@
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-md);
   background: var(--color-bg-1);
-  font: 400 13px/1.4 var(--font-sans);
+  font: 400 var(--text-content)/1.4 var(--font-sans);
   color: var(--color-fg);
   text-align: left;
   cursor: pointer;
@@ -623,7 +623,7 @@
   box-shadow:
     var(--shadow-2),
     inset 0 1px 0 var(--edge-lit);
-  font: 400 13px/1.5 var(--font-sans);
+  font: 400 var(--text-content)/1.5 var(--font-sans);
   color: var(--color-fg);
 }
 
@@ -683,7 +683,7 @@
 }
 
 .changes-diff-name {
-  font-size: calc(13px * var(--reading-scale));
+  font-size: var(--text-content);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -805,7 +805,7 @@
   border-block-end: 1px solid var(--color-line-soft);
   color: var(--color-fg-mute);
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: var(--text-meta);
   line-height: 1.5;
 }
 
@@ -884,7 +884,7 @@ button.semantic-chip--moved:hover {
   background: var(--color-bg-1);
   border-block-end: 1px solid var(--color-line-soft);
   color: var(--color-fg-soft);
-  font-size: 11px;
+  font-size: var(--text-meta);
   line-height: 1.5;
 }
 
@@ -925,7 +925,7 @@ button.semantic-chip--moved:hover {
 /* Declarations added, removed, renamed and moved: counts, names on hover. */
 .changes-declarations {
   color: var(--color-fg-mute);
-  font-size: 11px;
+  font-size: var(--text-meta);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -935,7 +935,7 @@ button.semantic-chip--moved:hover {
   border: 1px solid var(--color-line);
   border-radius: var(--radius-full);
   color: var(--color-fg-mute);
-  font-size: 11px;
+  font-size: var(--text-meta);
   white-space: nowrap;
 }
 
@@ -943,7 +943,7 @@ button.semantic-chip--moved:hover {
 .semantic-relations-status {
   background: var(--color-bg-1);
   color: var(--color-fg-mute);
-  font: 11px/1.5 var(--font-sans);
+  font: var(--text-meta)/1.5 var(--font-sans);
   padding: 4px 12px;
 }
 
@@ -1006,7 +1006,7 @@ button.semantic-chip--moved:hover {
 .changes-notice {
   margin: 0;
   padding: 0 4px;
-  font: 400 12px/1.45 var(--font-sans);
+  font: 400 var(--text-secondary)/1.45 var(--font-sans);
   color: var(--color-fg-mute);
   overflow-wrap: anywhere;
 }

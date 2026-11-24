@@ -61,7 +61,7 @@ export function StatusBadge({ state, size = "sm", onClick }: StatusBadgeProps) {
     const workflow = state.workflow;
     const step = formatStepName(state.step, "");
     badge = (
-      <span className="inline-flex max-w-full items-center overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] text-2xs font-medium">
+      <span className="inline-flex max-w-full items-center overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] text-meta font-medium">
         {workflow && (
           <span className="truncate bg-[var(--color-bg-2)] px-2 py-0.5 text-[var(--color-fg-soft)]">
             {workflow}

@@ -86,7 +86,7 @@ export function RunStateBadge({
     <span
       data-testid="task-tree-node-run-badge"
       data-run-status={chip.status ?? "unknown"}
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-1.5 py-0.5 text-2xs font-medium ${tone.bg} ${tone.text}`}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-1.5 py-0.5 text-meta font-medium ${tone.bg} ${tone.text}`}
       title={`Run: ${chip.label}${stepType ? ` (${stepType})` : ""}`}
       aria-label={`Run state: ${chip.label}${stepType ? `, step ${stepType}` : ""}`}
     >

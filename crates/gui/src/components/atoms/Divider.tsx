@@ -35,7 +35,7 @@ export function Divider({
         role="separator"
         aria-orientation="horizontal"
         className={[
-          "flex items-center gap-3 text-xs text-[var(--color-fg-mute)]",
+          "flex items-center gap-3 text-secondary text-[var(--color-fg-mute)]",
           className,
         ]
           .filter(Boolean)

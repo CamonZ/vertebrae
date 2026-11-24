@@ -24,7 +24,7 @@ export function LocalFileReferenceLink({
     <>
       <button
         type="button"
-        className="inline cursor-pointer rounded-sm bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-13 text-[var(--inline-code-fg)] underline decoration-current/30 hover:decoration-current"
+        className="inline cursor-pointer rounded-sm bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-content text-[var(--inline-code-fg)] underline decoration-current/30 hover:decoration-current"
         data-testid="local-file-reference-link"
         data-actionable-reference="file"
         data-file-path={reference.path}

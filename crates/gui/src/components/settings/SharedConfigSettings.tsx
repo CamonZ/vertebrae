@@ -170,7 +170,7 @@ export function SharedConfigSettings({
   }
   return (
     <div className="mt-7 space-y-5" data-testid={`shared-settings-${section}`}>
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-fg-mute)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 text-secondary text-[var(--color-fg-mute)]">
         <div>
           <span className="font-medium">This machine · config.toml</span>
           {settings && (
@@ -189,12 +189,12 @@ export function SharedConfigSettings({
         </Button>
       </div>
       {settings?.credential_warning && (
-        <p role="status" className="text-sm text-[var(--color-warn)]">
+        <p role="status" className="text-content text-[var(--color-warn)]">
           {settings.credential_warning}
         </p>
       )}
       {error && (
-        <p role="alert" className="text-sm text-[var(--color-err)]">
+        <p role="alert" className="text-content text-[var(--color-err)]">
           {error}
         </p>
       )}
@@ -423,7 +423,7 @@ export function SharedConfigSettings({
                     ] as const
                   ).map(([key, values]) => (
                     <fieldset key={key} className="space-y-2">
-                      <legend className="mb-2 text-sm font-medium">
+                      <legend className="mb-2 text-content font-medium">
                         {key === "signals" ? "Signals" : "Subsystems"}
                       </legend>
                       {values.map((v) => (
@@ -469,7 +469,7 @@ export function SharedConfigSettings({
             <p
               id="settings-validation"
               role="alert"
-              className="text-sm text-[var(--color-err)]"
+              className="text-content text-[var(--color-err)]"
             >
               {validation.message}
             </p>
@@ -493,7 +493,7 @@ export function SharedConfigSettings({
             >
               Discard
             </Button>
-            <span role="status" className="text-sm text-[var(--color-fg-mute)]">
+            <span role="status" className="text-content text-[var(--color-fg-mute)]">
               {saved
                 ? draft.section === "provider" ||
                   draft.section === "typesafe" ||
@@ -513,7 +513,7 @@ export function SharedConfigSettings({
         onClose={() => setPending(null)}
         title="Unsaved settings"
       >
-        <p className="mb-5 text-sm">Discard your unsaved settings changes?</p>
+        <p className="mb-5 text-content">Discard your unsaved settings changes?</p>
         <div className="flex gap-3">
           <Button onClick={() => setPending(null)}>Keep editing</Button>
           <Button
@@ -538,7 +538,7 @@ export function SharedConfigSettings({
         onClose={() => blocker.state === "blocked" && blocker.reset()}
         title="Unsaved settings"
       >
-        <p className="mb-5 text-sm">
+        <p className="mb-5 text-content">
           {busy
             ? "Wait for the current settings operation to finish."
             : "Leave Settings and discard your unsaved changes?"}
@@ -573,7 +573,7 @@ function ToggleRow({
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 text-sm">
+    <div className="flex items-center justify-between gap-3 text-content">
       <span className="first-letter:uppercase">{label}</span>
       <Toggle label={label} checked={checked} onChange={onChange} />
     </div>

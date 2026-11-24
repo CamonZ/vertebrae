@@ -9,9 +9,7 @@ interface SpecSectionProps {
   onDescriptionChange?: (value: string) => Promise<void>;
 }
 
-/** Subsection eyebrow ("Goal", "Description", …). 10px to match the reference
- * `.t-sublbl` (var(--text-10)) — a step down from the 11px eyebrow default. The
- * inline size beats the variant's hardcoded font-size. */
+/** Subsection eyebrow ("Goal", "Description", …). */
 function SubLabel({ children }: { children: string }) {
   return (
     <Text
@@ -34,7 +32,7 @@ function SectionList({ label, items }: { label: string; items: Section[] }) {
         {items.map((item, i) => (
           <li
             key={`${item.type}-${item.order ?? i}`}
-            className="flex items-start gap-2 text-sm text-[var(--color-fg-soft)]"
+            className="flex items-start gap-2 text-content text-[var(--color-fg-soft)]"
           >
             <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--color-fg-faint)]" />
             <span>{item.content}</span>
@@ -57,7 +55,7 @@ function ChecklistItems({ items }: { items: Section[] }) {
           return (
             <li
               key={`${item.type}-${item.order ?? i}`}
-              className="flex items-start gap-2 text-sm text-[var(--color-fg-soft)]"
+              className="flex items-start gap-2 text-content text-[var(--color-fg-soft)]"
             >
               <span
                 className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[var(--radius-xs)] border ${
@@ -159,7 +157,7 @@ export function SpecSection({
           {grouped.goals.map((goal, i) => (
             <p
               key={`goal-${goal.order ?? i}`}
-              className="text-sm text-[var(--color-fg)] leading-relaxed"
+              className="text-content text-[var(--color-fg)] leading-relaxed"
             >
               {goal.content}
             </p>

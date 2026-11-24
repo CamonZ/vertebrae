@@ -4,7 +4,7 @@
 .chat-association {
   min-width: 0;
   flex: 0 0 auto;
-  font: 11px var(--mono, monospace);
+  font: var(--text-meta) var(--mono, monospace);
 }
 .chat-association > summary {
   display: flex;
@@ -61,10 +61,10 @@
   border-radius: var(--radius-md, 6px);
   background: var(--color-bg-1);
   box-shadow: 0 8px 24px var(--hearth-association-menu-shadow);
-  font: 12px/1.5 var(--sans, sans-serif);
+  font: var(--text-secondary)/1.5 var(--sans, sans-serif);
   color: var(--color-fg);
 }
 .association-path {
   overflow-wrap: anywhere;
-  font: 11px/1.5 var(--mono, monospace);
+  font: var(--text-meta)/1.5 var(--mono, monospace);
 }

@@ -199,7 +199,7 @@ export function ScanIdentifier({
       level={level}
       emptyValue={emptyValue}
       copyable={copyable}
-      className={["font-mono text-xs", textColor, className]
+      className={["font-mono text-secondary", textColor, className]
         .filter(Boolean)
         .join(" ")}
       testId={testId}
@@ -230,7 +230,7 @@ export function IdentityBadge({
       emptyValue={emptyValue}
       copyable={copyable}
       className={[
-        "rounded bg-bg-2 px-1.5 py-0.5 font-mono text-2xs",
+        "rounded bg-bg-2 px-1.5 py-0.5 font-mono text-meta",
         textColor,
         className,
       ]
@@ -260,7 +260,7 @@ export function NavigableReference({
       level={level}
       emptyValue={emptyValue}
       copyable={copyable}
-      className={["font-mono text-xs transition-colors", textColor, className]
+      className={["font-mono text-secondary transition-colors", textColor, className]
         .filter(Boolean)
         .join(" ")}
       testId={testId}
@@ -288,7 +288,7 @@ export function DiagnosticId({
       full
       emptyValue={emptyValue}
       copyable={copyable}
-      className={["break-all font-mono text-xs", textColor, className]
+      className={["break-all font-mono text-secondary", textColor, className]
         .filter(Boolean)
         .join(" ")}
       testId={testId}
