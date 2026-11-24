@@ -181,7 +181,7 @@ export function DocumentPane({
           <div
             role="group"
             aria-label="Document view"
-            className="document-views"
+            className="document-views workspace-tabs"
           >
             <button
               type="button"

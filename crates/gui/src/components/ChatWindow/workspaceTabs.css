@@ -24,6 +24,10 @@
   color: var(--color-fg-soft);
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
 }
 
 .workspace-tabs > button:hover:not(:disabled),
@@ -59,12 +63,15 @@
   min-width: 180px;
   overflow: auto;
 }
-/* Keyboard resizes (⌥←/⌥→/⌥=) ease to the new width; SIDEBAR_EASE_MS. */
+/* Keyboard resizes (⌥←/⌥→/⌥=) ease to the new width; SIDEBAR_EASE_MS
+   matches --t-base. */
 .changes-side-panel.is-easing {
-  transition: flex-basis 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: flex-basis var(--t-base) var(--ease);
 }
 @media (prefers-reduced-motion: reduce) {
-  .changes-side-panel.is-easing {
+  .changes-side-panel.is-easing,
+  .workspace-tabs > button,
+  .workspace-tabs .changes-tab {
     transition: none;
   }
 }

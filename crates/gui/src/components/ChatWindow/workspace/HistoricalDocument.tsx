@@ -79,12 +79,13 @@ export function HistoricalDocument({
       className="flex min-h-0 flex-1 flex-col gap-2"
     >
       <div className="document-toolbar">
-        <OpenInExternalEditor
-          root={worktreePath}
-          path={path}
-        />
+        <OpenInExternalEditor root={worktreePath} path={path} />
         <span className="document-path">{path} · Read-only</span>
-        <div role="group" aria-label="Document view" className="document-views">
+        <div
+          role="group"
+          aria-label="Document view"
+          className="document-views workspace-tabs"
+        >
           {(["diff", "file"] as const).map((value) => (
             <button
               key={value}

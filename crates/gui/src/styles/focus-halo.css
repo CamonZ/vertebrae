@@ -15,11 +15,11 @@
                                     surface's own elevation in --surface-shadow
    - [data-focus-halo="overlay"]    a full-bleed viewer whose content covers
                                     it and whose scroller clips an outer ring
-                                    (the Changes diff): the halo is drawn
-                                    as a soft inner glow (no edge line)
-                                    above the content; --focus-overlay-inset
-                                    keeps it off a scrollbar track,
-                                    --focus-overlay-glow retints it
+                                    (the Changes diff): the focus edge is
+                                    drawn as a 1px inner line above the
+                                    content (no glow: glow means running);
+                                    --focus-overlay-inset keeps it off a
+                                    scrollbar track
    - [data-focus-halo="none"]       the element shows focus another way (resize
                                     grips, the transcript caret); the
                                     browser's own focus ring is removed too,
@@ -86,7 +86,7 @@
     z-index: 20;
     pointer-events: none;
     border-radius: inherit;
-    box-shadow: inset 0 0 18px 2px var(--focus-overlay-glow, var(--focus-halo));
+    box-shadow: inset 0 0 0 1px var(--focus-edge);
   }
 
   @media (forced-colors: active) {

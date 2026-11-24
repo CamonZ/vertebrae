@@ -65,6 +65,8 @@ import {
 import { routeSource, type FileReveal } from "./workspace/sourceRoute";
 import { ChangedFilesList } from "./workspace/ChangedFilesList";
 import { ChangesSummary } from "./workspace/ChangesSummary";
+import { SideEmptyState } from "./SideEmptyState";
+import { CodeGlyph } from "./commentIcons";
 import { ComparisonControls } from "./workspace/ComparisonControls";
 import { OpenDocumentTabs } from "./workspace/OpenDocumentTabs";
 import {
@@ -120,8 +122,14 @@ export function WorktreeChanges({
   onTurnVersionChange,
   onExit,
   sessionId,
+  compact = false,
 }: {
   ref?: Ref<HTMLElement>;
+  /**
+   * Changes is the chat's whole view (narrower than the side column's
+   * beside threshold): the files explorer starts collapsed to its toggle.
+   */
+  compact?: boolean;
   /**
    * The chat whose Changes this is: the comparison, active file and line
    * cursor live in its side column store, so a remount finds them in place.
@@ -228,7 +236,13 @@ export function WorktreeChanges({
     if (diffReady && section && section.ownerDocument.activeElement === section)
       resumeLineCursor(section);
   }, [diffReady]);
-  const [filesOpen, setFilesOpen] = useState(true);
+  const [filesOpen, setFilesOpen] = useState(!compact);
+  // Crossing the beside/view threshold resets the explorer to its default.
+  const [placedCompact, setPlacedCompact] = useState(compact);
+  if (placedCompact !== compact) {
+    setPlacedCompact(compact);
+    setFilesOpen(!compact);
+  }
   const [mode, setMode] = useState<SidebarMode>("changes");
   // Back on Changes: scroll to the file the chat left it on.
   const [jumpTarget, setJumpTarget] = useState<JumpTarget | null>(() =>
@@ -528,22 +542,36 @@ export function WorktreeChanges({
         : null,
     });
 
+  // Loading, failure and an empty comparison share the side column's
+  // empty-state pattern.
   const changesBody =
     state.status === "loading" ? (
-      <p role="status">Loading changes…</p>
+      <SideEmptyState
+        icon={<CodeGlyph />}
+        message={<span role="status">Loading changes…</span>}
+      />
     ) : state.status === "error" ? (
-      <p role="alert">{state.message}</p>
+      <SideEmptyState
+        icon={<CodeGlyph />}
+        message={<span role="alert">{state.message}</span>}
+        hint="Refresh to try again."
+      />
     ) : files.length === 0 ? (
-      <div
-        role="status"
-        aria-label="No changes"
-        className="flex flex-1 items-center justify-center text-[var(--color-fg-mute)]"
-      >
-        <p>No changes against this baseline.</p>
+      <div role="status" aria-label="No changes" className="changes-empty">
+        <SideEmptyState
+          icon={<CodeGlyph />}
+          message="No changes against this baseline."
+        />
       </div>
     ) : (
       <div aria-label="All file diffs" className="changes-viewport">
-        <Suspense fallback={<p role="status">Loading diffs…</p>}>
+        <Suspense
+          fallback={
+            <p role="status" className="changes-notice">
+              Loading diffs…
+            </p>
+          }
+        >
           <AllChangesView
             key={JSON.stringify([worktreePath, comparisonRequest])}
             files={state.data.files}
@@ -637,14 +665,15 @@ export function WorktreeChanges({
       />
       {jumpTarget &&
         state.status === "ready" &&
+        files.length > 0 &&
         !files.some((file) => file.path === jumpTarget.path) && (
-          <p role="status">
+          <p role="status" className="changes-notice">
             {jumpTarget.path} has no diff against this baseline. Choose another
             comparison to inspect its changes.
           </p>
         )}
       {comparisonChoices.error && (
-        <p role="status">
+        <p role="status" className="changes-notice">
           Comparison choices unavailable: {comparisonChoices.error}. Refresh to
           retry.
         </p>
@@ -653,12 +682,14 @@ export function WorktreeChanges({
         <ChangesSummary data={state.data} viewedCount={viewedPaths.size} />
       )}
       {watchError && (
-        <p role="status">
+        <p role="status" className="changes-notice">
           Automatic refresh unavailable: {watchError}. Use Refresh to update.
         </p>
       )}
       {state.status === "ready" && state.data.base_unavailable && (
-        <p role="status">{state.data.base_unavailable}</p>
+        <p role="status" className="changes-notice">
+          {state.data.base_unavailable}
+        </p>
       )}
       <div
         ref={resize.containerRef}

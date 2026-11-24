@@ -740,6 +740,7 @@ export function ChatWindow({
                   key={`${sessionId}:${worktreePath}`}
                   worktreePath={worktreePath}
                   sessionId={sessionId}
+                  compact={sidePlacement === "view"}
                   onChangesLoaded={
                     worktreePath === evidenceCheckout
                       ? handleWorktreeLoaded

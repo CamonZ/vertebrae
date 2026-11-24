@@ -1,12 +1,13 @@
+/* The explorer is one tonal step above the Changes well: no border, no
+   shadow (DESIGN.md surface roles). */
 .changes-files-panel {
   display: flex;
   flex: 0 0 240px;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
-  max-width: 40%;
   overflow: hidden;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-lg);
   background: var(--color-bg-1);
 }
 
@@ -30,36 +31,40 @@
   border-bottom: 0;
 }
 
-.changes-files-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font: 500 12px var(--sans, sans-serif);
-  color: var(--color-fg-soft);
-}
-
 .changes-files-count {
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg);
   font: 500 11px/1.4 var(--font-sans);
   font-variant-numeric: tabular-nums;
   color: var(--color-fg-mute);
 }
 
+/* Icon and small text buttons are raised controls: the stronger hover. */
+.changes-files-toggle,
+.changes-tab-close,
+.changes-open-button,
+.changes-viewed-button,
+.changes-refresh,
+.document-save,
+.document-conflict button {
+  transition:
+    background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
+}
+
 .changes-files-toggle {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   color: var(--color-fg-mute);
   cursor: pointer;
 }
 
-.changes-files-toggle:hover,
-.changes-file-row:hover {
+.changes-files-toggle:hover {
   background: var(--color-bg-hover-raised);
   color: var(--color-fg);
 }
@@ -67,28 +72,51 @@
 .changes-files-list {
   min-height: 0;
   overflow-y: auto;
-  padding: 4px;
+  padding: 4px 0;
 }
 
-.changes-file-row {
+/* List rows (changed files and the files tree): 32px, one line, the plain
+   list hover, and the shared selected-row treatment. Hover over the
+   selected row keeps the selected look so it does not flicker. */
+.changes-file-row,
+.files-tree-row {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 8px;
-  border-radius: 4px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 0;
+  font: 400 calc(13px * var(--reading-scale)) / 1.4 var(--font-sans);
+  color: var(--color-fg-soft);
   text-align: left;
   cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
 }
 
-.changes-file-row[aria-current="location"] {
+.changes-file-row:hover,
+.files-tree-row:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-fg);
+}
+
+.changes-file-row[aria-current="location"],
+.changes-file-row[aria-current="location"]:hover,
+.files-tree-row[aria-current="location"],
+.files-tree-row[aria-current="location"]:hover {
   background: var(--color-selection);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+  color: var(--color-fg);
 }
 
 .changes-file-status {
   flex-shrink: 0;
   width: 14px;
-  font: 400 13px/1.5 var(--font-sans);
+  font: 500 11px/1.4 var(--font-mono);
+  text-align: center;
   color: var(--color-accent);
 }
 
@@ -102,12 +130,15 @@
   color: var(--color-err);
 }
 
+/* Name, then its directory muted on the same line; the row's title holds
+   the full path. */
 .changes-file-path {
   display: flex;
   flex: 1;
-  flex-direction: column;
+  align-items: baseline;
   min-width: 0;
-  gap: 2px;
+  gap: 6px;
+  overflow: hidden;
 }
 
 .changes-file-name,
@@ -118,20 +149,24 @@
 }
 
 .changes-file-name {
-  font: 500 calc(13px * var(--reading-scale))/1.5 var(--font-sans);
+  flex-shrink: 0;
+  max-width: 100%;
+  font-weight: 500;
   color: var(--color-fg);
 }
 
 .changes-file-directory {
-  font: 400 calc(11px * var(--reading-scale))/1.5 var(--font-sans);
-  color: var(--color-fg-soft);
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: calc(12px * var(--reading-scale));
+  color: var(--color-fg-mute);
 }
 
 .changes-file-stats {
   display: flex;
   flex-shrink: 0;
   gap: 5px;
-  font: 500 11px/1.4 var(--font-sans);
+  font: 500 11px/1.4 var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -140,8 +175,8 @@
   flex-direction: column;
   gap: 6px;
   padding: 12px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-1);
   color: var(--color-fg-mute);
   font-size: 12px;
 }
@@ -149,18 +184,16 @@
 .changes-refresh {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   flex-shrink: 0;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-md, 6px);
-  background: var(--color-bg-1);
+  border-radius: var(--radius-md);
   color: var(--color-fg-mute);
   cursor: pointer;
 }
 
 .changes-refresh:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-fg) 5%, var(--color-bg-1));
+  background: var(--color-bg-hover-raised);
   color: var(--color-fg);
 }
 
@@ -186,32 +219,39 @@
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   color: var(--color-fg-mute);
   cursor: pointer;
 }
 
+/* Ghost buttons in the diff heading: no outline until hovered. */
 .changes-open-button,
 .changes-viewed-button {
   padding: 2px 8px;
-  border: 1px solid var(--color-line);
-  font-size: 11px;
+  font: 500 12px/1.4 var(--font-sans);
 }
 
-/* Viewed is status, not an action: a quiet tinted pill when set. */
-.changes-viewed-button[aria-pressed="true"] {
+/* Open in an external editor sits among them (and in the document toolbar)
+   as the same ghost button. */
+.changes-diff-heading .evidence-action,
+.document-toolbar .evidence-action {
+  padding: 2px 8px;
   border-color: transparent;
-  background: color-mix(in oklch, var(--color-ok, var(--hearth-worktree-addition-fallback)) 10%, transparent);
-  color: var(--color-ok, var(--hearth-worktree-addition-fallback));
+  font: 500 12px/1.4 var(--font-sans);
+}
+
+/* Viewed is status, not an action: a quiet 10%-tint pill when set. */
+.changes-viewed-button[aria-pressed="true"] {
+  border-radius: var(--radius-full);
+  background: color-mix(in oklch, var(--color-ok) 10%, transparent);
+  color: var(--color-ok);
 }
 
 .changes-tab-close:hover,
 .changes-open-button:hover,
 .changes-viewed-button:hover,
-.document-views button:hover:not(:disabled):not([aria-pressed="true"]),
 .document-save:hover:not(:disabled),
-.document-conflict button:hover:not(:disabled),
-.files-tree-row:hover:not(:disabled) {
+.document-conflict button:hover:not(:disabled) {
   background: var(--color-bg-hover-raised);
   color: var(--color-fg);
 }
@@ -266,28 +306,16 @@
   margin-bottom: 16px;
 }
 
+/* Tree rows indent with an inline padding-left (FilesTree.tsx). */
 .files-tree-row {
-  display: flex;
-  align-items: center;
   gap: 6px;
-  width: 100%;
-  padding-top: 4px;
-  padding-right: 8px;
-  padding-bottom: 4px;
-  border-radius: 4px;
-  font: 400 13px/1.5 var(--font-sans);
-  color: var(--color-fg-soft);
-  text-align: left;
-  cursor: pointer;
+  padding-block: 0;
+  padding-right: 12px;
 }
 
 .files-tree-row:disabled {
   cursor: default;
   opacity: 0.6;
-}
-
-.files-tree-row[aria-current="location"] {
-  background: var(--color-selection);
 }
 
 .files-tree-twisty {
@@ -304,14 +332,11 @@
   text-overflow: ellipsis;
 }
 
-.files-tree-name.is-added {
-  color: var(--color-ok);
-}
-
+.files-tree-name.is-added,
 .files-tree-name.is-modified,
 .files-tree-name.is-renamed,
 .files-tree-name.has-changes {
-  color: var(--color-accent);
+  color: var(--color-fg);
 }
 
 .files-tree-link {
@@ -329,7 +354,7 @@
 .files-tree-note {
   padding-top: 4px;
   padding-bottom: 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-fg-mute);
 }
 
@@ -355,54 +380,44 @@
   color: var(--color-accent);
 }
 
-.document-views {
-  display: flex;
-  overflow: hidden;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-md, 6px);
-}
-
-.document-views button {
-  padding: 3px 10px;
-  font-size: 12px;
-  color: var(--color-fg-mute);
-  cursor: pointer;
-}
-
-.document-views button[aria-pressed="true"] {
-  background: var(--color-bg-1);
-  color: var(--color-fg);
+/* View toggles (Unified/Split, Diff/File) take the workspace tab treatment
+   (workspaceTabs.css); inline in a toolbar they drop the strip's rule. */
+.document-views.workspace-tabs {
+  align-self: stretch;
+  border-bottom: 0;
 }
 
 .document-save {
-  padding: 4px 12px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-md, 6px);
-  font-size: 12px;
-  color: var(--color-fg);
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  font: 500 12px/1.4 var(--font-sans);
+  color: var(--color-accent);
   cursor: pointer;
 }
 
+/* Nothing to save: a quiet ghost label, not a dimmed box. */
 .document-save:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  color: var(--color-fg-faint);
+  cursor: default;
 }
 
+/* A warning that needs a decision: the boxed err wash. */
 .document-conflict {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border: 1px solid var(--color-danger, var(--hearth-worktree-deletion-fallback));
-  border-radius: var(--radius-md, 6px);
+  border: 1px solid color-mix(in oklch, var(--color-err) 45%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--color-err) 10%, transparent);
   font-size: 12px;
 }
 
 .document-conflict button {
   padding: 2px 8px;
   border: 1px solid var(--color-line-strong);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
@@ -426,13 +441,10 @@
 }
 
 .changes-workspace {
+  /* Type tiers: 13px content (code, file names, paths), 12px secondary
+     (directories, notes, tabs, actions), 11px meta (status, counts). */
   --diffs-font-size: calc(13px * var(--reading-scale));
   gap: 0;
-  min-width: 0;
-}
-
-.changes-files-panel {
-  max-width: none;
   min-width: 0;
 }
 
@@ -471,13 +483,9 @@
   width: 3px;
   height: 24px;
   transform: translate(-50%, -50%);
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   background: var(--focus-edge);
   pointer-events: none;
-}
-
-.changes-file-row {
-  min-width: 0;
 }
 
 .document-toolbar {
@@ -489,10 +497,9 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px 16px;
-  padding: 10px 12px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-md, 6px);
-  background: var(--color-bg-2);
+  padding: 8px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-1);
   font-family: var(--font-sans);
 }
 
@@ -532,7 +539,7 @@
 }
 
 .changes-summary-note {
-  font-size: calc(11px * var(--reading-scale));
+  font-size: calc(12px * var(--reading-scale));
   line-height: 1.5;
   color: var(--color-fg-soft);
 }
@@ -573,6 +580,10 @@
   font: 400 13px/1.4 var(--font-sans);
   color: var(--color-fg);
   text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
 }
 
 .comparison-select-label {
@@ -591,23 +602,27 @@
   transform: rotate(45deg);
 }
 
-.comparison-select:hover {
-  border-color: var(--color-fg-faint);
+.comparison-select:hover,
+.comparison-select[aria-expanded="true"] {
+  background: var(--color-bg-hover-raised);
 }
 
 .comparison-select[aria-expanded="true"] {
   border-color: var(--color-fg-mute);
 }
 
+/* The base/compare menus float above the panel: the float layer
+   (DESIGN.md), whose --shadow-2 carries the hairline ring. */
 .comparison-options {
   z-index: 1000;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 4px;
-  border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   background: var(--color-bg-2);
-  box-shadow: 0 8px 24px var(--hearth-worktree-menu-shadow);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 1px 0 var(--edge-lit);
   font: 400 13px/1.5 var(--font-sans);
   color: var(--color-fg);
 }
@@ -617,7 +632,7 @@
   align-items: baseline;
   gap: 8px;
   padding: 7px 8px;
-  border-radius: var(--radius-xs, 3px);
+  border-radius: var(--radius-md);
   overflow-wrap: anywhere;
   cursor: pointer;
 }
@@ -668,7 +683,7 @@
 }
 
 .changes-diff-name {
-  font-size: calc(1em * var(--reading-scale));
+  font-size: calc(13px * var(--reading-scale));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -721,16 +736,14 @@
   --diff-line-cursor: var(--color-accent);
 }
 
-/* The focus halo hugs the diffs, leaving the scrollbar track (8px) outside;
-   gray so it doesn't compete with the diff's own colours. */
+/* The focus edge hugs the diffs, leaving the scrollbar track (8px) outside. */
 .diff-line-cursor-host {
   --focus-overlay-inset: 0 8px 0 0;
-  --focus-overlay-glow: color-mix(in oklch, var(--color-fg-mute) 30%, transparent);
 }
 
 
-/* The Changes glow spans the whole panel, scrollbar included, so the track
-   doesn't read as a strip outside the focused area. */
+/* The Changes focus edge spans the whole panel, scrollbar included, so the
+   track doesn't read as a strip outside the focused area. */
 .diff-line-cursor-host--changes {
   position: relative;
   --focus-overlay-inset: 0;
@@ -807,13 +820,13 @@
 }
 
 .semantic-scope-keyword {
-  color: var(--color-fg-faint);
+  color: var(--color-fg-mute);
 }
 
 .semantic-chip {
   flex-shrink: 0;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: color-mix(in oklch, var(--color-fg) 6%, transparent);
   white-space: nowrap;
 }
@@ -843,7 +856,7 @@ button.semantic-chip--moved:hover {
   flex-shrink: 0;
   padding: 0 6px;
   border: 1px dashed var(--color-line-soft);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--color-fg-soft);
   cursor: pointer;
 }
@@ -857,7 +870,7 @@ button.semantic-chip--moved:hover {
 .semantic-test-tag {
   margin-inline-start: 6px;
   padding: 0 5px;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
   background: color-mix(in oklch, var(--color-fg) 6%, transparent);
   color: var(--color-fg-faint);
   font-family: var(--font-sans);
@@ -920,7 +933,7 @@ button.semantic-chip--moved:hover {
 .changes-diff-mode {
   padding: 0 6px;
   border: 1px solid var(--color-line);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--color-fg-mute);
   font-size: 11px;
   white-space: nowrap;
@@ -963,4 +976,37 @@ button.semantic-chip--moved:hover {
 
 .semantic-relations :is(button, summary):hover {
   color: var(--color-fg);
+}
+
+/* An empty comparison centres the side column's empty state in the pane. */
+.changes-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .changes-files-toggle,
+  .changes-tab-close,
+  .changes-open-button,
+  .changes-viewed-button,
+  .changes-refresh,
+  .document-save,
+  .document-conflict button,
+  .changes-file-row,
+  .files-tree-row,
+  .comparison-select {
+    transition: none;
+  }
+}
+
+/* Comparison notices (jump target outside the diff, unavailable choices or
+   watcher, missing base): the quiet notice row, not body text. */
+.changes-notice {
+  margin: 0;
+  padding: 0 4px;
+  font: 400 12px/1.45 var(--font-sans);
+  color: var(--color-fg-mute);
+  overflow-wrap: anywhere;
 }

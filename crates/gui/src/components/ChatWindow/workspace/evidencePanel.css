@@ -1,8 +1,8 @@
 .evidence-status {
   flex-shrink: 0;
   padding: 1px 6px;
-  border: 1px solid currentColor;
-  border-radius: 4px;
+  border-radius: var(--radius-full);
+  background: color-mix(in oklch, currentColor 10%, transparent);
   font: 500 11px/1.4 var(--font-sans);
   color: var(--color-accent);
 }
@@ -25,13 +25,22 @@
   flex-shrink: 0;
   padding: 3px 10px;
   border: 1px solid var(--color-line-strong);
-  border-radius: var(--radius-md, 6px);
+  border-radius: var(--radius-md);
   font-size: 12px;
   color: var(--color-fg-mute);
   cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease);
 }
 
 .evidence-action:hover {
-  background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+  background: var(--color-bg-hover-raised);
   color: var(--color-fg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evidence-action {
+    transition: none;
+  }
 }
