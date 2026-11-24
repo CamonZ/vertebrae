@@ -176,8 +176,8 @@ export const SelectField = forwardRef<HTMLSelectElement, SelectFieldProps>(
 
     // Size classes
     const sizeClasses = {
-      sm: "text-sm px-3 py-2",
-      md: "text-base px-4 py-2.5",
+      sm: "text-content px-3 py-2",
+      md: "text-content px-4 py-2.5",
       lg: "text-lg px-5 py-3",
     };
 

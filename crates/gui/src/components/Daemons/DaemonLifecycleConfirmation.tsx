@@ -66,7 +66,7 @@ export function DaemonLifecycleConfirmation({
       className="w-[480px] max-w-[calc(100vw-2rem)]"
     >
       <div data-testid="daemon-lifecycle-confirmation">
-        <p className="text-sm leading-relaxed text-[var(--color-fg-soft)]">
+        <p className="text-content leading-relaxed text-[var(--color-fg-soft)]">
           Delete <strong>{label}</strong>? This permanently unregisters it from
           the active fleet and revokes access only after the server confirms
           the operation. Active work, live sessions, or unknown ownership will
@@ -75,14 +75,14 @@ export function DaemonLifecycleConfirmation({
         </p>
         <dl className="mt-4 rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-3 py-2">
           <div className="flex items-start justify-between gap-3 py-1">
-            <dt className="text-xs text-[var(--color-fg-mute)]">Daemon</dt>
-            <dd className="text-right text-xs text-[var(--color-fg)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">Daemon</dt>
+            <dd className="text-right text-secondary text-[var(--color-fg)]">
               {label}
             </dd>
           </div>
           <div className="flex items-start justify-between gap-3 py-1">
-            <dt className="text-xs text-[var(--color-fg-mute)]">ID</dt>
-            <dd className="max-w-[65%] break-all text-right font-mono text-2xs text-[var(--color-fg-soft)]">
+            <dt className="text-secondary text-[var(--color-fg-mute)]">ID</dt>
+            <dd className="max-w-[65%] break-all text-right font-mono text-meta text-[var(--color-fg-soft)]">
               {daemon.id}
             </dd>
           </div>

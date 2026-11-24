@@ -40,7 +40,7 @@ export function ChatFileReferenceLink({
           data-file-column={target.column ?? undefined}
           aria-describedby={unavailable ? descriptionId : undefined}
           type="button"
-          className={`inline cursor-pointer rounded-sm px-1.5 py-0.5 font-mono text-13 underline decoration-current/30 ${
+          className={`inline cursor-pointer rounded-sm px-1.5 py-0.5 font-mono text-content underline decoration-current/30 ${
             unavailable && !target.root
               ? "bg-[var(--warn-wash)] text-[var(--warn)]"
               : "bg-[var(--inline-code-bg)] text-[var(--inline-code-fg)]"

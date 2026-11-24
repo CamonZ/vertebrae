@@ -40,7 +40,7 @@ export function RelativeTime({ date, className = '' }: RelativeTimeProps) {
 
   return (
     <span
-      className={`text-xs text-fg-mute ${className}`}
+      className={`text-secondary text-fg-mute ${className}`}
       title={fullDate}
     >
       {formatRelativeTime(date)}

@@ -27,7 +27,7 @@ export function CustomTypefaceSettings({ onSaved }: { onSaved(): void }) {
   return (
     <div className="mt-4 grid gap-3 rounded-lg bg-bg-2 p-4 sm:grid-cols-2">
       <div className="grid gap-1 sm:col-span-2">
-        <span className="text-xs text-fg-soft">Base pairing</span>
+        <span className="text-secondary text-fg-soft">Base pairing</span>
         <Dropdown
           aria-label="Base pairing"
           size="field"
@@ -42,9 +42,9 @@ export function CustomTypefaceSettings({ onSaved }: { onSaved(): void }) {
           }}
         />
       </div>
-      {families === null && <p role="status" className="text-xs text-fg-soft">Loading installed fonts…</p>}
+      {families === null && <p role="status" className="text-secondary text-fg-soft">Loading installed fonts…</p>}
       {families?.length === 0 && (
-        <p role="status" className="text-xs text-fg-soft sm:col-span-2">
+        <p role="status" className="text-secondary text-fg-soft sm:col-span-2">
           Installed fonts couldn’t be listed. Enter a family name or leave the field blank to use the base pairing.
         </p>
       )}
@@ -57,7 +57,7 @@ export function CustomTypefaceSettings({ onSaved }: { onSaved(): void }) {
         };
         return (
           <div key={id} className="grid content-start gap-1">
-            <span className="text-xs text-fg-soft">{label}</span>
+            <span className="text-secondary text-fg-soft">{label}</span>
             {families.length > 0 ? (
               <Dropdown
                 aria-label={label}
@@ -88,7 +88,7 @@ export function CustomTypefaceSettings({ onSaved }: { onSaved(): void }) {
               />
             )}
             {families.length > 0 && !available && (
-              <p className="text-xs text-fg-soft">Using the base pairing until this font is available.</p>
+              <p className="text-secondary text-fg-soft">Using the base pairing until this font is available.</p>
             )}
           </div>
         );

@@ -27,9 +27,9 @@ const baseClasses =
   "disabled:cursor-not-allowed disabled:opacity-40";
 
 const sizeClasses: Record<ButtonSize, string> = {
-  sm: "h-[26px] px-3 text-xs",
-  md: "h-8 px-4 text-sm",
-  lg: "h-10 px-5 text-sm",
+  sm: "h-[26px] px-3 text-secondary",
+  md: "h-8 px-4 text-content",
+  lg: "h-10 px-5 text-content",
 };
 
 const variantClasses: Record<ButtonVariant, string> = {

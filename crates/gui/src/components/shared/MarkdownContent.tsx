@@ -84,7 +84,7 @@ const CodeSnippet = lazy(() => import("./CodeSnippet"));
  */
 function PlainCodeSnippet({ source }: { source: string }) {
   return (
-    <div className="px-3 py-3 font-mono text-13 leading-[1.6] whitespace-pre text-fg">
+    <div className="px-3 py-3 font-mono text-code leading-[1.6] whitespace-pre text-fg">
       <code>{source}</code>
     </div>
   );
@@ -119,12 +119,12 @@ function HighlightedCodeBlock({
       {(hasLanguage || diagramError) && (
         <div className="flex flex-wrap items-center gap-2 border-b border-border/50 px-3 py-1">
           {hasLanguage && (
-            <span className="font-mono text-eyebrow text-fg-mute">
+            <span className="font-mono text-meta text-fg-mute">
               {language}
             </span>
           )}
           {diagramError && (
-            <span className="font-mono text-eyebrow text-err">
+            <span className="font-mono text-meta text-err">
               {diagramError}
             </span>
           )}
@@ -465,12 +465,12 @@ function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
   return (
     <div className="mb-2 max-w-full overflow-hidden rounded-md border border-border/50 bg-bg">
       <div className="flex items-center border-b border-border/50 px-3 py-1">
-        <span className="font-mono text-eyebrow text-fg-mute">
+        <span className="font-mono text-meta text-fg-mute">
           {renderer.label}
         </span>
       </div>
       {result.status === "rendering" ? (
-        <div className="px-3 py-4 font-mono text-eyebrow text-fg-mute">
+        <div className="px-3 py-4 font-mono text-meta text-fg-mute">
           Rendering {renderer.label} diagram...
         </div>
       ) : (
@@ -549,7 +549,7 @@ function createMarkdownComponents() {
   return {
     p: ({ children, ...props }: ComponentPropsWithoutRef<"p">) => (
       <p
-        className="mb-2 text-base leading-relaxed text-fg antialiased last:mb-0"
+        className="mb-2 text-content leading-relaxed text-fg antialiased last:mb-0"
         {...props}
       >
         {children}
@@ -570,7 +570,7 @@ function createMarkdownComponents() {
     ),
     h3: ({ children, ...props }: ComponentPropsWithoutRef<"h3">) => (
       <h3
-        className="mb-2 mt-3 text-base font-semibold text-fg first:mt-0"
+        className="mb-2 mt-3 text-content font-semibold text-fg first:mt-0"
         {...props}
       >
         {children}
@@ -578,7 +578,7 @@ function createMarkdownComponents() {
     ),
     h4: ({ children, ...props }: ComponentPropsWithoutRef<"h4">) => (
       <h4
-        className="mb-1 mt-2 text-sm font-semibold text-fg first:mt-0"
+        className="mb-1 mt-2 text-content font-semibold text-fg first:mt-0"
         {...props}
       >
         {children}
@@ -586,7 +586,7 @@ function createMarkdownComponents() {
     ),
     ul: ({ children, ...props }: ComponentPropsWithoutRef<"ul">) => (
       <ul
-        className="mb-2 ml-4 list-disc space-y-1 text-base text-fg"
+        className="mb-2 ml-4 list-disc space-y-1 text-content text-fg"
         {...props}
       >
         {children}
@@ -594,7 +594,7 @@ function createMarkdownComponents() {
     ),
     ol: ({ children, ...props }: ComponentPropsWithoutRef<"ol">) => (
       <ol
-        className="mb-2 ml-4 list-decimal space-y-1 text-base text-fg"
+        className="mb-2 ml-4 list-decimal space-y-1 text-content text-fg"
         {...props}
       >
         {children}
@@ -692,7 +692,7 @@ function createMarkdownComponents() {
     },
     table: ({ children, ...props }: ComponentPropsWithoutRef<"table">) => (
       <div className="mb-2 overflow-x-auto">
-        <table className="w-full border-collapse text-sm" {...props}>
+        <table className="w-full border-collapse text-content" {...props}>
           {children}
         </table>
       </div>
@@ -704,7 +704,7 @@ function createMarkdownComponents() {
     ),
     th: ({ children, ...props }: ComponentPropsWithoutRef<"th">) => (
       <th
-        className="px-3 py-1.5 text-left text-xs font-medium text-fg-soft"
+        className="px-3 py-1.5 text-left text-secondary font-medium text-fg-soft"
         {...props}
       >
         {children}
@@ -776,7 +776,7 @@ function MarkdownCode({
 
   const fallback = (
     <code
-      className="rounded bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-13 text-[var(--inline-code-fg)]"
+      className="rounded bg-[var(--inline-code-bg)] px-1.5 py-0.5 font-mono text-secondary text-[var(--inline-code-fg)]"
       {...props}
     >
       {children}

@@ -377,7 +377,7 @@ export function ArtifactsPage() {
               <Spinner />
             </div>
           ) : error ? (
-            <p role="alert" className="p-4 text-sm text-err">
+            <p role="alert" className="p-4 text-content text-err">
               {error}
             </p>
           ) : artifacts.length === 0 ? (

@@ -59,7 +59,7 @@ export function ChatMessage({
       <div
         title={timestamp}
         className={[
-          "min-w-0 max-w-full rounded-[var(--radius-lg)] border px-3 py-2 font-sans text-sm leading-relaxed",
+          "min-w-0 max-w-full rounded-[var(--radius-lg)] border px-3 py-2 font-sans text-content leading-relaxed",
           "whitespace-pre-wrap break-words",
           roleClasses[role],
         ].join(" ")}

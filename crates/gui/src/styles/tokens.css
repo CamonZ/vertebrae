@@ -149,24 +149,39 @@
   --font-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
 
-  /* Type scale — matches docs/design/tokens.css */
-  --text-eyebrow: 0.6875rem; /* 11px */
-  --text-2xs: 0.625rem; /* 10px */
-  --text-xs: 0.75rem; /* 12px */
-  --text-sm: 0.875rem; /* 14px */
-  --text-base: 0.9375rem; /* 15px — Hearth body */
-  --text-lg: 1rem; /* 16px */
+  /* Type scale — one scale on a 14px content base. Every font size in the
+     app uses one of these tokens; vertebrae/no-font-size-literals and
+     scripts/check-font-size-classes.mjs reject literal sizes elsewhere.
+     All sizes are rem: the root font size is 16px × --text-scale (Settings →
+     Text size), so that one setting scales every surface together.
+     Tailwind's default sizes are reset, so only these utilities exist. */
+  --text-*: initial;
+  /* Text tiers. Equal importance means the same tier on every surface. */
+  --text-meta: 0.75rem; /* 12px — timestamps, counts, IDs, badges, hints, eyebrows */
+  --text-meta--line-height: calc(1 / 0.75);
+  --text-secondary: 0.8125rem; /* 13px — supporting text, controls, labels, chrome */
+  --text-secondary--line-height: calc(1.125 / 0.8125);
+  --text-content: 0.875rem; /* 14px — prose, code, file names, table cells, task titles */
+  --text-content--line-height: calc(1.25 / 0.875);
+  /* Code always reads at the content size (Pierre diffs, CodeSnippet,
+     PierrePanelCode, markdown code blocks). */
+  --text-code: var(--text-content);
+  /* Headings and display. */
+  --text-lg: 1rem; /* 16px — entity and section headings */
+  --text-lg--line-height: calc(1.75 / 1.125);
   --text-xl: 1.125rem; /* 18px */
-  --text-2xl: 1.25rem; /* 20px */
+  --text-xl--line-height: calc(1.75 / 1.25);
+  --text-2xl: 1.25rem; /* 20px — h3 */
+  --text-2xl--line-height: calc(2 / 1.5);
+  --text-lede: 1.375rem; /* 22px — ledes and page subtitles */
   --text-3xl: 1.5rem; /* 24px */
+  --text-3xl--line-height: calc(2.25 / 1.875);
   --text-4xl: 2.25rem; /* 36px — h2 */
+  --text-4xl--line-height: calc(2.5 / 2.25);
+  --text-hero: 2.5rem; /* 40px — hero numerals */
   --text-5xl: 3.5rem; /* 56px — h1 */
-  --text-13: 0.8125rem; /* 13px — promoted so Tailwind emits text-13 utility */
-  --text-display: clamp(
-    4.5rem,
-    11vw,
-    8.75rem
-  ); /* rem so it breathes with root font-size */
+  --text-5xl--line-height: 1;
+  --text-display: clamp(4.5rem, 11vw, 8.75rem);
 
   /* letter-spacing scale — collapses the hardcoded 0.01/0.04/0.08/0.16em variants */
   --tracking-tight: -0.01em;
@@ -345,32 +360,6 @@
     --serif: var(--font-serif);
     --sans: var(--font-sans);
     --mono: var(--font-mono);
-    --display: var(--text-display);
-    --h1: var(--text-5xl);
-    --h2: var(--text-4xl);
-    --h3: var(--text-2xl);
-    --eyebrow: var(--text-eyebrow);
-    --body: var(--text-base);
-    --body-sm: var(--text-sm);
-    --caption: var(--text-xs);
-    /* Pixel-named type scale — mirror docs/design/tokens.css so the v2 prototype
-       vocabulary stays defined in the production adapter (see
-       styles/hearthTokenAdapter). --text-8/9 are intentional sub-text decoration
-       glyphs and stay as literal px; all others now alias @theme rem tokens so
-       they ride the root font-size ladder. */
-    --text-8: 8px;
-    --text-9: 9px;
-    --text-10: var(--text-2xs); /* 10px */
-    --text-11: var(--text-eyebrow); /* 11px */
-    --text-12: var(--text-xs); /* 12px */
-    /* --text-13 is defined directly in @theme; re-aliasing it here would be a
-       self-referential cycle that invalidates every var(--text-13). */
-    --text-14: var(--text-sm); /* 14px */
-    --text-15: var(--text-base); /* 15px */
-    --text-16: var(--text-lg); /* 16px */
-    --text-20: var(--text-2xl); /* 20px */
-    --text-22: 1.375rem; /* 22px — rem so it scales with root */
-    --text-40: 2.5rem; /* 40px — rem so it scales with root */
 
     /* Space */
     --s-1: var(--spacing-1);
@@ -428,22 +417,6 @@
     --edge-glow-loop: drop-shadow(
       0 0 4px color-mix(in oklch, var(--step-route) 50%, transparent)
     );
-  }
-
-  /* ── Density attribute (Retina-aware + manual). Auto-set by useDensity():
-     comfortable when scaleFactor < 1.5 (non-Retina) OR innerWidth < 1400.
-     Placed after the :root adapter so these overrides win the cascade. ── */
-  :root[data-density="comfortable"] {
-    --text-2xs: 0.6875rem; /* 10→11 */
-    --text-eyebrow: 0.75rem; /* 11→12 */
-    --text-xs: 0.8125rem; /* 12→13 */
-    --text-sm: 0.9375rem; /* 14→15 */
-  }
-  :root[data-density="compact"] {
-    --text-2xs: 0.5625rem;
-    --text-eyebrow: 0.625rem;
-    --text-xs: 0.6875rem;
-    --text-sm: 0.8125rem;
   }
 
   /* =============================================================================
@@ -606,7 +579,6 @@
     --pairing-font-serif: "Instrument Serif", "Newsreader", Georgia, serif;
     --pairing-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
     --font-features: normal;
-    --prose-base-size: 15px;
     --prose-leading: 1.6;
     --display-tracking: -0.01em;
   }
@@ -616,7 +588,6 @@
     --pairing-font-serif: "IBM Plex Serif", Georgia, serif;
     --pairing-font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
     --font-features: normal;
-    --prose-base-size: 14px;
     --prose-leading: 1.65;
     --display-tracking: -0.02em;
   }
@@ -627,7 +598,6 @@
     --pairing-font-serif: "Fraunces", Georgia, serif;
     --pairing-font-mono: "Spline Sans Mono", ui-monospace, "SF Mono", monospace;
     --font-features: normal;
-    --prose-base-size: 14px;
     --prose-leading: 1.65;
     --display-tracking: -0.02em;
   }
@@ -637,7 +607,6 @@
     --pairing-font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
     --pairing-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
     --font-features: "ss01", "cv11";
-    --prose-base-size: 13px;
     --prose-leading: 1.6;
     --display-tracking: -0.025em;
   }
@@ -648,7 +617,6 @@
     --pairing-font-serif: "DM Serif Display", Georgia, serif;
     --pairing-font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
     --font-features: normal;
-    --prose-base-size: 15px;
     --prose-leading: 1.6;
     --display-tracking: -0.01em;
   }
@@ -658,7 +626,6 @@
     --pairing-font-serif: "Space Grotesk", system-ui, sans-serif;
     --pairing-font-mono: "Space Mono", ui-monospace, "SF Mono", monospace;
     --font-features: normal;
-    --prose-base-size: 14px;
     --prose-leading: 1.6;
     --display-tracking: -0.03em;
   }
@@ -668,7 +635,6 @@
     --pairing-font-serif: "Playfair Display", Georgia, serif;
     --pairing-font-mono: "Source Code Pro", ui-monospace, "SF Mono", monospace;
     --font-features: normal;
-    --prose-base-size: 15px;
     --prose-leading: 1.6;
     --display-tracking: -0.015em;
   }
@@ -678,7 +644,6 @@
     --pairing-font-serif: "Syne", system-ui, sans-serif;
     --pairing-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
     --font-features: normal;
-    --prose-base-size: 14px;
     --prose-leading: 1.65;
     --display-tracking: -0.02em;
   }
@@ -688,16 +653,15 @@
     --pairing-font-serif: "Young Serif", Georgia, serif;
     --pairing-font-mono: "Fira Code", ui-monospace, "SF Mono", monospace;
     --font-features: normal;
-    --prose-base-size: 15px;
     --prose-leading: 1.62;
     --display-tracking: -0.01em;
   }
 
+  /* Text size (Settings → Appearance) scales the root font size; useTheme
+     sets --text-scale. */
   :root {
-    --reading-scale: 1;
-    --chat-user-size: calc(var(--text-13) * var(--reading-scale));
-    --chat-composer-size: calc(var(--text-sm) * var(--reading-scale));
-    --chat-composer-leading: calc(var(--spacing-6) * var(--reading-scale));
+    --text-root: 16px;
+    --text-scale: 1;
   }
 
   /* Every native single-line select draws the same caret, whichever component

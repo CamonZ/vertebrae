@@ -135,7 +135,7 @@ export function GateSteering({
             </Button>
           </div>
           {stopError && (
-            <p role="alert" className="mt-2 text-xs text-[var(--color-err)]">
+            <p role="alert" className="mt-2 text-secondary text-[var(--color-err)]">
               {stopError}
             </p>
           )}

@@ -23,7 +23,7 @@ function RawArtifactBody({
 }) {
   return (
     <div className="space-y-2">
-      <p role="alert" className="text-sm text-warn">
+      <p role="alert" className="text-content text-warn">
         {diagnostic}
       </p>
       <div data-testid="artifact-raw-body">
@@ -91,7 +91,7 @@ export function ArtifactPreviewBody({ artifact }: ArtifactPreviewBodyProps) {
       return (
         <div
           data-testid="artifact-json-preview"
-          className="max-h-96 overflow-auto rounded-md border border-border bg-bg font-mono text-xs"
+          className="max-h-96 overflow-auto rounded-md border border-border bg-bg font-mono text-secondary"
         >
           <PanelCode source={formatted} language="json" label="Artifact JSON" />
         </div>

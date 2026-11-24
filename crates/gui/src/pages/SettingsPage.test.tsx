@@ -176,7 +176,7 @@ describe("SettingsPage", () => {
     useUIStore.setState({
       inlineDiscussionPreference: { mode: "follow" },
       theme: "system",
-      readingTextSize: "default",
+      textSize: "default",
       customTypefaces: {},
       useCustomTypeface: false,
       customTypefaceBase: null,
@@ -1113,7 +1113,7 @@ describe("SettingsPage", () => {
     ).toEqual(["anthropic", "openai", "openrouter"]);
   });
 
-  it("changes reading text size independently of the typeface", async () => {
+  it("changes text size independently of the typeface", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -1121,21 +1121,21 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
     await user.click(screen.getByTestId("settings-nav-appearance"));
-    const size = screen.getByLabelText("Reading text size");
+    const size = screen.getByLabelText("Text size");
 
     expect(size).toHaveAttribute("data-value", "default");
     chooseDropdownValue(size, "large");
     await user.click(screen.getByRole("radio", { name: "Technical" }));
     expect(useUIStore.getState()).toMatchObject({
-      readingTextSize: "large",
+      textSize: "large",
       typePairing: "technical",
     });
 
     chooseDropdownValue(size, "default");
-    expect(useUIStore.getState().readingTextSize).toBe("default");
+    expect(useUIStore.getState().textSize).toBe("default");
   });
 
-  it("applies a custom reading scale and installed typeface overrides", async () => {
+  it("applies a custom text scale and installed typeface overrides", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
@@ -1143,12 +1143,12 @@ describe("SettingsPage", () => {
       </MemoryRouter>
     );
     await user.click(screen.getByTestId("settings-nav-appearance"));
-    chooseDropdownValue(screen.getByLabelText("Reading text size"), "custom");
+    chooseDropdownValue(screen.getByLabelText("Text size"), "custom");
     fireEvent.change(screen.getByLabelText("Scale (%)"), { target: { value: "112" } });
     await user.click(screen.getByRole("button", { name: "Increase Scale (%)" }));
-    expect(useUIStore.getState().readingTextSize).toBe(113);
+    expect(useUIStore.getState().textSize).toBe(113);
     await user.click(screen.getByRole("button", { name: "Decrease Scale (%)" }));
-    expect(useUIStore.getState().readingTextSize).toBe(112);
+    expect(useUIStore.getState().textSize).toBe(112);
 
     const custom = screen.getByRole("radio", { name: "Custom typefaces" });
     await user.click(custom);

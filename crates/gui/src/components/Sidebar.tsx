@@ -125,7 +125,7 @@ function ProjectAvatar({
           // the design's `.app-rail .logo`); the 0.5px right→left translate is
           // an optical nudge to counter the italic slant pushing the glyph
           // visually right.
-          "font-serif text-base italic leading-none text-white",
+          "font-serif text-lg italic leading-none text-white",
           "[transform:translateX(-0.5px)]",
           "ring-0 transition-shadow duration-[var(--t-fast)] hover:ring-2 hover:ring-[var(--color-accent-wash)]",
           palette[bucket],
@@ -268,7 +268,7 @@ function ProjectPopover({
       ].join(" ")}
     >
       {projects.length === 0 ? (
-        <div className="px-3 py-2 text-xs text-[var(--color-fg-mute)]">
+        <div className="px-3 py-2 text-secondary text-[var(--color-fg-mute)]">
           No recent projects
         </div>
       ) : (
@@ -283,7 +283,7 @@ function ProjectPopover({
               data-testid={`sidebar-project-entry-${p.slug}`}
               className={[
                 "flex w-full items-center justify-between gap-2 px-3 py-2",
-                "text-left text-sm text-[var(--color-fg)]",
+                "text-left text-content text-[var(--color-fg)]",
                 isActive ? "cursor-default" : "hover:bg-[var(--color-bg-2)]",
               ].join(" ")}
             >
@@ -305,7 +305,7 @@ function ProjectPopover({
         <div
           role="alert"
           data-testid="sidebar-add-project-error"
-          className="space-y-2 px-3 py-2 text-xs text-[var(--color-err)]"
+          className="space-y-2 px-3 py-2 text-secondary text-[var(--color-err)]"
         >
           <p>{addProjectState.message}</p>
           {addProjectState.path && (
@@ -326,7 +326,7 @@ function ProjectPopover({
         disabled={addProjectState.status === "adding"}
         aria-label="Add a project"
         data-testid="sidebar-add-project"
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--color-fg)] hover:bg-[var(--color-bg-2)] disabled:cursor-wait disabled:opacity-60"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-content text-[var(--color-fg)] hover:bg-[var(--color-bg-2)] disabled:cursor-wait disabled:opacity-60"
       >
         <span
           aria-hidden

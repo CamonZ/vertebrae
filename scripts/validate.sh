@@ -48,6 +48,7 @@ run_gui() {
   (cd crates/gui && SIDECAR_PROFILE=debug npm run tauri:prepare-sidecars)
   (cd crates/gui && npm run test:sidecars)
   (cd crates/gui && npm run test:cascade)
+  (cd crates/gui && npm run test:font-size)
   (cd crates/gui && npm run lint)
   (cd crates/gui && npm run lint:css)
   (cd crates/gui && npm run typecheck)

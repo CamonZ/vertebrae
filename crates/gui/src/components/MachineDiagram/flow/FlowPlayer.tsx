@@ -372,7 +372,7 @@ export function FlowPlayer({
       data-following={followed ?? undefined}
     >
       {flow.title && (
-        <div className="text-sm font-medium text-fg">{flow.title}</div>
+        <div className="text-content font-medium text-fg">{flow.title}</div>
       )}
       <FlowDiagram
         diagram={diagram}
@@ -508,7 +508,7 @@ function BeatNote({
   const showsBeat = !!beat && shown;
   return (
     <div
-      className="group w-full px-3 pt-2.5 text-xs"
+      className="group w-full px-3 pt-2.5 text-secondary"
       hidden={!showsBeat && !narration}
       data-testid="flow-note-card"
     >
@@ -516,7 +516,7 @@ function BeatNote({
         <div id={id} hidden={!shown} data-testid="flow-beat-note">
           {phase && (
             <div
-              className="mb-0.5 text-center text-[11px] text-fg-mute"
+              className="mb-0.5 text-center text-meta text-fg-mute"
               data-testid="flow-note-phase"
             >
               {phase}
@@ -542,7 +542,7 @@ function BeatNote({
       )}
       {narration && (
         <div
-          className={`flex items-center justify-center gap-2 text-sm text-fg ${
+          className={`flex items-center justify-center gap-2 text-content text-fg ${
             showsBeat ? "mt-2 border-t border-[var(--color-line)] pt-2" : ""
           }`}
           data-testid="flow-narration"
@@ -654,7 +654,7 @@ function BeatRail({
             {peek === i && !current && (
               <span
                 role="tooltip"
-                className={`pointer-events-none absolute bottom-full z-[2] mb-2 w-max max-w-64 rounded-[var(--radius-md)] bg-[var(--color-bg-2)] px-2 py-1 text-xs leading-snug text-fg shadow-[var(--shadow-2)] ${align}`}
+                className={`pointer-events-none absolute bottom-full z-[2] mb-2 w-max max-w-64 rounded-[var(--radius-md)] bg-[var(--color-bg-2)] px-2 py-1 text-secondary leading-snug text-fg shadow-[var(--shadow-2)] ${align}`}
                 data-testid="flow-beat-peek"
               >
                 <span className="mr-1.5 tabular-nums text-fg-mute">
@@ -699,7 +699,7 @@ function StepMarks({ changes }: { changes: readonly BeatChange[] }) {
         <span
           key={k}
           data-mark={c.change}
-          className={`rounded-[var(--radius-sm,4px)] border px-1 font-mono text-[11px] leading-4 ${
+          className={`rounded-[var(--radius-sm,4px)] border px-1 font-mono text-meta leading-4 ${
             c.change === "added"
               ? "border-fg bg-fg text-bg"
               : c.change === "changed"
@@ -862,7 +862,7 @@ function Controls({
       />
       {clock.beatCount > 0 && (
         <span
-          className="px-1.5 text-xs tabular-nums text-fg-soft"
+          className="px-1.5 text-secondary tabular-nums text-fg-soft"
           data-testid="flow-beat-count"
         >
           {Math.max(0, clock.beat) + 1}
@@ -872,7 +872,7 @@ function Controls({
       <Button
         size="sm"
         variant="ghost"
-        className="!px-1.5 text-xs tabular-nums"
+        className="!px-1.5 text-secondary tabular-nums"
         onClick={() => clock.setSpeed(nextSpeedUp)}
         aria-label={`Speed ${speedLabel(clock.speed)}`}
         aria-keyshortcuts="+ -"
@@ -947,7 +947,7 @@ function Divider() {
 function ShortcutHelp() {
   return (
     <dl
-      className={`${floating} grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 px-3 py-2 text-xs`}
+      className={`${floating} grid grid-cols-[auto_1fr] gap-x-4 gap-y-0.5 px-3 py-2 text-secondary`}
       aria-label="Keyboard shortcuts"
       data-testid="flow-shortcuts"
     >
@@ -963,7 +963,7 @@ function ShortcutHelp() {
 
 /* ---------- inspectors ---------- */
 
-const panel = `${floating} min-w-0 px-3 py-2 text-xs`;
+const panel = `${floating} min-w-0 px-3 py-2 text-secondary`;
 function PartInspector({
   flow,
   diagram,
@@ -992,7 +992,7 @@ function PartInspector({
       data-part-id={part.id}
     >
       <div className="flex items-baseline gap-2">
-        <span className="text-sm font-medium text-fg">
+        <span className="text-content font-medium text-fg">
           {part.identity.name}
         </span>
         <span className="truncate text-fg-mute">{part.identity.job}</span>
@@ -1062,7 +1062,7 @@ function CardInspector({
       data-card-id={cardId}
     >
       <div className="flex items-baseline gap-2">
-        <span className="text-sm font-medium text-fg">
+        <span className="text-content font-medium text-fg">
           {cardLabel(flow, cardId)}
         </span>
         {card && <span className="text-fg-mute">{card.token}</span>}

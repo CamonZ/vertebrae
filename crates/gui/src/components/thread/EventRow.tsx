@@ -121,7 +121,7 @@ function GateEvaluationRow(
         }
         className="w-full"
       >
-        <pre className="max-h-64 overflow-auto font-mono text-xs whitespace-pre-wrap text-[var(--color-fg-soft)]">
+        <pre className="max-h-64 overflow-auto font-mono text-secondary whitespace-pre-wrap text-[var(--color-fg-soft)]">
           {prettyJson(props.verdict)}
         </pre>
       </Card>
@@ -149,7 +149,7 @@ function ResolutionSubmissionRow(
         footer={<IdChip id={props.executionId} kind="step execution" />}
         className="w-full"
       >
-        <pre className="max-h-64 overflow-auto font-mono text-xs whitespace-pre-wrap text-[var(--color-fg-soft)]">
+        <pre className="max-h-64 overflow-auto font-mono text-secondary whitespace-pre-wrap text-[var(--color-fg-soft)]">
           {prettyJson(props.values)}
         </pre>
       </Card>

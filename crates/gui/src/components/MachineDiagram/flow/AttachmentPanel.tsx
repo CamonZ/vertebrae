@@ -27,7 +27,7 @@ export function AttachmentPanel({
   });
   if (!attachments.length) return null;
   return (
-    <ul aria-label={label} className="mt-2 flex min-w-0 flex-col gap-2 text-xs">
+    <ul aria-label={label} className="mt-2 flex min-w-0 flex-col gap-2 text-secondary">
       {attachments.map((a, i) => (
         <li
           key={a.id ?? `${a.kind}:${i}`}

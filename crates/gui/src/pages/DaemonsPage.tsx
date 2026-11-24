@@ -302,7 +302,7 @@ export function DaemonsPage() {
             </button>
           </div>
           {(fleet.isRefreshing || fleet.error) && (
-            <div className="flex items-center gap-2 text-xs text-[var(--color-fg-mute)]">
+            <div className="flex items-center gap-2 text-secondary text-[var(--color-fg-mute)]">
               {fleet.isRefreshing && (
                 <span role="status" data-testid="daemon-fleet-refreshing">
                   Refreshing…
@@ -364,7 +364,7 @@ export function DaemonsPage() {
             <>
               {fleet.error && (
                 <div
-                  className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-md)] border border-[var(--color-warn)]/40 bg-[var(--color-warn-wash)] px-3 py-2 text-xs text-[var(--color-warn)]"
+                  className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius-md)] border border-[var(--color-warn)]/40 bg-[var(--color-warn-wash)] px-3 py-2 text-secondary text-[var(--color-warn)]"
                   role="status"
                   data-testid="daemon-fleet-stale"
                 >

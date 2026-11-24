@@ -116,7 +116,7 @@ function ScopedDiagramBlock({
         ) : (
           <button
             type="button"
-            className="mt-2 rounded border border-border px-2 py-1 text-sm text-accent disabled:opacity-50"
+            className="mt-2 rounded border border-border px-2 py-1 text-content text-accent disabled:opacity-50"
             disabled={save.status === "saving"}
             onClick={() => void saveArtifact()}
           >

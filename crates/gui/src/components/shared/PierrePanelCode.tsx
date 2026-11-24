@@ -25,7 +25,7 @@ const createEditor: EditorFactory<undefined, undefined> = (
 ) => new Editor(type, options, key);
 const style = {
   "--diffs-font-family": "var(--font-mono)",
-  "--diffs-font-size": "var(--text-13)",
+  "--diffs-font-size": "var(--text-code)",
   "--diffs-line-height": "1.6",
 } as CSSProperties;
 

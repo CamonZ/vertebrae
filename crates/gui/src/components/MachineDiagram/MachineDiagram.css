@@ -277,7 +277,7 @@
   align-items: baseline;
   gap: 6px;
   padding: 8px;
-  font-size: 12px;
+  font-size: var(--text-secondary);
   font-weight: 400;
   line-height: 1.5;
 }
@@ -296,7 +296,7 @@
 }
 .flow-story-number {
   flex: 0 0 18px;
-  font-size: 11px;
+  font-size: var(--text-meta);
   font-variant-numeric: tabular-nums;
   color: var(--color-fg-mute);
 }
@@ -323,7 +323,7 @@
 }
 .flow-story-actor > summary > span {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--text-meta);
 }
 .flow-story-beat > ul {
   margin: 4px 8px 12px 28px;
@@ -350,7 +350,7 @@
   border-bottom: 0;
 }
 .flow-story ul[aria-label] > li > div:first-child {
-  font-size: 11px;
+  font-size: var(--text-meta);
   line-height: 1.5;
   gap: 2px 8px;
   margin-bottom: 4px;
@@ -362,7 +362,7 @@
   display: block;
   width: 100%;
   padding: 4px 0;
-  font-size: 11px;
+  font-size: var(--text-meta);
   line-height: 1.6;
   text-decoration-color: var(--color-line-strong);
   text-underline-offset: 3px;
@@ -397,7 +397,7 @@
   min-width: 0;
 }
 .flow-story .flow-source-file {
-  font-size: 12px;
+  font-size: var(--text-secondary);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
@@ -408,7 +408,7 @@
   text-overflow: ellipsis;
   direction: rtl;
   text-align: left;
-  font-size: 10px;
+  font-size: var(--text-meta);
   color: var(--color-fg-mute);
 }
 .flow-story [data-flow-code-ref] {

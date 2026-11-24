@@ -257,7 +257,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                   d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-              <span className="text-sm text-err flex-grow">{error}</span>
+              <span className="text-content text-err flex-grow">{error}</span>
               <button
                 type="button"
                 onClick={() => {}}
@@ -296,7 +296,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                 onClick={onClose}
                 disabled={isSubmitting && preventCloseDuringSubmit}
                 className={`
-                  px-4 py-2 text-sm font-medium rounded-md border border-border
+                  px-4 py-2 text-content font-medium rounded-md border border-border
                   hover:bg-bg-2 transition-colors
                   ${isSubmitting && preventCloseDuringSubmit ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
                 `}
@@ -312,7 +312,7 @@ export const FormModal = forwardRef<HTMLDivElement, FormModalProps>(
                 onClick={handleSubmitClick}
                 disabled={isSubmitting}
                 className={`
-                  px-4 py-2 text-sm font-medium rounded-md border border-transparent
+                  px-4 py-2 text-content font-medium rounded-md border border-transparent
                   action-primary
                   transition-colors flex items-center gap-2
                 `}

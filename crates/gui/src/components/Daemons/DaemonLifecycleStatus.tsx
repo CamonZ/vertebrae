@@ -42,7 +42,7 @@ export function DaemonLifecycleStatus({
   return (
     <p
       className={[
-        "rounded-[var(--radius-sm)] border px-3 py-2 text-xs leading-relaxed",
+        "rounded-[var(--radius-sm)] border px-3 py-2 text-secondary leading-relaxed",
         phase === "error"
           ? "border-[var(--color-err)]/40 bg-[var(--color-err-wash)] text-[var(--color-err)]"
           : phase === "success"

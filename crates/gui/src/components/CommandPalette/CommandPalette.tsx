@@ -11,8 +11,8 @@ import { useChatStore } from "../../stores/chatStore";
 import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
 import { useEntityPanelStore } from "../../stores/entityPanelStore";
 import {
-  isReadingPercent,
-  READING_SIZE_PRESETS,
+  isTextSizePercent,
+  TEXT_SIZE_PRESETS,
 } from "../../utils/readingAppearance";
 import { ACCENTS, TYPE_PAIRINGS, useUIStore } from "../../stores/uiStore";
 import { ChatsTreeList } from "./ChatsTree";
@@ -214,7 +214,7 @@ function PaletteDialog({
   const openTask = useEntityPanelStore((state) => state.openTask);
   const setTheme = useUIStore((state) => state.setTheme);
   const setTypePairing = useUIStore((state) => state.setTypePairing);
-  const setReadingTextSize = useUIStore((state) => state.setReadingTextSize);
+  const setTextSize = useUIStore((state) => state.setTextSize);
   const setAccent = useUIStore((state) => state.setAccent);
 
   const close = useCallback(() => {
@@ -335,14 +335,14 @@ function PaletteDialog({
         keywords: "appearance",
         run: () => setTheme("system"),
       },
-      ...READING_SIZE_PRESETS.map(
+      ...TEXT_SIZE_PRESETS.map(
         ({ value, label, percent }): PaletteItem => ({
-          id: `action-reading-size-${value}`,
+          id: `action-text-size-${value}`,
           scope: "actions",
-          label: `Reading text size: ${label}`,
+          label: `Text size: ${label}`,
           detail: `${percent}%`,
           keywords: "font size appearance scale",
-          run: () => setReadingTextSize(value),
+          run: () => setTextSize(value),
         })
       ),
       ...TYPE_PAIRINGS.map(
@@ -445,7 +445,7 @@ function PaletteDialog({
     setFactoryName,
     setTheme,
     setTypePairing,
-    setReadingTextSize,
+    setTextSize,
     setAccent,
     tasks,
     workflows,
@@ -454,17 +454,17 @@ function PaletteDialog({
   const groups = useMemo(() => {
     const order = [...contexts.map((context) => context.id), ...GROUP_ORDER];
     const customPercent = Number(
-      /^(?:reading(?: text)? size|font size)\s+(\d{2,3})%?$/i.exec(
+      /^(?:(?:reading )?text size|font size)\s+(\d{2,3})%?$/i.exec(
         query.trim()
       )?.[1]
     );
-    const customSize: PaletteItem[] = isReadingPercent(customPercent)
+    const customSize: PaletteItem[] = isTextSizePercent(customPercent)
       ? [
           {
-            id: "action-reading-size-custom",
+            id: "action-text-size-custom",
             scope: "actions",
-            label: `Reading text size: ${customPercent}%`,
-            run: () => setReadingTextSize(customPercent),
+            label: `Text size: ${customPercent}%`,
+            run: () => setTextSize(customPercent),
           },
         ]
       : [];
@@ -483,7 +483,7 @@ function PaletteDialog({
         ].slice(0, scope === "all" ? MAX_PER_SCOPE : undefined),
       }))
       .filter((group) => group.items.length > 0);
-  }, [contexts, items, query, scope, setReadingTextSize]);
+  }, [contexts, items, query, scope, setTextSize]);
 
   const flat = useMemo(() => groups.flatMap((group) => group.items), [groups]);
 

@@ -41,7 +41,7 @@ export function GateDraftProgress({
       data-testid="gate-draft-progress"
       data-complete={draft.complete ? "1" : "0"}
       aria-label="Gate answers"
-      className="max-h-56 overflow-y-auto border-b border-[var(--color-line)] px-3 py-2 text-xs"
+      className="max-h-56 overflow-y-auto border-b border-[var(--color-line)] px-3 py-2 text-secondary"
     >
       <div className="mb-1.5 flex items-center justify-between font-mono uppercase tracking-wider text-[var(--color-fg-mute)]">
         <span>{draft.complete ? "Answers complete" : "Answers so far"}</span>

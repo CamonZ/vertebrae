@@ -12,7 +12,7 @@ interface CountProps extends HTMLAttributes<HTMLSpanElement> {
  * surfaces.
  *
  * Font-size is intentionally inherited; pass a `text-*` class to size it for
- * the context (e.g. `text-[16px]` on a kanban header, `text-2xs` in a dense
+ * the context (e.g. `text-lg` on a kanban header, `text-meta` in a dense
  * gutter). `tabular-nums` keeps multi-digit counts from shifting on update.
  */
 export function Count({ value, className, ...rest }: CountProps) {

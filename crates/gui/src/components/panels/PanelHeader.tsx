@@ -31,7 +31,7 @@ export function PanelHeader({
         .join(" ")}
     >
       <div className="flex items-start gap-3">
-        <div data-panel-title className="min-w-0 flex-1 font-sans text-base font-semibold leading-snug text-[var(--color-fg)]">
+        <div data-panel-title className="min-w-0 flex-1 font-sans text-content font-semibold leading-snug text-[var(--color-fg)]">
           {title}
         </div>
         {controls && (
@@ -41,7 +41,7 @@ export function PanelHeader({
         )}
       </div>
       {metadata && (
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--color-fg-mute)]">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-secondary text-[var(--color-fg-mute)]">
           {metadata}
         </div>
       )}

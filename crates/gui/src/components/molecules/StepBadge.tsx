@@ -87,7 +87,7 @@ export function StepBadge({
   return (
     <span
       className={[
-        "inline-flex items-center rounded-[var(--radius-sm)] border border-current/30 px-2 py-0.5 text-2xs font-medium",
+        "inline-flex items-center rounded-[var(--radius-sm)] border border-current/30 px-2 py-0.5 text-meta font-medium",
         visual.glow,
         className,
       ]

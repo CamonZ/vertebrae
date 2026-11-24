@@ -152,16 +152,16 @@ export function InlineDiscussionSettings({
       className="mt-8 border-t border-[var(--color-line)] pt-5"
       aria-label="Inline discussions"
     >
-      <h3 className="text-sm font-medium" data-settings-anchor>
+      <h3 className="text-content font-medium" data-settings-anchor>
         Inline discussions
       </h3>
-      <p className="mt-1 text-sm text-[var(--color-fg-soft)]">
+      <p className="mt-1 text-content text-[var(--color-fg-soft)]">
         Choose who answers questions about selected code. Changes apply to the
         next question, including follow-ups; running replies keep their captured
         model and context.
       </p>
       <div className="space-y-4 py-4">
-        <label className="flex max-w-sm flex-col gap-1 text-sm">
+        <label className="flex max-w-sm flex-col gap-1 text-content">
           Answer using
           <Select
             aria-label="Inline discussion mode"
@@ -180,7 +180,7 @@ export function InlineDiscussionSettings({
             role="group"
             aria-label="Custom inline discussion options"
           >
-            <label className="flex min-w-0 flex-col gap-1 text-sm">
+            <label className="flex min-w-0 flex-col gap-1 text-content">
               Provider
               <Select
                 aria-label="Inline discussion provider"
@@ -189,7 +189,7 @@ export function InlineDiscussionSettings({
                 options={providerOptions}
               />
             </label>
-            <label className="flex min-w-0 flex-col gap-1 text-sm">
+            <label className="flex min-w-0 flex-col gap-1 text-content">
               Model
               <Select
                 aria-label="Inline discussion model"
@@ -249,7 +249,7 @@ export function InlineDiscussionSettings({
               return (
                 <label
                   key={field.key}
-                  className="flex min-w-0 flex-col gap-1 text-sm"
+                  className="flex min-w-0 flex-col gap-1 text-content"
                 >
                   {field.label}
                   <Select
@@ -273,17 +273,17 @@ export function InlineDiscussionSettings({
           </div>
         )}
       </div>
-      <p className="text-sm text-[var(--color-fg-soft)]">
+      <p className="text-content text-[var(--color-fg-soft)]">
         Inline discussions always use the enforced read-only permission policy.
         Model changes reset options the new model does not support.
       </p>
       {storageError && (
-        <p role="alert" className="text-sm">
+        <p role="alert" className="text-content">
           {storageError}
         </p>
       )}
       {error && (
-        <p role="alert" className="text-sm">
+        <p role="alert" className="text-content">
           {error}
         </p>
       )}

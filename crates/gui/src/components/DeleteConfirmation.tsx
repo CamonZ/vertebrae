@@ -41,10 +41,10 @@ export function DeleteConfirmation({
     >
       <div className="space-y-3">
         <div>
-          <h4 className="text-sm font-semibold text-err">
+          <h4 className="text-content font-semibold text-err">
             Delete {itemType}?
           </h4>
-          <p className="mt-1 text-sm text-fg-soft">
+          <p className="mt-1 text-content text-fg-soft">
             Are you sure you want to delete <EmWord>{itemName}</EmWord>?
           </p>
         </div>
@@ -52,14 +52,14 @@ export function DeleteConfirmation({
         {children}
 
         {error && (
-          <p className="text-xs text-err bg-err/10 p-2 rounded">{error}</p>
+          <p className="text-secondary text-err bg-err/10 p-2 rounded">{error}</p>
         )}
 
         <div className="flex gap-2">
           <button
             onClick={onConfirm}
             disabled={isDeleting}
-            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-[var(--color-err-wash)] text-[var(--color-err)] hover:bg-[color-mix(in_oklch,var(--color-err)_25%,transparent)] disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-secondary font-medium bg-[var(--color-err-wash)] text-[var(--color-err)] hover:bg-[color-mix(in_oklch,var(--color-err)_25%,transparent)] disabled:opacity-50 cursor-pointer"
           >
             {isDeleting ? (
               <>
@@ -91,7 +91,7 @@ export function DeleteConfirmation({
           <button
             onClick={onCancel}
             disabled={isDeleting}
-            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-xs font-medium bg-[var(--color-bg-3)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-4)] hover:text-[var(--color-fg)] disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-secondary font-medium bg-[var(--color-bg-3)] text-[var(--color-fg-mute)] hover:bg-[var(--color-bg-4)] hover:text-[var(--color-fg)] disabled:opacity-50 cursor-pointer"
           >
             Cancel
           </button>

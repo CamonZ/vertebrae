@@ -130,7 +130,7 @@ export function TurnDocument({
         </div>
       ) : (
         <>
-          <p className="text-xs text-fg-mute">{source.note}</p>
+          <p className="text-secondary text-fg-mute">{source.note}</p>
           <div className="changes-viewport">
             <Suspense fallback={<p role="status">Loading viewer…</p>}>
               <SourceEvidenceCode

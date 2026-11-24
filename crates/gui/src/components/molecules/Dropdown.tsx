@@ -340,7 +340,7 @@ export function Dropdown({
             ))}
           </ul>
           {visibleOptions.length === 0 && searchPlaceholder && (
-            <p role="status" className="px-2 py-1 text-xs text-fg-soft">No matching fonts</p>
+            <p role="status" className="px-2 py-1 text-secondary text-fg-soft">No matching fonts</p>
           )}
         </div>
       )}

@@ -170,7 +170,7 @@ export function DaemonEnrollmentModal({
           <h2 className="mt-2 font-serif text-2xl text-[var(--color-fg)]">
             Register a <em className="text-[var(--color-accent)]">daemon</em>
           </h2>
-          <p className="mt-2 text-sm italic leading-relaxed text-[var(--color-fg-mute)]">
+          <p className="mt-2 text-content italic leading-relaxed text-[var(--color-fg-mute)]">
             Naming reserves an id now; the machine claims it later with a
             one-time token. Capabilities are read from the machine on first
             heartbeat, so there is nothing else to fill in.
@@ -197,12 +197,12 @@ export function DaemonEnrollmentModal({
               className="mt-2"
               disabled={isBusy}
             />
-            <p className="mt-1 text-xs text-[var(--color-fg-mute)]">
+            <p className="mt-1 text-secondary text-[var(--color-fg-mute)]">
               How you will recognise this machine in run logs. Renameable later.
             </p>
             {(nameError || error) && (
               <p
-                className="mt-3 text-xs text-[var(--color-err)]"
+                className="mt-3 text-secondary text-[var(--color-err)]"
                 role="alert"
                 data-testid="daemon-enrollment-error"
               >
@@ -246,7 +246,7 @@ export function DaemonEnrollmentModal({
               </>
             )}
           </h2>
-          <p className="mt-2 text-sm italic leading-relaxed text-[var(--color-fg-mute)]">
+          <p className="mt-2 text-content italic leading-relaxed text-[var(--color-fg-mute)]">
             {isReissue
               ? "Run the new one-time enrollment command on the daemon's machine. A running daemon reconnects with the new credential automatically."
               : "The daemon is registered but has never checked in. Run this on the machine — the token is accepted once, then burned."}
@@ -259,7 +259,7 @@ export function DaemonEnrollmentModal({
                   Daemon ID
                 </p>
                 <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] bg-[var(--color-bg)] px-3 py-2">
-                  <code className="min-w-0 flex-1 truncate font-mono text-xs text-[var(--color-fg)]">
+                  <code className="min-w-0 flex-1 truncate font-mono text-secondary text-[var(--color-fg)]">
                     {bootstrap.daemon.id}
                   </code>
                   <CopyButton
@@ -277,7 +277,7 @@ export function DaemonEnrollmentModal({
                 </p>
                 <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] bg-[var(--color-bg)] px-3 py-2">
                   <code
-                    className="min-w-0 flex-1 truncate font-mono text-xs text-[var(--color-fg)]"
+                    className="min-w-0 flex-1 truncate font-mono text-secondary text-[var(--color-fg)]"
                     aria-label={
                       tokenVisible
                         ? "Enrollment token"
@@ -302,7 +302,7 @@ export function DaemonEnrollmentModal({
                     onCopy={handleCopy}
                   />
                 </div>
-                <p className="mt-2 text-xs text-[var(--color-warn)]">
+                <p className="mt-2 text-secondary text-[var(--color-warn)]">
                   ⚠ Shown once. Expires{" "}
                   {new Date(bootstrap.expires_at).toLocaleString()}. Re-issue
                   from the daemon&apos;s panel if it is lost.
@@ -314,7 +314,7 @@ export function DaemonEnrollmentModal({
                   Or paste this
                 </p>
                 <div className="mt-2 flex items-start gap-2 rounded-[var(--radius-sm)] border border-[var(--color-line-strong)] bg-[var(--color-bg)] p-3">
-                  <code className="min-w-0 flex-1 break-words font-mono text-xs leading-relaxed text-[var(--color-fg)]">
+                  <code className="min-w-0 flex-1 break-words font-mono text-secondary leading-relaxed text-[var(--color-fg)]">
                     {command}
                   </code>
                   <CopyButton
@@ -326,14 +326,14 @@ export function DaemonEnrollmentModal({
                 </div>
                 {serverEndpointError && (
                   <p
-                    className="mt-2 text-xs text-[var(--color-warn)]"
+                    className="mt-2 text-secondary text-[var(--color-warn)]"
                     role="status"
                   >
                     {serverEndpointError} Use the endpoint configured for this
                     account before running the command.
                   </p>
                 )}
-                <p className="mt-2 text-xs text-[var(--color-fg-mute)]">
+                <p className="mt-2 text-secondary text-[var(--color-fg-mute)]">
                   Save the token to a protected file and pipe it to
                   <span className="mx-1 font-mono text-[var(--color-fg-soft)]">
                     --token-stdin

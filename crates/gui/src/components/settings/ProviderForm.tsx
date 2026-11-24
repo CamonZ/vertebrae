@@ -118,7 +118,7 @@ export function ProviderForm({
         </Notice>
       )}
       <details>
-        <summary className="cursor-pointer text-sm font-medium">
+        <summary className="cursor-pointer text-content font-medium">
           Advanced options
         </summary>
         <div className="mt-4 space-y-4">
@@ -136,7 +136,7 @@ export function ProviderForm({
           )}
           {draft.harness !== "typesafe" && (
             <>
-              <p className="text-xs text-[var(--color-fg-mute)]">
+              <p className="text-secondary text-[var(--color-fg-mute)]">
                 Environment values remain hidden. Keep, replace or clear each
                 value explicitly.
               </p>

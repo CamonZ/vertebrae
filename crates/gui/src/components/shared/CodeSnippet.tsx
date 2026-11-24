@@ -52,7 +52,7 @@ export function useResolvedLanguage(language: string): SupportedLanguages {
 const snippetStyle = {
   "--diffs-font-family": "var(--font-mono)",
   "--diffs-header-font-family": "var(--font-mono)",
-  "--diffs-font-size": "var(--text-13)",
+  "--diffs-font-size": "var(--text-code)",
   "--diffs-line-height": "1.6",
   "--diffs-gap-block": "0.75rem",
   "--diffs-gap-inline": "0.75rem",

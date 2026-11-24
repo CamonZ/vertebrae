@@ -27,11 +27,11 @@ describe("Count", () => {
   });
 
   it("merges a caller className and forwards span attributes", () => {
-    render(<Count value={7} className="ml-auto text-2xs" data-testid="c" />);
+    render(<Count value={7} className="ml-auto text-meta" data-testid="c" />);
     const el = screen.getByTestId("c");
     expect(el).toHaveTextContent("7");
     expect(el.className).toContain("ml-auto");
-    expect(el.className).toContain("text-2xs");
+    expect(el.className).toContain("text-meta");
     expect(el.className).toContain("font-serif");
   });
 });

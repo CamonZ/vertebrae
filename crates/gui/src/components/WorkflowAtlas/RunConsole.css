@@ -76,7 +76,7 @@
 }
 .rc-eyebrow {
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -118,7 +118,7 @@
   background: transparent;
   cursor: pointer;
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg-mute);
   display: flex;
   align-items: center;
@@ -141,7 +141,7 @@
 }
 .rc-tab .n {
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   min-width: 17px;
   height: 16px;
   padding: 0 var(--s-1);
@@ -178,7 +178,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg);
   outline: none;
   transition: all var(--t-fast) var(--ease);
@@ -209,7 +209,7 @@
   padding: var(--s-8) var(--s-4);
   text-align: center;
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   line-height: 1.6;
 }
@@ -272,7 +272,7 @@
   margin-left: auto;
   padding-left: var(--s-2);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -280,7 +280,7 @@
 }
 .rc-title {
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg-soft);
   line-height: 1.35;
   display: -webkit-box;
@@ -368,7 +368,7 @@
 }
 .rc-ag {
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   display: flex;
   align-items: center;
@@ -389,7 +389,7 @@
   align-items: center;
   gap: var(--s-1);
   font-family: var(--sans);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   font-weight: 500;
   cursor: pointer;
   color: var(--accent);
@@ -447,7 +447,7 @@
 }
 .rc-fab-label {
   font-family: var(--sans);
-  font-size: var(--text-13);
+  font-size: var(--text-content);
   font-weight: 500;
   color: var(--fg);
   letter-spacing: -0.005em;
@@ -457,7 +457,7 @@
   align-items: center;
   gap: var(--s-1h);
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   font-weight: 500;
   color: var(--accent);
   padding: 1px var(--s-1h);

@@ -51,7 +51,7 @@ function parseCodeRefString(input: string): { path: string; lineStart: number | 
 }
 
 const inputClasses =
-  'rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-2 py-1.5 text-sm text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] disabled:opacity-50';
+  'rounded-[var(--radius-sm)] border border-[var(--color-line)] bg-[var(--color-bg-1)] px-2 py-1.5 text-content text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] disabled:opacity-50';
 
 interface CodeRefFormProps {
   initialData?: CodeRef;
@@ -170,7 +170,7 @@ function CodeRefForm({ initialData, onSave, onCancel, onDelete, isDeleting }: Co
       </div>
 
       {error && (
-        <p className="text-xs text-[var(--color-err)] ml-4">{error}</p>
+        <p className="text-secondary text-[var(--color-err)] ml-4">{error}</p>
       )}
 
       {/* Action buttons */}
@@ -265,10 +265,10 @@ function CodeRefItem({ codeRef, onEdit }: CodeRefItemProps) {
     >
       <div className="min-w-0 flex-1">
         {codeRef.name && (
-          <p className="text-sm font-medium text-[var(--color-fg)]">{codeRef.name}</p>
+          <p className="text-content font-medium text-[var(--color-fg)]">{codeRef.name}</p>
         )}
         <div className="flex items-center gap-2">
-          <code className="truncate font-mono text-xs text-[var(--color-fg-soft)]">
+          <code className="truncate font-mono text-secondary text-[var(--color-fg-soft)]">
             {codeRef.path}
           </code>
           {lineRange && (
@@ -278,7 +278,7 @@ function CodeRefItem({ codeRef, onEdit }: CodeRefItemProps) {
           )}
         </div>
         {codeRef.description && (
-          <p className="mt-1 text-sm text-[var(--color-fg-mute)]">{codeRef.description}</p>
+          <p className="mt-1 text-content text-[var(--color-fg-mute)]">{codeRef.description}</p>
         )}
       </div>
       <button
@@ -410,7 +410,7 @@ export function TaskCodeRefs({ codeRefs, taskId, onCodeRefsChanged }: TaskCodeRe
       {/* Code refs list */}
       <div className="flex-1 overflow-auto p-4">
         {codeRefs.length === 0 && !isAdding ? (
-          <div className="text-center text-sm text-[var(--color-fg-mute)] py-6">
+          <div className="text-center text-content text-[var(--color-fg-mute)] py-6">
             No code references
           </div>
         ) : (

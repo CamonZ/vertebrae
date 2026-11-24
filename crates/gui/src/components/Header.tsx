@@ -59,7 +59,7 @@ function Breadcrumb({
       )}
       <span
         data-testid="topbar-breadcrumb-page"
-        className="truncate pl-0.5 font-sans text-[13px] font-medium text-[var(--color-fg)]"
+        className="truncate pl-0.5 font-sans text-content font-medium text-[var(--color-fg)]"
       >
         {page}
       </span>
@@ -76,10 +76,10 @@ export function CommandKChip() {
       data-testid="topbar-kbd"
       className="hidden items-center gap-1 text-[var(--color-fg-faint)] sm:inline-flex"
     >
-      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-2xs text-[var(--color-fg-mute)]">
+      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-meta text-[var(--color-fg-mute)]">
         ⌘
       </kbd>
-      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-2xs text-[var(--color-fg-mute)]">
+      <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-[5px] py-px font-mono text-meta text-[var(--color-fg-mute)]">
         K
       </kbd>
     </span>
@@ -99,7 +99,7 @@ export function Header() {
         "titlebar relative flex h-[38px] shrink-0 items-center gap-4",
         "bg-[var(--color-canvas)] pr-4",
         IS_MACOS ? "pl-[78px]" : "pl-4",
-        "font-mono text-eyebrow tracking-[0.04em] text-[var(--color-fg-mute)]",
+        "font-mono text-meta tracking-[0.04em] text-[var(--color-fg-mute)]",
       ].join(" ")}
     >
       <BrandMark />

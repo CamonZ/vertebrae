@@ -52,7 +52,7 @@ export function GateChatStatusBar({
       data-attempt={status.attempt}
       role="status"
       aria-live="polite"
-      className="flex items-center gap-2 border-b border-[var(--color-line)] px-3 py-1.5 text-xs text-[var(--color-fg-soft)]"
+      className="flex items-center gap-2 border-b border-[var(--color-line)] px-3 py-1.5 text-secondary text-[var(--color-fg-soft)]"
     >
       <RunChip
         force

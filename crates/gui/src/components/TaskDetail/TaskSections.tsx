@@ -330,7 +330,7 @@ export function TaskSections({ sections, taskId }: TaskSectionsProps) {
         {showTypeSelector ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-[var(--color-fg)]">Select type:</span>
+              <span className="text-content font-medium text-[var(--color-fg)]">Select type:</span>
               <button
                 type="button"
                 onClick={() => setShowTypeSelector(false)}
@@ -374,7 +374,7 @@ export function TaskSections({ sections, taskId }: TaskSectionsProps) {
       {/* Sections list */}
       <div className="flex-1 overflow-auto">
         {displayTypes.length === 0 && !addingToType ? (
-          <div className="px-4 py-6 text-center text-sm text-[var(--color-fg-mute)]">
+          <div className="px-4 py-6 text-center text-content text-[var(--color-fg-mute)]">
             No sections defined
           </div>
         ) : (

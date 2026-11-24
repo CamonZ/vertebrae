@@ -134,7 +134,7 @@ function DetailRow({
   return (
     <div className="flex items-center justify-between py-2">
       <span className="t-label text-[var(--color-fg-mute)]">{label}</span>
-      <span className="font-mono text-xs text-[var(--color-fg)]">
+      <span className="font-mono text-secondary text-[var(--color-fg)]">
         {children}
       </span>
     </div>
@@ -614,7 +614,7 @@ export function TaskDetailPanel({
       >
         {childrenIds.length > 0 && (
           <div className="rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--color-bg-3)] p-2.5">
-            <p className="mb-2 text-xs font-medium text-[var(--color-warn)]">
+            <p className="mb-2 text-secondary font-medium text-[var(--color-warn)]">
               This task has {childrenIds.length} child task
               {childrenIds.length !== 1 ? "s" : ""}
             </p>
@@ -722,11 +722,11 @@ export function TaskDetailPanel({
           onBlur={() => handleFieldSave("title")}
           autoFocus
           disabled={isSubmitting}
-          className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 font-sans text-[length:calc(var(--text-base)*var(--reading-scale))] font-semibold leading-snug text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] disabled:opacity-50"
+          className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 font-sans text-lg font-semibold leading-snug text-[var(--color-fg)] placeholder-[var(--color-fg-faint)] disabled:opacity-50"
           placeholder="Enter title"
         />
         {fieldError && (
-          <p className="font-sans text-xs text-[var(--color-err)]">
+          <p className="font-sans text-secondary text-[var(--color-err)]">
             {fieldError}
           </p>
         )}
@@ -735,7 +735,7 @@ export function TaskDetailPanel({
       <h3
         data-panel-title
         onClick={() => handleFieldClick("title")}
-        className="cursor-pointer rounded-[var(--radius-sm)] font-sans text-[length:calc(var(--text-base)*var(--reading-scale))] font-semibold leading-snug text-[var(--color-fg)] hover:bg-[var(--color-bg-1)]"
+        className="cursor-pointer rounded-[var(--radius-sm)] font-sans text-lg font-semibold leading-snug text-[var(--color-fg)] hover:bg-[var(--color-bg-1)]"
       >
         {taskData.title}
       </h3>
@@ -757,13 +757,13 @@ export function TaskDetailPanel({
           hero below, so it isn't repeated here. */}
       <span
         aria-hidden
-        className="font-mono text-2xs text-[var(--color-fg-faint)]"
+        className="font-mono text-meta text-[var(--color-fg-faint)]"
       >
         ·
       </span>
       <span
         data-testid="task-detail-level"
-        className="font-mono text-2xs text-[var(--color-fg-faint)]"
+        className="font-mono text-meta text-[var(--color-fg-faint)]"
       >
         {taskData.level}
       </span>
@@ -771,11 +771,11 @@ export function TaskDetailPanel({
         <>
           <span
             aria-hidden
-            className="font-mono text-2xs text-[var(--color-fg-faint)]"
+            className="font-mono text-meta text-[var(--color-fg-faint)]"
           >
             ·
           </span>
-          <span className="font-mono text-2xs text-[var(--color-fg-faint)]">
+          <span className="font-mono text-meta text-[var(--color-fg-faint)]">
             under{" "}
             <button
               type="button"
@@ -783,7 +783,7 @@ export function TaskDetailPanel({
               onClick={() =>
                 taskData.parent_id && onTaskSelect?.(taskData.parent_id)
               }
-              className="cursor-pointer font-serif text-xs italic text-[var(--color-fg-mute)] transition-colors hover:text-[var(--color-fg)]"
+              className="cursor-pointer font-serif text-secondary italic text-[var(--color-fg-mute)] transition-colors hover:text-[var(--color-fg)]"
             >
               {parentTitle}
             </button>
@@ -792,7 +792,7 @@ export function TaskDetailPanel({
       )}
       {priorityIndicator && (
         <span
-          className={`font-mono text-xs font-bold ${priorityIndicator.color}`}
+          className={`font-mono text-secondary font-bold ${priorityIndicator.color}`}
           aria-label={priorityIndicator.label}
         >
           {priorityIndicator.glyph}
@@ -802,13 +802,13 @@ export function TaskDetailPanel({
         <>
           <span
             aria-hidden
-            className="font-mono text-2xs text-[var(--color-fg-faint)]"
+            className="font-mono text-meta text-[var(--color-fg-faint)]"
           >
             ·
           </span>
           <span
             data-testid="task-detail-location"
-            className="font-mono text-2xs text-[var(--color-fg-mute)]"
+            className="font-mono text-meta text-[var(--color-fg-mute)]"
           >
             {(() => {
               const workflow = taskLocationWorkflowLabel(taskLocation);
@@ -851,7 +851,7 @@ export function TaskDetailPanel({
 
       {workflowError && (
         <div
-          className="mx-4 mt-2 rounded-[var(--radius-md)] border border-[color-mix(in_oklch,var(--color-err)_30%,transparent)] bg-[var(--color-err-wash)] px-3 py-2 text-xs text-[var(--color-err)]"
+          className="mx-4 mt-2 rounded-[var(--radius-md)] border border-[color-mix(in_oklch,var(--color-err)_30%,transparent)] bg-[var(--color-err-wash)] px-3 py-2 text-secondary text-[var(--color-err)]"
           role="alert"
         >
           {workflowError}
@@ -862,7 +862,7 @@ export function TaskDetailPanel({
         <div className="flex flex-1 items-center justify-center">
           <div className="flex flex-col items-center gap-3">
             <Spinner className="h-8 w-8" />
-            <p className="text-xs text-[var(--color-fg-mute)]">
+            <p className="text-secondary text-[var(--color-fg-mute)]">
               Loading task...
             </p>
           </div>
@@ -886,10 +886,10 @@ export function TaskDetailPanel({
                 d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
               />
             </svg>
-            <p className="mb-2 text-sm font-medium text-[var(--color-fg)]">
+            <p className="mb-2 text-content font-medium text-[var(--color-fg)]">
               Failed to load task
             </p>
-            <p className="rounded-[var(--radius-md)] border border-[color-mix(in_oklch,var(--color-err)_30%,transparent)] bg-[var(--color-err-wash)] px-3 py-2 font-mono text-xs text-[var(--color-err)]">
+            <p className="rounded-[var(--radius-md)] border border-[color-mix(in_oklch,var(--color-err)_30%,transparent)] bg-[var(--color-err-wash)] px-3 py-2 font-mono text-secondary text-[var(--color-err)]">
               {error}
             </p>
           </div>
@@ -962,7 +962,7 @@ export function TaskDetailPanel({
               </div>
             )}
             {children.length === 0 ? (
-              <p className="py-2 text-xs italic text-[var(--color-fg-mute)]">
+              <p className="py-2 text-secondary italic text-[var(--color-fg-mute)]">
                 No child tasks
               </p>
             ) : (
@@ -982,7 +982,7 @@ export function TaskDetailPanel({
                       copyable={false}
                       testId={`child-task-id-${child.id}`}
                     />
-                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-fg-soft)]">
+                    <span className="min-w-0 flex-1 truncate text-content text-[var(--color-fg-soft)]">
                       {child.title}
                     </span>
                     <span className="flex-shrink-0">
@@ -1036,15 +1036,15 @@ export function TaskDetailPanel({
             count={artifacts.length}
           >
             {artifactsLoading ? (
-              <p className="py-2 text-xs text-[var(--color-fg-mute)]">
+              <p className="py-2 text-secondary text-[var(--color-fg-mute)]">
                 Loading attachments…
               </p>
             ) : artifactsError ? (
-              <p role="alert" className="py-2 text-xs text-[var(--color-err)]">
+              <p role="alert" className="py-2 text-secondary text-[var(--color-err)]">
                 {artifactsError}
               </p>
             ) : artifacts.length === 0 ? (
-              <p className="py-2 text-xs italic text-[var(--color-fg-mute)]">
+              <p className="py-2 text-secondary italic text-[var(--color-fg-mute)]">
                 No attachments
               </p>
             ) : (
@@ -1057,10 +1057,10 @@ export function TaskDetailPanel({
                     onClick={() => openArtifact(artifact.id)}
                     className="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left hover:bg-[var(--color-bg-2)]"
                   >
-                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-fg-soft)]">
+                    <span className="min-w-0 flex-1 truncate text-content text-[var(--color-fg-soft)]">
                       {artifact.logical_name ?? artifact.filename}
                     </span>
-                    <span className="font-mono text-2xs uppercase text-[var(--color-fg-mute)]">
+                    <span className="font-mono text-meta uppercase text-[var(--color-fg-mute)]">
                       {artifact.metadata?.content_kind ?? "raw"}
                     </span>
                   </button>
@@ -1133,7 +1133,7 @@ export function TaskDetailPanel({
                       onBlur={() => handleFieldSave("priority")}
                       autoFocus
                       disabled={isSubmitting}
-                      className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 text-sm text-[var(--color-fg)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="w-full rounded-[var(--radius-md)] border border-[var(--color-accent)] bg-[var(--color-bg-1)] px-2 py-1.5 text-content text-[var(--color-fg)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <option value="">None</option>
                       <option value="low">Low</option>
@@ -1142,7 +1142,7 @@ export function TaskDetailPanel({
                       <option value="critical">Critical</option>
                     </select>
                     {fieldError && (
-                      <p className="text-xs text-[var(--color-err)]">
+                      <p className="text-secondary text-[var(--color-err)]">
                         {fieldError}
                       </p>
                     )}
@@ -1150,7 +1150,7 @@ export function TaskDetailPanel({
                 ) : (
                   <p
                     onClick={() => handleFieldClick("priority")}
-                    className="cursor-pointer rounded-[var(--radius-sm)] p-2 text-sm text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)]"
+                    className="cursor-pointer rounded-[var(--radius-sm)] p-2 text-content text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)]"
                   >
                     {taskData.priority || "None"}
                   </p>
@@ -1173,7 +1173,7 @@ export function TaskDetailPanel({
                             handleFieldSave("level");
                           }}
                           disabled={isSubmitting}
-                          className={`flex-1 cursor-pointer rounded-[var(--radius-md)] px-3 py-1.5 text-sm font-medium transition-colors ${
+                          className={`flex-1 cursor-pointer rounded-[var(--radius-md)] px-3 py-1.5 text-content font-medium transition-colors ${
                             editValues.level === level
                               ? "bg-[var(--color-accent)] text-[var(--color-bg)]"
                               : "border border-[var(--color-line-strong)] bg-[var(--color-bg-1)] text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)]"
@@ -1184,7 +1184,7 @@ export function TaskDetailPanel({
                       ))}
                     </div>
                     {fieldError && (
-                      <p className="text-xs text-[var(--color-err)]">
+                      <p className="text-secondary text-[var(--color-err)]">
                         {fieldError}
                       </p>
                     )}
@@ -1192,7 +1192,7 @@ export function TaskDetailPanel({
                 ) : (
                   <p
                     onClick={() => handleFieldClick("level")}
-                    className="cursor-pointer rounded-[var(--radius-sm)] p-2 text-sm text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)]"
+                    className="cursor-pointer rounded-[var(--radius-sm)] p-2 text-content text-[var(--color-fg-soft)] hover:bg-[var(--color-bg-2)]"
                   >
                     {taskData.level
                       ? taskData.level.charAt(0).toUpperCase() +
@@ -1248,7 +1248,7 @@ export function TaskDetailPanel({
                   <h4 className="mb-1 t-label text-[var(--color-fg-mute)]">
                     Worktree
                   </h4>
-                  <p className="break-all font-mono text-xs text-[var(--color-fg-soft)]">
+                  <p className="break-all font-mono text-secondary text-[var(--color-fg-soft)]">
                     {taskData.worktree}
                   </p>
                 </div>

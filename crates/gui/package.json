@@ -27,8 +27,9 @@
     "test:sidecars": "node --test scripts/prepare-sidecars.test.mjs",
     "test:selection": "node --test scripts/selection-style.test.mjs",
     "test:cascade": "node --test scripts/layer-cascade.test.mjs",
+    "test:font-size": "node --test scripts/font-size-lint.test.mjs",
     "build:flow-validator": "vite build --config vite.flow-validator.config.ts",
-    "lint:css": "biome lint src && stylelint \"src/**/*.css\""
+    "lint:css": "biome lint src && stylelint \"src/**/*.css\" && node scripts/check-font-size-classes.mjs"
   },
   "dependencies": {
     "@hpcc-js/wasm-graphviz": "^1.28.0",

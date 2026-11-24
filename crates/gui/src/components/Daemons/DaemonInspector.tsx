@@ -60,8 +60,8 @@ interface DaemonInspectorProps {
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-3 border-b border-[var(--color-line)] py-2.5 last:border-b-0">
-      <dt className="text-xs text-[var(--color-fg-mute)]">{label}</dt>
-      <dd className="min-w-0 break-words text-right text-xs text-[var(--color-fg-soft)]">
+      <dt className="text-secondary text-[var(--color-fg-mute)]">{label}</dt>
+      <dd className="min-w-0 break-words text-right text-secondary text-[var(--color-fg-soft)]">
         {value}
       </dd>
     </div>
@@ -77,8 +77,8 @@ function DetailEditorRow({
 }) {
   return (
     <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] items-start gap-3 border-b border-[var(--color-line)] py-2.5 last:border-b-0">
-      <dt className="pt-2 text-xs text-[var(--color-fg-mute)]">{label}</dt>
-      <dd className="min-w-0 text-right text-xs text-[var(--color-fg-soft)]">
+      <dt className="pt-2 text-secondary text-[var(--color-fg-mute)]">{label}</dt>
+      <dd className="min-w-0 text-right text-secondary text-[var(--color-fg-soft)]">
         {children}
       </dd>
     </div>
@@ -204,7 +204,7 @@ export function DaemonInspector({
             </div>
           ) : error && !daemon ? (
             <div
-              className="rounded-[var(--radius-md)] border border-[var(--color-err)]/40 bg-[var(--color-err-wash)] p-4 text-sm text-[var(--color-err)]"
+              className="rounded-[var(--radius-md)] border border-[var(--color-err)]/40 bg-[var(--color-err-wash)] p-4 text-content text-[var(--color-err)]"
               role="alert"
               data-testid="daemon-inspector-error"
             >
@@ -226,7 +226,7 @@ export function DaemonInspector({
             <div className="space-y-5" data-testid="daemon-inspector-content">
               {daemon.status === "pending" && (
                 <p
-                  className="rounded-[var(--radius-md)] border border-[var(--color-warn)]/35 bg-[var(--color-warn-wash)] p-3 text-xs leading-relaxed text-[var(--color-warn)]"
+                  className="rounded-[var(--radius-md)] border border-[var(--color-warn)]/35 bg-[var(--color-warn-wash)] p-3 text-secondary leading-relaxed text-[var(--color-warn)]"
                   role="status"
                   data-testid="daemon-inspector-pending"
                 >
@@ -236,7 +236,7 @@ export function DaemonInspector({
               )}
               {reenrollmentRequired && !revoked && !terminal && (
                 <div
-                  className="rounded-[var(--radius-md)] border border-[var(--color-warn)]/35 bg-[var(--color-warn-wash)] p-3 text-xs leading-relaxed text-[var(--color-warn)]"
+                  className="rounded-[var(--radius-md)] border border-[var(--color-warn)]/35 bg-[var(--color-warn-wash)] p-3 text-secondary leading-relaxed text-[var(--color-warn)]"
                   role="status"
                   data-testid="daemon-inspector-credential-reenrollment"
                 >
@@ -384,7 +384,7 @@ export function DaemonInspector({
                     value={formatDaemonTimestamp(daemon.updated_at)}
                   />
                 </dl>
-                <p className="mt-3 text-xs leading-relaxed text-[var(--color-fg-mute)]">
+                <p className="mt-3 text-secondary leading-relaxed text-[var(--color-fg-mute)]">
                   Values come from Sacrum&apos;s live in-memory snapshot.
                   Missing fields are not inferred from shell connectivity or
                   local installation state.
@@ -400,7 +400,7 @@ export function DaemonInspector({
               )}
               {revoked && (
                 <p
-                  className="rounded-[var(--radius-md)] border border-[var(--color-warn)]/35 bg-[var(--color-warn-wash)] p-3 text-xs leading-relaxed text-[var(--color-warn)]"
+                  className="rounded-[var(--radius-md)] border border-[var(--color-warn)]/35 bg-[var(--color-warn-wash)] p-3 text-secondary leading-relaxed text-[var(--color-warn)]"
                   role="status"
                   data-testid="daemon-inspector-reenrollment-status"
                 >
@@ -438,7 +438,7 @@ export function DaemonInspector({
         )}
         {actionError && !lifecycleAction && (
           <p
-            className="shrink-0 border-t border-[var(--color-line)] px-4 py-2 text-xs text-[var(--color-err)]"
+            className="shrink-0 border-t border-[var(--color-line)] px-4 py-2 text-secondary text-[var(--color-err)]"
             role="alert"
             data-testid="daemon-inspector-action-error"
           >

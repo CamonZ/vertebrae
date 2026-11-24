@@ -102,7 +102,7 @@ export function ThinkingLine({
         data-mode={mode}
       >
         {showText ? (
-          <span className="truncate text-sm text-[var(--color-fg-mute)]">
+          <span className="truncate text-content text-[var(--color-fg-mute)]">
             {text}
           </span>
         ) : (

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState } from "react";
-import { readingPercent, TYPEFACE_ROLES } from "../utils/readingAppearance";
+import { textSizePercent, TYPEFACE_ROLES } from "../utils/readingAppearance";
 import { useUIStore } from "../stores/uiStore";
 
 /**
@@ -21,7 +21,7 @@ export function useTheme() {
     state.useCustomTypeface ? state.customTypefaceBase ?? state.typePairing : state.typePairing
   );
   const useCustomTypeface = useUIStore((state) => state.useCustomTypeface);
-  const readingTextSize = useUIStore((state) => state.readingTextSize);
+  const textSize = useUIStore((state) => state.textSize);
   const customTypefaces = useUIStore((state) => state.customTypefaces);
   const accent = useUIStore((state) => state.accent);
 
@@ -29,11 +29,12 @@ export function useTheme() {
     document.documentElement.dataset.type = typePairing;
   }, [typePairing]);
 
+  // Text size scales the root font size, so every rem token follows it.
   useLayoutEffect(() => {
     document.documentElement.style.setProperty(
-      "--reading-scale", String(readingPercent(readingTextSize) / 100)
+      "--text-scale", String(textSizePercent(textSize) / 100)
     );
-  }, [readingTextSize]);
+  }, [textSize]);
 
   useLayoutEffect(() => {
     const style = document.documentElement.style;

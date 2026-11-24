@@ -42,7 +42,7 @@ export function Card({
     <div className={classes} {...rest}>
       {header && (
         <div className="flex items-center justify-between gap-3 border-b border-[var(--color-line)] px-4 py-3">
-          <div className="min-w-0 flex-1 truncate font-sans text-sm font-medium text-[var(--color-fg)]">
+          <div className="min-w-0 flex-1 truncate font-sans text-content font-medium text-[var(--color-fg)]">
             {header}
           </div>
           {headerAction && (
@@ -54,7 +54,7 @@ export function Card({
       )}
       <div className="px-4 py-3">{children}</div>
       {footer && (
-        <div className="border-t border-[var(--color-line)] px-4 py-3 text-sm text-[var(--color-fg-soft)]">
+        <div className="border-t border-[var(--color-line)] px-4 py-3 text-content text-[var(--color-fg-soft)]">
           {footer}
         </div>
       )}

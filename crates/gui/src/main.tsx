@@ -7,7 +7,7 @@ import "./index.css";
 import { router } from "./router";
 import { SplashScreen, GlobalListeners } from "./components";
 import { commands } from "./bindings";
-import { useTheme, useDensity, useInlineCodeStyle } from "./hooks";
+import { useTheme, useInlineCodeStyle } from "./hooks";
 import { queryClient } from "./query/queryClient";
 import {
   checkGuiUpdateChannels,
@@ -25,10 +25,9 @@ if (import.meta.env.DEV && import.meta.env.MODE !== "test")
   );
 
 function App() {
-  // Appearance (theme, typeface, accent, density, inline code) applies above
+  // Appearance (theme, typeface, accent, text size, inline code) applies above
   // the boot splash so the first paint already uses the saved preferences.
   useTheme();
-  useDensity();
   useInlineCodeStyle();
   const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState("Loading configuration...");

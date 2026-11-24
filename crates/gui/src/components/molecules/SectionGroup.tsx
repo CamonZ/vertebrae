@@ -60,12 +60,12 @@ export function SectionGroup({
         onClick={toggle}
         aria-expanded={open}
         aria-label={ariaLabel}
-        className="sticky top-0 z-10 flex w-full items-center gap-2 bg-[var(--color-bg-1)] px-4 py-2.5 text-left text-sm font-medium text-[var(--color-fg)] hover:bg-[var(--color-bg-2)]"
+        className="sticky top-0 z-10 flex w-full items-center gap-2 bg-[var(--color-bg-1)] px-4 py-2.5 text-left text-content font-medium text-[var(--color-fg)] hover:bg-[var(--color-bg-2)]"
       >
         <span
           aria-hidden
           className={[
-            "inline-block text-xs text-[var(--color-fg-mute)] transition-transform duration-[var(--t-base)] ease-[var(--ease-default)]",
+            "inline-block text-secondary text-[var(--color-fg-mute)] transition-transform duration-[var(--t-base)] ease-[var(--ease-default)]",
             open ? "rotate-90" : "",
           ].join(" ")}
         >

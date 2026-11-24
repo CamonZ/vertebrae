@@ -294,7 +294,7 @@ function ComponentRow({
           <span className="font-medium text-fg">{label}</span>
           {needsRefresh && (
             <span
-              className="rounded bg-accent-wash px-2 py-0.5 text-xs text-accent"
+              className="rounded bg-accent-wash px-2 py-0.5 text-secondary text-accent"
               data-testid={`${testId}-needs-refresh`}
             >
               update available
@@ -302,7 +302,7 @@ function ComponentRow({
           )}
           {!needsRefresh && alreadyInstalled && (
             <span
-              className="rounded bg-ok-wash px-2 py-0.5 text-xs text-ok-fg"
+              className="rounded bg-ok-wash px-2 py-0.5 text-secondary text-ok-fg"
               data-testid={`${testId}-already-installed`}
             >
               already installed
@@ -310,15 +310,15 @@ function ComponentRow({
           )}
           {!needsRefresh && !alreadyInstalled && onPath && (
             <span
-              className="rounded bg-bg px-2 py-0.5 text-xs text-fg-mute"
+              className="rounded bg-bg px-2 py-0.5 text-secondary text-fg-mute"
               data-testid={`${testId}-on-path`}
             >
               found on PATH
             </span>
           )}
         </div>
-        <div className="mt-1 text-sm text-fg-soft">{description}</div>
-        <div className="mt-2 truncate font-mono text-xs text-fg-mute">
+        <div className="mt-1 text-content text-fg-soft">{description}</div>
+        <div className="mt-2 truncate font-mono text-secondary text-fg-mute">
           {targetPath}
         </div>
       </div>

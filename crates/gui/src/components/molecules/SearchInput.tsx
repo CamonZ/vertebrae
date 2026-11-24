@@ -25,7 +25,7 @@ const wrapperClasses =
 const inputClasses =
   "w-full h-[34px] pl-8 pr-8 bg-[var(--color-bg-1)] " +
   "border border-[var(--color-line-strong)] rounded-[var(--radius-md)] " +
-  "font-sans text-xs text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] " +
+  "font-sans text-secondary text-[var(--color-fg)] placeholder:text-[var(--color-fg-faint)] " +
   "transition-[border-color,box-shadow] duration-[var(--t-fast)] ease-[var(--ease-default)] " +
   // WebKit draws its own cancel button on type="search"; the component renders
   // a single, labelled clear button instead.
@@ -132,7 +132,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
           hint && (
             <kbd
               aria-hidden
-              className="pointer-events-none absolute right-2 rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-1.5 py-px font-mono text-2xs text-[var(--color-fg-mute)]"
+              className="pointer-events-none absolute right-2 rounded-[var(--radius-xs)] border border-[var(--color-line-strong)] bg-[var(--color-bg-2)] px-1.5 py-px font-mono text-meta text-[var(--color-fg-mute)]"
             >
               {hint}
             </kbd>

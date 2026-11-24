@@ -263,7 +263,7 @@ export function TasksPage() {
 
   const headerActions = useMemo(
     () => (
-      <div className="flex items-center gap-3 text-eyebrow">
+      <div className="flex items-center gap-3 text-meta">
         <LiveCount running={runningCount} />
       </div>
     ),

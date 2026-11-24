@@ -8,7 +8,7 @@
        .turn-sep / .thr-row vocabulary)
 
    The prototype self-injected this CSS via an IIFE and targeted prototype
-   tokens (--bg-2, --accent, --s-4, --r-full, --text-13, …). The GUI
+   tokens (--bg-2, --accent, --s-4, --r-full, …). The GUI
    re-exports that entire vocabulary at :root (the "DOCS/DESIGN V2 TOKEN
    ADAPTER" block in src/index.css), so every var() below resolves
    unchanged — no token remapping was required (see P0 tokenMap).
@@ -104,7 +104,7 @@
 /* time gutter */
 .evwhen {
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   text-align: right;
   padding-top: 2px;
@@ -115,7 +115,7 @@
 }
 .evwhen .rel {
   display: block;
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   color: var(--fg-mute);
   margin-top: 1px;
 }
@@ -195,17 +195,17 @@
 .evstep-arrow {
   color: var(--fg-ghost);
   font-family: var(--mono);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
 }
 .evstep-name {
   font-family: var(--mono);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg);
   letter-spacing: 0.01em;
 }
 .evstep-kind {
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
   color: var(--step-llm-fg);
@@ -239,7 +239,7 @@
 .evstep-rt {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   letter-spacing: var(--tracking-wide);
 }
@@ -264,7 +264,7 @@
   user-select: none;
   -webkit-user-select: none;
   font-family: var(--sans);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -323,7 +323,7 @@
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
   font-family: var(--mono);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   border-radius: var(--r-xs);
   color: var(--inline-code-fg);
   background: var(--inline-code-bg);
@@ -420,7 +420,7 @@
 }
 .ev-expand {
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   letter-spacing: var(--tracking-wide);
   color: var(--fg-faint);
   background: none;
@@ -448,7 +448,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r-xs);
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   line-height: var(--leading-relaxed);
   color: var(--fg-mute);
   white-space: pre-wrap;
@@ -469,7 +469,7 @@
   user-select: none;
   -webkit-user-select: none;
   font-family: var(--sans);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0;
   text-transform: none;
@@ -488,7 +488,7 @@
 }
 .ev-speaker .model {
   color: var(--fg-faint);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   padding: 1px var(--s-1h);
   border: 1px solid var(--line);
   border-radius: var(--r-xs);
@@ -521,7 +521,7 @@
 }
 .evprose {
   font-family: var(--font-prose);
-  font-size: calc(var(--prose-base-size) * var(--reading-scale));
+  font-size: var(--text-content);
   overflow-wrap: anywhere;
   line-height: var(--prose-leading);
   color: var(--fg-soft);
@@ -570,7 +570,7 @@
   margin: var(--s-3) 0 var(--s-1);
   color: var(--fg);
   font-family: var(--font-sans);
-  font-size: var(--text-14);
+  font-size: var(--text-content);
   line-height: var(--leading-normal);
   font-weight: 600;
 }
@@ -594,7 +594,7 @@
   line-height: inherit;
 }
 .evprose .markdown-content table {
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
 }
 .evprose .markdown-content .group {
   margin: var(--s-2) 0;
@@ -610,7 +610,7 @@
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
   font-family: var(--mono);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--inline-code-fg);
   background: var(--inline-code-bg);
   padding: 1px var(--s-1);
@@ -657,7 +657,7 @@
   border: 0;
   background: transparent;
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   color: var(--fg-soft);
   text-align: left;
   min-width: 0;
@@ -730,13 +730,13 @@
 .evtool-dur {
   margin-left: auto;
   color: var(--fg-faint);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   flex-shrink: 0;
   padding-left: var(--s-2);
 }
 .evtool-chev {
   color: var(--fg-faint);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   flex-shrink: 0;
   transition: transform var(--t-fast) var(--ease);
   margin-left: var(--s-1);
@@ -749,7 +749,7 @@
   background: var(--bg);
   border-top: 1px solid var(--line);
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   line-height: var(--leading-relaxed);
   color: var(--fg-mute);
   white-space: pre-wrap;
@@ -798,7 +798,7 @@
   list-style: none;
   border-top: 1px solid var(--line);
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   color: var(--fg-mute);
 }
 .evdiff {
@@ -821,8 +821,8 @@
   margin: 0;
   padding: 0 var(--s-2);
   font-family: var(--mono);
-  font-size: 13px;
-  line-height: 20px;
+  font-size: var(--text-content);
+  line-height: 1.25rem;
   white-space: pre;
   overflow: hidden;
   color: var(--fg-soft);
@@ -852,7 +852,7 @@
   background: transparent;
   color: var(--fg-mute);
   font-family: var(--sans);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   line-height: var(--leading-tight);
 }
 .evactivity.banner,
@@ -903,7 +903,7 @@
   border-radius: var(--r-sm);
   color: var(--step-wait-fg);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   display: flex;
   align-items: center;
   gap: var(--s-2h);
@@ -919,7 +919,7 @@
 .evrow--wait .wid {
   color: var(--accent);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
 }
 /* navigable child-run links (constraint #3 — links, never an inlined subtree) */
 .evrow--wait .wlinks {
@@ -931,7 +931,7 @@
 .evrow--wait .wlink {
   color: var(--accent);
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   background: none;
   border: 1px solid color-mix(in oklch, var(--accent) 30%, transparent);
   border-radius: var(--r-xs);
@@ -958,7 +958,7 @@
   border-radius: var(--r-sm);
   color: var(--err);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -972,7 +972,7 @@
 }
 .evrow--error .sub {
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   color: var(--fg-mute);
 }
 
@@ -990,7 +990,7 @@
 .evresult-hd {
   padding: var(--s-1h) var(--s-2h);
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
   color: var(--accent);
@@ -998,7 +998,7 @@
 }
 .evresult-bd {
   padding: var(--s-2) var(--s-2h);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   line-height: var(--leading-relaxed);
   color: var(--fg-soft);
   max-height: 320px;
@@ -1057,11 +1057,11 @@
 .th-arrow {
   color: var(--fg-ghost);
   font-family: var(--mono);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
 }
 .th-name {
   font-family: var(--mono);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg);
   letter-spacing: 0.01em;
   white-space: nowrap;
@@ -1074,7 +1074,7 @@
 }
 .th-kind {
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
   color: var(--kf, var(--step-llm-fg));
@@ -1087,7 +1087,7 @@
 }
 .th-sum {
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   margin-left: var(--s-2);
   white-space: nowrap;
@@ -1100,7 +1100,7 @@
 .th-rt {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   letter-spacing: var(--tracking-wide);
   flex-shrink: 0;
@@ -1108,7 +1108,7 @@
 }
 .thread-head .evwhen {
   font-family: var(--mono);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--fg-faint);
   text-align: right;
   padding-top: var(--s-3);
@@ -1116,7 +1116,7 @@
 }
 .thread-head .evwhen .rel {
   display: block;
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   color: var(--fg-mute);
   margin-top: 1px;
 }
@@ -1151,7 +1151,7 @@
   align-items: center;
   gap: var(--s-2);
   font-family: var(--mono);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
   color: var(--fg-faint);
@@ -1193,7 +1193,7 @@
   border-radius: var(--r-sm);
   cursor: pointer;
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
   min-width: 0;
   transition: background var(--t-fast) var(--ease);
 }
@@ -1213,7 +1213,7 @@
   color: var(--kf, var(--step-llm-fg));
   letter-spacing: var(--tracking-eyebrow);
   text-transform: uppercase;
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   flex-shrink: 0;
 }
 .sth-name {
@@ -1252,7 +1252,7 @@
 .sth-chev {
   margin-left: auto;
   color: var(--fg-faint);
-  font-size: var(--text-9);
+  font-size: var(--text-meta);
   flex-shrink: 0;
   transition: transform var(--t-fast) var(--ease);
 }
@@ -1265,7 +1265,7 @@
   flex-shrink: 0;
   display: inline-flex;
   padding: 0 var(--s-0);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   background: none;
   border: none;
 }
@@ -1288,7 +1288,7 @@
   gap: 6px;
   padding: 6px 12px;
   font-family: var(--font-sans, inherit);
-  font-size: 12px;
+  font-size: var(--text-secondary);
   line-height: 1.45;
   color: var(--color-fg);
 }
@@ -1319,7 +1319,7 @@
   margin-right: auto;
   align-self: center;
   color: var(--color-fg-mute);
-  font: 400 11px/1.4 var(--font-sans);
+  font: 400 var(--text-meta)/1.4 var(--font-sans);
 }
 .diff-comment-editor-hint kbd {
   display: inline-flex;
@@ -1332,7 +1332,7 @@
   border-radius: 4px;
   background: var(--color-bg-1);
   color: var(--color-fg-mute);
-  font: 500 10px/1 var(--font-mono);
+  font: 500 var(--text-meta)/1 var(--font-mono);
 }
 .diff-comment-main {
   display: flex;
@@ -1353,7 +1353,7 @@
   gap: 8px;
   margin-top: 2px;
   color: var(--color-fg-mute);
-  font: 400 11px/1.4 var(--font-sans);
+  font: 400 var(--text-meta)/1.4 var(--font-sans);
 }
 .diff-comment-where {
   min-width: 0;
@@ -1367,7 +1367,7 @@
   padding: 0 6px;
   background: color-mix(in oklch, var(--color-warn) 12%, transparent);
   color: var(--color-warn);
-  font: 500 10px/16px var(--font-sans);
+  font: 500 var(--text-meta)/1rem var(--font-sans);
 }
 .diff-comment-actions,
 .diff-comment-editor-actions,
@@ -1390,7 +1390,7 @@
   gap: 2px;
 }
 .diff-comment-editor-actions button {
-  font: 400 12px/1.45 var(--font-sans);
+  font: 400 var(--text-secondary)/1.45 var(--font-sans);
   background: transparent;
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-lg);
@@ -1440,7 +1440,7 @@
   min-width: 0;
   color: var(--color-fg-soft);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
 }
 .tool-activity-summary {
   display: flex;
@@ -1490,7 +1490,7 @@
   flex-shrink: 0;
   margin-left: auto;
   color: var(--color-fg-mute);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
 }
 .tool-activity-summary-status .is-error {
   color: var(--err);
@@ -1505,7 +1505,7 @@
   flex-wrap: wrap;
   gap: 4px 12px;
   padding: 12px 0 9px;
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--color-fg-soft);
 }
 .tool-activity-note > span {
@@ -1527,7 +1527,7 @@
   min-width: 0;
   padding: 7px 0;
   color: var(--color-fg-soft);
-  font: var(--text-12)/1.5 var(--sans);
+  font: var(--text-secondary)/1.5 var(--sans);
   text-align: left;
   cursor: pointer;
 }
@@ -1542,11 +1542,11 @@
 }
 .tool-activity-call-toggle .tool-activity-inferred {
   flex-shrink: 0;
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
 }
 .tool-activity-provider {
   color: var(--color-fg-mute);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
 }
 .tool-activity-detail-targets {
   display: grid;
@@ -1558,7 +1558,7 @@
   gap: 5px;
   margin-left: auto;
   color: var(--color-fg-mute);
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   white-space: nowrap;
 }
 .tool-activity-status.is-error {
@@ -1574,7 +1574,7 @@
   background: var(--color-fg-soft);
 }
 .tool-activity-target {
-  font: var(--text-11) var(--mono);
+  font: var(--text-meta) var(--mono);
   color: var(--color-fg);
   overflow-wrap: anywhere;
 }
@@ -1585,7 +1585,7 @@
   margin-top: 5px;
 }
 .tool-activity-relationships > span {
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--color-fg-mute);
   padding: 1px 5px;
   border: 1px solid var(--color-line);
@@ -1593,7 +1593,7 @@
 }
 .tool-activity-unresolved {
   margin-top: 4px;
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--color-fg-mute);
 }
 .tool-activity-raw {
@@ -1616,7 +1616,7 @@
   padding: 7px 10px;
   border-bottom: 1px solid var(--color-line);
   color: var(--color-fg-soft);
-  font: var(--text-10) var(--mono);
+  font: var(--text-meta) var(--mono);
 }
 .tool-activity-raw-heading > span {
   color: var(--color-fg-mute);
@@ -1630,7 +1630,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   color: var(--color-fg-soft);
-  font: var(--text-11)/1.65 var(--mono);
+  font: var(--text-meta)/1.65 var(--mono);
   tab-size: 2;
 }
 .tool-activity-raw-panel[aria-label="Arguments"] pre {
@@ -1639,7 +1639,7 @@
 .tool-activity-empty {
   padding: 12px;
   color: var(--color-fg-mute);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
 }
 @media (max-width: 700px) {
   .tool-activity-summary {
@@ -1679,7 +1679,7 @@
 }
 .tool-activity-overflow {
   flex-shrink: 0;
-  font-size: var(--text-10);
+  font-size: var(--text-meta);
   color: var(--color-fg-mute);
   white-space: nowrap;
 }
@@ -1708,12 +1708,12 @@
 
 .tool-activity-inferred {
   color: var(--color-fg-mute);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
 }
 
 .tool-activity-retry {
   padding: 6px 0;
-  font: var(--text-11) var(--sans);
+  font: var(--text-meta) var(--sans);
   color: var(--color-fg-mute);
   cursor: pointer;
 }
@@ -1736,7 +1736,7 @@
   background: var(--bg-2);
   color: var(--fg-soft);
   font-family: var(--sans);
-  font-size: var(--text-13);
+  font-size: var(--text-content);
 }
 .needs-you-card[data-settled] {
   border-left-color: var(--line-strong);
@@ -1750,7 +1750,7 @@
 .needs-you-eyebrow {
   margin: 0;
   color: var(--accent);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   font-weight: 500;
 }
 .needs-you-card[data-settled] .needs-you-eyebrow {
@@ -1766,12 +1766,12 @@
   background: var(--bg-3);
   color: var(--fg-soft);
   font-family: var(--mono);
-  font-size: var(--text-11);
+  font-size: var(--text-meta);
 }
 .needs-you-title {
   margin: 0;
   color: var(--fg);
-  font-size: var(--text-13);
+  font-size: var(--text-content);
   font-weight: 500;
   line-height: var(--leading-normal);
 }
@@ -1786,7 +1786,7 @@
   background: var(--bg-1);
   color: var(--fg);
   font-family: var(--mono);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   line-height: var(--leading-relaxed);
   outline: none;
 }
@@ -1801,7 +1801,7 @@
   border-radius: var(--r-md);
   background: var(--bg-1);
   color: var(--fg);
-  font-size: var(--text-13);
+  font-size: var(--text-content);
   outline: none;
 }
 .needs-you-option {
@@ -1839,7 +1839,7 @@
   background: transparent;
   color: var(--fg-soft);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   font-weight: 500;
   cursor: pointer;
   transition:
@@ -1871,12 +1871,12 @@
 .needs-you-status {
   margin: 0;
   color: var(--fg-mute);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
 }
 .needs-you-error {
   margin: 0;
   color: var(--err);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
 }
 
 /* ════ CHAT TRANSCRIPT (bare log) ════
@@ -1893,7 +1893,7 @@
 }
 .evlog--bare .ev-speaker {
   margin-bottom: var(--s-2);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
 }
 .evlog--bare .ev-speaker .ev-ember {
   background: var(--fg-faint);
@@ -1927,7 +1927,7 @@
 .evlog--bare .evtool.evchange .evtool-hd {
   padding: 0 0 var(--s-1h);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
 }
 .evlog--bare .evtool.evchange .evtool-name {
   color: var(--fg-soft);
@@ -1959,7 +1959,7 @@
   padding: var(--s-1) var(--s-2);
   color: var(--fg-mute);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   line-height: var(--leading-normal);
 }
 .needs-you-settled[data-outcome="denied"] .needs-you-settled-line {
@@ -1977,7 +1977,7 @@
 .needs-you-details > summary {
   width: fit-content;
   color: var(--fg-mute);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   cursor: pointer;
 }
 .needs-you-details > summary:hover {

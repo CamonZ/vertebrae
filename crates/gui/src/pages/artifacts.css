@@ -6,7 +6,7 @@
 .artifact-inspector-body .markdown-content ul,
 .artifact-inspector-body .markdown-content ol,
 .artifact-inspector-body .markdown-content blockquote {
-  font-size: var(--text-sm);
+  font-size: var(--text-content);
 }
 
 /* Artifact inspector title: file name first, folder path muted before it. */
@@ -31,7 +31,7 @@
   /* Match the tree rows: tree padding + row padding on the right; on the
      left, also the chevron and icon, so "Name" sits over the labels. */
   padding: 0 4px 0 calc(var(--s-2) + 8px + 24px + 6px);
-  font-size: var(--text-2xs);
+  font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -44,7 +44,7 @@
   display: inline-flex;
   align-items: center;
   font-family: var(--sans);
-  font-size: var(--text-xs);
+  font-size: var(--text-secondary);
   letter-spacing: 0;
   text-transform: none;
 }

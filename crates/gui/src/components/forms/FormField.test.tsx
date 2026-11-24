@@ -197,14 +197,14 @@ describe("FormField", () => {
       expect(label).toHaveClass("font-medium");
     });
 
-    it("applies text-xs size to label", () => {
+    it("applies text-secondary size to label", () => {
       render(
         <FormField label="Title">
           <input type="text" />
         </FormField>
       );
       const label = screen.getByText("Title");
-      expect(label).toHaveClass("text-xs");
+      expect(label).toHaveClass("text-secondary");
     });
 
     it("applies text-err color to required asterisk", () => {
@@ -236,7 +236,7 @@ describe("FormField", () => {
         </FormField>
       );
       const helpText = screen.getByText("Help text");
-      expect(helpText).toHaveClass("font-serif", "italic", "text-13");
+      expect(helpText).toHaveClass("font-serif", "italic", "text-content");
     });
   });
 
@@ -258,7 +258,7 @@ describe("FormField", () => {
         </FormField>
       );
       const errorContainer = screen.getByRole("alert");
-      expect(errorContainer).toHaveClass("text-2xs");
+      expect(errorContainer).toHaveClass("text-meta");
     });
 
     it("applies flex and items-center to error container", () => {

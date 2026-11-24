@@ -203,7 +203,7 @@ export function InlineEditField({
               disabled={disabled || isSubmitting || isDeleting}
               placeholder={placeholder}
               rows={rows}
-              className={`flex-1 min-h-0 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted disabled:opacity-50 ${resizeClasses[resize]}`}
+              className={`flex-1 min-h-0 bg-bg-1 border border-border rounded ${inputPadding} text-content ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted disabled:opacity-50 ${resizeClasses[resize]}`}
             />
           ) : (
             <input
@@ -214,7 +214,7 @@ export function InlineEditField({
               onKeyDown={handleKeyDown}
               disabled={disabled || isSubmitting || isDeleting}
               placeholder={placeholder}
-              className={`flex-1 bg-bg-1 border border-border rounded ${inputPadding} text-sm ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted disabled:opacity-50`}
+              className={`flex-1 bg-bg-1 border border-border rounded ${inputPadding} text-content ${monospace ? 'font-mono' : ''} text-fg placeholder-text-muted disabled:opacity-50`}
             />
           )}
 
@@ -275,7 +275,7 @@ export function InlineEditField({
           </div>
         </div>
         {error && (
-          <p className="text-xs text-err ml-4 mt-1">{error}</p>
+          <p className="text-secondary text-err ml-4 mt-1">{error}</p>
         )}
       </div>
     );
@@ -294,7 +294,7 @@ export function InlineEditField({
       {!isEmpty && renderDisplay ? (
         renderDisplay(value)
       ) : (
-        <p className={`text-sm ${monospace && !isEmpty ? 'font-mono' : ''} ${isEmpty ? 'text-fg-mute italic' : 'text-fg-soft whitespace-pre-wrap leading-relaxed'}`}>
+        <p className={`text-content ${monospace && !isEmpty ? 'font-mono' : ''} ${isEmpty ? 'text-fg-mute italic' : 'text-fg-soft whitespace-pre-wrap leading-relaxed'}`}>
           {displayText}
         </p>
       )}

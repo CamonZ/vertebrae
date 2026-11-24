@@ -64,7 +64,7 @@ export function TreeNode({
       data-testid={testId}
       data-selected={selected || undefined}
       className={[
-        "group relative flex cursor-pointer gap-1.5 pr-2 text-sm",
+        "group relative flex cursor-pointer gap-1.5 pr-2 text-content",
         multiline ? "min-h-[3.25rem] items-start py-2" : "h-8 items-center",
         "transition-[background-color] duration-[var(--t-fast)]",
         // Selected rows: a solid accent bar pinned to the left edge plus the
@@ -139,7 +139,7 @@ export function TreeNode({
       {right && (
         <span
           className={[
-            "shrink-0 font-mono text-eyebrow text-[var(--color-fg-mute)]",
+            "shrink-0 font-mono text-meta text-[var(--color-fg-mute)]",
             multiline ? "mt-0.5" : "",
           ]
             .filter(Boolean)

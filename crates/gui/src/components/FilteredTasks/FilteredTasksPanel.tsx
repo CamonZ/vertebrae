@@ -85,7 +85,7 @@ function CreateTaskForm({
           placeholder="Task title..."
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-xs text-fg placeholder:text-fg-mute transition-all"
+          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-secondary text-fg placeholder:text-fg-mute transition-all"
           autoFocus
           disabled={isSubmitting}
         />
@@ -96,17 +96,17 @@ function CreateTaskForm({
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={2}
-          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-xs text-fg placeholder:text-fg-mute transition-all resize-none"
+          className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 text-secondary text-fg placeholder:text-fg-mute transition-all resize-none"
           disabled={isSubmitting}
         />
 
         {/* Level select */}
         <div className="flex items-center gap-2">
-          <label className="text-xs text-fg-mute">Level:</label>
+          <label className="text-secondary text-fg-mute">Level:</label>
           <select
             value={level}
             onChange={(e) => setLevel(e.target.value as TaskLevel)}
-            className="rounded-lg border border-border bg-bg-2 px-2 py-1 text-xs text-fg transition-all"
+            className="rounded-lg border border-border bg-bg-2 px-2 py-1 text-secondary text-fg transition-all"
             disabled={isSubmitting}
           >
             <option value="task">Task</option>
@@ -117,7 +117,7 @@ function CreateTaskForm({
 
         {/* Error message */}
         {error && (
-          <p className="text-xs text-err">{error}</p>
+          <p className="text-secondary text-err">{error}</p>
         )}
 
         {/* Action buttons */}
@@ -125,14 +125,14 @@ function CreateTaskForm({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg px-3 py-1 text-xs font-medium text-fg-mute transition-colors hover:bg-bg-hover hover:text-fg"
+            className="rounded-lg px-3 py-1 text-secondary font-medium text-fg-mute transition-colors hover:bg-bg-hover hover:text-fg"
             disabled={isSubmitting}
           >
             Cancel
           </button>
           <button
             type="submit"
-            className="action-primary rounded-lg px-3 py-1 text-xs font-medium"
+            className="action-primary rounded-lg px-3 py-1 text-secondary font-medium"
             disabled={isSubmitting || !title.trim()}
           >
             {isSubmitting ? "Creating..." : "Create"}
@@ -223,14 +223,14 @@ export function FilteredTasksPanel({
       <div className="flex h-12 items-center justify-between border-b border-border px-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent/10 font-mono text-xs font-bold text-accent">
+            <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg border border-accent/30 bg-accent/10 font-mono text-secondary font-bold text-accent">
               {(step.order ?? 0) + 1}
             </span>
             <h2 className="truncate t-label text-fg-mute">
               {step.name}
             </h2>
           </div>
-          <p className="ml-8 text-xs text-fg-mute">
+          <p className="ml-8 text-secondary text-fg-mute">
             {tasks.length} task{tasks.length !== 1 ? "s" : ""}
             {activeCount > 0 && (
               <span className="ml-2 text-warn">({activeCount} active)</span>
@@ -297,7 +297,7 @@ export function FilteredTasksPanel({
               onChange={(e) =>
                 setSearch(e.target.value || null)
               }
-              className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 pl-7 text-xs text-fg placeholder:text-fg-mute transition-all"
+              className="w-full rounded-lg border border-border bg-bg-2 px-3 py-1.5 pl-7 text-secondary text-fg placeholder:text-fg-mute transition-all"
               aria-label="Search tasks"
             />
             <svg
@@ -339,11 +339,11 @@ export function FilteredTasksPanel({
       {/* Footer with task count */}
       {totalTasks > 0 && (
         <div className="flex items-center justify-between border-t border-border bg-bg-1/50 px-3 py-2">
-          <p className="font-mono text-xs text-fg-mute">
+          <p className="font-mono text-secondary text-fg-mute">
             {totalTasks} task{totalTasks !== 1 ? "s" : ""}
           </p>
           {selectedTaskId && (
-            <p className="flex items-center gap-1 font-mono text-xs text-fg-mute">
+            <p className="flex items-center gap-1 font-mono text-secondary text-fg-mute">
               Selected:{" "}
               <IdentityBadge
                 id={selectedTaskId}

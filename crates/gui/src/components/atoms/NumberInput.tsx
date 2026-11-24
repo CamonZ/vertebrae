@@ -81,7 +81,7 @@ export const NumberInput = forwardRef<HTMLInputElement, NumberInputProps>(
           onChange={(event) => onValueChange(event.target.value)}
           className={[
             "no-spin pr-[60px] tabular-nums",
-            size === "compact" && "h-7 text-xs",
+            size === "compact" && "h-7 text-secondary",
             className,
           ]
             .filter(Boolean)

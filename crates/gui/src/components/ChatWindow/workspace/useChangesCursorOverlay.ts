@@ -305,7 +305,7 @@ export function useChangesCursorOverlay(
       if (pre && pre.getAttribute("data-changes-cursor-diff") !== kind) {
         pre.setAttribute("data-changes-cursor-diff", kind);
       }
-      // A reading-scale or font change can resize the gutter while the
+      // A text size or font change can resize the gutter while the
       // viewport itself stays fixed.
       const gutter = number?.parentElement ?? null;
       if (gutter !== observedGutter) {

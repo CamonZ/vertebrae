@@ -49,7 +49,7 @@
    border because its `border-border` class maps to an undefined token). Left
    alone they read as three mismatched widgets. Normalize them into one cohesive
    header-chip set — 26px tall, transparent, 1px --line-strong, --r-sm, mono
-   --text-2xs, --fg-mute. These rules are unlayered, so they win over the
+   --text-meta, --fg-mute. These rules are unlayered, so they win over the
    components' own Tailwind utilities. */
 .scope-level,
 .tasks-v2 .scope-expand {
@@ -67,7 +67,7 @@
   border: 1px solid var(--ctl-line);
   border-radius: var(--ctl-radius);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   letter-spacing: 0;
   color: var(--fg-soft);
   transition:
@@ -124,7 +124,7 @@
 }
 
 /* Collapsed-done summary row. Ported from docs/design/tasks-v2.html (lines
-   148-156) with --s-1h -> --s-1 and --text-9/--text-11 -> --text-2xs token
+   148-156) with --s-1h -> --s-1 and --text-9/--text-11 -> --text-meta token
    swaps for the live v2 scale. */
 .tasks-v2 .t-summary {
   display: flex;
@@ -171,7 +171,7 @@
 
 .tasks-v2 .t-summary .sum-label {
   font-family: var(--mono);
-  font-size: var(--text-2xs);
+  font-size: var(--text-meta);
   letter-spacing: 0.04em;
   color: var(--ok);
   opacity: 0.9;
@@ -181,7 +181,7 @@
 .tasks-v2 .t-summary .sum-hint {
   margin-left: auto;
   font-family: var(--mono);
-  font-size: var(--text-2xs);
+  font-size: var(--text-meta);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--fg-faint);
@@ -206,8 +206,7 @@
 }
 
 /* Completion marks for terminal task runs in the list. Ported from
-   docs/design/tasks-v2.html (.done-mark / .cancel-mark) with --text-13 ->
-   var(--text-sm). Active runs show a RunChip; completed runs a green ✓; stopped
+   docs/design/tasks-v2.html (.done-mark / .cancel-mark) at --text-content. Active runs show a RunChip; completed runs a green ✓; stopped
    runs a muted ⊘; failed runs an error-toned ⊘. */
 .tasks-v2 .done-mark {
   display: inline-flex;
@@ -222,7 +221,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--text-sm);
+  font-size: var(--text-content);
   line-height: 1;
   color: var(--fg-faint);
 }
@@ -328,7 +327,7 @@
   text-align: center;
   font-family: var(--mono);
   color: var(--fg-mute);
-  font-size: var(--text-13);
+  font-size: var(--text-content);
   line-height: 1;
 }
 
@@ -343,7 +342,7 @@
 
 .tasks-v2 .t-row.l0 .t-glyph {
   color: var(--fg);
-  font-size: var(--text-sm);
+  font-size: var(--text-content);
 }
 
 .tasks-v2 .t-row.l1 {
@@ -377,7 +376,7 @@
   flex: 1;
   font-family: var(--sans);
   font-style: normal;
-  font-size: calc(var(--text-sm) * var(--reading-scale));
+  font-size: var(--text-content);
   font-weight: 400;
   color: var(--fg);
   letter-spacing: -0.005em;
@@ -408,7 +407,7 @@
   gap: 12px;
   min-width: 0;
   font-family: var(--sans);
-  font-size: var(--text-xs);
+  font-size: var(--text-secondary);
   color: var(--fg-mute);
   white-space: nowrap;
 }
@@ -474,13 +473,13 @@
   border-radius: var(--r-xs);
   background: var(--bg-2);
   color: var(--fg-mute);
-  font-size: var(--text-2xs);
+  font-size: var(--text-meta);
   line-height: 1.5;
 }
 
 .tasks-v2 .t-tags .tag-more {
   color: var(--fg-faint);
-  font-size: var(--text-2xs);
+  font-size: var(--text-meta);
 }
 
 /* Status column: run chip, Blocked or Done, aligned on one lane. */
@@ -493,7 +492,7 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: var(--text-xs);
+  font-size: var(--text-secondary);
   white-space: nowrap;
 }
 
@@ -517,7 +516,7 @@
 .tasks-v2 .t-when {
   text-align: right;
   color: var(--fg-mute);
-  font-size: var(--text-xs);
+  font-size: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -529,7 +528,7 @@
 }
 
 .tasks-v2 .t-pri {
-  font-size: var(--text-xs);
+  font-size: var(--text-secondary);
   white-space: nowrap;
 }
 
@@ -551,7 +550,7 @@
   background: color-mix(in oklch, var(--bg-1) 55%, var(--bg));
   color: var(--fg-faint);
   font-family: var(--mono);
-  font-size: var(--text-2xs);
+  font-size: var(--text-meta);
 }
 
 .tasks-v2 .caption-strip .plate {
@@ -562,7 +561,7 @@
 
 .tasks-v2 .caption-strip em {
   font-family: var(--serif);
-  font-size: var(--text-xs);
+  font-size: var(--text-secondary);
 }
 
 /* Thin separator between the action icons and the close control in the panel
@@ -682,7 +681,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
   font-family: var(--sans);
-  font-size: var(--text-12);
+  font-size: var(--text-secondary);
   color: var(--fg-mute);
   cursor: pointer;
   transition: all var(--t-fast) var(--ease);
