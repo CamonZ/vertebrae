@@ -353,12 +353,7 @@ async fn selection_fixture(world: &mut GuiWorld, unborn: bool, source_link: &str
 /// opens beside the transcript (≥1100px) rather than in its place.
 async fn widen_chat_for_side_column(client: &fantoccini::Client) {
     client.set_window_rect(0, 0, 1280, 1024).await.unwrap();
-    gui_acceptance::click_when_ready(
-        client,
-        Locator::Css("button[aria-label='Expand chat workspace']"),
-        "expand chat workspace",
-    )
-    .await;
+    gui_acceptance::expand_chat_workspace(client).await;
     gui_acceptance::wait_for_js(
         client,
         "chat wide enough for a side column beside the transcript",
@@ -1282,7 +1277,7 @@ async fn verify_resume_after_restart(world: &mut GuiWorld, outdated: bool) {
     {
         gui_acceptance::click_pane_action(
             &client,
-            "[data-testid='chat-tabs-history']",
+            gui_acceptance::CHAT_HISTORY_ACTION,
             "open conversation history",
         )
         .await;
@@ -1296,22 +1291,14 @@ async fn verify_resume_after_restart(world: &mut GuiWorld, outdated: bool) {
         Duration::from_secs(10),
     )
     .await;
-    let completed_toggle = "[role='switch'][aria-label='Show completed'][aria-checked='false']";
-    if client.find(Locator::Css(completed_toggle)).await.is_ok() {
-        gui_acceptance::click_when_ready(
-            &client,
-            Locator::Css(completed_toggle),
-            "include completed conversations",
-        )
-        .await;
-    }
+    gui_acceptance::set_show_completed(&client, Some(true)).await;
     gui_acceptance::wait_for_js(
         &client,
         "no discussion history row or restored conversation pane",
         r#"
         const panel = document.querySelector('[data-testid="local-chat-mini-panel"]');
         const history = panel?.querySelector('[data-testid="local-chat-history-drawer"]');
-        return history && panel.querySelector('[aria-label="Show completed"][aria-checked="true"]') &&
+        return history &&
           history.querySelectorAll('.hc-mini-history-open').length === 1 &&
           !history.querySelector('.hc-mini-history-ticket-toggle') &&
           !panel.innerText.includes(arguments[0]) &&
@@ -1870,12 +1857,7 @@ async fn themed_layout(world: &mut GuiWorld) {
 
     client.set_window_rect(0, 0, 1280, 1024).await.unwrap();
 
-    let widen_button = Locator::Css("[aria-label='Expand chat workspace']");
-
-    if let Ok(button) = client.find(widen_button).await {
-        gui_acceptance::wait_actionable(&button).await;
-        button.click().await.unwrap();
-    }
+    gui_acceptance::expand_chat_workspace(&client).await;
 
     let geometry_settled = r#"
         const panel = document.querySelector('.hc-panel');
@@ -2595,7 +2577,7 @@ async fn ask_restored_tool_thread(world: &mut GuiWorld) {
     {
         gui_acceptance::click_pane_action(
             &client,
-            "[data-testid='chat-tabs-history']",
+            gui_acceptance::CHAT_HISTORY_ACTION,
             "open conversation history",
         )
         .await;

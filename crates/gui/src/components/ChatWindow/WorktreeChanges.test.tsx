@@ -1050,15 +1050,15 @@ it("resizes with the keyboard and restores the chosen width after collapse", asy
     const handle = screen.getByRole("separator", {
       name: "Resize files sidebar",
     });
-    expect(handle).toHaveAttribute("aria-valuenow", "240");
+    expect(handle).toHaveAttribute("aria-valuenow", "200");
     fireEvent.keyDown(handle, { key: "ArrowRight" });
-    expect(handle).toHaveAttribute("aria-valuenow", "250");
+    expect(handle).toHaveAttribute("aria-valuenow", "210");
     fireEvent.click(screen.getByRole("button", { name: "Hide files" }));
     expect(screen.queryByRole("separator")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show files" }));
     expect(screen.getByRole("separator")).toHaveAttribute(
       "aria-valuenow",
-      "250"
+      "210"
     );
   } finally {
     measure.mockRestore();

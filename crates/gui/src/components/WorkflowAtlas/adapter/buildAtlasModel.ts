@@ -8,6 +8,7 @@
    (epic + ticket + task) and `running` (those with an active TaskRun).
    ────────────────────────────────────────────────────────────────── */
 
+import { topologicalColumnSort } from "../../KanbanBoard/columnOrder";
 import type {
   JsonValue,
   PipelineStep,
@@ -97,9 +98,10 @@ function phaseOf(wf: PipelineWorkflow): string {
 }
 
 /**
- * Order phase columns by the minimum `display_order` among each column's
- * members, with the `UNPHASED` bucket always last. Ties broken by phase name
- * for determinism.
+ * Order phase columns the way the Board orders its kanban columns: a
+ * topological sort over the workflow transitions between columns
+ * (`topologicalColumnSort`), so the Map and the Board read left to right alike.
+ * The `UNPHASED` bucket is always last.
  */
 function orderPhases(
   workflows: PipelineWorkflow[]
@@ -112,21 +114,42 @@ function orderPhases(
     else byPhase.set(p, [wf]);
   }
 
-  const cols = [...byPhase.entries()].map(([name, members]) => ({
-    name,
-    members: members.slice().sort((a, b) => a.display_order - b.display_order),
-    minOrder: Math.min(...members.map((w) => w.display_order)),
-  }));
-
-  cols.sort((a, b) => {
-    const au = a.name === UNPHASED;
-    const bu = b.name === UNPHASED;
-    if (au !== bu) return au ? 1 : -1; // Unphased always last
-    if (a.minOrder !== b.minOrder) return a.minOrder - b.minOrder;
-    return a.name.localeCompare(b.name);
+  const columnOf = new Map<string, string>();
+  for (const wf of workflows) {
+    if (wf.kanban_column && wf.kanban_column.trim() !== "")
+      columnOf.set(wf.id, wf.kanban_column);
+  }
+  const transitions = workflows.flatMap((wf) => wf.transitions);
+  const linked = transitions.some((t) => {
+    const from = columnOf.get(t.from_workflow_id);
+    const to = columnOf.get(t.to_workflow_id);
+    return from !== undefined && to !== undefined && from !== to;
   });
+  const rank = new Map(
+    topologicalColumnSort(new Set(columnOf.values()), transitions, columnOf).map(
+      (name, index) => [name, index]
+    )
+  );
+  const minOrder = (members: PipelineWorkflow[]) =>
+    Math.min(...members.map((w) => w.display_order));
 
-  return cols.map(({ name, members }) => ({ name, members }));
+  return [...byPhase.entries()]
+    .map(([name, members]) => ({
+      name,
+      members: members
+        .slice()
+        .sort((a, b) => a.display_order - b.display_order),
+    }))
+    .sort((a, b) => {
+      const au = a.name === UNPHASED;
+      const bu = b.name === UNPHASED;
+      if (au !== bu) return au ? 1 : -1; // Unphased always last
+      // With transitions between columns the Board's order wins; without any
+      // there is nothing to sort topologically, so declared order applies.
+      if (linked) return (rank.get(a.name) ?? 0) - (rank.get(b.name) ?? 0);
+      const d = minOrder(a.members) - minOrder(b.members);
+      return d !== 0 ? d : a.name.localeCompare(b.name);
+    });
 }
 
 /**

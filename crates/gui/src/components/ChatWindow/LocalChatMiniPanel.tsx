@@ -26,7 +26,7 @@ import {
 } from "../../utils/localChatSessionGroups";
 import { formatRelative } from "../../utils/formatRelative";
 import { harnessDisplayName } from "./chatHelpers";
-import { Toggle } from "../Toggle";
+import { OverflowMenu } from "../molecules/OverflowMenu";
 import { SearchInput } from "../molecules/SearchInput";
 import { scrollToSpawn, type SpawnOutlineItem } from "./sessionListUtils";
 import { SessionGroupList } from "./SessionGroupList";
@@ -576,18 +576,22 @@ export const LocalChatMiniPanel = memo(function LocalChatMiniPanel({
               data-testid="local-chat-session-search"
             />
           </div>
-        </div>
-
-        <div
-          className="hc-mini-history-completed-toggle"
-          data-mini-history-toggle
-        >
-          <span>Show completed</span>
-          <Toggle
-            checked={showCompleted}
-            onChange={setShowCompleted}
-            label="Show completed"
-          />
+          {/* Filters share the search row; "Show completed" is one of them. */}
+          <div className="hc-mini-history-filters" data-mini-history-toggle>
+            <OverflowMenu
+              label="Chat list filters"
+              testId="local-chat-filters"
+              items={[
+                {
+                  key: "show-completed",
+                  label: "Show completed",
+                  checked: showCompleted,
+                  onSelect: () => setShowCompleted(!showCompleted),
+                  testId: "local-chat-show-completed",
+                },
+              ]}
+            />
+          </div>
         </div>
 
         <div

@@ -38,6 +38,31 @@ function daemonLabel(daemon: Daemon): string {
   return daemon.display_name || daemon.name || daemon.id;
 }
 
+/** "not_enrolled" -> "Not enrolled": raw enum tokens never reach the page. */
+function humanizeToken(token: string): string {
+  const spaced = token.replace(/[_-]+/g, " ").trim();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+/** One null convention for the fleet columns: a muted dash with a tooltip. */
+function DaemonCell({
+  value,
+  emptyWhen,
+  emptyTitle,
+}: {
+  value: string | null;
+  emptyWhen?: string;
+  emptyTitle: string;
+}) {
+  if (value === null || value === emptyWhen)
+    return (
+      <span className="daemon-col-empty" title={emptyTitle}>
+        —
+      </span>
+    );
+  return <>{value}</>;
+}
+
 export function DaemonsPage() {
   const fleet = useDaemonFleet();
   const websocketStatus = useWebSocketStatus();
@@ -472,9 +497,11 @@ export function DaemonsPage() {
                                       <span key={part}>{part}</span>
                                     ))}
                                   {daemon.health_reason &&
-                                    daemon.health !== "healthy" && (
+                                    daemon.health !== "healthy" &&
+                                    normalizedDaemonStatus(daemon.status) !==
+                                      "pending" && (
                                       <span className="daemon-row-health">
-                                        {daemon.health_reason}
+                                        {humanizeToken(daemon.health_reason)}
                                       </span>
                                     )}
                                 </span>
@@ -489,19 +516,35 @@ export function DaemonsPage() {
                                 </Badge>
                               </span>
                               <span className="daemon-col">
-                                {formatDaemonCapabilityReadiness(
-                                  daemon.capabilities
-                                )}
+                                <DaemonCell
+                                  value={formatDaemonCapabilityReadiness(
+                                    daemon.capabilities
+                                  )}
+                                  emptyWhen="Unknown"
+                                  emptyTitle="Capabilities unknown"
+                                />
                               </span>
                               <span className="daemon-col">
-                                {daemon.max_concurrency == null
-                                  ? "No limit"
-                                  : `${daemon.max_concurrency} at once`}
+                                <DaemonCell
+                                  value={
+                                    daemon.max_concurrency == null
+                                      ? null
+                                      : `${daemon.max_concurrency} at once`
+                                  }
+                                  emptyTitle="No concurrency limit"
+                                />
                               </span>
                               <span className="daemon-col daemon-col-seen">
-                                {daemon.last_seen_at
-                                  ? formatDaemonHeartbeatAge(daemon.last_seen_at)
-                                  : "—"}
+                                <DaemonCell
+                                  value={
+                                    daemon.last_seen_at
+                                      ? formatDaemonHeartbeatAge(
+                                          daemon.last_seen_at
+                                        )
+                                      : null
+                                  }
+                                  emptyTitle="Never seen"
+                                />
                               </span>
                             </button>
                           </div>

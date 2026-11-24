@@ -28,6 +28,7 @@ import {
   WorkspaceCommandsContext,
   type WorkspaceCommands,
 } from "./chatPaletteCommands";
+import { WorkspaceChromeContext } from "./WorkspaceChromeContext";
 import { useChildChatSessions } from "../../hooks/useChildChatSessions";
 import { useLocalChatHistory } from "../../hooks/useLocalChatHistory";
 import { useChatPaneManagement } from "../../hooks/useChatPaneManagement";
@@ -181,6 +182,7 @@ export function ChatWindowManager({
     panelRef,
     isMaximized,
     isResizing,
+    isWindowResizing,
     renderedPanelWidth,
     toggleMaximized,
     toggleFromShortcut,
@@ -716,6 +718,15 @@ export function ChatWindowManager({
     []
   );
 
+  const workspaceChrome = useMemo(
+    () => ({
+      expanded: isMaximized,
+      onToggleExpanded: toggleMaximized,
+      onToggleHistory: toggleHistoryVisibility,
+    }),
+    [isMaximized, toggleMaximized, toggleHistoryVisibility]
+  );
+
   // Join the shared glass-panel focus model so Escape closes whichever panel is
   // focused. The chat is globally mounted; it's "open" only while showing.
   const shouldHandleChatPanelEscape = useCallback(() => {
@@ -782,7 +793,7 @@ export function ChatWindowManager({
       data-focused={isFocused || undefined}
       data-closing={closing || undefined}
       data-maximized={isMaximized || undefined}
-      data-resizing={isResizing || undefined}
+      data-resizing={isResizing || isWindowResizing || undefined}
       onAnimationEnd={onAnimationEnd}
       {...focusProps}
     >
@@ -871,18 +882,20 @@ export function ChatWindowManager({
               onNextNeedingYou={() => focusNeedingYou(1)}
             />
             <WorkspaceCommandsContext.Provider value={getWorkspaceCommands}>
-              <ChatPaneList
-                registerSideColumn={registerSideColumn}
-                registerPaneFind={registerPaneFind}
-                shownPane={shownPane}
-                tabPanels={isMaximized}
-                focusPane={focusPane}
-                closeChatPanel={closeChatPanel}
-                startFreshActiveSession={startFreshActiveSession}
-                showProjectContext={openChatsSpanProjects}
-                projectLabelBySessionId={projectLabelBySessionId}
-                renderObserver={renderObserver}
-              />
+              <WorkspaceChromeContext.Provider value={workspaceChrome}>
+                <ChatPaneList
+                  registerSideColumn={registerSideColumn}
+                  registerPaneFind={registerPaneFind}
+                  shownPane={shownPane}
+                  tabPanels={isMaximized}
+                  focusPane={focusPane}
+                  closeChatPanel={closeChatPanel}
+                  startFreshActiveSession={startFreshActiveSession}
+                  showProjectContext={openChatsSpanProjects}
+                  projectLabelBySessionId={projectLabelBySessionId}
+                  renderObserver={renderObserver}
+                />
+              </WorkspaceChromeContext.Provider>
             </WorkspaceCommandsContext.Provider>
           </div>
         </div>

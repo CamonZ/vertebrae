@@ -9,6 +9,7 @@ import {
 import { useSearchParams } from "react-router-dom";
 import type { Artifact } from "../bindings";
 import { TreeNode } from "../components/molecules/TreeNode";
+import { EmptyState } from "../components/molecules/EmptyState";
 import { Spinner } from "../components/Spinner";
 import { ScopeChip } from "../components/molecules/ScopeChip";
 import { useExpandedNodes } from "../hooks/useExpandedNodes";
@@ -380,9 +381,10 @@ export function ArtifactsPage() {
               {error}
             </p>
           ) : artifacts.length === 0 ? (
-            <p className="p-4 text-sm text-fg-mute">
-              No project artifacts yet.
-            </p>
+            <EmptyState
+              title="No project artifacts yet"
+              description="Artifacts attached to this project appear here."
+            />
           ) : (
             <ArtifactTreeRows
               nodes={tree}

@@ -70,7 +70,7 @@ export function KanbanCard({
           ? "border-[var(--color-line-strong)]"
           : isRunning
             ? "border-[color-mix(in_oklch,var(--color-accent)_30%,var(--color-line-strong))] shadow-[0_0_18px_color-mix(in_oklch,var(--color-accent)_16%,transparent)]"
-            : "border-[var(--color-line-strong)] bg-[var(--color-bg-2)] hover:bg-[var(--row-hover)]"
+            : "border-[var(--color-line-strong)] bg-[var(--surface-page)] shadow-[var(--shadow-1)] hover:[background-image:linear-gradient(var(--color-bg-hover-raised),var(--color-bg-hover-raised))]"
       } ${
         showLeftBar
           ? "before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-[var(--color-accent)] before:content-['']"

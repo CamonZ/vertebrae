@@ -103,7 +103,9 @@ export function LevelIndex({
                   rowRefs.current[index] = element;
                 }}
                 className={
-                  "factory-index-row" + (item.id === hotId ? " is-hot" : "")
+                  "factory-index-row" +
+                  (item.kind ? ` k-${item.kind}` : "") +
+                  (item.id === hotId ? " is-hot" : "")
                 }
                 data-testid={`atlas-level-row-${item.name}`}
                 tabIndex={index === activeIndex ? 0 : -1}
@@ -117,7 +119,16 @@ export function LevelIndex({
                 onBlur={() => onPoint(null)}
                 onClick={() => onActivate(item)}
               >
-                <span className="factory-index-name">{item.name}</span>
+                <span className="factory-index-name">
+                  {item.kind && (
+                    <i
+                      className="factory-index-kind"
+                      data-kind={item.kind}
+                      aria-hidden="true"
+                    />
+                  )}
+                  {item.name}
+                </span>
                 <span className="factory-index-meta">
                   {item.detail && <span>{item.detail}</span>}
                   {item.total > 0 && <span>{plural(item.total, "task")}</span>}

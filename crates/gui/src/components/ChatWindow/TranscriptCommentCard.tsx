@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CommentShortcutHint } from "./CommentShortcutHint";
 import { placeCommentCard, type Box } from "./commentCardPlacement";
 
@@ -57,6 +57,26 @@ export function TranscriptCommentCard({
     if (textareaRef.current) fitTextarea(textareaRef.current);
   }, [draft]);
 
+  // Esc always cancels, wherever focus is (the card is portaled to the body
+  // and focus can sit on the page after a click), and never reaches the
+  // handlers that would close the pane behind it.
+  const cancelRef = useRef(onCancel);
+  useLayoutEffect(() => {
+    cancelRef.current = onCancel;
+  }, [onCancel]);
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelRef.current();
+      // Drop a stale selection too, so the pill does not come straight back.
+      window.getSelection()?.removeAllRanges();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, []);
+
   useLayoutEffect(() => {
     const card = cardRef.current;
     if (!card) return;
@@ -94,6 +114,7 @@ export function TranscriptCommentCard({
       className="chat-comment-card chat-comment-card-fixed"
       data-focus-halo="surface"
       data-owns-escape=""
+      data-escape-claim=""
       data-placement={placement?.side}
       role="group"
       aria-label="Add a comment to selected text"
@@ -106,17 +127,12 @@ export function TranscriptCommentCard({
             }
           : { top: 0, left: 0 }
       }
-      onKeyDown={(event) => {
-        if (event.key !== "Escape") return;
-        event.preventDefault();
-        onCancel();
-      }}
     >
       <div className="chat-comment-card-header">
         <span className="chat-comment-card-title">Comment on selection</span>
       </div>
-      <blockquote className="chat-comment-quote">
-        <mark>{quote}</mark>
+      <blockquote className="chat-comment-quote chat-comment-quote-selection">
+        {quote}
       </blockquote>
       <label htmlFor="local-chat-comment-draft" className="sr-only">
         Comment on selected text

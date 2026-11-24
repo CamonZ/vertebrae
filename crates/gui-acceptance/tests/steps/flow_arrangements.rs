@@ -142,13 +142,7 @@ async fn three_options_switch(world: &mut GuiWorld) {
     let client = wd.lock().await;
 
     client.set_window_size(1280, 1024).await.unwrap();
-    if let Ok(widen) = client
-        .find(Locator::Css("button[aria-label='Expand chat workspace']"))
-        .await
-    {
-        gui_acceptance::wait_actionable(&widen).await;
-        widen.click().await.unwrap();
-    }
+    gui_acceptance::expand_chat_workspace(&client).await;
 
     // The selector lists every arrangement by label and opens on the first option.
     wait_shows(&client, "A", "0").await;

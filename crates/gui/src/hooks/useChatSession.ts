@@ -84,9 +84,7 @@ export function useChatSession(sessionId: string) {
   } = useLocalChat(sessionId);
 
   const clearMessages = useChatStore((s) => s.clearMessages);
-  const setSessionManualTitle = useChatStore(
-    (s) => s.setSessionManualTitle
-  );
+  const setSessionManualTitle = useChatStore((s) => s.setSessionManualTitle);
   const setSessionSelectedModel = useChatStore(
     (s) => s.setSessionSelectedModel
   );
@@ -94,9 +92,7 @@ export function useChatSession(sessionId: string) {
     (s) => s.setSessionReasoningEffort
   );
   const setSessionSpeedTier = useChatStore((s) => s.setSessionSpeedTier);
-  const setSessionPersonality = useChatStore(
-    (s) => s.setSessionPersonality
-  );
+  const setSessionPersonality = useChatStore((s) => s.setSessionPersonality);
   const setSessionHarness = useChatStore((s) => s.setSessionHarness);
   const setSessionPermissionMode = useChatStore(
     (s) => s.setSessionPermissionMode
@@ -142,8 +138,9 @@ export function useChatSession(sessionId: string) {
     );
     if (provider) return providerHarnessInfo(harnessCatalog, provider);
     const harnessInfo =
-      harnessCatalog.harnesses.find((item) => item.harness === selectedHarness) ??
-      null;
+      harnessCatalog.harnesses.find(
+        (item) => item.harness === selectedHarness
+      ) ?? null;
     // A custom provider removed from config.toml cannot start or resume.
     return harnessInfo && session?.providerId
       ? {
@@ -153,7 +150,12 @@ export function useChatSession(sessionId: string) {
           unavailable_reason: `Provider '${session.providerId}' is not configured.`,
         }
       : harnessInfo;
-  }, [harnessCatalog, selectedHarness, selectedProviderId, session?.providerId]);
+  }, [
+    harnessCatalog,
+    selectedHarness,
+    selectedProviderId,
+    session?.providerId,
+  ]);
   const fallbackProvider = useMemo((): LocalChatProviderInfo | null => {
     if (!harnessCatalog) return null;
     return resolveDefaultProvider(harnessCatalog);
@@ -239,9 +241,7 @@ export function useChatSession(sessionId: string) {
   );
   const speedTiers = useMemo(
     () =>
-      visibleHarness
-        ? speedTiersForModel(visibleHarness, selectedModelId)
-        : [],
+      visibleHarness ? speedTiersForModel(visibleHarness, selectedModelId) : [],
     [selectedModelId, visibleHarness]
   );
   const supportedSpeedTierIds = useMemo(
@@ -291,10 +291,7 @@ export function useChatSession(sessionId: string) {
     // A saved setting is only an initial value. A user choice already made in
     // this empty session must win over a later settings-page update. Stale
     // defaults stay visible until the user chooses a model or resets them.
-    if (
-      selectedModelId === undefined &&
-      savedHarnessDefaults?.modelId
-    ) {
+    if (selectedModelId === undefined && savedHarnessDefaults?.modelId) {
       setSessionSelectedModel(sessionId, savedHarnessDefaults.modelId);
     }
 
@@ -349,10 +346,7 @@ export function useChatSession(sessionId: string) {
       selectedModelId ?? visibleHarness.default_model_id
     );
     if (selectedPersonality === undefined && savedPersonality) {
-      setSessionPersonality(
-        sessionId,
-        savedPersonality
-      );
+      setSessionPersonality(sessionId, savedPersonality);
     }
   }, [
     hasConversation,
@@ -486,6 +480,9 @@ export function useChatSession(sessionId: string) {
     lifecycle !== "closing" &&
     activeTurn !== null &&
     activeTurn.phase !== "stopping";
+  // Stop stays in the header for the whole turn (disabled while stopping or
+  // closing) and leaves it once the turn ends.
+  const isGenerating = activeTurn !== null;
 
   const handleStopGeneration = useCallback(async () => {
     await stopActiveTurn();
@@ -508,24 +505,35 @@ export function useChatSession(sessionId: string) {
     [sessionId, projectGeneration, projectPath]
   );
   const steeringRequest = useRef<typeof steering>(undefined);
-  useEffect(() => () => {
-    steeringRequest.current = undefined;
-  }, [steeringScope]);
+  useEffect(
+    () => () => {
+      steeringRequest.current = undefined;
+    },
+    [steeringScope]
+  );
 
   const steeringForSession =
     steering?.scope === steeringScope &&
     (steering.backendSessionId === session?.backendSessionId ||
-      (steering.phase === "failed" && !session?.backendSessionId && session?.hasUserMessage))
+      (steering.phase === "failed" &&
+        !session?.backendSessionId &&
+        session?.hasUserMessage))
       ? steering
       : undefined;
   const isSteering = steeringForSession?.phase === "pending";
-  const visibleSteering = steeringForSession && (
-    isSteering || !session?.activeTurn || session.activeTurn.turnId === steeringForSession.turnId
-  ) ? steeringForSession : undefined;
+  const visibleSteering =
+    steeringForSession &&
+    (isSteering ||
+      !session?.activeTurn ||
+      session.activeTurn.turnId === steeringForSession.turnId)
+      ? steeringForSession
+      : undefined;
   useEffect(() => {
     if (steeringForSession?.phase !== "confirmed") return;
     const timer = window.setTimeout(() => {
-      setSteering((current) => current === steeringForSession ? undefined : current);
+      setSteering((current) =>
+        current === steeringForSession ? undefined : current
+      );
     }, 3000);
     return () => window.clearTimeout(timer);
   }, [steeringForSession]);
@@ -540,8 +548,13 @@ export function useChatSession(sessionId: string) {
     const backendSessionId = session?.backendSessionId;
     const turnId = session?.activeTurn?.turnId;
     const content = inputValue.trim();
-    if (!canSteer || !backendSessionId || !turnId || !content ||
-        steeringRequest.current?.backendSessionId === backendSessionId) {
+    if (
+      !canSteer ||
+      !backendSessionId ||
+      !turnId ||
+      !content ||
+      steeringRequest.current?.backendSessionId === backendSessionId
+    ) {
       return;
     }
 
@@ -564,60 +577,93 @@ export function useChatSession(sessionId: string) {
       );
     };
     const showResult = (
-      phase: "confirmed" | "failed", message: string, deliveredTurnId = turnId
+      phase: "confirmed" | "failed",
+      message: string,
+      deliveredTurnId = turnId
     ) => {
       if (steeringRequest.current !== request) return;
       steeringRequest.current = undefined;
-      const activeTurn = useChatStore.getState().sessions[sessionId]?.activeTurn;
+      const activeTurn =
+        useChatStore.getState().sessions[sessionId]?.activeTurn;
       setSteering((current) =>
-        current !== request ? current :
-          matchesChat(phase === "failed") && (!activeTurn || activeTurn.turnId === deliveredTurnId)
+        current !== request
+          ? current
+          : matchesChat(phase === "failed") &&
+              (!activeTurn || activeTurn.turnId === deliveredTurnId)
             ? { ...request, turnId: deliveredTurnId, phase, message }
             : undefined
       );
     };
     try {
       const deliveredTurn = await steerLocalChatTurn(
-        sessionId, backendSessionId, turnId, content
+        sessionId,
+        backendSessionId,
+        turnId,
+        content
       );
       const active = useChatStore.getState().sessions[sessionId]?.activeTurn;
       if (
         steeringRequest.current === request &&
         matchesChat() &&
-        (!active || active.turnId === turnId || active.turnId === deliveredTurn) &&
+        (!active ||
+          active.turnId === turnId ||
+          active.turnId === deliveredTurn) &&
         useComposerDraftStore.getState().bySession[sessionId] === inputValue
       ) {
         setInputValue("");
       }
       showResult(
         "confirmed",
-        deliveredTurn === turnId ? "Sent to the active turn" : "Delivered as a follow-up turn",
+        deliveredTurn === turnId
+          ? "Sent to the active turn"
+          : "Delivered as a follow-up turn",
         deliveredTurn
       );
     } catch (error) {
-      const detail = error instanceof Error ? error.message : "Delivery could not be confirmed";
-      showResult("failed", `Steering failed: ${detail}. Check the conversation before retrying.`);
+      const detail =
+        error instanceof Error
+          ? error.message
+          : "Delivery could not be confirmed";
+      showResult(
+        "failed",
+        `Steering failed: ${detail}. Check the conversation before retrying.`
+      );
     }
-  }, [canSteer, inputValue, projectGeneration, projectPath, session, sessionId, setInputValue, steeringScope]);
+  }, [
+    canSteer,
+    inputValue,
+    projectGeneration,
+    projectPath,
+    session,
+    sessionId,
+    setInputValue,
+    steeringScope,
+  ]);
 
   // --- Action callbacks ---
-  const handleSend = useCallback((message?: string): boolean => {
-    const trimmed = (message ?? inputValue).trim();
-    if (!trimmed || !canSendMessage || isSteering) return false;
-    void sendMessage(trimmed);
-    setSteering(undefined);
-    setInputValue("");
-    return true;
-  }, [canSendMessage, inputValue, isSteering, sendMessage, setInputValue]);
+  const handleSend = useCallback(
+    (message?: string): boolean => {
+      const trimmed = (message ?? inputValue).trim();
+      if (!trimmed || !canSendMessage || isSteering) return false;
+      void sendMessage(trimmed);
+      setSteering(undefined);
+      setInputValue("");
+      return true;
+    },
+    [canSendMessage, inputValue, isSteering, sendMessage, setInputValue]
+  );
 
-  const handleStartSession = useCallback((message?: string): boolean => {
-    if (!canUseComposer) return false;
-    const initialPrompt = (message ?? inputValue).trim();
-    void startSession(initialPrompt || undefined);
-    setSteering(undefined);
-    setInputValue("");
-    return true;
-  }, [canUseComposer, inputValue, setInputValue, startSession]);
+  const handleStartSession = useCallback(
+    (message?: string): boolean => {
+      if (!canUseComposer) return false;
+      const initialPrompt = (message ?? inputValue).trim();
+      void startSession(initialPrompt || undefined);
+      setSteering(undefined);
+      setInputValue("");
+      return true;
+    },
+    [canUseComposer, inputValue, setInputValue, startSession]
+  );
 
   const handleClearMessages = useCallback(async () => {
     if (session?.backendSessionId) {
@@ -691,7 +737,9 @@ export function useChatSession(sessionId: string) {
       : lifecycle === "resuming"
         ? "Resume session"
         : isActive
-          ? canQueueMessage ? "Queue message" : "Send message"
+          ? canQueueMessage
+            ? "Queue message"
+            : "Send message"
           : hasResume || lifecycle === "closed" || lifecycle === "error"
             ? "Resume session"
             : "Start session";
@@ -737,6 +785,7 @@ export function useChatSession(sessionId: string) {
     submitLabel,
     composerPlaceholder,
     canStopGeneration,
+    isGenerating,
     isWaiting,
     activityLabel,
     compactionSummary: session?.compactionSummary ?? null,
@@ -779,6 +828,7 @@ export function useChatSession(sessionId: string) {
     canSteer,
     isSteering,
     steeringStatus: visibleSteering?.message,
+    steeringPhase: visibleSteering?.phase,
     handleStartSession,
     handleClearMessages,
     handleStopGeneration,

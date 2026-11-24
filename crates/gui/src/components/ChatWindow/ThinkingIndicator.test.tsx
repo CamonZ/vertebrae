@@ -189,4 +189,11 @@ describe("ThinkingIndicator", () => {
       screen.getByRole("status").getAttribute("aria-label")
     );
   });
+
+  it("caps the full-size line so it never reads as a full-width rule", () => {
+    render(<ThinkingIndicator />);
+    expect(screen.getByTestId("thinking-line")).toHaveStyle({
+      width: "min(100%, 240px)",
+    });
+  });
 });

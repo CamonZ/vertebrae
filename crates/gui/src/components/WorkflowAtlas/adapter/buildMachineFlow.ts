@@ -17,6 +17,7 @@ import {
   type SessionDirective,
 } from "../inspector/routeSessions";
 import { buildAtlasModel } from "./buildAtlasModel";
+import type { Kind } from "../layout/types";
 import {
   NO_FACTORY_SCOPE,
   type FactoryFilterValue,
@@ -80,6 +81,8 @@ export interface AtlasMachineFlow {
   readonly destinations?: ReadonlyMap<string, AtlasLevelTarget>;
   /** Display names of stations and stubs that are not inspector entities. */
   readonly names?: ReadonlyMap<string, string>;
+  /** Step type of each step part, by part id (never derived from step names). */
+  readonly kinds?: ReadonlyMap<string, Kind>;
 }
 
 const PART_KIND = {
@@ -122,6 +125,7 @@ export function buildMachineFlow(
   const diagnostics: string[] = [];
   const destinations = new Map<string, AtlasLevelTarget>();
   const names = new Map<string, string>();
+  const kinds = new Map<string, Kind>();
   const workflows = new Map(summary.workflows.map((wf) => [wf.id, wf]));
   const known = new Map(
     (context ?? summary).workflows.map((wf) => [wf.id, wf])
@@ -399,6 +403,7 @@ export function buildMachineFlow(
           label
         );
       }
+      kinds.set(partId, step.kind);
       parts.push({
         id: partId,
         kind: PART_KIND[step.kind],
@@ -512,6 +517,7 @@ export function buildMachineFlow(
     diagnostics,
     destinations,
     names,
+    kinds,
   };
 }
 
@@ -520,7 +526,10 @@ export function buildMachineFlow(
  * the Graph. Stubs keep their names: a stub's name is where it leads.
  */
 export function hoverLabels(part: PartSpec): PartSpec {
-  return part.kind === "topology endpoint"
-    ? part
-    : { ...part, labels: { title: "hover", subtitle: "hover" } };
+  if (part.kind === "topology endpoint") return part;
+  // A factory station always carries its name; its job (the workflow count)
+  // shows on hover.
+  if (part.kind === "factory")
+    return { ...part, labels: { title: "shown", subtitle: "hover" } };
+  return { ...part, labels: { title: "hover", subtitle: "hover" } };
 }

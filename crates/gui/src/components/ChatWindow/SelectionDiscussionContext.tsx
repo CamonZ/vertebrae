@@ -17,7 +17,12 @@ import {
 } from "react";
 import { commands, type LocalChatHarnessKind } from "../../bindings";
 import { errorMessage } from "../../query/commandResult";
-import { reviewLocation, reviewRange, supportsInlineDiscussion, unwrapAnchor } from "./reviewAnchors";
+import {
+  reviewLocation,
+  reviewRange,
+  supportsInlineDiscussion,
+  unwrapAnchor,
+} from "./reviewAnchors";
 import {
   getLocalChatLifecycle,
   isLocalChatLifecycleBusy,
@@ -109,7 +114,9 @@ export function SelectionDiscussionProvider({
   const [anchorError, setAnchorError] = useState<string | null>(null);
   const [mappingError, setMappingError] = useState<string | null>(null);
   // Presentation only: collapsing never touches a thread's session.
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const [focusRequest, setFocusRequest] = useState<string | null>(null);
   const capabilityVersion = useRef(0);
   const snapshotRef = useRef<WorktreeSnapshot | null>(null);
@@ -117,7 +124,9 @@ export function SelectionDiscussionProvider({
   const mounted = useRef(false);
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => {
+      mounted.current = false;
+    };
   }, []);
   const checkAvailability = useCallback(async () => {
     const version = ++capabilityVersion.current;
@@ -218,16 +227,26 @@ export function SelectionDiscussionProvider({
   const reportMapping = useCallback((error: unknown | null) => {
     setMappingError(error === null ? null : errorMessage(error));
   }, []);
-  const { mapSnapshot, noteWriter, comparison } = useSelectionDiscussionCatalog({
-    controller, projectPath, parentChatId, worktreePath, report: reportCatalogError, reportMapping,
-  });
-  const reconcile = useCallback((snapshot: WorktreeSnapshot) => {
-    const changed = snapshotRef.current !== snapshot;
-    snapshotRef.current = snapshot;
-    controller.reconcile(snapshot);
-    if (changed) void checkAvailability();
-    mapSnapshot(snapshot);
-  }, [checkAvailability, controller, mapSnapshot]);
+  const { mapSnapshot, noteWriter, comparison } = useSelectionDiscussionCatalog(
+    {
+      controller,
+      projectPath,
+      parentChatId,
+      worktreePath,
+      report: reportCatalogError,
+      reportMapping,
+    }
+  );
+  const reconcile = useCallback(
+    (snapshot: WorktreeSnapshot) => {
+      const changed = snapshotRef.current !== snapshot;
+      snapshotRef.current = snapshot;
+      controller.reconcile(snapshot);
+      if (changed) void checkAvailability();
+      mapSnapshot(snapshot);
+    },
+    [checkAvailability, controller, mapSnapshot]
+  );
   // Runs with the review snapshot rather than re-reading files per thread.
   // Owned here, not by a rendering component, so closing or never opening
   // the side column does not stop re-anchoring (db5160ff).
@@ -242,12 +261,25 @@ export function SelectionDiscussionProvider({
       // Snapshot the selected provider/model before any asynchronous setup.
       const thread = controller.thread(id);
       const question = text.trim();
-      if (choice.error !== null || !thread || thread.status.kind === "unreadable" || !question || !parentChatId || !projectPath) return;
+      if (
+        choice.error !== null ||
+        !thread ||
+        thread.status.kind === "unreadable" ||
+        !question ||
+        !parentChatId ||
+        !projectPath
+      )
+        return;
 
       const checkout = thread.anchor.fullFile?.checkout ?? worktreePath;
       const store = useChatStore.getState();
-      const session = (thread.sessionId ? store.sessions[thread.sessionId] : undefined) ??
-        findDiscussionSession(Object.values(store.sessions), { projectPath, parentChatId, worktreePath: checkout }, id);
+      const session =
+        (thread.sessionId ? store.sessions[thread.sessionId] : undefined) ??
+        findDiscussionSession(
+          Object.values(store.sessions),
+          { projectPath, parentChatId, worktreePath: checkout },
+          id
+        );
       // One turn at a time, and never into a process that is closing.
       if (
         session &&
@@ -266,7 +298,11 @@ export function SelectionDiscussionProvider({
           harness: choice.harness,
           providerId: choice.providerId,
           projectPath,
-          discussionBinding: { parentChatId, reviewThreadId: id, worktreePath: checkout },
+          discussionBinding: {
+            parentChatId,
+            reviewThreadId: id,
+            worktreePath: checkout,
+          },
         });
       if (applyChoice) {
         store.setSessionSelectedModel(sessionId, choice.modelId);
@@ -288,7 +324,8 @@ export function SelectionDiscussionProvider({
       });
       const delivered = await deliverLocalChatTurn(sessionId, turn.payload);
       if (delivered && turn.notesOutdated) {
-        if (mounted.current && controller.thread(id)) controller.sent(id, sessionId, true);
+        if (mounted.current && controller.thread(id))
+          controller.sent(id, sessionId, true);
         void writer?.(id);
       }
 
@@ -316,44 +353,67 @@ export function SelectionDiscussionProvider({
     [controller]
   );
 
-  const begin = useCallback(async (anchor: CodeSelection, question?: string) => {
-    if (!(anchor.fullFile ? canAskFullFile : canAsk) || !parentChatId || !projectPath || capturing.current ||
-        !supportsInlineDiscussion(anchor)) return false;
-    capturing.current = true;
-    setAnchorError(null);
-    // Where the user asked from (the draft composer or its button).
-    const origin = document.activeElement;
-    const id = crypto.randomUUID();
-    const generation = getProjectScopeGeneration();
-    try {
-      const capture = await unwrapAnchor(commands.captureReviewAnchor({
-        worktree: anchor.fullFile?.checkout ?? worktreePath,
-        threadId: id,
-        location: reviewLocation(anchor, parentChatId, comparison()),
-        range: reviewRange(anchor),
-        selectedText: anchor.code,
-        parent: { chatId: parentChatId, projectPath },
-      }));
-      if (!mounted.current || generation !== getProjectScopeGeneration()) return false;
-      controller.ask(anchor, id, capture);
-      // The draft the user typed in gives way to the discussion's composer,
-      // unless they moved focus elsewhere while the anchor was captured.
-      const active = document.activeElement;
-      if (active === origin || !active || active === document.body)
-        setFocusRequest(id);
-    } catch (error) {
-      if (generation === getProjectScopeGeneration()) reportCatalogError(error);
-      return false;
-    } finally {
-      capturing.current = false;
-    }
-    if (question) {
-      void send(id, question).catch((error: unknown) => {
-        if (mounted.current) setAnchorError(errorMessage(error));
-      });
-    }
-    return true;
-  }, [canAsk, canAskFullFile, comparison, controller, parentChatId, projectPath, reportCatalogError, send, worktreePath]);
+  const begin = useCallback(
+    async (anchor: CodeSelection, question?: string) => {
+      if (
+        !(anchor.fullFile ? canAskFullFile : canAsk) ||
+        !parentChatId ||
+        !projectPath ||
+        capturing.current ||
+        !supportsInlineDiscussion(anchor)
+      )
+        return false;
+      capturing.current = true;
+      setAnchorError(null);
+      // Where the user asked from (the draft composer or its button).
+      const origin = document.activeElement;
+      const id = crypto.randomUUID();
+      const generation = getProjectScopeGeneration();
+      try {
+        const capture = await unwrapAnchor(
+          commands.captureReviewAnchor({
+            worktree: anchor.fullFile?.checkout ?? worktreePath,
+            threadId: id,
+            location: reviewLocation(anchor, parentChatId, comparison()),
+            range: reviewRange(anchor),
+            selectedText: anchor.code,
+            parent: { chatId: parentChatId, projectPath },
+          })
+        );
+        if (!mounted.current || generation !== getProjectScopeGeneration())
+          return false;
+        controller.ask(anchor, id, capture);
+        // The draft the user typed in gives way to the discussion's composer,
+        // unless they moved focus elsewhere while the anchor was captured.
+        const active = document.activeElement;
+        if (active === origin || !active || active === document.body)
+          setFocusRequest(id);
+      } catch (error) {
+        if (generation === getProjectScopeGeneration())
+          reportCatalogError(error);
+        return false;
+      } finally {
+        capturing.current = false;
+      }
+      if (question) {
+        void send(id, question).catch((error: unknown) => {
+          if (mounted.current) setAnchorError(errorMessage(error));
+        });
+      }
+      return true;
+    },
+    [
+      canAsk,
+      canAskFullFile,
+      comparison,
+      controller,
+      parentChatId,
+      projectPath,
+      reportCatalogError,
+      send,
+      worktreePath,
+    ]
+  );
 
   const actions = useMemo<DiscussionActions>(
     () => ({
@@ -370,7 +430,8 @@ export function SelectionDiscussionProvider({
         setFocusRequest(id && options?.focus ? id : null);
         const thread = id ? controller.thread(id) : undefined;
 
-        if (!options?.inPlace && thread && anchorsInChanges(thread.anchor)) callbacks.current.onOpen();
+        if (!options?.inPlace && thread && anchorsInChanges(thread.anchor))
+          callbacks.current.onOpen();
         if (thread?.sessionId) {
           const store = useChatStore.getState();
           const session = store.sessions[thread.sessionId];
@@ -392,11 +453,24 @@ export function SelectionDiscussionProvider({
       focusTaken: (id) =>
         setFocusRequest((current) => (current === id ? null : current)),
     }),
-    [controller, send, cancel, canAsk, canAskFullFile, begin, reconcile, checkAvailability]
+    [
+      controller,
+      send,
+      cancel,
+      canAsk,
+      canAskFullFile,
+      begin,
+      reconcile,
+      checkAvailability,
+    ]
   );
 
-  const unreadable = state.threads.find(({ status, anchor }) => status.kind === "unreadable" && !anchor.fullFile?.turn)?.status;
-  const readError = unreadable?.kind === "unreadable" ? unreadable.message : null;
+  const unreadable = state.threads.find(
+    ({ status, anchor }) =>
+      status.kind === "unreadable" && !anchor.fullFile?.turn
+  )?.status;
+  const readError =
+    unreadable?.kind === "unreadable" ? unreadable.message : null;
   const value = useMemo<DiscussionValue>(
     () => ({
       ...state,
@@ -406,7 +480,16 @@ export function SelectionDiscussionProvider({
       projectPath: worktreePath,
       anchorError: anchorError ?? readError ?? mappingError,
     }),
-    [state, actions, collapsed, focusRequest, worktreePath, anchorError, readError, mappingError]
+    [
+      state,
+      actions,
+      collapsed,
+      focusRequest,
+      worktreePath,
+      anchorError,
+      readError,
+      mappingError,
+    ]
   );
 
   return (
@@ -548,7 +631,8 @@ export function MiniThread({
     onClosed?.(thread.anchor);
   };
   const unreadable = thread.status.kind === "unreadable";
-  const canAsk = !unreadable && !activeTurn && !!question.trim() && !choice?.error;
+  const canAsk =
+    !unreadable && !activeTurn && !!question.trim() && !choice?.error;
   const ask = () => {
     if (!canAsk) return;
     discussion.send(thread.id, question);
@@ -582,11 +666,14 @@ export function MiniThread({
         close();
       }}
       onClick={(event) => {
-        if (thread.status.kind !== "inline" ||
-          event.currentTarget.ownerDocument.getSelection()?.isCollapsed === false ||
+        if (
+          thread.status.kind !== "inline" ||
+          event.currentTarget.ownerDocument.getSelection()?.isCollapsed ===
+            false ||
           (event.target instanceof Element &&
             event.target.closest("button, a, input, textarea, select, pre"))
-        ) return;
+        )
+          return;
         discussion.select(thread.anchor);
       }}
     >
@@ -621,7 +708,9 @@ export function MiniThread({
         <button
           type="button"
           className="selection-mini-close"
-          aria-label={collapsed ? "Show all turns" : "Show only the latest response"}
+          aria-label={
+            collapsed ? "Show all turns" : "Show only the latest response"
+          }
           aria-pressed={collapsed}
           aria-keyshortcuts="Meta+Shift+E"
           title={`${collapsed ? "Show all turns" : "Show only the latest response"} (${collapseKeys})`}
@@ -638,7 +727,13 @@ export function MiniThread({
             strokeLinejoin="round"
             aria-hidden="true"
           >
-            <path d={collapsed ? "m7 9 5-5 5 5M7 15l5 5 5-5" : "m7 4 5 5 5-5M7 20l5-5 5 5"} />
+            <path
+              d={
+                collapsed
+                  ? "m7 9 5-5 5 5M7 15l5 5 5-5"
+                  : "m7 4 5 5 5-5M7 20l5-5 5 5"
+              }
+            />
           </svg>
         </button>
         <button
@@ -663,9 +758,12 @@ export function MiniThread({
           </svg>
         </button>
       </header>
-      {thread.status.kind !== "inline" && thread.status.kind !== "unreadable" && (
-        <pre aria-label="Original selected code">{thread.git.original.code}</pre>
-      )}
+      {thread.status.kind !== "inline" &&
+        thread.status.kind !== "unreadable" && (
+          <pre aria-label="Original selected code">
+            {thread.git.original.code}
+          </pre>
+        )}
       <DiscussionModelNotice />
       <div className="selection-mini-messages">
         {hidden && (
@@ -724,7 +822,8 @@ export function MiniThread({
           placeholder="Ask a follow-up question…"
           onKeyDown={(event) => {
             if (event.nativeEvent.isComposing) return;
-            if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+            if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey))
+              return;
             event.preventDefault();
             if (event.repeat) return;
             if (event.shiftKey) sendToMain();
@@ -797,9 +896,19 @@ export function DiscussionModelNotice() {
 
   if (!choice?.error) return null;
 
+  // "<reason> Open Settings → … to choose …": the reason leads, the path to
+  // fix it follows as a quieter second clause.
+  const at = choice.error.indexOf("Open Settings");
+  const reason = at > 0 ? choice.error.slice(0, at).trim() : choice.error;
+  const fix = at > 0 ? choice.error.slice(at) : "";
+
   return (
-    <p role="alert" className="selection-model-notice">
-      {choice.error}
+    <p role="alert" className="selection-model-notice" data-tone="warn">
+      <span className="selection-model-notice-dot" aria-hidden="true" />
+      <span className="selection-model-notice-text">
+        <span>{reason}</span>
+        {fix && <span className="selection-model-notice-fix"> {fix}</span>}
+      </span>
     </p>
   );
 }

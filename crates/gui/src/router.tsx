@@ -7,7 +7,6 @@ import {
 } from "react-router-dom";
 import { useState, useEffect } from "react";
 import { AppShell } from "./components";
-import { useTheme, useDensity, useInlineCodeStyle } from "./hooks";
 import {
   ProjectSetupPage,
   WelcomeInstallPage,
@@ -31,12 +30,6 @@ import {
 import { useRunChatDeepLink } from "./hooks/useRunChatDeepLink";
 
 function RootLayout() {
-  // Initialize theme management at the app root
-  useTheme();
-  // Initialize density management (Retina-aware type scale) at the app root
-  useDensity();
-  // Apply inline code colors from Appearance settings
-  useInlineCodeStyle();
   // `#task=…&run=…&exec=…` opens a TaskRun in the chat from any page.
   useRunChatDeepLink();
 

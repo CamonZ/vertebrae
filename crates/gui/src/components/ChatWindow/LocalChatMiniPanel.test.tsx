@@ -1506,7 +1506,6 @@ describe("entity hierarchy browsing", () => {
       runMetadata.tasks = new Map();
     }
   });
-
 });
 
 it("keeps a revealed conversation visible as parent metadata arrives, while allowing later collapse", async () => {

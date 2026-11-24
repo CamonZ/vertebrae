@@ -27,7 +27,10 @@ import {
 } from "../../../stores/chatSideColumnStore";
 import { DIFF_CURSOR_ENTRY_ATTRIBUTE } from "../../thread/toolChange/diffCursor";
 import { GAP_BATCH } from "../../thread/toolChange/diffGaps";
-import { canonicalPath, type FilePatch } from "../../thread/toolChange/diffLineMapper";
+import {
+  canonicalPath,
+  type FilePatch,
+} from "../../thread/toolChange/diffLineMapper";
 import { GAP_CURSOR_ATTRIBUTE, useChangeGaps } from "./useChangeGaps";
 import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
 import { DiffReviewContext } from "../../thread/toolChange/DiffReviewContext";
@@ -59,7 +62,12 @@ import {
   type SemanticFile,
 } from "./useChangeFiles";
 import { useSemanticMode } from "./useSemanticMode";
-import { linksAt, linksForFile, useRelatedSymbols, type SymbolGraphRequest } from "./relatedSymbols";
+import {
+  linksAt,
+  linksForFile,
+  useRelatedSymbols,
+  type SymbolGraphRequest,
+} from "./relatedSymbols";
 
 import { labelChips, type SemanticLabel } from "./semanticHunks";
 import { SEMANTIC_GUTTER_CSS, syncSemanticGutter } from "./semanticGutter";
@@ -190,19 +198,28 @@ export default function AllChangesView({
   const patchesByPath = useMemo(() => {
     const byPath = new Map<string, FilePatch>();
     for (const result of parsedPatches)
-      for (const file of result.reviewFiles) byPath.set(canonicalPath(file), file);
+      for (const file of result.reviewFiles)
+        byPath.set(canonicalPath(file), file);
     return byPath;
   }, [parsedPatches]);
   // The line diff, with semantic labels wherever the sides can be read.
   const semanticOn = !!loadSides;
   const gapsEnabled =
     !!loadSides && LINE_INFO_SEPARATORS.has(options.hunkSeparators);
-  const changeFiles = useChangeFiles(changes, patchesByPath, loadSides, semanticOn);
+  const changeFiles = useChangeFiles(
+    changes,
+    patchesByPath,
+    loadSides,
+    semanticOn
+  );
   const [expanded, setExpanded] = useState<ExpandedLabel | null>(null);
   const returnFocus = useRef<ExpandedLabel | null>(null);
   const { request: requestFile, fileFor } = changeFiles;
   const semantic = useSemanticMode(changeFiles, semanticOn);
-  const related = useRelatedSymbols(semanticOn ? symbolGraphRequest : undefined, patchesByPath);
+  const related = useRelatedSymbols(
+    semanticOn ? symbolGraphRequest : undefined,
+    patchesByPath
+  );
   const foldReason = useCallback(
     (path: string): FoldReason | null => {
       if (viewedPaths.has(path)) return "viewed";
@@ -320,7 +337,9 @@ export default function AllChangesView({
     selectionState: chatChanges ? heldCursor : undefined,
     onCursorMove: (path, lineNumber, side) => {
       const now = performance.now();
-      const behavior = changesCursorScrollBehavior(now - lastCursorMove.current);
+      const behavior = changesCursorScrollBehavior(
+        now - lastCursorMove.current
+      );
       lastCursorMove.current = now;
       onCursorFile?.(path);
       requestFile(path);
@@ -337,33 +356,70 @@ export default function AllChangesView({
   });
   const { annotationsFor, openComposer, onSelectionChange, selectedLinesFor } =
     review;
-  const gutterState = useRef({ semantic, related, itemPaths, expanded, onRelatedJump });
-  gutterState.current = { semantic, related, itemPaths, expanded, onRelatedJump };
-  const paintGutter = useCallback((item: CodeViewRenderedItem<ReviewAnnotation, undefined>) => {
-    const root = item.element.shadowRoot;
-    if (item.type !== "diff" || !root) return;
-    const state = gutterState.current;
-    const path = state.itemPaths.get(item.id) ?? item.id;
-    // Only the primary patch item receives a file's semantic coordinates.
-    const file = path === item.id ? state.semantic.fileFor(path) : null;
-    const links = linksForFile(state.related.links, path, file);
-    const labels = file?.status === "semantic"
-      ? file.view.labels.filter((label) =>
-          label.scope.length > 0 || label.test || label.facts.length > 0 ||
-          labelChips(label).length > 0 ||
-          (!!state.onRelatedJump && linksAt(links, label.declarationIndices ?? []).length > 0)
+  const gutterState = useRef({
+    semantic,
+    related,
+    itemPaths,
+    expanded,
+    onRelatedJump,
+  });
+  gutterState.current = {
+    semantic,
+    related,
+    itemPaths,
+    expanded,
+    onRelatedJump,
+  };
+  const paintGutter = useCallback(
+    (item: CodeViewRenderedItem<ReviewAnnotation, undefined>) => {
+      const root = item.element.shadowRoot;
+      if (item.type !== "diff" || !root) return;
+      const state = gutterState.current;
+      const path = state.itemPaths.get(item.id) ?? item.id;
+      // Only the primary patch item receives a file's semantic coordinates.
+      const file = path === item.id ? state.semantic.fileFor(path) : null;
+      const links = linksForFile(state.related.links, path, file);
+      const labels =
+        file?.status === "semantic"
+          ? file.view.labels.filter(
+              (label) =>
+                label.scope.length > 0 ||
+                label.test ||
+                label.facts.length > 0 ||
+                labelChips(label).length > 0 ||
+                (!!state.onRelatedJump &&
+                  linksAt(links, label.declarationIndices ?? []).length > 0)
+            )
+          : [];
+      const active =
+        state.expanded?.id === item.id ? state.expanded.label : undefined;
+      const focus =
+        returnFocus.current?.id === item.id
+          ? returnFocus.current.label
+          : undefined;
+      if (
+        syncSemanticGutter(
+          root,
+          item.instance,
+          labels,
+          active,
+          (label) => {
+            setExpanded((current) =>
+              current?.id === item.id && current.label === label
+                ? null
+                : { id: item.id, label }
+            );
+          },
+          focus
         )
-      : [];
-    const active = state.expanded?.id === item.id ? state.expanded.label : undefined;
-    const focus = returnFocus.current?.id === item.id ? returnFocus.current.label : undefined;
-    if (syncSemanticGutter(root, item.instance, labels, active, (label) => {
-      setExpanded((current) =>
-        current?.id === item.id && current.label === label ? null : { id: item.id, label }
-      );
-    }, focus)) returnFocus.current = null;
-  }, []);
+      )
+        returnFocus.current = null;
+    },
+    []
+  );
   useEffect(() => {
-    for (const item of viewRef.current?.getInstance()?.getRenderedItems() ?? []) {
+    for (const item of viewRef.current?.getInstance()?.getRenderedItems() ??
+      []) {
       paintGutter(item);
     }
   }, [semantic, related, expanded, itemPaths, paintGutter]);
@@ -398,7 +454,8 @@ export default function AllChangesView({
           : patchItem;
         const review = own ? annotationsFor(item.id) : undefined;
         const active = expanded?.id === item.id ? expanded.label : undefined;
-        const annotations = review && semantic.annotate(item.id, review, active);
+        const annotations =
+          review && semantic.annotate(item.id, review, active);
         const signature = JSON.stringify(annotations ?? []);
         const path = itemPaths.get(item.id) ?? item.id;
         const file = semantic.fileFor(path);
@@ -425,7 +482,16 @@ export default function AllChangesView({
         });
         return { ...item, annotations, collapsed, version };
       }),
-    [items, itemPaths, annotationsFor, collapsedPaths, fileDiffFor, semantic, related.links, expanded]
+    [
+      items,
+      itemPaths,
+      annotationsFor,
+      collapsedPaths,
+      fileDiffFor,
+      semantic,
+      related.links,
+      expanded,
+    ]
   );
   const { gapCursor } = review;
   const { markCursor } = gaps;
@@ -714,7 +780,11 @@ export default function AllChangesView({
                             setExpanded(null);
                           }}
                           related={linksAt(
-                            linksForFile(related.links, path, semantic.fileFor(path)),
+                            linksForFile(
+                              related.links,
+                              path,
+                              semantic.fileFor(path)
+                            ),
                             label.declarationIndices ?? []
                           )}
                           onRelatedJump={onRelatedJump}
@@ -782,24 +852,7 @@ export default function AllChangesView({
                 {semanticView && (
                   <DeclarationCounts summary={semanticView.summary} />
                 )}
-                {fileDiff && (
-                  <span className="changes-diff-totals">
-                    <span className="changes-diff-deletions">
-                      −
-                      {fileDiff.hunks.reduce(
-                        (sum, hunk) => sum + hunk.deletionLines,
-                        0
-                      )}
-                    </span>
-                    <span className="changes-diff-additions">
-                      +
-                      {fileDiff.hunks.reduce(
-                        (sum, hunk) => sum + hunk.additionLines,
-                        0
-                      )}
-                    </span>
-                  </span>
-                )}
+                {/* +/− totals live in the summary bar and file list row. */}
                 {onViewedChange && (
                   <button
                     type="button"

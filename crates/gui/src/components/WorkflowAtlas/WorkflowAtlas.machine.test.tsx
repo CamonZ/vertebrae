@@ -779,7 +779,7 @@ it.each([false, true])(
       const dh = Number(diagram.getAttribute("height"));
       const scale = Math.max(
         0.04,
-        Math.min(2.4, (width - 96) / dw, (800 - 96) / dh)
+        Math.min(2.4, (width - 220) / dw, (800 - 220) / dh)
       );
       return `translate(${(width - dw * scale) / 2}px,${(800 - dh * scale) / 2}px) scale(${scale})`;
     };

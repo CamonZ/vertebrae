@@ -12,24 +12,26 @@
 
 .rc {
   position: absolute;
-  top: 14px;
-  left: 14px;
-  bottom: 14px;
+  top: var(--s-2);
+  left: var(--s-2);
+  bottom: var(--s-2);
   /* width is state-driven (drag-resizable); see .rc-resize-handle */
   z-index: 65;
   display: flex;
   flex-direction: column;
-  background: linear-gradient(
-    158deg,
-    color-mix(in oklch, var(--bg-3) 42%, transparent),
-    color-mix(in oklch, var(--bg-2) 30%, transparent)
-  );
-  -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1);
-  backdrop-filter: blur(30px) brightness(1.4) saturate(1);
-  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  /* Float role: one flat surface, --shadow-3 and a lit top edge, like the mini
+     chat panel. No gradient, no glass. */
+  background: var(--surface-page);
   border-radius: var(--r-lg);
-  box-shadow: var(--shadow-3), 0 0 44px rgba(0, 0, 0, 0.35);
+  box-shadow:
+    var(--shadow-3),
+    inset 0 1px 0 var(--edge-lit);
   overflow: hidden;
+}
+/* Beside a list (factory / level index): float to its right, one gutter away,
+   so the list stays fully visible instead of peeking out from under it. */
+.uv-canvas:has(.factory-index) .rc {
+  left: calc(clamp(220px, 22vw, 280px) + var(--s-2) * 2);
 }
 
 /* ── Horizontal resize handle ──
@@ -69,6 +71,7 @@
 .rc-hd-top {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--s-2);
 }
 .rc-eyebrow {
@@ -89,24 +92,6 @@
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 7px var(--accent-glow);
-}
-.rc-live {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-1h);
-  font-family: var(--mono);
-  font-size: var(--text-11);
-  color: var(--accent);
-  font-weight: 500;
-}
-.rc-live .pulse {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 8px var(--accent-glow);
-  animation: rc-pulse 1.6s ease-in-out infinite;
 }
 @keyframes rc-pulse {
   0%,
@@ -245,12 +230,14 @@
 .rc-row + .rc-row {
   margin-top: var(--s-0);
 }
+/* Shared row scale: --color-bg-hover on hover, --color-selection when selected
+   (the float surface is page tone, like the lists it matches). */
 .rc-row:hover {
-  background: color-mix(in oklch, var(--fg) 5%, transparent);
-  border-color: color-mix(in oklch, var(--fg) 9%, transparent);
+  background: var(--color-bg-hover);
 }
-.rc-row.sel {
-  background: var(--selection);
+.rc-row.sel,
+.rc-row.sel:hover {
+  background: var(--color-selection);
 }
 /* Selected: a 3px accent left bar — the same selection signal the Tasks list
    rows and Kanban cards use. No border, no glow, no bar at rest. */
@@ -276,15 +263,19 @@
   display: flex;
   align-items: center;
   gap: var(--s-1h);
+  min-width: 0;
 }
+/* The workflow name / runtime truncates; the gap keeps it off the id chip. */
 .rc-meta {
+  flex: 0 1 auto;
+  min-width: 0;
   margin-left: auto;
+  padding-left: var(--s-2);
   font-family: var(--mono);
   font-size: var(--text-10);
   color: var(--fg-faint);
-  display: inline-flex;
-  align-items: center;
-  gap: var(--s-1h);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .rc-title {
@@ -332,17 +323,23 @@
 .rc-act {
   flex-shrink: 0;
   align-self: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
+  /* Hit area and breathing room from the progress bars: spacing, not size. */
+  margin-left: var(--s-2);
   border-radius: var(--r-md);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--line-strong);
-  background: color-mix(in oklch, var(--bg) 30%, transparent);
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--fg-mute);
   transition: all var(--t-fast) var(--ease);
+}
+.rc-act:hover {
+  border-color: var(--line-strong);
+  background: var(--color-bg-hover-raised);
 }
 .rc-act.run:hover {
   border-color: var(--accent);
@@ -418,23 +415,22 @@
   gap: var(--s-2);
   height: 38px;
   padding: 0 var(--s-3) 0 var(--s-2h);
-  background: linear-gradient(
-    158deg,
-    color-mix(in oklch, var(--bg-3) 46%, transparent),
-    color-mix(in oklch, var(--bg-2) 34%, transparent)
-  );
-  -webkit-backdrop-filter: blur(26px) brightness(1.4) saturate(1);
-  backdrop-filter: blur(26px) brightness(1.4) saturate(1);
-  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  /* Raised chip, not glass: page-tone fill, hairline, --shadow-1. */
+  background: var(--surface-page);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-full);
-  box-shadow: var(--shadow-2), 0 0 22px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-1);
   cursor: pointer;
   color: var(--fg);
   transition: all var(--t-fast) var(--ease);
 }
 .rc-fab:hover {
   border-color: color-mix(in oklch, var(--accent) 42%, transparent);
-  box-shadow: var(--shadow-2), 0 0 24px var(--accent-glow);
+  background-image: linear-gradient(
+    var(--color-bg-hover-raised),
+    var(--color-bg-hover-raised)
+  );
+  box-shadow: var(--shadow-2);
   transform: translateX(-50%) translateY(-1px);
 }
 .rc-fab-ico {

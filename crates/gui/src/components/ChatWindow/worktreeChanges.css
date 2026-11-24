@@ -60,7 +60,7 @@
 
 .changes-files-toggle:hover,
 .changes-file-row:hover {
-  background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+  background: var(--color-bg-hover-raised);
   color: var(--color-fg);
 }
 
@@ -212,7 +212,7 @@
 .document-save:hover:not(:disabled),
 .document-conflict button:hover:not(:disabled),
 .files-tree-row:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-fg) 5%, transparent);
+  background: var(--color-bg-hover-raised);
   color: var(--color-fg);
 }
 
@@ -548,8 +548,10 @@
 
 .changes-comparison-controls label {
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr);
-  flex: 1 1 160px;
+  /* Selects size to their content (min 140px); the toolbar wraps instead of
+     truncating "master (default)". */
+  grid-template-columns: auto minmax(140px, 1fr);
+  flex: 1 1 260px;
   min-width: 0;
   align-items: center;
   gap: 6px;
@@ -673,19 +675,6 @@
   font-family: var(--font-mono);
 }
 
-.changes-diff-totals {
-  display: flex;
-  gap: 8px;
-  font-size: 11px;
-}
-
-.changes-diff-deletions {
-  color: var(--diffs-deletion-color-override, #e06c75);
-}
-.changes-diff-additions {
-  color: var(--diffs-addition-color-override, #68ad71);
-}
-
 .comparison-filter {
   padding: 4px 8px;
   color: var(--color-fg-soft);
@@ -702,7 +691,6 @@
     min-height: 20px;
   }
 
-  .changes-diff-heading .changes-diff-totals,
   .changes-diff-heading .changes-declarations {
     display: none;
   }

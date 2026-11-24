@@ -228,7 +228,7 @@ async fn open_browser(world: &mut GuiWorld) {
 
     gui_acceptance::click_pane_action(
         &client,
-        "[data-testid='chat-tabs-history']",
+        gui_acceptance::CHAT_HISTORY_ACTION,
         "conversation history",
     )
     .await;
@@ -252,12 +252,7 @@ async fn toggle_completed(world: &mut GuiWorld) {
         .clone();
     let client = wd.lock().await;
 
-    gui_acceptance::click_when_ready(
-        &client,
-        Locator::Css("[role=switch][aria-label='Show completed']"),
-        "Show completed",
-    )
-    .await;
+    gui_acceptance::set_show_completed(&client, None).await;
 }
 
 #[then("the conversation browser should contain this hierarchy:")]

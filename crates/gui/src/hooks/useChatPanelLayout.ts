@@ -18,6 +18,8 @@ export const DEFAULT_PANEL_LEFT_INSET = 60;
 export const DEFAULT_PANEL_RIGHT_INSET = SIDE_PANEL_INSET_PX;
 /** Keyboard resize step (px) for the drag handle. */
 export const RESIZE_STEP = 16;
+/** Quiet period after the last window resize before width easing resumes. */
+const WINDOW_RESIZE_SETTLE_MS = 150;
 
 interface UseChatPanelLayoutResult {
   panelRef: React.RefObject<HTMLDivElement | null>;
@@ -26,6 +28,8 @@ interface UseChatPanelLayoutResult {
   maximizedWidth: number;
   isMaximized: boolean;
   isResizing: boolean;
+  /** The window is mid-resize; width changes apply without easing. */
+  isWindowResizing: boolean;
   renderedPanelWidth: number;
   setPanelWidth: React.Dispatch<React.SetStateAction<number>>;
   setIsResizing: React.Dispatch<React.SetStateAction<boolean>>;
@@ -63,6 +67,7 @@ export function useChatPanelLayout(): UseChatPanelLayoutResult {
   const isMaximized = chatPanelPresentation === "expanded";
   const [maximizedWidth, setMaximizedWidth] = useState(DEFAULT_PANEL_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  const [isWindowResizing, setIsWindowResizing] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined" && !isMaximized) {
@@ -156,11 +161,25 @@ export function useChatPanelLayout(): UseChatPanelLayoutResult {
 
   useEffect(() => {
     if (!isMaximized) return;
-    const updateMaximizedWidth = () =>
+    setMaximizedWidth(computeMaximizedWidth());
+    // Track the window edge directly: easing each resize tick makes the
+    // panel trail the window like rubber. The ease resumes once it settles.
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    const onWindowResize = () => {
+      setIsWindowResizing(true);
       setMaximizedWidth(computeMaximizedWidth());
-    updateMaximizedWidth();
-    window.addEventListener("resize", updateMaximizedWidth);
-    return () => window.removeEventListener("resize", updateMaximizedWidth);
+      clearTimeout(settle);
+      settle = setTimeout(
+        () => setIsWindowResizing(false),
+        WINDOW_RESIZE_SETTLE_MS
+      );
+    };
+    window.addEventListener("resize", onWindowResize);
+    return () => {
+      window.removeEventListener("resize", onWindowResize);
+      clearTimeout(settle);
+      setIsWindowResizing(false);
+    };
   }, [computeMaximizedWidth, isMaximized]);
 
   /** Restore the compact width after dismissal; open chats survive. */
@@ -180,6 +199,7 @@ export function useChatPanelLayout(): UseChatPanelLayoutResult {
     maximizedWidth,
     isMaximized,
     isResizing,
+    isWindowResizing,
     renderedPanelWidth: isMaximized ? maximizedWidth : panelWidth,
     setPanelWidth,
     setIsResizing,

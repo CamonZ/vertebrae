@@ -235,6 +235,12 @@ function createPersistedHistorySession(
   return session;
 }
 
+/** The compact panel keeps its workspace controls in the header's ⋯ menu. */
+function expandWorkspaceButton(): HTMLElement {
+  fireEvent.click(screen.getByTestId("pane-overflow-menu"));
+  return screen.getByRole("menuitem", { name: "Expand chat workspace" });
+}
+
 describe("ChatWindowManager", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -243,10 +249,12 @@ describe("ChatWindowManager", () => {
     vi.clearAllMocks();
     queryClient.removeQueries({ queryKey: ["local-chat-project-history"] });
     vi.mocked(commands.loadLocalChatProjectHistory).mockResolvedValue({
-      status: "ok", data: { sessions: [], excludedIds: [] },
+      status: "ok",
+      data: { sessions: [], excludedIds: [] },
     });
     vi.mocked(commands.loadCachedLocalChatProjectExclusions).mockResolvedValue({
-      status: "ok", data: [],
+      status: "ok",
+      data: [],
     });
     vi.mocked(commands.discoverLocalChatChildSessions).mockResolvedValue({
       status: "ok",
@@ -310,33 +318,60 @@ describe("ChatWindowManager", () => {
 
   it("shows cached rows while loading only the visible project's filtered history", async () => {
     const timestamp = "2026-01-01T00:00:00Z";
-    createPersistedHistorySession("cached-a", "Cached A", "/test/project", timestamp);
-    createPersistedHistorySession("completed-a", "Completed A", "/test/project", timestamp);
-    createPersistedHistorySession("cached-b", "Cached B", "/old/project", timestamp);
+    createPersistedHistorySession(
+      "cached-a",
+      "Cached A",
+      "/test/project",
+      timestamp
+    );
+    createPersistedHistorySession(
+      "completed-a",
+      "Completed A",
+      "/test/project",
+      timestamp
+    );
+    createPersistedHistorySession(
+      "cached-b",
+      "Cached B",
+      "/old/project",
+      timestamp
+    );
     // The last read's exclusions hide completed rows before the next read returns.
     vi.mocked(commands.loadCachedLocalChatProjectExclusions).mockResolvedValue({
-      status: "ok", data: ["completed-a"],
+      status: "ok",
+      data: ["completed-a"],
     });
     const load = vi.mocked(commands.loadLocalChatProjectHistory);
     const pending: Array<(data: LocalChatProjectHistory) => void> = [];
     load.mockImplementation(
-      () => new Promise((resolve) => {
-        pending.push((data) => resolve({ status: "ok", data }));
-      })
+      () =>
+        new Promise((resolve) => {
+          pending.push((data) => resolve({ status: "ok", data }));
+        })
     );
     useChatStore.getState().openSession("Active", "/test/project");
 
-    render(<StrictMode><ChatWindowManager /></StrictMode>);
+    render(
+      <StrictMode>
+        <ChatWindowManager />
+      </StrictMode>
+    );
     await waitFor(() => expect(commands.getProjects).toHaveBeenCalled());
     expect(load).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByLabelText("Expand chat workspace"));
+    fireEvent.click(expandWorkspaceButton());
     let sidebar = within(screen.getByTestId("local-chat-mini-panel"));
-    expect(await sidebar.findByRole("button", { name: /Load local chat Cached A/ })).toBeVisible();
+    expect(
+      await sidebar.findByRole("button", { name: /Load local chat Cached A/ })
+    ).toBeVisible();
     await waitFor(() =>
-      expect(sidebar.queryByRole("button", { name: /Load local chat Completed A/ })).toBeNull()
+      expect(
+        sidebar.queryByRole("button", { name: /Load local chat Completed A/ })
+      ).toBeNull()
     );
-    await waitFor(() => expect(load.mock.calls).toEqual([["project-test", false]]));
+    await waitFor(() =>
+      expect(load.mock.calls).toEqual([["project-test", false]])
+    );
 
     fireEvent.keyDown(window, { key: "b", metaKey: true });
     expect(screen.queryByTestId("local-chat-mini-panel")).toBeNull();
@@ -344,73 +379,123 @@ describe("ChatWindowManager", () => {
     sidebar = within(screen.getByTestId("local-chat-mini-panel"));
     expect(load.mock.calls).toEqual([["project-test", false]]);
 
-    await act(async () => pending.shift()!({
-      excludedIds: ["completed-a"],
-      sessions: [{
-        id: "child-a",
-        label: "Child A",
-        title: "Catalog child A",
-        titleStatus: "manual",
-        titleConfidence: null,
-        titleUserMessageCount: 0,
-        harness: "claude",
-        model: null,
-        selectedModelId: null,
-        selectedReasoningEffort: null,
-        selectedPersonality: null,
-        permissionMode: null,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        projectPath: "/test/project",
-        providerResumeId: null,
-        parentChatId: "cached-a",
-        threadTotalTokens: null,
-        hasUserMessage: true,
-        messageCount: 1,
-        lifecycle: "idle",
-        status: "open",
-      }],
-    }));
-    expect(sidebar.queryByRole("button", { name: /Load local chat Completed A/ })).toBeNull();
-    expect(sidebar.getByRole("button", { name: /Load local chat Cached A/ })).toBeVisible();
+    await act(async () =>
+      pending.shift()!({
+        excludedIds: ["completed-a"],
+        sessions: [
+          {
+            id: "child-a",
+            label: "Child A",
+            title: "Catalog child A",
+            titleStatus: "manual",
+            titleConfidence: null,
+            titleUserMessageCount: 0,
+            harness: "claude",
+            model: null,
+            selectedModelId: null,
+            selectedReasoningEffort: null,
+            selectedPersonality: null,
+            permissionMode: null,
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            projectPath: "/test/project",
+            providerResumeId: null,
+            parentChatId: "cached-a",
+            threadTotalTokens: null,
+            hasUserMessage: true,
+            messageCount: 1,
+            lifecycle: "idle",
+            status: "open",
+          },
+        ],
+      })
+    );
+    expect(
+      sidebar.queryByRole("button", { name: /Load local chat Completed A/ })
+    ).toBeNull();
+    expect(
+      sidebar.getByRole("button", { name: /Load local chat Cached A/ })
+    ).toBeVisible();
 
-    expect(sidebar.queryByRole("button", { name: /Load local chat Catalog child A/ })).toBeNull();
-    fireEvent.click(sidebar.getByRole("button", { name: "Subagents for Cached A" }));
-    expect(sidebar.getByRole("button", { name: /Open spawned agent Catalog child A/ })).toBeVisible();
+    expect(
+      sidebar.queryByRole("button", { name: /Load local chat Catalog child A/ })
+    ).toBeNull();
+    fireEvent.click(
+      sidebar.getByRole("button", { name: "Subagents for Cached A" })
+    );
+    expect(
+      sidebar.getByRole("button", {
+        name: /Open spawned agent Catalog child A/,
+      })
+    ).toBeVisible();
 
     // Opting in reads completed chats on demand and marks them completed.
-    fireEvent.click(sidebar.getByRole("switch", { name: "Show completed" }));
-    await waitFor(() => expect(load.mock.calls.at(-1)).toEqual(["project-test", true]));
+    fireEvent.click(sidebar.getByRole("button", { name: "Chat list filters" }));
+    fireEvent.click(
+      sidebar.getByRole("menuitemcheckbox", { name: "Show completed" })
+    );
+    await waitFor(() =>
+      expect(load.mock.calls.at(-1)).toEqual(["project-test", true])
+    );
     await act(async () => pending.shift()!({ excludedIds: [], sessions: [] }));
-    const completedRow = await sidebar.findByRole("button", { name: /Load local chat Completed A/ });
+    const completedRow = await sidebar.findByRole("button", {
+      name: /Load local chat Completed A/,
+    });
     expect(
-      within(completedRow.closest(".hc-mini-history-row") as HTMLElement)
-        .getByRole("img", { name: "Completed conversation" })
+      within(
+        completedRow.closest(".hc-mini-history-row") as HTMLElement
+      ).getByRole("img", { name: "Completed conversation" })
     ).toBeInTheDocument();
-    fireEvent.click(sidebar.getByRole("switch", { name: "Show completed" }));
+    fireEvent.click(sidebar.getByRole("button", { name: "Chat list filters" }));
+    fireEvent.click(
+      sidebar.getByRole("menuitemcheckbox", { name: "Show completed" })
+    );
 
     // A late read for the previous project cannot change the selected view.
     load.mockClear();
     fireEvent.keyDown(window, { key: "b", metaKey: true });
     fireEvent.keyDown(window, { key: "b", metaKey: true });
     sidebar = within(screen.getByTestId("local-chat-mini-panel"));
-    await waitFor(() => expect(load.mock.calls).toEqual([["project-test", false]]));
-    fireEvent.click(sidebar.getByRole("button", { name: "old-project" }));
-    expect(await sidebar.findByRole("button", { name: /Load local chat Cached B/ })).toBeVisible();
     await waitFor(() =>
-      expect(load.mock.calls).toEqual([["project-test", false], ["project-old", false]])
+      expect(load.mock.calls).toEqual([["project-test", false]])
+    );
+    fireEvent.click(sidebar.getByRole("button", { name: "old-project" }));
+    expect(
+      await sidebar.findByRole("button", { name: /Load local chat Cached B/ })
+    ).toBeVisible();
+    await waitFor(() =>
+      expect(load.mock.calls).toEqual([
+        ["project-test", false],
+        ["project-old", false],
+      ])
     );
     const [finishLateA, finishB] = pending.splice(0);
     await act(async () => finishB({ excludedIds: [], sessions: [] }));
-    await act(async () => finishLateA({ excludedIds: ["cached-b"], sessions: [] }));
-    expect(sidebar.getByRole("button", { name: /Load local chat Cached B/ })).toBeVisible();
+    await act(async () =>
+      finishLateA({ excludedIds: ["cached-b"], sessions: [] })
+    );
+    expect(
+      sidebar.getByRole("button", { name: /Load local chat Cached B/ })
+    ).toBeVisible();
   });
 
   it("refreshes again when a task completes while an earlier read is in flight", async () => {
     const timestamp = "2026-01-01T00:00:00Z";
     const association = (ticketId: string) => ({ association: { ticketId } });
-    createPersistedHistorySession("linked-a", "Linked A", "/test/project", timestamp, association("task-a") as Partial<ChatSession>);
-    createPersistedHistorySession("linked-b", "Linked B", "/test/project", timestamp, association("task-b") as Partial<ChatSession>);
+    createPersistedHistorySession(
+      "linked-a",
+      "Linked A",
+      "/test/project",
+      timestamp,
+      association("task-a") as Partial<ChatSession>
+    );
+    createPersistedHistorySession(
+      "linked-b",
+      "Linked B",
+      "/test/project",
+      timestamp,
+      association("task-b") as Partial<ChatSession>
+    );
     const taskListeners: Array<(event: { payload: unknown }) => void> = [];
     vi.mocked(events.taskChangedEvent.listen).mockImplementation((handler) => {
       taskListeners.push(handler as (event: { payload: unknown }) => void);
@@ -419,14 +504,17 @@ describe("ChatWindowManager", () => {
     const load = vi.mocked(commands.loadLocalChatProjectHistory);
     const pending: Array<(data: LocalChatProjectHistory) => void> = [];
     load.mockImplementation(
-      () => new Promise((resolve) => {
-        pending.push((data) => resolve({ status: "ok", data }));
-      })
+      () =>
+        new Promise((resolve) => {
+          pending.push((data) => resolve({ status: "ok", data }));
+        })
     );
     useChatStore.getState().openSession("Active", "/test/project");
 
     render(<ChatWindowManager />);
-    fireEvent.click(await screen.findByLabelText("Expand chat workspace"));
+    fireEvent.click(
+      (await screen.findByTestId("pane-overflow-menu"), expandWorkspaceButton())
+    );
     await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
     await act(async () => pending.shift()!({ excludedIds: [], sessions: [] }));
 
@@ -437,7 +525,9 @@ describe("ChatWindowManager", () => {
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     // Task B changes after the read for task A started.
     act(() => taskListeners.forEach((listen) => listen(completed("task-b"))));
-    await act(async () => pending.shift()!({ excludedIds: ["linked-a"], sessions: [] }));
+    await act(async () =>
+      pending.shift()!({ excludedIds: ["linked-a"], sessions: [] })
+    );
     await waitFor(() => expect(load).toHaveBeenCalledTimes(3));
     await act(async () =>
       pending.shift()!({ excludedIds: ["linked-a", "linked-b"], sessions: [] })
@@ -445,7 +535,9 @@ describe("ChatWindowManager", () => {
 
     const sidebar = within(screen.getByTestId("local-chat-mini-panel"));
     await waitFor(() =>
-      expect(sidebar.queryByRole("button", { name: /Load local chat Linked B/ })).toBeNull()
+      expect(
+        sidebar.queryByRole("button", { name: /Load local chat Linked B/ })
+      ).toBeNull()
     );
   });
 
@@ -597,9 +689,7 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
 
     const panel = screen.getByTestId("chat-window-manager");
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
 
     expect(panel).toHaveAttribute("data-maximized", "true");
     expect(screen.getByTestId("local-chat-mini-panel")).toBeInTheDocument();
@@ -682,9 +772,7 @@ describe("ChatWindowManager", () => {
     });
 
     render(<ChatWindowManager />);
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
 
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     expect(miniPanel.getByText("Inspect Repo")).toBeInTheDocument();
@@ -760,9 +848,7 @@ describe("ChatWindowManager", () => {
     });
 
     render(<ChatWindowManager />);
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
 
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     const thinkingRow = miniPanel
@@ -824,9 +910,7 @@ describe("ChatWindowManager", () => {
     });
     vi.mocked(commands.loadLocalChatSessionReplay).mockClear();
     render(<ChatWindowManager />);
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     await user.click(
       await screen.findByRole("button", {
         name: "Unknown project",
@@ -915,9 +999,7 @@ describe("ChatWindowManager", () => {
       },
     });
     render(<ChatWindowManager />);
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     await user.click(
       await screen.findByRole("button", {
         name: "Subagents for Root conversation",
@@ -999,9 +1081,7 @@ describe("ChatWindowManager", () => {
     });
 
     render(<ChatWindowManager />);
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     expect(
       miniPanel.queryByRole("button", {
@@ -1080,9 +1160,7 @@ describe("ChatWindowManager", () => {
     });
 
     render(<ChatWindowManager />);
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     expect(
       miniPanel.getByRole("button", {
@@ -1357,7 +1435,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(screen.getByLabelText("Expand chat workspace"));
+    await user.click(expandWorkspaceButton());
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     expect(miniPanel.getByText("Task One")).toBeInTheDocument();
     expect(miniPanel.getByText("Task Two")).toBeInTheDocument();
@@ -1403,7 +1481,7 @@ describe("ChatWindowManager", () => {
       ).not.toBeInTheDocument();
     });
 
-    await user.click(screen.getByLabelText("Expand chat workspace"));
+    await user.click(expandWorkspaceButton());
     await clickPaneControl(user, "Start fresh local chat");
 
     await waitFor(() => {
@@ -1442,7 +1520,7 @@ describe("ChatWindowManager", () => {
     });
 
     render(<ChatWindowManager />);
-    await user.click(screen.getByLabelText("Expand chat workspace"));
+    await user.click(expandWorkspaceButton());
 
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     await waitFor(() => {
@@ -1541,7 +1619,7 @@ describe("ChatWindowManager", () => {
       expect(commands.getCurrentProjectPath).toHaveBeenCalled();
     });
 
-    await user.click(screen.getByLabelText("Expand chat workspace"));
+    await user.click(expandWorkspaceButton());
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
     await waitFor(() => {
       expect(
@@ -1642,9 +1720,7 @@ describe("ChatWindowManager", () => {
     });
 
     render(<ChatWindowManager />);
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
 
     const panel = screen.getByTestId("chat-window-manager");
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
@@ -1893,9 +1969,7 @@ describe("ChatWindowManager", () => {
     });
 
     render(<ChatWindowManager />);
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
 
     await screen.findByRole("button", { name: "old-project" });
@@ -2004,7 +2078,7 @@ describe("ChatWindowManager", () => {
         expect(commands.getProjects).toHaveBeenCalled();
       });
 
-      await user.click(screen.getByLabelText("Expand chat workspace"));
+      await user.click(expandWorkspaceButton());
       const miniPanel = within(screen.getByTestId("local-chat-mini-panel"));
 
       expect(
@@ -2275,7 +2349,7 @@ describe("ChatWindowManager", () => {
     ]);
   });
 
-  it("keeps the footer metadata row aligned when a tab has no usage yet", () => {
+  it("shows the context ring only for the tab that has usage", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
       value: 1200,
@@ -2309,14 +2383,15 @@ describe("ChatWindowManager", () => {
     render(<ChatWindowManager />);
     fireEvent.keyDown(window, { key: "\\", metaKey: true });
 
-    const footerRow = () =>
-      screen.getByTestId("chat-pane").querySelector(".hc-foot-meta");
-    expect(footerRow()).toHaveTextContent("context 14%");
+    const ring = () =>
+      within(screen.getByTestId("chat-pane")).queryByTestId(
+        "chat-context-ring"
+      );
+    expect(ring()).toHaveAccessibleName(/^Context 14%/);
     act(() => {
       fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
     });
-    expect(footerRow()).toBeInTheDocument();
-    expect(footerRow()?.textContent?.trim()).toBe("");
+    expect(ring()).not.toBeInTheDocument();
   });
 
   it("renders simultaneous streaming content in the correct tabs", () => {
@@ -2766,7 +2841,7 @@ describe("ChatWindowManager", () => {
     );
 
     render(<ChatWindowManager />);
-    await user.click(screen.getByLabelText("Expand chat workspace"));
+    await user.click(expandWorkspaceButton());
 
     await user.click(
       await screen.findByLabelText("Delete local chat History Only")
@@ -2971,7 +3046,10 @@ describe("ChatWindowManager", () => {
       sessions: {
         ...state.sessions,
         [first]: { ...state.sessions[first], backgroundWork: running("dev") },
-        [second]: { ...state.sessions[second], backgroundWork: running("test") },
+        [second]: {
+          ...state.sessions[second],
+          backgroundWork: running("test"),
+        },
       },
     }));
     render(<ChatWindowManager />);
@@ -2982,7 +3060,12 @@ describe("ChatWindowManager", () => {
     const key = (init: KeyboardEventInit) =>
       fireEvent.keyDown(window, { metaKey: true, shiftKey: true, ...init });
 
-    fireEvent.keyDown(window, { key: "¡", code: "Digit1", metaKey: true, altKey: true });
+    fireEvent.keyDown(window, {
+      key: "¡",
+      code: "Digit1",
+      metaKey: true,
+      altKey: true,
+    });
     expect(useChatStore.getState().activeSessionId).toBe(first);
 
     // ⌘⇧B opens on the first section with content.
@@ -3008,12 +3091,20 @@ describe("ChatWindowManager", () => {
     // ⌘⌥→ moves composer ↔ side column inside the chat, never switching tabs.
     const composer = screen.getByTestId("local-chat-composer");
     act(() => composer.focus());
-    fireEvent.keyDown(composer, { key: "ArrowRight", code: "ArrowRight", metaKey: true, altKey: true });
+    fireEvent.keyDown(composer, {
+      key: "ArrowRight",
+      code: "ArrowRight",
+      metaKey: true,
+      altKey: true,
+    });
     expect(useChatStore.getState().activeSessionId).toBe(first);
-    expect(
-      screen.getByRole("region", { name: "Discussions" })
-    ).toHaveFocus();
-    fireEvent.keyDown(document.activeElement!, { key: "ArrowRight", code: "ArrowRight", metaKey: true, altKey: true });
+    expect(screen.getByRole("region", { name: "Discussions" })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, {
+      key: "ArrowRight",
+      code: "ArrowRight",
+      metaKey: true,
+      altKey: true,
+    });
     expect(screen.getByTestId("local-chat-composer")).toHaveFocus();
     expect(useChatStore.getState().activeSessionId).toBe(first);
 
@@ -3243,9 +3334,7 @@ describe("ChatWindowManager", () => {
 
   async function browseBeta() {
     const user = userEvent.setup();
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     await user.click(
       await screen.findByRole("button", { name: "old-project" })
     );
@@ -3342,9 +3431,7 @@ describe("ChatWindowManager", () => {
       "2026-01-01T00:00:00Z"
     );
     render(<ChatWindowManager />);
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     await user.click(
       await screen.findByRole("button", { name: "Unknown project" })
     );
@@ -3499,9 +3586,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "old-project" })
@@ -3544,9 +3629,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     await screen.findByRole("button", { name: "Original ticket" });
 
     act(() =>
@@ -3611,9 +3694,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     await screen.findByRole("button", { name: "old-project" });
 
     const search = screen.getByRole("searchbox");
@@ -3726,9 +3807,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     expect(
       await screen.findByRole("button", { name: "Grouped ticket" })
     ).toHaveAttribute("aria-expanded", "false");
@@ -3840,9 +3919,7 @@ describe("ChatWindowManager", () => {
       screen.queryByTestId("local-chat-session-search")
     ).not.toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    );
+    await user.click(expandWorkspaceButton());
     const search = await screen.findByRole("searchbox", {
       name: "Search local chats",
     });
@@ -4155,7 +4232,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(screen.getByLabelText("Expand chat workspace"));
+    await user.click(expandWorkspaceButton());
     await user.click(
       await screen.findByLabelText("Delete local chat Live Task")
     );
@@ -4194,7 +4271,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(screen.getByLabelText("Expand chat workspace"));
+    await user.click(expandWorkspaceButton());
     await user.click(
       await screen.findByLabelText("Delete local chat Live Task")
     );
@@ -4233,7 +4310,7 @@ describe("ChatWindowManager", () => {
 
     render(<ChatWindowManager />);
 
-    await user.click(screen.getByLabelText("Expand chat workspace"));
+    await user.click(expandWorkspaceButton());
     await user.click(
       await screen.findByLabelText("Delete local chat Live Task")
     );

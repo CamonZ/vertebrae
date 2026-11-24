@@ -1,3 +1,4 @@
+import { locationCrumb } from "./locationCrumb";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { Task, TaskChangedEvent } from "../../bindings";
 import { commands, events } from "../../bindings";
@@ -132,9 +133,7 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between py-2">
-      <span className="t-label text-[var(--color-fg-mute)]">
-        {label}
-      </span>
+      <span className="t-label text-[var(--color-fg-mute)]">{label}</span>
       <span className="font-mono text-xs text-[var(--color-fg)]">
         {children}
       </span>
@@ -598,8 +597,8 @@ export function TaskDetailPanel({
   const isPendingReview = humanInputGate !== null;
   const showMaxConcurrencyInput = Boolean(
     taskLocation.workflowId &&
-      !runControlsState.hasActiveRun &&
-      !isWorkflowRunRequested
+    !runControlsState.hasActiveRun &&
+    !isWorkflowRunRequested
   );
 
   const deleteConfirmation =
@@ -742,9 +741,7 @@ export function TaskDetailPanel({
       </h3>
     )
   ) : (
-    <span className="t-label text-[var(--color-fg-mute)]">
-      Task Details
-    </span>
+    <span className="t-label text-[var(--color-fg-mute)]">Task Details</span>
   );
 
   const headerMetadata = taskData ? (
@@ -813,8 +810,15 @@ export function TaskDetailPanel({
             data-testid="task-detail-location"
             className="font-mono text-2xs text-[var(--color-fg-mute)]"
           >
-            {taskLocationWorkflowLabel(taskLocation)} ›{" "}
-            {formatStepName(taskLocationStepLabel(taskLocation), "Unavailable")}
+            {(() => {
+              const workflow = taskLocationWorkflowLabel(taskLocation);
+              const step = formatStepName(
+                taskLocationStepLabel(taskLocation),
+                "Unavailable"
+              );
+              // "Backlog › Backlog" reads as a glitch: show a repeat once.
+              return locationCrumb(workflow, step);
+            })()}
           </span>
         </>
       )}
@@ -841,7 +845,6 @@ export function TaskDetailPanel({
           controls={headerControls}
           className="t-detail-head-bar"
         />
-
       </div>
 
       {deleteConfirmation}

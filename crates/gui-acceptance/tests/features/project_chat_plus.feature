@@ -18,7 +18,7 @@ Feature: Project chat plus actions
     When I type "seed second project chat" into the element with test id "local-chat-composer"
     And I press the "Enter" key
     Then the GUI should show "local-chat-acceptance reply" within 10 seconds
-    When I click on the element with test id "chat-tabs-history"
+    When I open the chat history
     Then the local chat history drawer should show the "second" project within 5 seconds
     When I click the local chat plus action for the "primary" project
     Then the active local chat should use the "primary" project directory within 5 seconds
@@ -38,7 +38,7 @@ Feature: Project chat plus actions
     When I type "seed codex project chat" into the element with test id "local-chat-composer"
     And I press the "Enter" key
     Then the GUI should show "local-chat-acceptance reply" within 10 seconds
-    When I click on the element with test id "chat-tabs-history"
+    When I open the chat history
     And I click the local chat plus action for the "primary" project
     Then the active local chat should use the "primary" project directory within 5 seconds
     When I choose local chat provider "openai"

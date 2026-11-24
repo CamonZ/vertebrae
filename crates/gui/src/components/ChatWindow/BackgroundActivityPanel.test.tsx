@@ -66,6 +66,17 @@ describe("BackgroundActivityPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not repeat the tab name as a heading and centres the empty state", () => {
+    render(<BackgroundActivityPanel work={EMPTY_BACKGROUND_WORK} />);
+
+    expect(screen.queryByText("Background tasks")).toBeNull();
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(
+      screen.getByText("No background tasks are running.")
+    ).toBeInTheDocument();
+    expect(document.querySelector(".side-empty-state")).not.toBeNull();
+  });
+
   it("shows a command's progress and an elapsed time that ticks with the clock", () => {
     vi.useFakeTimers();
     let now = Date.parse("2026-11-13T12:01:05Z");

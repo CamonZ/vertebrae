@@ -20,6 +20,9 @@ export function OpenDocumentTabs({
   onActivate(path: string): void;
   onClose(path: string): void;
 }) {
+  // "All changes" alone is a label for the only view: no row until a second
+  // view (an open document, a turn or a historical file) exists.
+  if (showingChanges && documents.length === 0) return null;
   return (
     <nav aria-label="Open documents" className="changes-tabs workspace-tabs">
       <button

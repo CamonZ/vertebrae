@@ -338,10 +338,6 @@ export function RunConsole({ summary, factoryName = null }: RunConsoleProps) {
                 <span className="ember" />
                 Run Console
               </span>
-              <span className="rc-live">
-                <span className="pulse" />
-                {runCount} running
-              </span>
               <IconButton
                 onClick={() => setOpen(false)}
                 ariaLabel="Collapse run console"

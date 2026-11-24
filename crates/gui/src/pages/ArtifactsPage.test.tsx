@@ -184,7 +184,7 @@ describe("ArtifactsPage", () => {
       error: null,
     });
     rerender(<ArtifactsPage />);
-    expect(screen.getByText("No project artifacts yet.")).toBeInTheDocument();
+    expect(screen.getByText("No project artifacts yet")).toBeInTheDocument();
 
     useProjectArtifacts.mockReturnValueOnce({
       artifacts: [],

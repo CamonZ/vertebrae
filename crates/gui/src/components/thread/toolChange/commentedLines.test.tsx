@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RefObject } from "react";
 import {
   COMMENTED_LINE_ATTRIBUTE,
+  COMMENT_END_ATTRIBUTE,
+  COMMENTED_LINES_CSS,
   useCommentedLines,
   type CommentedRange,
 } from "./commentedLines";
@@ -91,6 +93,31 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("COMMENTED_LINES_CSS", () => {
+  const endRule = COMMENTED_LINES_CSS.slice(
+    COMMENTED_LINES_CSS.indexOf(`[${COMMENT_END_ATTRIBUTE}]::after`)
+  );
+
+  it("draws the end mark as a non-circular glyph in the left slot, clear of the digits", () => {
+    expect(COMMENTED_LINES_CSS).not.toMatch(/border-radius:\s*50%/);
+    expect(endRule).toMatch(/inset-inline-start:\s*6px/);
+    expect(endRule).toMatch(/mask:/);
+    expect(endRule).not.toMatch(/\bright:/);
+  });
+
+  it("yields the slot to a row's semantic indicator", () => {
+    expect(COMMENTED_LINES_CSS).toMatch(
+      /\[data-semantic-indicator\]\)::after\s*{\s*display:\s*none/
+    );
+  });
+
+  it("strengthens the active comment without resizing the glyph", () => {
+    expect(COMMENTED_LINES_CSS).toMatch(/--review-comment-glyph-opacity:\s*1/);
+    expect(COMMENTED_LINES_CSS).not.toMatch(/--review-comment-dot/);
+    expect(endRule).toMatch(/width:\s*10px/);
+  });
+});
+
 describe("useCommentedLines", () => {
   it("marks every row of each commented range, the active one strongest", () => {
     const item = renderedDiff("a", 8);
@@ -98,6 +125,28 @@ describe("useCommentedLines", () => {
     render(<Marks view={viewWith([item])} ranges={() => ranges} />);
     act(() => vi.runOnlyPendingTimers());
     expect(marks(item)).toEqual(["", "-", "-", "", "A", "A", "-", ""]);
+  });
+
+  it("puts the marker dot on the line number at each range's end line only", () => {
+    const item = renderedDiff("a", 6);
+    const ranges = [range(2, 4), range(6, 6, true)];
+    const { unmount } = render(
+      <Marks view={viewWith([item])} ranges={() => ranges} />
+    );
+    act(() => vi.runOnlyPendingTimers());
+    const ends = [
+      ...item.element.shadowRoot!.querySelectorAll("[data-column-number]"),
+    ].map((row) => row.hasAttribute(COMMENT_END_ATTRIBUTE));
+    expect(ends).toEqual([false, false, false, true, false, true]);
+    expect(
+      item.element.shadowRoot!.querySelectorAll(
+        `[data-line][${COMMENT_END_ATTRIBUTE}]`
+      )
+    ).toHaveLength(0);
+    unmount();
+    expect(
+      item.element.shadowRoot!.querySelectorAll(`[${COMMENT_END_ATTRIBUTE}]`)
+    ).toHaveLength(0);
   });
 
   it("follows range changes and clears on unmount", () => {

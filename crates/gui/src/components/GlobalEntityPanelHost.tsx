@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { useLocation } from "react-router-dom";
 import { usePanelExitTransition } from "../hooks/usePanelExitTransition";
 import { usePipelineSummary } from "../hooks/usePipelineSummary";
 import { useEntityPanelStore } from "../stores/entityPanelStore";
@@ -186,6 +187,16 @@ function PrimaryEntityPanel() {
   const setHoveredEdge = useEntityPanelStore((state) => state.setHoveredEdge);
   const lastSelection = useRef<EntityPanelSelection | null>(null);
   if (selection) lastSelection.current = selection;
+
+  // The detail panel belongs to the page it was opened from: switching pages
+  // closes it instead of leaving it floating over Artifacts, Daemons or Atlas.
+  const { pathname } = useLocation();
+  const previousPathname = useRef(pathname);
+  useEffect(() => {
+    if (previousPathname.current === pathname) return;
+    previousPathname.current = pathname;
+    if (useEntityPanelStore.getState().selection) close();
+  }, [pathname, close]);
 
   const {
     mounted: panelMounted,

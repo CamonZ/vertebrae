@@ -1,12 +1,13 @@
 import { preloadTaskDetailFontAfterStyles } from "./utils/preloadTaskDetailFont";
 import { StrictMode, useState, useEffect } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { createRoot } from "react-dom/client";
+import { createRoot, type Root } from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 import "./index.css";
 import { router } from "./router";
 import { SplashScreen, GlobalListeners } from "./components";
 import { commands } from "./bindings";
+import { useTheme, useDensity, useInlineCodeStyle } from "./hooks";
 import { queryClient } from "./query/queryClient";
 import {
   checkGuiUpdateChannels,
@@ -24,6 +25,11 @@ if (import.meta.env.DEV && import.meta.env.MODE !== "test")
   );
 
 function App() {
+  // Appearance (theme, typeface, accent, density, inline code) applies above
+  // the boot splash so the first paint already uses the saved preferences.
+  useTheme();
+  useDensity();
+  useInlineCodeStyle();
   const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState("Loading configuration...");
   const [updateScheduler] = useState(() =>
@@ -74,7 +80,15 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(
+// An edit to this module re-runs it under HMR; reuse the mounted root so a
+// second root (with its own window listeners, e.g. a second ⌘K handler that
+// toggles the palette shut again) is never stacked on the same container.
+const root: Root =
+  (import.meta.hot?.data.root as Root | undefined) ??
+  createRoot(document.getElementById("root")!);
+if (import.meta.hot) import.meta.hot.data.root = root;
+
+root.render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <App />

@@ -170,7 +170,6 @@ function Column({
           counts={{ changes: null, background: null }}
           available={side.available}
           onSection={side.select}
-          onClose={side.requestClose}
         >
           {side.shownSection === "discussions" ? (
             <SideDiscussions />
@@ -187,7 +186,63 @@ function Column({
   );
 }
 
+describe("ChatSideColumn reselect", () => {
+  const props = {
+    counts: { changes: null, background: null },
+    available: () => true,
+  };
+
+  it("sends a click on the shown tab to onReselect when given", () => {
+    const onSection = vi.fn();
+    const onReselect = vi.fn();
+    render(
+      <ChatSideColumn
+        {...props}
+        section="discussions"
+        onSection={onSection}
+        onReselect={onReselect}
+      >
+        <div />
+      </ChatSideColumn>
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: /Discussions/ }));
+    expect(onReselect).toHaveBeenCalledWith("discussions");
+    expect(onSection).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("tab", { name: /Background tasks/ }));
+    expect(onSection).toHaveBeenCalledWith("background", true);
+  });
+});
+
 describe("SideDiscussions", () => {
+  it("shows a centred empty state with a `c` key hint and no key footer at zero discussions", () => {
+    render(
+      <Discussions threads={[]}>
+        <SideDiscussions />
+      </Discussions>
+    );
+
+    expect(screen.getByText("No discussions yet.")).toBeInTheDocument();
+    const hint = document.querySelector(".side-empty-hint")!;
+    expect(hint).toHaveTextContent(
+      "Select code in Changes and press c to ask about it."
+    );
+    expect(hint.querySelector("kbd.chat-comment-kbd")).toHaveTextContent("c");
+    expect(screen.queryByLabelText("Discussions keys")).toBeNull();
+  });
+
+  it("lists its keys once there are discussions", () => {
+    render(
+      <Discussions threads={TWO_DETACHED_ONE_INLINE}>
+        <SideDiscussions />
+      </Discussions>
+    );
+
+    expect(screen.getByLabelText("Discussions keys")).toBeInTheDocument();
+    expect(screen.queryByText("No discussions yet.")).toBeNull();
+  });
+
   it("puts the keyboard in a section chosen by key, click or ↓ from the tabs", async () => {
     let controls: SideColumnControls | null = null;
     render(
@@ -225,7 +280,6 @@ describe("SideDiscussions", () => {
           counts={{ changes: 4, background: null }}
           available={() => true}
           onSection={vi.fn()}
-          onClose={vi.fn()}
         >
           <SideDiscussions />
         </ChatSideColumn>

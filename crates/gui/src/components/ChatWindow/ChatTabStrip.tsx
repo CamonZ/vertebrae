@@ -231,6 +231,8 @@ interface ChatTabProps {
   hint: string | null;
   showProject: boolean;
   closable: boolean;
+  /** The only open chat: its title already heads the pane, so it is not a tab stop. */
+  single: boolean;
   dropMarker: ReturnType<ReturnType<typeof useTabDrag>["dropMarker"]>;
   registerTab: (node: HTMLButtonElement | null) => void;
   onPointerDown: (event: ReactPointerEvent) => void;
@@ -248,6 +250,7 @@ function ChatTab({
   hint,
   showProject,
   closable,
+  single,
   dropMarker,
   registerTab,
   onPointerDown,
@@ -277,7 +280,7 @@ function ChatTab({
           aria-selected={selected}
           aria-controls={selected ? chatTabPanelId(tab.id) : undefined}
           aria-label={chatTabLabel(tab)}
-          tabIndex={selected ? 0 : -1}
+          tabIndex={selected && !single ? 0 : -1}
           className="hc-tab-button"
           data-testid="chat-tab"
           data-entry-id={tab.id}
@@ -394,7 +397,8 @@ function CompactSwitcher({
       trigger={
         <>
           <TabDot tab={active} />
-          <span className="hc-tab-title">{active.title}</span>
+          {/* The pane header right below already shows (and renames) this
+              title; the trigger keeps the dot, count and its accessible name. */}
           <span className="hc-tabs-count">{tabs.length}</span>
           <ChevronDownIcon />
         </>
@@ -451,28 +455,34 @@ function StripControls({
           {count} need you
         </StripButton>
       )}
-      <StripButton
-        label="Chat history"
-        tooltip={shortcutTooltip("Chat history", CHAT_HISTORY_SHORTCUT)}
-        onClick={onToggleHistory}
-        pressed={expanded ? historyVisible : undefined}
-        testId="chat-tabs-history"
-        placement="left"
-      >
-        <HistoryIcon />
-      </StripButton>
-      <StripButton
-        label={expandLabel}
-        tooltip={shortcutTooltip(
-          expandLabel,
-          WORKSPACE_SHORTCUTS.toggleExpanded
-        )}
-        onClick={onToggleExpanded}
-        testId="chat-tabs-expand"
-        placement="left"
-      >
-        <ExpandIcon expanded={expanded} />
-      </StripButton>
+      {/* The compact panel has one chrome row: its history and expand
+          controls live in the pane header's overflow menu instead. */}
+      {expanded && (
+        <>
+          <StripButton
+            label="Chat history"
+            tooltip={shortcutTooltip("Chat history", CHAT_HISTORY_SHORTCUT)}
+            onClick={onToggleHistory}
+            pressed={historyVisible}
+            testId="chat-tabs-history"
+            placement="left"
+          >
+            <HistoryIcon />
+          </StripButton>
+          <StripButton
+            label={expandLabel}
+            tooltip={shortcutTooltip(
+              expandLabel,
+              WORKSPACE_SHORTCUTS.toggleExpanded
+            )}
+            onClick={onToggleExpanded}
+            testId="chat-tabs-expand"
+            placement="left"
+          >
+            <ExpandIcon expanded={expanded} />
+          </StripButton>
+        </>
+      )}
       <span className="sr-only" aria-live="polite" data-testid="chat-tabs-live">
         {announcement && (
           <span key={announcement.key}>{announcement.text}</span>
@@ -487,8 +497,15 @@ export function ChatTabStrip(props: ChatTabStripProps) {
   const announcement = useAttentionAnnouncement(props.tabs);
   const controls = <StripControls announcement={announcement} {...props} />;
   if (!props.expanded) {
+    // Nothing to switch or answer: the row collapses to zero height.
+    const idle = props.tabs.length <= 1 && props.needingYou.length === 0;
     return (
-      <div className="hc-tabs" data-compact="" data-testid="chat-tab-strip">
+      <div
+        className="hc-tabs"
+        data-compact=""
+        data-empty={idle ? "" : undefined}
+        data-testid="chat-tab-strip"
+      >
         <CompactSwitcher
           tabs={props.tabs}
           activeId={props.activeId}
@@ -549,6 +566,7 @@ function ExpandedTabs({
         aria-label="Open chats"
         aria-orientation="horizontal"
         className="hc-tablist"
+        data-single={tabs.length === 1 ? "" : undefined}
         {...drag.tablistHandlers}
       >
         {shown.map((tab) => (
@@ -559,6 +577,7 @@ function ExpandedTabs({
             hint={chatNumberHint(tabs.indexOf(tab), tabs.length)}
             showProject={showProject}
             closable={tabs.length > 1}
+            single={tabs.length === 1}
             dropMarker={drag.dropMarker(tab.id)}
             registerTab={focus.registerTab(tab.id)}
             onPointerDown={(event) => drag.onTabPointerDown(event, tab.id)}

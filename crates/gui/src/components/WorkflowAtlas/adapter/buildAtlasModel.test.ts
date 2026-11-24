@@ -156,6 +156,34 @@ describe("buildAtlasModel", () => {
     expect(byId.get("entry")!.id).toBe(stepRef("wf", "entry"));
   });
 
+  it("orders phase columns like the Board when transitions link them", () => {
+    const wf = (id: string, column: string, to?: string) =>
+      makeWorkflow(id, [makeStep(`${id}-s`, id, 0)], {
+        kanban_column: column,
+        transitions: to
+          ? [makeTransition({ from_workflow_id: id, to_workflow_id: to })]
+          : [],
+      });
+    const model = buildAtlasModel({
+      workflows: [
+        wf("review", "Review", "done"),
+        wf("analysis", "Analysis", "decomp"),
+        wf("done", "Done"),
+        wf("intake", "Intake", "analysis"),
+        wf("decomp", "Decomposition", "review"),
+      ],
+    });
+
+    // Alphabetical would be Analysis, Decomposition, Done, Intake, Review.
+    expect(model.phases.map((p) => p.name)).toEqual([
+      "Intake",
+      "Analysis",
+      "Decomposition",
+      "Review",
+      "Done",
+    ]);
+  });
+
   it("orders phase columns by min member display_order, Unphased last", () => {
     const summary: PipelineSummary = {
       workflows: [

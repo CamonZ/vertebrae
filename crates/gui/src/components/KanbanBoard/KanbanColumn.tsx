@@ -19,7 +19,7 @@ export function KanbanColumn({
 
   return (
     <div
-      className="flex h-full min-w-72 max-w-md shrink-0 grow basis-0 flex-col overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[color-mix(in_oklch,var(--color-bg-1)_50%,var(--color-bg))]"
+      className="flex h-full min-w-72 max-w-md shrink-0 grow basis-0 flex-col overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-line)] bg-[var(--surface-well)]"
       role="region"
       aria-label={`${columnName} column, ${tasks.length} tasks`}
     >

@@ -331,7 +331,9 @@ const machine: hegel.stateful.StateMachine<Model> = {
       await saveShown(m);
     },
     async allChanges(_tc, m) {
-      fireEvent.click(screen.getByRole("button", { name: "All changes" }));
+      // With nothing else open the lone "All changes" label is not rendered.
+      const allChanges = screen.queryByRole("button", { name: "All changes" });
+      if (allChanges) fireEvent.click(allChanges);
       if (!m.historical) m.view = { kind: "all" };
       m.reveal = null;
       count(m, "allChanges");
@@ -417,10 +419,13 @@ test(
             };
           });
 
-          const view = render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
+          const view = render(
+            <WorktreeChanges sessionId="chat" worktreePath="/worktree" />
+          );
           m.rerender = (sourceJump) =>
             view.rerender(
-              <WorktreeChanges sessionId="chat"
+              <WorktreeChanges
+                sessionId="chat"
                 worktreePath="/worktree"
                 sourceJump={sourceJump}
               />

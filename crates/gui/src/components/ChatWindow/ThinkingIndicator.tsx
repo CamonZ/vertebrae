@@ -57,7 +57,11 @@ export function ThinkingIndicator({
         // hairline there, the expressive lines keep their texture
         text={compact && style === "shimmer" ? "" : statusLabel}
         fallback={compact ? "hairline" : "text"}
-        style={compact ? { width: 40, height: 10 } : { height: 20 }}
+        style={
+          compact
+            ? { width: 40, height: 10 }
+            : { height: 20, width: "min(100%, 240px)" }
+        }
       />
     </div>
   );

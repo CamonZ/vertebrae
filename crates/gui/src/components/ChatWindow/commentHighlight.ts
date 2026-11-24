@@ -137,6 +137,25 @@ function publish() {
 }
 
 /**
+ * Keep the text a comment is being written on marked (as the focused
+ * highlight) while its card is open: focusing the card's textarea drops the
+ * native selection, and the quote would otherwise lose its mark. Cleared when
+ * `range` becomes null (cancel, submit) or the pane unmounts.
+ */
+export function useDraftHighlight(range: Range | null) {
+  useEffect(() => {
+    if (!range || !highlightsSupported()) return;
+    const key = {};
+    contributions.set(key, { pending: [], hover: [], active: [range] });
+    publish();
+    return () => {
+      contributions.delete(key);
+      publish();
+    };
+  }, [range]);
+}
+
+/**
  * Mark every pending text comment's quote in the transcript: the pointer's
  * one more strongly, the hovered-chip or pinned one most. Returns the
  * resolved range of each comment, for the transcript's comment markers.

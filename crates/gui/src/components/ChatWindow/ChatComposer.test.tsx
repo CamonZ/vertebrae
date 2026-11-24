@@ -178,42 +178,146 @@ describe("ChatComposer", () => {
     expect(dropdownOptionValues(picker)).toEqual(["", "default", "sol"]);
   });
 
-  // --- Context bar ---
+  // --- Transient notices ---
 
-  it("renders the context fill bar with width and color", () => {
+  const steeringNotice = () =>
+    screen
+      .getAllByRole("status")
+      .find((el) => el.classList.contains("hc-composer-notice")) as HTMLElement;
+
+  it("renders the steering notice as a live quiet activity row while pending", () => {
     render(
       <ChatComposer
-        {...defaultProps({ ctxPct: 42, ctxColor: "var(--color-warn)" })}
+        {...defaultProps({
+          steeringStatus: "Sending to the active turn…",
+          steeringPhase: "pending",
+        })}
+      />
+    );
+    const notice = steeringNotice();
+    expect(notice).toHaveTextContent("Sending to the active turn…");
+    expect(notice).toHaveAttribute("data-live");
+    expect(notice).not.toHaveAttribute("data-tone");
+  });
+
+  it("settles the steering notice once the turn confirms it", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({
+          steeringStatus: "Sent to the active turn",
+          steeringPhase: "confirmed",
+        })}
+      />
+    );
+    const notice = steeringNotice();
+    expect(notice).not.toHaveAttribute("data-live");
+    expect(notice).not.toHaveAttribute("data-tone");
+  });
+
+  it("marks a failed steering notice with the warning tone", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({
+          steeringStatus: "Could not reach the active turn",
+          steeringPhase: "failed",
+        })}
+      />
+    );
+    expect(steeringNotice()).toHaveAttribute("data-tone", "warn");
+  });
+
+  // --- Context ring ---
+
+  it("renders the context ring arc with the severity colour and fill", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({
+          ctxPct: 42,
+          ctxColor: "var(--color-warn)",
+          usage: { used: 42, max: 100 },
+        })}
       />
     );
     const fill = screen.getByTestId("chat-context-fill");
-    expect(fill).toHaveStyle({ width: "42%", background: "var(--color-warn)" });
+    const circumference = 2 * Math.PI * 6;
+    expect(fill.style.stroke).toBe("var(--color-warn)");
+    expect(Number(fill.style.strokeDashoffset)).toBeCloseTo(
+      circumference * 0.58
+    );
   });
 
-  it("renders the context footer meta with percentage when usage exists", () => {
+  it("renders near-empty context as a static track with a dot, not an arc", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({
+          ctxPct: 0,
+          ctxColor: "var(--color-ok)",
+          usage: { used: 0, max: 100 },
+        })}
+      />
+    );
+    expect(screen.queryByTestId("chat-context-fill")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-context-dot")).toBeInTheDocument();
+  });
+
+  it("summarises context usage on the ring and details it in a popover", () => {
     render(
       <ChatComposer
         {...defaultProps({
           ctxPct: 50,
-          usage: { used: 100, max: 200 },
+          usage: { used: 100_000, max: 200_000 },
           threadTotalTokens: 900,
         })}
       />
     );
-    expect(screen.getByText(/context/)).toBeInTheDocument();
-    expect(screen.getByText("50%")).toBeInTheDocument();
-    expect(screen.getByText(/thread 900/)).toBeInTheDocument();
+    const ring = screen.getByTestId("chat-context-ring");
+    expect(ring).toHaveAccessibleName("Context 50% · 100k of 200k tokens");
+    expect(ring).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(ring);
+    const popover = screen.getByRole("dialog", { name: "Context usage" });
+    expect(ring).toHaveAttribute("aria-expanded", "true");
+    expect(popover).toHaveTextContent("50%");
+    expect(popover).toHaveTextContent("100,000 / 200,000");
+    expect(popover).toHaveTextContent("Thread900");
   });
 
-  it("renders non-breaking space when usage is null", () => {
-    const { container } = render(<ChatComposer {...defaultProps()} />);
-    const meta = container.querySelector(".hc-foot-meta");
-    expect(meta).toBeInTheDocument();
-    // The aria-hidden attribute should be true when no usage
-    expect(meta?.getAttribute("aria-hidden")).toBe("true");
+  it("closes the context popover on Escape and returns focus to the ring", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({ ctxPct: 10, usage: { used: 10, max: 100 } })}
+      />
+    );
+    const ring = screen.getByTestId("chat-context-ring");
+    fireEvent.click(ring);
+    expect(screen.getByTestId("chat-context-popover")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(
+      screen.queryByTestId("chat-context-popover")
+    ).not.toBeInTheDocument();
+    expect(ring).toHaveFocus();
   });
 
-  it("includes model name in the context meta when session has a model", () => {
+  it("closes the context popover on an outside press", () => {
+    render(
+      <ChatComposer
+        {...defaultProps({ ctxPct: 10, usage: { used: 10, max: 100 } })}
+      />
+    );
+    fireEvent.click(screen.getByTestId("chat-context-ring"));
+    fireEvent.mouseDown(document.body);
+    expect(
+      screen.queryByTestId("chat-context-popover")
+    ).not.toBeInTheDocument();
+  });
+
+  it("omits the context ring until usage lands", () => {
+    render(<ChatComposer {...defaultProps()} />);
+    expect(screen.queryByTestId("chat-context-ring")).not.toBeInTheDocument();
+  });
+
+  it("names the session model in the context popover", () => {
     render(
       <ChatComposer
         {...defaultProps({
@@ -223,9 +327,10 @@ describe("ChatComposer", () => {
         })}
       />
     );
-    const ctxLbl = document.querySelector(".ctx-lbl");
-    expect(ctxLbl?.textContent).toContain("context");
-    expect(ctxLbl?.textContent).toContain("sonnet-4-20250514");
+    fireEvent.click(screen.getByTestId("chat-context-ring"));
+    expect(screen.getByTestId("chat-context-popover")).toHaveTextContent(
+      "Modelsonnet-4-20250514"
+    );
   });
 
   // --- Provider picker ---
@@ -948,7 +1053,7 @@ describe("ChatComposer", () => {
     expect(dropdownOptions(picker)[0].label).toBe("Current effort");
   });
 
-  it("strips claude- prefix from model name in context meta", () => {
+  it("strips claude- prefix from the model in the context popover", () => {
     render(
       <ChatComposer
         {...defaultProps({
@@ -958,9 +1063,10 @@ describe("ChatComposer", () => {
         })}
       />
     );
-    const ctxLbl = document.querySelector(".ctx-lbl");
-    expect(ctxLbl?.textContent).toContain("opus-4");
-    expect(ctxLbl?.textContent).not.toContain("claude-opus");
+    fireEvent.click(screen.getByTestId("chat-context-ring"));
+    const popover = screen.getByTestId("chat-context-popover");
+    expect(popover).toHaveTextContent("opus-4");
+    expect(popover).not.toHaveTextContent("claude-opus");
   });
 
   it("renders permission mode picker with session's current permission mode", () => {
@@ -1135,6 +1241,38 @@ describe("ChatComposer", () => {
         "@@ -3,3 +3,1 @@ ctx -a -b"
       );
       expect(popover).toHaveTextContent("Why was this removed?");
+    });
+
+    it("shows chips with a kind icon, full text in the title and a remove button", () => {
+      const onRemoveComment = vi.fn();
+      render(
+        <ChatComposer
+          {...defaultProps({
+            pendingComments: [pendingComment, diffComment],
+            onRemoveComment,
+          })}
+        />
+      );
+      const [textChip, diffChip] = [1, 2].map((n) =>
+        screen.getByTestId(`local-chat-comment-icon-${n}`)
+      );
+      // No bare visible index; the kind icon leads instead.
+      expect(textChip.querySelector(".chat-comment-chip-number")).toBeNull();
+      expect(
+        textChip.querySelector(".chat-comment-chip-icon svg")
+      ).not.toBeNull();
+      expect(
+        diffChip.querySelector(".chat-comment-chip-label .mono")
+      ).toHaveTextContent("a.ts:4-5");
+      expect(diffChip).toHaveAttribute(
+        "title",
+        expect.stringContaining("src/a.ts:4-5 (old)")
+      );
+      expect(diffChip.getAttribute("title")).toContain("Why was this removed?");
+      fireEvent.click(
+        screen.getByRole("button", { name: "Remove comment 2 from reply" })
+      );
+      expect(onRemoveComment).toHaveBeenCalledWith(diffComment.id);
     });
 
     it("edits and removes a diff comment from its chip", () => {

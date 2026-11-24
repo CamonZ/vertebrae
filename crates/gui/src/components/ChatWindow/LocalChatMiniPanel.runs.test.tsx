@@ -27,7 +27,6 @@ const mocks = vi.hoisted(() => ({
   retry: vi.fn(),
 }));
 
-
 vi.mock("../../hooks/useHistoryRuns", () => ({
   useHistoryRuns: ({ enabled }: { enabled: boolean }) => {
     mocks.enabled.push(enabled);

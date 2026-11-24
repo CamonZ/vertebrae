@@ -137,6 +137,39 @@ describe("useChatPanelLayout", () => {
     });
   });
 
+  describe("window resize while maximized", () => {
+    it("tracks the window without easing, then resumes easing once settled", () => {
+      const { result } = renderPanelHook();
+      act(() => result.current.toggleMaximized());
+      expect(result.current.isWindowResizing).toBe(false);
+
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      expect(result.current.isWindowResizing).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(100);
+        window.dispatchEvent(new Event("resize"));
+        vi.advanceTimersByTime(100);
+      });
+      expect(result.current.isWindowResizing).toBe(true);
+
+      act(() => {
+        vi.advanceTimersByTime(100);
+      });
+      expect(result.current.isWindowResizing).toBe(false);
+    });
+
+    it("ignores window resizes while compact", () => {
+      const { result } = renderPanelHook();
+      act(() => {
+        window.dispatchEvent(new Event("resize"));
+      });
+      expect(result.current.isWindowResizing).toBe(false);
+    });
+  });
+
   describe("resize drag", () => {
     it("sets isResizing on startResizeDrag", () => {
       const { result } = renderPanelHook();
