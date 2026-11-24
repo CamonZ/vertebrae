@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   CSSProperties,
   HTMLAttributes,
@@ -245,7 +245,13 @@ export function IdChip({
   className,
   testId,
 }: IdChipProps): ReactNode {
-  const [copied, setCopied] = useState(false);
+  const [status, setStatus] = useState<"idle" | "copied" | "failed">("idle");
+
+  useEffect(() => {
+    if (status !== "copied") return;
+    const timeout = window.setTimeout(() => setStatus("idle"), 1100);
+    return () => window.clearTimeout(timeout);
+  }, [status]);
 
   if (!id) {
     return (
@@ -258,35 +264,38 @@ export function IdChip({
   // Lowercase noun for the copy affordance, e.g. "ticket" / "task run".
   const label = kind === "task" && level ? level : kind;
 
-  const copy = (
+  const copy = async (
     event: MouseEvent<HTMLSpanElement> | KeyboardEvent<HTMLSpanElement>
   ) => {
     event.stopPropagation();
-    const done = () => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1100);
-    };
-    navigator.clipboard?.writeText(id).then(done).catch(done);
+    setStatus("idle");
+    try {
+      await navigator.clipboard.writeText(id);
+      setStatus("copied");
+    } catch {
+      setStatus("failed");
+    }
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLSpanElement>) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      copy(event);
+      void copy(event);
     }
   };
 
   return (
     <span
       role="button"
+      data-focus-halo
       tabIndex={0}
       data-testid={testId}
       data-full-id={id}
       aria-label={`Copy full ${label} ID`}
-      title="Click to copy"
+      title={status === "failed" ? "Could not copy. Try again." : "Click to copy"}
       onClick={copy}
       onKeyDown={handleKeyDown}
-      className={classNames("c-id-chip", copied && "copied", className)}
+      className={classNames("c-id-chip", status !== "idle" && status, className)}
     >
       <span className="id-text">{formatEntityId(id)}</span>
       <svg
@@ -314,6 +323,23 @@ export function IdChip({
       >
         <polyline points="20 6 9 17 4 12" />
       </svg>
+      <svg
+        className="error-mark"
+        width="9"
+        height="9"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        aria-hidden
+      >
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 8v4m0 4h.01" />
+      </svg>
+      <span className="sr-only" role="status">
+        {status === "failed" ? "Could not copy ID" : status === "copied" ? "Copied ID" : ""}
+      </span>
     </span>
   );
 }

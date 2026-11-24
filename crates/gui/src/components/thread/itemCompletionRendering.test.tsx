@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EventRow } from "./EventRow";
 import type { AgentMessage } from "./types";
@@ -37,6 +37,11 @@ describe("shared item completion boundary", () => {
     expect(container.querySelector(".ev-cursor")).toBeNull();
     expect(container.querySelector(".evtool-spin")).toBeNull();
     expect(rich).not.toHaveBeenCalled();
+  });
+  it("offers no copy action for reasoning prose", () => {
+    render(<EventRow {...message} reasoning prose="Thinking aloud" />);
+    expect(screen.getByTestId("rich")).toHaveTextContent("Thinking aloud");
+    expect(screen.queryByRole("button", { name: "Copy raw Markdown" })).toBeNull();
   });
   it("supports legacy streaming flags and keeps historical content rich", () => {
     const {rerender} = render(<EventRow {...message} streaming prose="**partial**" />);

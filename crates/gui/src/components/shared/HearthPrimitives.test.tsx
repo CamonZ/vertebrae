@@ -39,6 +39,27 @@ describe("Hearth primitives", () => {
     expect(writeText).toHaveBeenCalledWith(FULL_ID);
   });
 
+  it("shows a retryable error when clipboard writing fails", async () => {
+    const writeText = installClipboardMock().mockRejectedValueOnce(new Error("denied"));
+    render(<IdChip id={FULL_ID} kind="task" />);
+    const chip = screen.getByRole("button", { name: "Copy full task ID" });
+
+    await act(async () => {
+      fireEvent.click(chip);
+    });
+    expect(chip).toHaveClass("failed");
+    expect(chip).not.toHaveClass("copied");
+    expect(screen.getByRole("status")).toHaveTextContent("Could not copy ID");
+
+    await act(async () => {
+      fireEvent.keyDown(chip, { key: "Enter" });
+    });
+    expect(writeText.mock.calls).toEqual([[FULL_ID], [FULL_ID]]);
+    expect(chip).toHaveClass("copied");
+    expect(chip).not.toHaveClass("failed");
+    expect(screen.getByRole("status")).toHaveTextContent("Copied ID");
+  });
+
   it("hides terminal run statuses unless forced", () => {
     const { container, rerender } = render(<RunChip status="completed" />);
     expect(container.firstChild).toBeNull();
