@@ -26,6 +26,7 @@
     "package:release": "../../scripts/build-package.sh --release",
     "test:sidecars": "node --test scripts/prepare-sidecars.test.mjs",
     "test:selection": "node --test scripts/selection-style.test.mjs",
+    "test:cascade": "node --test scripts/layer-cascade.test.mjs",
     "build:flow-validator": "vite build --config vite.flow-validator.config.ts",
     "lint:css": "biome lint src && stylelint \"src/**/*.css\""
   },

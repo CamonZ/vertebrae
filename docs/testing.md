@@ -274,7 +274,16 @@ npm run test:watch
 
 # Run tests with coverage report
 npm run test:coverage
+
+# Resolve the layered stylesheet cascade for described elements
+npm run test:cascade
 ```
+
+`test:cascade` loads `src/index.css` with its layered imports through
+`scripts/css-cascade.mjs` and checks which rule wins for shared controls whose
+base and modifiers sit in different cascade layers. jsdom does not apply
+cascade layers, so these checks do not use it. Add a case there when moving a
+rule between stylesheets or layers changes which rule wins.
 
 ### Native macOS GUI verification
 
