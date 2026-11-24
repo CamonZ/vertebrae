@@ -496,16 +496,15 @@ export function WorkflowAtlas() {
             )
           )}
           <h1>
-            Workflow{" "}
-            <em>
-              {showFactoryOverview
+            {`Workflow ${
+              showFactoryOverview
                 ? "Factories"
                 : isBoard
                   ? "Board"
                   : isGraph
                     ? "Graph"
-                    : "Atlas"}
-            </em>
+                    : "Atlas"
+            }`}
           </h1>
         </div>
         <div className="uv-controls">
@@ -697,7 +696,9 @@ export function WorkflowAtlas() {
         <RunConsole summary={scopedSummary} factoryName={factoryFilter} />
       </div>
 
-      {showMap && <KindLegend />}
+      {(showMap || (isGraph && graphLevel.kind === "steps")) && (
+        <KindLegend />
+      )}
 
       {/* The global entity host renders the one workflow/step inspector. */}
     </main>

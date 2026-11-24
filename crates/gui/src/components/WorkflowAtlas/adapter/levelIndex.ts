@@ -1,3 +1,4 @@
+import type { Kind } from "../layout/types";
 import type { AtlasGraphLevel } from "./atlasLevels";
 import type { AtlasLevelTarget, AtlasMachineFlow } from "./buildMachineFlow";
 
@@ -14,6 +15,8 @@ export interface LevelIndexItem {
   /** The level the row opens, when it leads one level down. */
   readonly opens?: AtlasLevelTarget;
   /** The step the row inspects (steps level only). */
+  /** The step type of a step row, for its hue marker. */
+  readonly kind?: Kind;
   readonly step?: { readonly stepId: string; readonly workflowId: string };
 }
 
@@ -65,6 +68,7 @@ export function levelIndexItems(
         ...base,
         name: part.label ?? selection.stepId,
         detail: part.kind,
+        kind: model.kinds?.get(part.id),
         step: { stepId: selection.stepId, workflowId: selection.workflowId },
       });
     }

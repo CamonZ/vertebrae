@@ -1,6 +1,8 @@
 import {
   CHAT_AREA_SHORTCUT,
+  CHAT_HISTORY_SHORTCUT,
   SIDE_COLUMN_SHORTCUTS,
+  WORKSPACE_SHORTCUTS,
   shortcutText,
 } from "./chatShortcuts";
 import {
@@ -8,7 +10,8 @@ import {
   type SideSection,
 } from "../../stores/chatSideColumnStore";
 import { useDiscussionSummary } from "./selectionDiscussionState";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { WorkspaceChromeContext } from "./WorkspaceChromeContext";
 import { StopIcon } from "../panels";
 import { OverflowMenu } from "../molecules/OverflowMenu";
 import { FALLBACK_CHAT_PROJECT_LABEL } from "../../utils/localChatSessionGroups";
@@ -21,6 +24,8 @@ interface ChatHeaderProps {
   attention: ChatAttention;
   isClosing: boolean;
   canStopGeneration: boolean;
+  /** A turn is in flight; Stop shows only then. Defaults to canStopGeneration. */
+  isGenerating?: boolean;
   onClosePanel?: () => void;
   onStartFresh?: () => void;
   /** The side column's shown section; null while it is closed. */
@@ -199,6 +204,7 @@ export function ChatHeader({
   attention,
   isClosing,
   canStopGeneration,
+  isGenerating = canStopGeneration,
   onClosePanel,
   onStartFresh,
   sideSection = null,
@@ -302,6 +308,7 @@ export function ChatHeader({
   const paneActions = buildPaneActions({ onClosePanel });
 
   const discussions = useDiscussionSummary();
+  const chrome = useContext(WorkspaceChromeContext);
   const columnOpen = sideSection !== null;
   /**
    * A side section's toggle. Toolbar rule (two to three visible actions):
@@ -406,6 +413,48 @@ export function ChatHeader({
       ),
     }),
     {
+      // The compact panel has no tab strip row, so its workspace controls
+      // live here; the expanded workspace keeps them on its strip.
+      key: "workspaceHistory",
+      title: `Chat history (${shortcutText(CHAT_HISTORY_SHORTCUT)})`,
+      ariaLabel: "Chat history",
+      onClick: () => chrome?.onToggleHistory(),
+      show: !!chrome && !chrome.expanded,
+      menu: true,
+      menuLabel: "Chat history",
+      testId: "local-chat-workspace-history",
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 6h16M4 12h16M4 18h10"
+          />
+        </SvgIcon>
+      ),
+    },
+    {
+      key: "workspaceExpand",
+      title: `Expand chat workspace (${shortcutText(WORKSPACE_SHORTCUTS.toggleExpanded)})`,
+      ariaLabel: "Expand chat workspace",
+      onClick: () => chrome?.onToggleExpanded(),
+      show: !!chrome && !chrome.expanded,
+      menu: true,
+      menuLabel: "Expand chat workspace",
+      testId: "local-chat-workspace-expand",
+      icon: (
+        <SvgIcon size="h-3.5 w-3.5">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M4 9V4h5M4 4l6 6m10-1V4h-5m5 0-6 6M4 15v5h5m-5 0 6-6m10 1v5h-5m5 0-6-6"
+          />
+        </SvgIcon>
+      ),
+    },
+    {
       key: "fresh",
       title: "Start fresh local chat",
       ariaLabel: "Start fresh local chat",
@@ -470,15 +519,21 @@ export function ChatHeader({
       ),
     },
     {
+      // Shown only while generating (UX-01); ⌘. and the palette reach it too.
       key: "stop",
-      title: "Stop generation (Cmd+.)",
+      title: "Stop generation (⌘.)",
       ariaLabel: "Stop generation",
       onClick: onStopGeneration,
-      show: true,
+      show: isGenerating,
       disabled: !canStopGeneration,
-      className: "danger",
+      className: "danger hc-stop",
       testId: "local-chat-stop-generation",
-      icon: <StopIcon />,
+      icon: (
+        <>
+          <StopIcon />
+          <span className="hc-stop-label">Stop</span>
+        </>
+      ),
     },
     ...paneActions,
   ];

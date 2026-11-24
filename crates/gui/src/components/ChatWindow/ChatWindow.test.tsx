@@ -1094,7 +1094,7 @@ describe("ChatWindow", () => {
     expect(screen.queryByText("wf-1")).not.toBeInTheDocument();
   });
 
-  it("reserves the context metadata footer before usage lands", () => {
+  it("omits the context ring before usage lands", () => {
     const session = createSession();
     useChatStore.setState({
       sessions: { "test-session": session },
@@ -1102,9 +1102,9 @@ describe("ChatWindow", () => {
       panelOpen: true,
     });
 
-    const { container } = render(<ChatWindow sessionId="test-session" />);
+    render(<ChatWindow sessionId="test-session" />);
 
-    expect(container.querySelector(".hc-foot-meta")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-context-ring")).not.toBeInTheDocument();
   });
 
   it("keeps workspace controls off the chat header (they live on the tab strip)", async () => {
@@ -2628,7 +2628,7 @@ describe("ChatWindow", () => {
     expect(mockedCommands.closeLocalChatSession).toHaveBeenCalledTimes(2);
   });
 
-  it("disables stop after a persistent turn returns to idle", () => {
+  it("hides stop after a persistent turn returns to idle", () => {
     const session = createSession({
       backendSessionId: "codex-idle",
       harness: "codex",
@@ -2649,7 +2649,9 @@ describe("ChatWindow", () => {
 
     render(<ChatWindow sessionId="test-session" />);
 
-    expect(screen.getByTestId("local-chat-stop-generation")).toBeDisabled();
+    expect(
+      screen.queryByTestId("local-chat-stop-generation")
+    ).not.toBeInTheDocument();
   });
 
   it.each([
@@ -2803,7 +2805,7 @@ describe("ChatWindow", () => {
         ).toBe(true);
       });
 
-      expect(stop).toBeDisabled();
+      expect(stop).not.toBeInTheDocument();
       expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
       expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
         backendSessionId,
@@ -2860,14 +2862,16 @@ describe("ChatWindow", () => {
     });
 
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
-    expect(screen.getByTestId("local-chat-stop-generation")).toBeDisabled();
+    expect(
+      screen.queryByTestId("local-chat-stop-generation")
+    ).not.toBeInTheDocument();
     expect(useChatStore.getState().sessions["test-session"].messages).toEqual([
       expect.objectContaining({ kind: "user", text: "Respond only if needed" }),
       expect.objectContaining({ kind: "session_end", successful: true }),
     ]);
   });
 
-  it("ends activity and disables Stop on a matching terminal error", () => {
+  it("ends activity and hides Stop on a matching terminal error", () => {
     const backendSessionId = "codex-error-turn";
     const session = createSession({
       backendSessionId,
@@ -2903,7 +2907,9 @@ describe("ChatWindow", () => {
     });
 
     expect(screen.queryByText("Thinking...")).not.toBeInTheDocument();
-    expect(screen.getByTestId("local-chat-stop-generation")).toBeDisabled();
+    expect(
+      screen.queryByTestId("local-chat-stop-generation")
+    ).not.toBeInTheDocument();
     expect(screen.getByText("Codex stopped unexpectedly")).toBeInTheDocument();
     expect(useChatStore.getState().sessions["test-session"]).toMatchObject({
       backendSessionId: null,
@@ -4376,7 +4382,7 @@ describe("ChatWindow", () => {
         updated_input: { command: "ls" },
       })
     );
-    expect(await screen.findByText("Resolved")).toBeInTheDocument();
+    expect(await screen.findByText(/approved/)).toBeInTheDocument();
   });
 
   it("rejects non-object updated input before approving a permission request", async () => {
@@ -4456,7 +4462,7 @@ describe("ChatWindow", () => {
 
   // --- G) Context fill bar ---
 
-  it("fills the context bar to the input-context utilization percentage", () => {
+  it("fills the context ring to the input-context utilization percentage", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
       model: "claude-sonnet-4.5",
@@ -4471,16 +4477,15 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     const fill = screen.getByTestId("chat-context-fill");
-    expect(fill).toHaveStyle({ width: "50%" });
-    expect(screen.getByText("50%")).toBeInTheDocument();
-    expect(
-      screen.getByTitle(
-        "100,050 / 200,000 current request input context tokens"
-      )
-    ).toBeInTheDocument();
+    const circumference = 2 * Math.PI * 6;
+    expect(Number(fill.style.strokeDashoffset)).toBeCloseTo(circumference / 2);
+    fireEvent.click(screen.getByTestId("chat-context-ring"));
+    const popover = screen.getByTestId("chat-context-popover");
+    expect(popover).toHaveTextContent("Context50%");
+    expect(popover).toHaveTextContent("Request100,050 / 200,000");
   });
 
-  it("clamps the context bar at 100% when input context exceeds the max window", () => {
+  it("clamps the context ring at 100% when input context exceeds the max window", () => {
     const session = createSession({
       backendSessionId: "claude-abc",
       model: "claude-sonnet-4.5",
@@ -4495,13 +4500,11 @@ describe("ChatWindow", () => {
     render(<ChatWindow sessionId="test-session" />);
 
     const fill = screen.getByTestId("chat-context-fill");
-    expect(fill).toHaveStyle({ width: "100%" });
-    expect(screen.getByText("100%")).toBeInTheDocument();
-    expect(
-      screen.getByTitle(
-        "250,000 / 200,000 current request input context tokens"
-      )
-    ).toBeInTheDocument();
+    expect(Number(fill.style.strokeDashoffset)).toBeCloseTo(0);
+    fireEvent.click(screen.getByTestId("chat-context-ring"));
+    const popover = screen.getByTestId("chat-context-popover");
+    expect(popover).toHaveTextContent("Context100%");
+    expect(popover).toHaveTextContent("Request250,000 / 200,000");
   });
 });
 

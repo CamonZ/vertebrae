@@ -64,6 +64,10 @@ describe("ToolRow with a recorded worktree delta", () => {
     renderBlock();
     expect(screen.getByText("1 file changed")).toBeTruthy();
     expect(screen.getByText("recorded around Edit")).toBeTruthy();
+    // The attribution caveat moves off the caption into its title.
+    expect(
+      screen.getByTitle("Worktree observation · cause not established")
+    ).toBeTruthy();
     expect(screen.queryByRole("button")).toBeNull();
     expect(screen.queryByText("tool output")).toBeNull();
     expect(await screen.findByTestId("patch-diff")).toBeTruthy();

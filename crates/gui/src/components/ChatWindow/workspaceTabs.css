@@ -29,7 +29,7 @@
 .workspace-tabs > button:hover:not(:disabled),
 .workspace-tabs .changes-tab:hover {
   color: var(--color-fg);
-  background: var(--color-bg-hover);
+  background: var(--color-bg-hover-raised);
 }
 
 .workspace-tabs > button[aria-pressed="true"],
@@ -176,11 +176,35 @@
   margin-top: 18px;
 }
 
+/* A compact warn notice: flat dot, reason, then the settings path. */
 .selection-model-notice {
-  margin: 10px 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-1);
   color: var(--color-fg-soft);
-  font: 400 12px/1.5 var(--font-sans);
+  font: 400 var(--text-12) / 1.45 var(--font-sans);
   overflow-wrap: anywhere;
+}
+.selection-model-notice-dot {
+  flex: 0 0 auto;
+  width: 5px;
+  height: 5px;
+  margin-top: 0.5em;
+  border-radius: 999px;
+  background: var(--color-warn);
+}
+.selection-model-notice[data-tone="warn"] .selection-model-notice-text > :first-child {
+  color: var(--color-warn);
+}
+.selection-model-notice-text {
+  min-width: 0;
+}
+.selection-model-notice-fix {
+  color: var(--color-fg-mute);
 }
 
 .selection-mini-thinking .text-sm {
@@ -228,7 +252,10 @@
   .selection-mini-messages {
     padding-top: 8px;
   }
-  .selection-mini-messages .evlog--bare .evrow--user:not(.is-prompt):not(.is-system) .evbody {
+  .selection-mini-messages
+    .evlog--bare
+    .evrow--user:not(.is-prompt):not(.is-system)
+    .evbody {
     max-width: 100%;
     padding: 4px 6px;
   }
@@ -337,23 +364,6 @@ button:has(> .selection-chip-label) {
   content: "!";
   font-weight: 700;
 }
-.chat-side-close {
-  display: grid;
-  align-self: center;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: var(--radius-lg);
-  background: transparent;
-  color: var(--color-fg-mute);
-  cursor: pointer;
-}
-.chat-side-close:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-fg);
-}
 .chat-side-section {
   display: flex;
   flex: 1;
@@ -403,11 +413,6 @@ button:has(> .selection-chip-label) {
   border-radius: var(--radius-lg);
   background: color-mix(in oklch, var(--color-err) 10%, transparent);
   color: var(--color-err);
-  font-size: 12px;
-}
-.side-discussions-empty {
-  margin: 0;
-  color: var(--color-fg-soft);
   font-size: 12px;
 }
 .side-discussions-group ul {
@@ -492,4 +497,12 @@ button:has(> .selection-chip-label) {
 .background-activity-row:hover,
 .background-activity-row:focus-visible {
   background: var(--color-bg-hover);
+}
+
+/* Empty side sections: a centred block with a muted line and key hint. */
+.side-empty-state {
+  flex: 1;
+}
+.side-empty-state p {
+  margin: 0;
 }

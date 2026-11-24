@@ -81,9 +81,6 @@
   margin: 0;
   transition: color var(--t-base) var(--ease);
 }
-.uv-name h1 em {
-  color: var(--accent);
-}
 .uv-controls {
   flex: 1;
   display: flex;
@@ -131,12 +128,18 @@
   inset: 0;
   display: grid;
   grid-template-columns: clamp(232px, 24vw, 300px) minmax(0, 1fr);
+  /* Recessed list, gutter, page canvas: the canvas tone shows between them. */
+  gap: var(--s-2);
+  padding: var(--s-2);
+  background: var(--color-canvas);
   overflow: hidden;
 }
 .factory-overview-map {
   position: relative;
   min-width: 0;
   overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--bg);
 }
 
 /* ── Factory index (rail) ── */
@@ -144,8 +147,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  border-right: 1px solid var(--line);
-  background: var(--bg);
+  border-radius: var(--r-lg);
+  background: var(--surface-recessed);
   cursor: auto;
 }
 .factory-index-head {
@@ -218,21 +221,32 @@
   background: transparent;
   transition: background-color var(--t-fast) var(--ease);
 }
+/* Shared row scale: --color-bg-hover on hover, --color-selection + accent bar
+   when selected. */
 .factory-index-row:hover,
-.factory-index-row.is-hot {
-  background: var(--bg-1);
-  color: var(--fg);
-}
-.factory-index-row.is-hot::before {
-  background: var(--accent);
-}
+.factory-index-row.is-hot,
 .factory-index-row:focus-visible {
-  background: var(--bg-1);
+  background: var(--color-bg-hover);
   color: var(--fg);
 }
-.factory-index-row.is-recent {
+.factory-index-row.is-recent,
+.factory-index-row.is-recent:hover {
   background: var(--color-selection);
   color: var(--fg);
+}
+.factory-index-row.is-hot::before,
+.factory-index-row.is-recent::before {
+  background: var(--accent);
+}
+/* Step rows carry their step-type hue (by step type, never by name). */
+.factory-index-kind {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: var(--s-2);
+  border-radius: var(--r-xs);
+  background: var(--kc);
+  vertical-align: baseline;
 }
 .factory-index-name {
   display: -webkit-box;
@@ -438,10 +452,10 @@
   padding: 0 var(--s-3);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-full);
-  background: var(--bg-1);
+  background: var(--surface-page);
   color: var(--fg-soft);
   pointer-events: auto;
-  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+  box-shadow: var(--shadow-1);
   /* Markers follow the camera every frame; never animate their position. */
   transition:
     border-color var(--t-fast) var(--ease),
@@ -452,13 +466,16 @@
 .factory-overview-factories .uv-wf.factory-node:hover,
 .factory-overview-factories .uv-wf.factory-node.lit {
   border-color: var(--accent-mute);
-  background: var(--bg-2);
+  background-image: linear-gradient(
+    var(--color-bg-hover-raised),
+    var(--color-bg-hover-raised)
+  );
   color: var(--fg);
-  box-shadow: 0 6px 18px rgb(0 0 0 / 28%);
+  box-shadow: var(--shadow-1);
 }
 
 .factory-overview-factories .uv-wf.factory-node.dim {
-  opacity: 0.35;
+  opacity: 0.5;
 }
 .uv-factory-face {
   display: flex;
@@ -567,7 +584,8 @@
   overflow: hidden;
   cursor: pointer;
   box-shadow: var(--shadow-1);
-  background: color-mix(in oklch, var(--bg-1) 92%, transparent);
+  /* Raised: above the canvas tone in both themes. */
+  background: var(--surface-page);
   border: 1px solid var(--line-strong);
   /* A card glides to its new rect when the Map re-lays out. */
   transition:
@@ -581,6 +599,10 @@
 }
 .uv-wf:hover {
   border-color: var(--fg-faint);
+  background-image: linear-gradient(
+    var(--color-bg-hover-raised),
+    var(--color-bg-hover-raised)
+  );
 }
 .uv-wf.lit {
   border-color: var(--accent);
@@ -589,7 +611,7 @@
     0 0 26px var(--accent-glow);
 }
 .uv-wf.dim {
-  opacity: 0.3;
+  opacity: 0.5;
 }
 
 .uv-face {
@@ -1213,7 +1235,7 @@
   overflow: hidden;
 }
 .wfd-stat {
-  background: color-mix(in oklch, var(--bg) 26%, transparent);
+  background: var(--surface-well);
   padding: var(--s-2) var(--s-2h);
 }
 .wfd-stat .k {
@@ -1587,12 +1609,49 @@
   inset: 0;
   display: grid;
   grid-template-columns: clamp(220px, 22vw, 280px) minmax(0, 1fr);
+  gap: var(--s-2);
+  padding: var(--s-2);
+  background: var(--color-canvas);
   overflow: hidden;
 }
 .uv-machine-canvas {
   position: relative;
   min-width: 0;
   overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--bg);
+}
+/* Station cards are raised above the canvas (not sunken in light), with a
+   --shadow-1 lift. Step-type hues stay on the parts themselves. */
+.uv-machine-scene .md-root {
+  --md-fill: var(--surface-page);
+}
+.uv-machine-scene
+  :is([data-part-kind="workflow"], [data-part-kind="factory"])
+  .md-box {
+  filter: var(--drop-1);
+}
+/* Hover labels sit on a raised chip, not a near-black block, and never reach
+   past the card they name: one line each, above the frame. */
+.uv-machine-scene [data-part-labels] rect {
+  fill: var(--surface-page);
+  stroke: var(--line-strong);
+  stroke-width: 1px;
+  filter: var(--drop-1);
+}
+/* While a part's hover label is up, group headers step back so the two
+   texts never overprint. */
+.uv-machine-scene:has([data-part-labels]) .md-region-header text,
+.uv-machine-scene:has([data-part-labels]) .md-region-header .md-live-count {
+  opacity: 0.15;
+}
+/* Route labels get a halo in the canvas tone so they stay readable where they
+   cross a card title. */
+.uv-machine-scene [data-rail] .md-wire text {
+  paint-order: stroke;
+  stroke: var(--surface-page);
+  stroke-width: 6px;
+  stroke-linejoin: round;
 }
 .uv-machine-scene {
   transform-origin: 0 0;
@@ -1630,10 +1689,10 @@
    everything else steps back so the lit lines can be followed. */
 .uv-machine-layer[data-tracing] [data-scene-part]:not([data-traced]),
 .uv-machine-layer[data-tracing] [data-rail]:not([data-traced]) {
-  opacity: 0.1;
+  opacity: 0.5;
 }
 .uv-machine-layer[data-tracing] .md-region:not([data-traced]) {
-  opacity: 0.3;
+  opacity: 0.55;
 }
 /* A traced rail is heavier ink, never a hue: the connections list names
    which way the work goes. The step back and the lift fade in. */
@@ -1761,6 +1820,6 @@
 }
 .uv-taskrun-card {
   fill: var(--color-accent);
-  stroke: var(--color-bg);
+  stroke: var(--surface-page);
   stroke-width: 2;
 }

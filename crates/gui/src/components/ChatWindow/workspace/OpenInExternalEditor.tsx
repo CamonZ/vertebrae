@@ -54,6 +54,7 @@ export function OpenInExternalEditor({
       <button
         type="button"
         className="evidence-action"
+        aria-label="Open in external editor"
         disabled={!localAvailable || opening}
         title={
           localAvailable
@@ -64,7 +65,7 @@ export function OpenInExternalEditor({
           if (localAvailable) void open();
         }}
       >
-        Open in external editor
+        Editor
       </button>
       {(probeError || launchError) && (
         <span role="alert">{probeError || launchError}</span>

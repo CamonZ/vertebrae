@@ -10,6 +10,8 @@ import {
   DISCUSSION_OPEN_KEY,
   matchesExactChatShortcut,
 } from "./chatShortcuts";
+import { QuoteGlyph } from "./commentIcons";
+import { SideEmptyState } from "./SideEmptyState";
 import { MiniThread } from "./SelectionDiscussionContext";
 import {
   anchorNotice,
@@ -210,10 +212,16 @@ export function SideDiscussions() {
         </p>
       )}
       {empty ? (
-        <p className="side-discussions-empty">
-          No discussions yet. Select code in Changes and press c to ask about
-          it.
-        </p>
+        <SideEmptyState
+          icon={<QuoteGlyph />}
+          message="No discussions yet."
+          hint={
+            <>
+              Select code in Changes and press{" "}
+              <kbd className="chat-comment-kbd">c</kbd> to ask about it.
+            </>
+          }
+        />
       ) : (
         THREAD_PLACES.map((place) => (
           <DiscussionGroup
@@ -225,13 +233,15 @@ export function SideDiscussions() {
           />
         ))
       )}
-      <footer className="side-section-hints" aria-label="Discussions keys">
-        {DISCUSSION_LIST_HINTS.map(({ keys, label }) => (
-          <span key={label}>
-            <kbd>{keys.join("")}</kbd> {label}
-          </span>
-        ))}
-      </footer>
+      {!empty && (
+        <footer className="side-section-hints" aria-label="Discussions keys">
+          {DISCUSSION_LIST_HINTS.map(({ keys, label }) => (
+            <span key={label}>
+              <kbd>{keys.join("")}</kbd> {label}
+            </span>
+          ))}
+        </footer>
+      )}
     </section>
   );
 }

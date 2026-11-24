@@ -364,6 +364,8 @@ describe("ChatMessages", () => {
       window.getSelection()?.removeAllRanges();
       window.getSelection()?.addRange(range);
       fireEvent(document, new Event("selectionchange"));
+      // The pill follows a finished selection gesture, not a bare change.
+      fireEvent.mouseUp(screen.getByTestId("chat-messages-scroll"));
       fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
 
       const draft = screen.getByRole("textbox", {
@@ -539,6 +541,7 @@ describe("ChatMessages", () => {
                 // Whitespace-only selections are not comments.
                 if (!range.toString().trim()) selected = "none";
                 fireEvent(document, new Event("selectionchange"));
+                fireEvent.mouseUp(screen.getByTestId("chat-messages-scroll"));
                 if (!pressed) shown = selected === "assistant";
               }
               if (action === "clear") {

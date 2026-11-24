@@ -9,6 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ToolActivityGroup } from "./ToolActivityGroup";
+import { TurnLiveContext } from "./TurnLiveContext";
 import { activityLabel, groupToolMessages } from "./grouping";
 import { ChatSessionContext } from "../toolChange/ChatSessionContext";
 import type { ToolMessage } from "../types";
@@ -295,4 +296,18 @@ it("shows the unavailable state and retries the group after a command error", as
     ).not.toBeInTheDocument()
   );
   expect(analyze).toHaveBeenCalledTimes(2);
+});
+
+describe("turn liveness", () => {
+  it("shows awaiting results only while the turn is live", async () => {
+    const { rerender } = render(<ToolActivityGroup calls={[call("a")]} />);
+    expect(screen.getByText("1 awaiting results")).toBeInTheDocument();
+    rerender(
+      <TurnLiveContext.Provider value={false}>
+        <ToolActivityGroup calls={[call("a")]} />
+      </TurnLiveContext.Provider>
+    );
+    expect(screen.queryByText(/awaiting results/)).not.toBeInTheDocument();
+    await act(async () => {});
+  });
 });

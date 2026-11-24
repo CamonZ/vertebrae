@@ -3,10 +3,7 @@ import { commands } from "../../bindings";
 import type { JsonValue } from "../../bindings";
 import type { ChatMessage } from "../../stores/chatStore";
 
-type UserQuestionMessage = Extract<
-  ChatMessage,
-  { kind: "user_question" }
->;
+type UserQuestionMessage = Extract<ChatMessage, { kind: "user_question" }>;
 
 export function UserQuestionTurn({
   message,
@@ -21,9 +18,9 @@ export function UserQuestionTurn({
 }) {
   const [selections, setSelections] = useState<Record<number, string[]>>({});
   const [freeText, setFreeText] = useState<Record<number, string>>({});
-  const [submission, setSubmission] = useState<
-    "idle" | "submitting" | "error"
-  >("idle");
+  const [submission, setSubmission] = useState<"idle" | "submitting" | "error">(
+    "idle"
+  );
   const [error, setError] = useState<string | null>(null);
   const [errorIsRetryable, setErrorIsRetryable] = useState(false);
 
@@ -141,21 +138,29 @@ export function UserQuestionTurn({
   };
 
   return (
-    <section className="rounded-lg border border-[var(--color-accent)]/40 bg-[var(--color-bg-2)] p-4">
-      <p className="mb-3 t-label text-[var(--color-accent)]">
-        Claude needs your input
-      </p>
+    <section
+      className="needs-you-card"
+      data-settled={
+        message.status === "resolved" || message.status === "unavailable"
+          ? ""
+          : undefined
+      }
+    >
+      <header className="needs-you-head">
+        <p className="needs-you-eyebrow">Claude needs your input</p>
+      </header>
 
       {message.inputError ? (
         <div className="space-y-3">
-          <p className="text-sm text-[var(--color-err)]">
+          <p className="needs-you-error">
             This question could not be displayed: {message.inputError}
           </p>
           <button
             type="button"
             disabled={!isActionable || submission === "submitting"}
             onClick={() => void rejectMalformed()}
-            className="rounded border border-[var(--color-err)]/40 px-3 py-1.5 text-xs font-medium text-[var(--color-err)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="needs-you-btn"
+            data-danger=""
           >
             {submission === "submitting"
               ? "Returning error..."
@@ -171,10 +176,10 @@ export function UserQuestionTurn({
               className="space-y-3"
             >
               <legend className="w-full">
-                <span className="block t-label text-[var(--color-fg-mute)]">
+                <span className="needs-you-eyebrow block">
                   {question.header}
                 </span>
-                <span className="mt-1 block text-sm font-medium text-[var(--color-fg)]">
+                <span className="needs-you-title mt-1 block">
                   {question.question}
                 </span>
               </legend>
@@ -183,10 +188,7 @@ export function UserQuestionTurn({
                   const checked =
                     selections[questionIndex]?.includes(option.label) ?? false;
                   return (
-                    <label
-                      key={option.label}
-                      className="flex cursor-pointer gap-2 rounded border border-[var(--color-line)] p-2 has-[:checked]:border-[var(--color-accent)] has-[:checked]:bg-[var(--color-accent)]/5 has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-[var(--color-accent)]"
-                    >
+                    <label key={option.label} className="needs-you-option">
                       <input
                         type={question.multi_select ? "checkbox" : "radio"}
                         className="sr-only"
@@ -224,7 +226,7 @@ export function UserQuestionTurn({
                       question.multi_select
                     )
                   }
-                  className="mt-1 w-full rounded border border-[var(--color-line)] bg-[var(--color-bg)] px-2 py-1.5 text-sm text-[var(--color-fg)] outline-none"
+                  className="needs-you-field mt-1"
                 />
               </label>
             </fieldset>
@@ -233,7 +235,8 @@ export function UserQuestionTurn({
             type="button"
             disabled={!canSubmit}
             onClick={() => void submit()}
-            className="rounded border border-[var(--color-accent)]/50 bg-[var(--color-accent)]/10 px-3 py-1.5 text-xs font-medium text-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="needs-you-btn"
+            data-primary=""
           >
             {submission === "submitting" ? "Submitting..." : "Submit answers"}
           </button>
@@ -241,16 +244,16 @@ export function UserQuestionTurn({
       )}
 
       {error && (
-        <p role="alert" className="mt-3 text-xs text-[var(--color-err)]">
+        <p role="alert" className="needs-you-error">
           {error}
           {errorIsRetryable ? " You can retry." : ""}
         </p>
       )}
       {message.status === "resolved" && (
-        <p className="mt-3 text-xs text-[var(--color-ok)]">Answered</p>
+        <p className="needs-you-status">Answered</p>
       )}
       {message.status === "unavailable" && (
-        <p className="mt-3 text-xs text-[var(--color-fg-mute)]">
+        <p className="needs-you-status">
           This Claude session is no longer available.
         </p>
       )}

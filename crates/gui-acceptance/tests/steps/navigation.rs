@@ -1124,6 +1124,29 @@ fn xpath_literal(value: &str) -> String {
     format!("concat({parts})")
 }
 
+#[when("I open the chat history")]
+async fn open_chat_history(world: &mut GuiWorld) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    gui_acceptance::click_pane_action(&client, gui_acceptance::CHAT_HISTORY_ACTION, "chat history")
+        .await;
+}
+
+#[when("I expand the chat workspace")]
+async fn expand_chat_workspace(world: &mut GuiWorld) {
+    let wd = world
+        .webdriver
+        .as_ref()
+        .expect("WebDriver session not initialized")
+        .clone();
+    let client = wd.lock().await;
+    gui_acceptance::expand_chat_workspace(&client).await;
+}
+
 #[when(expr = "I click on the element with test id {string}")]
 async fn click_element_with_test_id(world: &mut GuiWorld, test_id: String) {
     let wd = world

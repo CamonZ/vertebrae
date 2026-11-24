@@ -204,7 +204,8 @@ export function WorktreeChanges({
 
   const historical = comparisonRequest.target.kind !== "working_tree";
 
-  const resize = useSidebarResize();
+  // A narrow file list leaves the width to the diff.
+  const resize = useSidebarResize({ initial: 200 });
 
   // Background refreshes keep the current list visible while Git runs.
   const [refresh, setRefresh] = useState<ChangesRefresh>({

@@ -112,10 +112,50 @@ Hierarchy is composed from:
 2. **Tonal background shifts** — `bg-primary` → `bg-secondary` → `bg-tertiary` (~6 lightness steps each).
 3. **The SpineRule divider** between major sections (see Components).
 
-**No box-shadow for elevation.** Cards, buttons, modals, inputs do not use shadow to suggest depth. The only allowed shadows are:
+**No box-shadow for in-flow elevation.** Cards, buttons, inputs and rows do not use shadow to suggest depth. The only allowed shadows are:
 
 - The semantic glow utilities scoped to running-state (see below).
-- Focus-visible rings (2px accent at 2px offset) for keyboard accessibility.
+- The shared focus halo (see Focus below).
+- The float layer: surfaces that sit above the page (`.hc-panel`, popovers,
+  the ⌘K palette, the transcript comment card) use `--shadow-1..3` plus the
+  `--edge-lit` 1px top edge. In light mode the shadows use `--shadow-ink`, a
+  warm brown ink, never a cool near-black. SVG shapes that `box-shadow` cannot
+  lift use `--drop-1`, the same shadow as a `drop-shadow()` filter.
+- The selected-row accent bar (see Selection below).
+
+### Surface roles
+
+Panes in the maximized chat workspace use role tokens rather than raw
+backgrounds, so each theme can order them on its own:
+
+| Role | Use | Dark | Light |
+| --- | --- | --- | --- |
+| `--surface-recessed` | Projects/history sidebar | `bg` | `bg-1` |
+| `--surface-well` | Changes code panel | `bg` | `bg-1` |
+| `--surface-page` | The chat column, one step up | `bg-2` | paper white |
+
+The panes sit on `--color-canvas`, separated by 8px gutters instead of
+hairlines. The sidebar has no border or shadow; the chat column is raised one
+step (`--shadow-1` plus `--edge-lit`); Changes is a rounded well inside it.
+
+### Hover and selection
+
+- `--color-bg-hover` is the hover for list rows on recessed or page surfaces.
+  It is a plain `rgba`, because `color-mix` hover backgrounds flash in
+  WKWebView.
+- `--color-bg-hover-raised` is the stronger hover (about 8% fg) for raised
+  controls: cards, chips, composer controls, header icon buttons and tabs.
+- A selected row uses the shared treatment: `--color-selection` background
+  plus `box-shadow: inset 3px 0 0 var(--color-accent)` on the leading edge.
+  Keep the hover state identical to the selected state so selection does not
+  flicker under the pointer.
+
+### Focus
+
+Focus styling goes through the shared halo block in `index.css`: mark the
+element with `data-focus-halo` (`within` for composite fields such as the
+composer, `surface` for floating surfaces, `overlay` for full-bleed viewers,
+`none` to opt out). Don't add per-component focus rings.
 
 ### The glow rule
 
@@ -180,7 +220,7 @@ For the task detail panel:
 
 ### Inputs
 
-Input sits on `bg-tertiary` with a 1px `border`. Focus changes the border to `primary` only — no ring, no glow, no shadow. Placeholder text is `text-muted`.
+Input sits on `bg-tertiary` with a 1px `border`. Focus uses the shared halo (see Focus); no glow and no extra shadow. Placeholder text is `text-muted`.
 
 ### Cards and surfaces
 
@@ -245,7 +285,7 @@ For the task detail panel:
 
 ## Motion
 
-All transitions use `120ms` (`--transition-fast`) or `200ms` (`--transition-normal`) ease-out. Hover states are tonal background or text color shifts only.
+Transitions use `--t-fast` (100ms), `--t-base` (180ms) or `--t-slow` (280ms) with `--ease`. Hover states are tonal background or text color shifts only. Size transitions must switch off while the user drives the size directly (panel drag, window resize), or the surface trails the pointer; `.hc-panel[data-resizing]` does this for the chat panel.
 
 Functional motion is permitted:
 
@@ -261,7 +301,7 @@ Decorative motion is not permitted: no scale-on-hover, bounce, spring, glow-on-h
 - Don't add glow except for live-execution semantics — see the glow rule above.
 - Don't introduce a fourth type family, and don't use Newsreader for chrome (titles, labels, menus).
 - Don't use Geist for IDs / timestamps / numerics, or JetBrains Mono for labels and body copy.
-- Don't add shadow-based elevation to cards, modals, buttons, or inputs.
+- Don't add shadow-based elevation to in-flow cards, buttons, or inputs; shadows belong to the float layer.
 - Don't add hover glow, glow-border, or shadow-glow to anything that is not actively running.
 - Don't use the dot-grid background (`.neural-grid` is intentionally a no-op now — references are kept only to avoid touching every page; do not add new ones).
 - Don't lighten or desaturate `accent` between themes — the hex is identical in both.

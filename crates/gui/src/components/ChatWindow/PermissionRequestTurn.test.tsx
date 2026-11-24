@@ -13,9 +13,7 @@ vi.mock("../../bindings", () => ({
 const mockedCommands = vi.mocked(commands);
 
 function createPermissionMessage(
-  overrides: Partial<
-    Extract<ChatMessage, { kind: "permission_request" }>
-  > = {}
+  overrides: Partial<Extract<ChatMessage, { kind: "permission_request" }>> = {}
 ): Extract<ChatMessage, { kind: "permission_request" }> {
   return {
     kind: "permission_request",
@@ -100,7 +98,7 @@ describe("PermissionRequestTurn", () => {
     });
   });
 
-  it("shows Resolved text after successful approval", async () => {
+  it("collapses to a quiet approved line with the tool input still reachable", async () => {
     mockedCommands.resolvePermissionRequest.mockResolvedValue({
       status: "ok",
       data: null,
@@ -110,8 +108,13 @@ describe("PermissionRequestTurn", () => {
     fireEvent.click(screen.getByText("Approve"));
 
     await waitFor(() => {
-      expect(screen.getByText("Resolved")).toBeInTheDocument();
+      expect(screen.getByText(/Write approved/)).toBeInTheDocument();
     });
+    expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+    expect(screen.queryByText("Deny")).not.toBeInTheDocument();
+    expect(screen.queryByText("Permission required")).not.toBeInTheDocument();
+    expect(screen.getByText("Tool input")).toBeInTheDocument();
+    expect(screen.getByText('{"content": "hello"}')).toBeInTheDocument();
   });
 
   it("shows error message when approval fails", async () => {
@@ -138,10 +141,10 @@ describe("PermissionRequestTurn", () => {
     fireEvent.click(screen.getByText("Approve"));
 
     await waitFor(() => {
-      expect(screen.getByText("Unavailable")).toBeInTheDocument();
+      expect(screen.getByText(/Write unavailable/)).toBeInTheDocument();
     });
-    expect(screen.getByText("Approve")).toBeDisabled();
-    expect(screen.getByText("Deny")).toBeDisabled();
+    expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+    expect(screen.queryByText("Deny")).not.toBeInTheDocument();
   });
 
   it("shows error when updated input is invalid JSON", async () => {
@@ -153,8 +156,7 @@ describe("PermissionRequestTurn", () => {
 
     await waitFor(() => {
       // JSON parse error message varies by runtime; just verify error is shown
-      const errorEl = document.querySelector(".text-\\[var\\(--color-err\\)\\]");
-      expect(errorEl).toBeInTheDocument();
+      expect(screen.getByRole("alert")).not.toBeEmptyDOMElement();
     });
     expect(mockedCommands.resolvePermissionRequest).not.toHaveBeenCalled();
   });
@@ -193,9 +195,9 @@ describe("PermissionRequestTurn", () => {
   it("starts in resolved state when requestId is absent", () => {
     const message = createPermissionMessage({ requestId: undefined });
     render(<PermissionRequestTurn message={message} />);
-    expect(screen.getByText("Resolved")).toBeInTheDocument();
-    expect(screen.getByText("Approve")).toBeDisabled();
-    expect(screen.getByText("Deny")).toBeDisabled();
+    expect(screen.getByText(/Write resolved/)).toBeInTheDocument();
+    expect(screen.queryByText("Approve")).not.toBeInTheDocument();
+    expect(screen.queryByText("Deny")).not.toBeInTheDocument();
   });
 
   it("sends empty object when input is cleared before approving", async () => {
@@ -256,7 +258,7 @@ describe("PermissionRequestTurn", () => {
     expect(screen.getByText("Approve")).toBeDisabled();
   });
 
-  it("shows Resolved text after successful denial", async () => {
+  it("shows a denied line after successful denial", async () => {
     mockedCommands.resolvePermissionRequest.mockResolvedValue({
       status: "ok",
       data: null,
@@ -266,7 +268,7 @@ describe("PermissionRequestTurn", () => {
     fireEvent.click(screen.getByText("Deny"));
 
     await waitFor(() => {
-      expect(screen.getByText("Resolved")).toBeInTheDocument();
+      expect(screen.getByText(/Write denied/)).toBeInTheDocument();
     });
   });
 
@@ -296,7 +298,7 @@ describe("PermissionRequestTurn", () => {
 
   it("does not show Resolved text in the initial pending state", () => {
     render(<PermissionRequestTurn message={createPermissionMessage()} />);
-    expect(screen.queryByText("Resolved")).not.toBeInTheDocument();
+    expect(screen.queryByText(/resolved/)).not.toBeInTheDocument();
   });
 
   it("sends error message when denying", async () => {

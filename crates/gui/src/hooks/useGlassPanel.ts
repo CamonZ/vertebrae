@@ -4,6 +4,7 @@ import { usePanelFocusStore } from "../stores/panelFocusStore";
 /** Mark a container whose focused content handles Escape itself. */
 export const OWNS_ESCAPE_ATTRIBUTE = "data-owns-escape";
 const OWNS_ESCAPE_SELECTOR = `[${OWNS_ESCAPE_ATTRIBUTE}]`;
+const ESCAPE_CLAIM_SELECTOR = "[data-escape-claim]";
 
 interface UseGlassPanelOptions {
   /** Stable identifier for this panel (e.g. "chat", "task-detail"). */
@@ -77,6 +78,9 @@ export function useGlassPanel({
       // UI that handles its own Escape (an inline editor, a chip row) gets it
       // instead of the whole panel closing under the user.
       if (document.activeElement?.closest(OWNS_ESCAPE_SELECTOR)) return;
+      // A floating card that claims Escape (the transcript comment card) gets
+      // it wherever focus is; this listener runs before the card's own.
+      if (document.querySelector(ESCAPE_CLAIM_SELECTOR)) return;
       if (guardRef.current && guardRef.current() === false) return;
       event.preventDefault();
       onCloseRef.current();

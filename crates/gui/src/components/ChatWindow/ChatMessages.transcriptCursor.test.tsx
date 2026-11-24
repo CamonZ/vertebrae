@@ -193,4 +193,65 @@ describe("ChatMessages transcript caret", () => {
     expect(document.activeElement).toBe(transcript);
     expect(window.getSelection()?.toString()).toBe("carefully");
   });
+
+  it("cancels the comment card with Esc even when focus is elsewhere", async () => {
+    const { transcript, text, onAddComment } = renderPane();
+    act(() => transcript.focus());
+    await frame();
+    selectCarefully(text);
+
+    fireEvent.keyDown(transcript, { key: "Enter", metaKey: true });
+    const draft = screen.getByRole("textbox", {
+      name: "Comment on selected text",
+    });
+    fireEvent.change(draft, { target: { value: "Half-written" } });
+    act(() => draft.blur());
+    fireEvent.keyDown(document.body, { key: "Escape" });
+
+    expect(
+      screen.queryByRole("textbox", { name: "Comment on selected text" })
+    ).not.toBeInTheDocument();
+    expect(onAddComment).not.toHaveBeenCalled();
+  });
+
+  it("keeps the panel's Esc handler out of it and attaches nothing", async () => {
+    const { transcript, text, onAddComment } = renderPane();
+    const panelEscape = vi.fn();
+    window.addEventListener("keydown", panelEscape);
+    act(() => transcript.focus());
+    await frame();
+    selectCarefully(text);
+    fireEvent.keyDown(transcript, { key: "Enter", metaKey: true });
+    const draft = screen.getByRole("textbox", {
+      name: "Comment on selected text",
+    });
+    fireEvent.change(draft, { target: { value: "Keep this?" } });
+    panelEscape.mockClear();
+    fireEvent.keyDown(draft, { key: "Escape" });
+    window.removeEventListener("keydown", panelEscape);
+
+    // Bubbling listeners never see it: the card stops it at the document.
+    expect(panelEscape).not.toHaveBeenCalled();
+    expect(onAddComment).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("local-chat-pending-comment")).toBeNull();
+  });
+
+  it("does not raise the comment pill or card from mouse movement over a stale selection", () => {
+    const { transcript, text } = renderPane();
+    // A selection made earlier, outside any gesture the transcript saw.
+    act(() => {
+      window.getSelection()?.setBaseAndExtent(text, 10, text, 19);
+    });
+    fireEvent.mouseMove(transcript);
+    fireEvent.pointerMove(transcript);
+    document.dispatchEvent(new Event("selectionchange"));
+    expect(screen.queryByTestId("local-chat-add-comment")).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: "Comment on selected text" })
+    ).toBeNull();
+
+    // A finished pointer selection does raise the pill.
+    fireEvent.mouseUp(transcript);
+    expect(screen.getByTestId("local-chat-add-comment")).toBeInTheDocument();
+  });
 });

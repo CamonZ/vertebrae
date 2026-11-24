@@ -25,8 +25,8 @@ interface GateSteeringProps {
   draft: GateDraft;
 }
 
-const cardClass =
-  "rounded-[var(--radius-lg)] border border-[var(--color-info)]/40 bg-[var(--color-info)]/5 p-3 text-sm";
+/** The shared "needs you" card used by permission and question turns. */
+const cardClass = "needs-you-card";
 
 /**
  * The visible steering tiers of a stalled gate chat, inline at the end of

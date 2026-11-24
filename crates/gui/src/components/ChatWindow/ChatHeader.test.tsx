@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ChatHeader } from "./ChatHeader";
+import { WorkspaceChromeContext } from "./WorkspaceChromeContext";
 import type {
   ChatAttention,
   ChatAttentionState,
@@ -253,18 +254,25 @@ describe("ChatHeader", () => {
     expect(onClearMessages).toHaveBeenCalledTimes(1);
   });
 
-  it("renders the stop generation button with testid", () => {
-    renderHeader();
+  it("renders the stop generation button with testid while generating", () => {
+    renderHeader({ canStopGeneration: true });
     expect(
       screen.getByTestId("local-chat-stop-generation")
     ).toBeInTheDocument();
   });
 
-  it("disables stop generation when canStopGeneration is false", () => {
+  it("hides stop generation when canStopGeneration is false", () => {
     renderHeader({ canStopGeneration: false });
     expect(
+      screen.queryByRole("button", { name: "Stop generation" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("labels the stop generation button while generating", () => {
+    renderHeader({ canStopGeneration: true });
+    expect(
       screen.getByRole("button", { name: "Stop generation" })
-    ).toBeDisabled();
+    ).toHaveTextContent("Stop");
   });
 
   it("enables stop generation when canStopGeneration is true", () => {
@@ -332,9 +340,10 @@ describe("ChatHeader", () => {
 
   it("does not render any optional buttons when no callbacks are provided", () => {
     renderHeader();
-    // Title, overflow trigger (holding clear), and stop are always-rendered.
+    // Title and overflow trigger (holding clear) are always rendered; stop
+    // appears only while generating.
     const buttons = screen.getAllByRole("button");
-    expect(buttons).toHaveLength(3); // title + overflow + stop
+    expect(buttons).toHaveLength(2); // title + overflow
   });
 
   // --- Mutation-killing tests: conditional visibility ---
@@ -368,7 +377,11 @@ describe("ChatHeader", () => {
   });
 
   it("renders all optional buttons when all callbacks are provided", () => {
-    renderHeader({ onStartFresh: vi.fn(), onClosePanel: vi.fn() });
+    renderHeader({
+      canStopGeneration: true,
+      onStartFresh: vi.fn(),
+      onClosePanel: vi.fn(),
+    });
     // Inline: title + stop + overflow + close panel.
     expect(screen.getAllByRole("button")).toHaveLength(4);
     openPaneMenu();
@@ -449,5 +462,43 @@ describe("ChatHeader", () => {
     expect(
       screen.getByRole("button", { name: "More pane actions" })
     ).toHaveFocus();
+  });
+
+  it("offers history and expand in the menu for the compact panel only", () => {
+    const chrome = {
+      expanded: false,
+      onToggleExpanded: vi.fn(),
+      onToggleHistory: vi.fn(),
+    };
+    const { rerender, props } = renderHeader();
+    rerender(
+      <WorkspaceChromeContext.Provider value={chrome}>
+        <ChatHeader {...props} />
+      </WorkspaceChromeContext.Provider>
+    );
+    openPaneMenu();
+    fireEvent.click(menuItem("Chat history"));
+    expect(chrome.onToggleHistory).toHaveBeenCalledTimes(1);
+    openPaneMenu();
+    fireEvent.click(menuItem("Expand chat workspace"));
+    expect(chrome.onToggleExpanded).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <WorkspaceChromeContext.Provider value={{ ...chrome, expanded: true }}>
+        <ChatHeader {...props} />
+      </WorkspaceChromeContext.Provider>
+    );
+    openPaneMenu();
+    expect(screen.queryByRole("menuitem", { name: "Chat history" })).toBeNull();
+  });
+
+  it("separates the destructive Clear messages item with a divider", () => {
+    renderHeader();
+    openPaneMenu();
+    const clear = menuItem("Clear messages");
+    expect(clear).toHaveClass("danger");
+    expect(
+      clear.parentElement?.querySelector('[role="separator"]')
+    ).not.toBeNull();
   });
 });

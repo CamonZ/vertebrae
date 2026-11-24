@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
 import { readingPercent, TYPEFACE_ROLES } from "../utils/readingAppearance";
 import { useUIStore } from "../stores/uiStore";
 
@@ -25,17 +25,17 @@ export function useTheme() {
   const customTypefaces = useUIStore((state) => state.customTypefaces);
   const accent = useUIStore((state) => state.accent);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.dataset.type = typePairing;
   }, [typePairing]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.style.setProperty(
       "--reading-scale", String(readingPercent(readingTextSize) / 100)
     );
   }, [readingTextSize]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const style = document.documentElement.style;
     for (const { id } of TYPEFACE_ROLES) {
       const name = useCustomTypeface ? customTypefaces[id] : undefined;
@@ -49,11 +49,11 @@ export function useTheme() {
     }
   }, [customTypefaces, useCustomTypeface]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.documentElement.dataset.accent = accent;
   }, [accent]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
 
     /**

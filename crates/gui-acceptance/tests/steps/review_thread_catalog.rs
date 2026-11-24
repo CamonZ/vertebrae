@@ -267,7 +267,7 @@ async fn cascade_updates_open_changes(world: &mut GuiWorld) {
     {
         gui_acceptance::click_pane_action(
             &peer,
-            "[data-testid='chat-tabs-history']",
+            gui_acceptance::CHAT_HISTORY_ACTION,
             "open the peer chat history",
         )
         .await;
@@ -715,7 +715,7 @@ async fn review_thread_outbox_reconnect(world: &mut GuiWorld) {
     .await;
     gui_acceptance::click_pane_action(
         &peer,
-        "[data-testid='chat-tabs-history']",
+        gui_acceptance::CHAT_HISTORY_ACTION,
         "conversation history",
     )
     .await;

@@ -3,20 +3,75 @@
  * their popover, inline selection discussions, diff review comments and the
  * comment cards of a sent user turn (SentComments).
  *
- * A comment card sits on bg-2 with a hairline and radius-lg; its quote is a
+ * Depth: the chat panel is a glass pane that already reads about bg-2, so
+ * the ladder starts one step above it. In-flow surfaces (composer, chips,
+ * inline and diff cards) are raised one step; floating ones (selection pill,
+ * create card, chip popover, hover marker) go one more, with --shadow-3 and a
+ * lit top edge (the .hc-launch / .app-sheet vocabulary). Light is paper with
+ * warm shadows, since its bg-N ramp gets darker, not lighter.
+ *
+ * A comment card sits on the raised surface with a hairline and radius-lg; its quote is a
  * muted left-barred block; meta (where, side, time) is mono 11px. Accent
  * marks exactly one thing per card: the primary action, or the focus bar
  * of the comment the user is looking at. No glow (DESIGN.md glow rule).
  */
 :root {
-  --comment-surface: var(--color-bg-2);
+  --comment-surface: var(--color-bg-3);
+  /* A chip sits on the composer, one step above it. */
+  --comment-chip-surface: var(--color-bg-4);
+  /* One visible step above the chip at rest (bg-4 is the top of the ramp). */
+  --comment-chip-surface-hover: color-mix(
+    in oklch,
+    var(--color-bg-4),
+    var(--color-fg) 6%
+  );
+  --comment-float: var(--color-bg-4);
+  /* The text well sits below the card but above the pane. */
+  --comment-well: var(--color-bg-3);
+  --comment-edge: color-mix(in oklch, var(--color-fg) 16%, transparent);
+  --comment-float-shadow: var(--shadow-3), inset 0 1px 0 var(--comment-edge);
+  --comment-pill-shadow: var(--shadow-2), inset 0 1px 0 var(--comment-edge);
   --comment-line: var(--color-line-strong);
   --comment-radius: var(--radius-lg);
-  --comment-quote-bar: var(--color-line-strong);
+  /* fg-faint, not line-strong: line-strong is the floating surface tone. */
+  --comment-quote-bar: var(--color-fg-faint);
   /* Highlight tints: rest < hover < focused. */
-  --comment-tint-rest: color-mix(in oklch, var(--color-accent) 14%, transparent);
-  --comment-tint-hover: color-mix(in oklch, var(--color-accent) 26%, transparent);
-  --comment-tint-focus: color-mix(in oklch, var(--color-accent) 22%, transparent);
+  --comment-tint-rest: color-mix(
+    in oklch,
+    var(--color-accent) var(--comment-tint-rest-pct),
+    transparent
+  );
+  --comment-tint-hover: color-mix(
+    in oklch,
+    var(--color-accent) var(--comment-tint-hover-pct),
+    transparent
+  );
+  --comment-tint-focus: color-mix(
+    in oklch,
+    var(--color-accent) var(--comment-tint-focus-pct),
+    transparent
+  );
+  --comment-tint-rest-pct: 14%;
+  --comment-tint-hover-pct: 26%;
+  --comment-tint-focus-pct: 22%;
+}
+.light {
+  --comment-surface: var(--color-bg);
+  --comment-chip-surface: var(--color-bg);
+  --comment-chip-surface-hover: var(--color-bg-1);
+  --comment-float: var(--color-bg);
+  --comment-well: var(--color-bg-1);
+  --comment-edge: rgba(255, 255, 255, 0.82);
+}
+
+/* Wide-gamut: the accent gains chroma, so the same percentages read
+   stronger. Scale the tints down, keeping rest < hover < focus. */
+@media (color-gamut: p3) {
+  :root {
+    --comment-tint-rest-pct: 11%;
+    --comment-tint-hover-pct: 21%;
+    --comment-tint-focus-pct: 17%;
+  }
 }
 
 .vtb-comment-card {
@@ -123,7 +178,8 @@
   padding: 0;
   border: 1px solid var(--comment-line);
   border-radius: 999px;
-  background: var(--comment-surface);
+  background: var(--comment-float);
+  box-shadow: var(--shadow-1);
   color: var(--color-fg-soft);
   font: 500 9px/1 var(--font-mono);
   cursor: pointer;
@@ -163,15 +219,15 @@
   /* Border and ring come from the focus halo (data-focus-halo="surface"). */
   border: 1px solid;
   border-radius: 8px;
-  background: color-mix(in oklch, var(--color-primary) 12%, var(--color-bg-2));
+  background: color-mix(in oklch, var(--color-primary) 12%, var(--comment-float));
   color: var(--color-fg);
   font: 600 12px/1 var(--font-sans);
-  --surface-shadow: var(--shadow-1);
+  --surface-shadow: var(--comment-pill-shadow);
   cursor: pointer;
   animation: chat-comment-in 120ms ease-out;
 }
 .chat-comment-trigger:hover {
-  background: color-mix(in oklch, var(--color-primary) 24%, var(--color-bg-2));
+  background: color-mix(in oklch, var(--color-primary) 24%, var(--comment-float));
 }
 .chat-comment-trigger kbd {
   margin-left: auto;
@@ -186,9 +242,9 @@
   /* Border and ring come from the focus halo (data-focus-halo="surface"). */
   border: 1px solid;
   border-radius: var(--comment-radius);
-  background: var(--comment-surface);
+  background: var(--comment-float);
   color: var(--color-fg);
-  --surface-shadow: 0 12px 32px rgb(0 0 0 / 0.32);
+  --surface-shadow: var(--comment-float-shadow);
   font: 400 13px/1.5 var(--font-sans);
   text-align: left;
   animation: chat-comment-in 120ms ease-out;
@@ -258,6 +314,11 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* The transcript card quotes only the selection: a plain left-rule quote. */
+.chat-comment-quote-selection {
+  color: var(--color-fg-soft);
+  font-weight: 400;
+}
 .chat-comment-quote mark {
   background: transparent;
   color: var(--color-fg);
@@ -288,12 +349,17 @@
   resize: vertical;
   border: 1px solid transparent;
   border-radius: 8px;
-  background: var(--color-bg-1);
+  background: var(--comment-well);
   padding: 8px;
   color: var(--color-fg);
 }
 
-/* The selection card's draft grows with its text (TranscriptCommentCard). */
+/* The selection card's draft grows with its text (TranscriptCommentCard),
+   in the card's own body size rather than the composer's. */
+.chat-comment-card .chat-comment-textarea {
+  font-size: var(--text-13);
+  line-height: 1.5;
+}
 .chat-comment-card-fixed .chat-comment-textarea {
   max-height: 12rem;
 }
@@ -314,8 +380,8 @@
   align-items: center;
   gap: 4px;
   padding-left: 4px;
-  color: var(--color-fg-faint);
-  font-size: 11px;
+  color: var(--color-fg-mute);
+  font: 400 11px/1.4 var(--font-sans);
 }
 .chat-comment-button {
   height: 26px;
@@ -349,14 +415,17 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 16px;
-  height: 16px;
+  min-width: 18px;
+  height: 18px;
   padding: 0 4px;
-  border: 1px solid var(--color-line);
-  border-radius: 4px;
-  background: var(--color-bg-1);
+  border: 1px solid color-mix(in oklch, var(--color-fg) 12%, transparent);
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--color-fg-mute);
-  font: 500 10px/1 var(--font-mono);
+  font-family: var(--font-mono);
+  font-size: var(--text-10);
+  font-weight: 500;
+  line-height: 1;
 }
 
 /* Composer chips: one per pending comment. */
@@ -377,7 +446,7 @@
   padding: 0 8px 0 6px;
   border: 1px solid var(--comment-line);
   border-radius: var(--comment-radius);
-  background: var(--comment-surface);
+  background: var(--comment-chip-surface);
   color: var(--color-fg-soft);
   font: 400 12px/1 var(--font-sans);
   cursor: pointer;
@@ -386,28 +455,59 @@
     border-color 120ms,
     color 120ms;
 }
-.chat-comment-chip:hover,
-.chat-comment-chip[aria-expanded="true"] {
+.chat-comment-chip:hover {
   border-color: var(--color-fg-faint);
-  background: var(--color-bg-3);
+  background: var(--comment-chip-surface-hover);
   color: var(--color-fg);
 }
-.chat-comment-chip-number {
+/* The chip whose card is open: an accent edge, not just a ring. */
+.chat-comment-chip[aria-expanded="true"] {
+  border-color: var(--color-accent);
+  background: var(--comment-chip-surface-hover);
+  color: var(--color-fg);
+}
+.chat-comment-chip-icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-fg-mute);
+}
+.chat-comment-chip:hover .chat-comment-chip-icon,
+.chat-comment-chip[aria-pressed="true"] .chat-comment-chip-icon {
+  color: var(--color-fg);
+}
+.chat-comment-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.chat-comment-chip-wrap .chat-comment-chip {
+  padding-right: 24px;
+}
+.chat-comment-chip-remove {
+  position: absolute;
+  top: 50%;
+  right: 4px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 3px;
-  border-radius: 999px;
-  color: var(--color-fg-soft);
-  font: 500 10px/1 var(--font-mono);
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-fg-mute);
+  cursor: pointer;
+  transform: translateY(-50%);
 }
-.chat-comment-chip[aria-pressed="true"] .chat-comment-chip-number {
-  background: color-mix(in oklch, var(--color-fg) 10%, transparent);
-  color: var(--color-fg);
-  outline: 1px solid var(--color-line-strong);
-  outline-offset: -1px;
+.chat-comment-chip-remove svg {
+  width: 12px;
+  height: 12px;
+}
+.chat-comment-chip-remove:hover {
+  background: var(--color-err-wash);
+  color: var(--color-err);
 }
 .chat-comment-chip-label {
   min-width: 0;
@@ -415,7 +515,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-comment-chip-label[data-mono] {
+.chat-comment-chip-label .mono {
   font-family: var(--font-mono);
   font-size: 11px;
 }

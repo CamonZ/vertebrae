@@ -83,12 +83,7 @@ describe("useGlassPanel", () => {
   it("declines Escape when the panel's guard returns false", () => {
     const closeA = vi.fn();
     render(
-      <Panel
-        id="a"
-        isOpen
-        onClose={closeA}
-        shouldHandleEscape={() => false}
-      />
+      <Panel id="a" isOpen onClose={closeA} shouldHandleEscape={() => false} />
     );
 
     fireEvent.keyDown(window, { key: "Escape" });
@@ -128,6 +123,18 @@ describe("useGlassPanel", () => {
     screen.getByRole("button", { name: "chip" }).blur();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(closeA).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves Escape to a floating card that claims it, wherever focus is", () => {
+    const closeA = vi.fn();
+    render(
+      <>
+        <Panel id="a" isOpen onClose={closeA} />
+        <div data-escape-claim="">card</div>
+      </>
+    );
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(closeA).not.toHaveBeenCalled();
   });
 
   it("unregisters on close so the next panel becomes focused", () => {

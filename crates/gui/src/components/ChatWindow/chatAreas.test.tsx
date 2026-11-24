@@ -13,7 +13,11 @@ function Panes({
     <div className="hc-chat-panes">
       {side.map((open, index) => (
         <div key={index} data-pane-id={`p${index}`}>
-          <div data-transcript-viewport tabIndex={0} aria-label={`transcript ${index}`} />
+          <div
+            data-transcript-viewport
+            tabIndex={0}
+            aria-label={`transcript ${index}`}
+          />
           <textarea
             data-testid="local-chat-composer"
             aria-label={`chat ${index}`}

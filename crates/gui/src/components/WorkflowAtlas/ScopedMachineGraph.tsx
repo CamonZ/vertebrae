@@ -76,6 +76,8 @@ function MachineGraph({
     {
       min: 0.04,
       max: 2.4,
+      // Room for port labels (incoming-route names) left of the first station.
+      pad: 220,
       initialTransform: cameraSnapshot?.current ?? undefined,
     }
   );

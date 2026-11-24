@@ -154,8 +154,11 @@ describe("KanbanCard", () => {
         name: /Task: Unselected task/i,
       });
       expect(card.className).not.toContain("before:bg-[var(--color-accent)]");
-      // Resting cards hover to the shared row-hover tint (matches the Tasks list).
-      expect(card.className).toContain("hover:bg-[var(--row-hover)]");
+      // Resting cards are raised (page tone + shadow-1) and hover with the shared
+      // raised tint layered over their fill.
+      expect(card.className).toContain("bg-[var(--surface-page)]");
+      expect(card.className).toContain("shadow-[var(--shadow-1)]");
+      expect(card.className).toContain("var(--color-bg-hover-raised)");
     });
   });
 

@@ -47,13 +47,13 @@ export function EmptyState({
         </div>
       )}
       {title && (
-        <div className="font-serif text-lg text-[var(--color-fg)]">{title}</div>
+        <div className="font-serif text-base text-[var(--color-fg)]">{title}</div>
       )}
       {description && (
         <Text
           variant="lede"
           color="tertiary"
-          className="max-w-[42ch] text-base"
+          className="max-w-[42ch] text-sm"
         >
           {description}
         </Text>

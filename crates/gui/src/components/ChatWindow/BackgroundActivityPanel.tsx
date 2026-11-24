@@ -9,6 +9,8 @@ import type { PaletteItem } from "../CommandPalette/paletteModel";
 import { contextScope, usePaletteScope } from "../CommandPalette/paletteScopes";
 import { RunChip } from "../shared/HearthPrimitives";
 import { formatElapsed } from "./backgroundActivity";
+import { TerminalGlyph } from "./commentIcons";
+import { SideEmptyState } from "./SideEmptyState";
 import { CHAT_AREA_ATTRIBUTE, enterFirstRow, stepRow } from "./chatAreas";
 import { keyHintItem, type KeyHintArgs } from "./chatPaletteCommands";
 import {
@@ -234,35 +236,38 @@ export function BackgroundActivityPanel({
       onFocus={(event) => enterFirstRow(event, ROW_SELECTOR)}
       className="flex min-h-0 flex-1 flex-col text-xs text-[var(--color-fg-soft)]"
     >
-      <header className="flex items-center gap-2 border-b border-[var(--color-line)] px-3 py-2">
-        <span className="font-medium text-[var(--color-fg)]">
-          Background tasks
-        </span>
-        {rows.length > 0 && (
-          <RunChip
-            force
-            small
-            state={active > 0 ? "running" : "stopped"}
-            label={active > 0 ? "Running" : "Unconfirmed"}
-          />
-        )}
-        <span className="min-w-0 flex-1 truncate">
-          {backgroundSummary(work)}
-        </span>
-        {onClose && (
-          <button
-            type="button"
-            aria-label="Close Background tasks panel"
-            onClick={onClose}
-            className="shrink-0 px-1 hover:text-[var(--color-fg)]"
-          >
-            ✕
-          </button>
-        )}
-      </header>
+      {/* The tab already names this section; the header is status only. */}
+      {(rows.length > 0 || onClose) && (
+        <header className="flex items-center gap-2 border-b border-[var(--color-line)] px-3 py-2">
+          {rows.length > 0 && (
+            <RunChip
+              force
+              small
+              state={active > 0 ? "running" : "stopped"}
+              label={active > 0 ? "Running" : "Unconfirmed"}
+            />
+          )}
+          <span className="min-w-0 flex-1 truncate">
+            {backgroundSummary(work)}
+          </span>
+          {onClose && (
+            <button
+              type="button"
+              aria-label="Close Background tasks panel"
+              onClick={onClose}
+              className="shrink-0 px-1 hover:text-[var(--color-fg)]"
+            >
+              ✕
+            </button>
+          )}
+        </header>
+      )}
 
       {rows.length === 0 ? (
-        <p className="px-3 py-3">No background tasks are running.</p>
+        <SideEmptyState
+          icon={<TerminalGlyph />}
+          message="No background tasks are running."
+        />
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto py-1.5">
           {rows.map((row) => (

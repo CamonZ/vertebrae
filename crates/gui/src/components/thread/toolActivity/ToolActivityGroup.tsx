@@ -6,6 +6,7 @@ import { activityNames } from "./classification";
 import { activitySummary } from "./grouping";
 import { useDecisionActivities } from "./useDecisionActivities";
 import { useActivities } from "./useActivities";
+import { TurnLiveContext } from "./TurnLiveContext";
 import type { ActivityAnalysis } from "./types";
 
 function Chevron({ open }: { open: boolean }) {
@@ -29,10 +30,10 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-function callState(call: ToolMessage) {
+function callState(call: ToolMessage, turnLive: boolean) {
   if (call.error || call.status === "err")
     return { tone: "error", label: "Recorded error" };
-  if (call.status === "pending")
+  if (call.status === "pending" && turnLive)
     return { tone: "pending", label: "Awaiting result" };
   return null;
 }
@@ -88,7 +89,7 @@ function CallDisclosure({
   const open =
     (call.onToggle ? call.collapsed === false : rawOpen) || findMatch;
   const rawId = useId();
-  const state = callState(call);
+  const state = callState(call, useContext(TurnLiveContext));
   const operations = analysis.operations;
   const labels = [
     ...new Set(
@@ -230,7 +231,10 @@ function ActivityGroup({
   const syntax = useActivities(calls, retryToken);
   const rows = useDecisionActivities(syntax, sessionId, open);
   const summary = activitySummary(rows);
-  const pending = calls.filter((call) => call.status === "pending").length;
+  const turnLive = useContext(TurnLiveContext);
+  const pending = turnLive
+    ? calls.filter((call) => call.status === "pending").length
+    : 0;
   const errors = calls.filter(
     (call) => call.error || call.status === "err"
   ).length;

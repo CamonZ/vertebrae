@@ -150,7 +150,9 @@ describe("UserQuestionTurn", () => {
     const submit = screen.getByRole("button", { name: "Submit answers" });
     fireEvent.click(submit);
     fireEvent.click(submit);
-    await waitFor(() => expect(screen.getByText("Submitting...")).toBeDisabled());
+    await waitFor(() =>
+      expect(screen.getByText("Submitting...")).toBeDisabled()
+    );
     expect(resolvePermissionRequest).toHaveBeenCalledTimes(1);
   });
 
@@ -175,7 +177,9 @@ describe("UserQuestionTurn", () => {
       "Bridge disconnected You can retry."
     );
     fireEvent.click(screen.getByRole("button", { name: "Submit answers" }));
-    await waitFor(() => expect(resolvePermissionRequest).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(resolvePermissionRequest).toHaveBeenCalledTimes(2)
+    );
   });
 
   it("marks a disconnected permission request unavailable instead of offering retry", async () => {
@@ -218,9 +222,7 @@ describe("UserQuestionTurn", () => {
         onResolved={vi.fn()}
       />
     );
-    expect(
-      screen.getByText(/questions must not be empty/)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/questions must not be empty/)).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     fireEvent.click(
       screen.getByRole("button", { name: "Return error to Claude" })
@@ -246,6 +248,8 @@ describe("UserQuestionTurn", () => {
     expect(
       screen.getByText("This Claude session is no longer available.")
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Submit answers" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Submit answers" })
+    ).toBeDisabled();
   });
 });

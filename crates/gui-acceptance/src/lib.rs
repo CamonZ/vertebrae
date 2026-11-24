@@ -363,6 +363,51 @@ pub async fn click_pane_action(client: &Client, css: &str, description: &str) {
     click_when_ready(client, fantoccini::Locator::Css(css), description).await;
 }
 
+/// Chat history toggle: on the expanded workspace's tab strip, or in the
+/// compact pane's overflow menu. Pass to [`click_pane_action`].
+pub const CHAT_HISTORY_ACTION: &str =
+    "[data-testid='chat-tabs-history'], [data-testid='local-chat-workspace-history']";
+
+/// Expand the compact chat panel into the workspace; a no-op when it is
+/// already expanded. The compact panel keeps Expand in its overflow menu.
+pub async fn expand_chat_workspace(client: &Client) {
+    let expanded = client
+        .find(fantoccini::Locator::Css(
+            "[aria-label='Collapse chat workspace']",
+        ))
+        .await
+        .is_ok();
+    if !expanded {
+        click_pane_action(
+            client,
+            "[data-testid='local-chat-workspace-expand']",
+            "expand chat workspace",
+        )
+        .await;
+    }
+}
+
+/// Set (`Some`) or flip (`None`) the chat list's "Show completed" filter,
+/// which lives in the history drawer's filter menu. Leaves the menu closed.
+pub async fn set_show_completed(client: &Client, on: Option<bool>) {
+    wait_for_js(
+        client,
+        "Show completed in the chat list filters",
+        r#"const [on] = arguments;
+        const trigger = document.querySelector('[data-testid="local-chat-filters"]');
+        if (!trigger) return false;
+        const item = document.querySelector('[data-testid="local-chat-show-completed"]');
+        if (!item) { trigger.click(); return false; }
+        const checked = item.getAttribute('aria-checked') === 'true';
+        // Selecting an item closes the menu; otherwise close it ourselves.
+        if (on === null || checked !== on) item.click(); else trigger.click();
+        return true;"#,
+        vec![serde_json::json!(on)],
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+}
+
 /// Wait for a stable, unobstructed target after its panel finishes animating.
 /// Re-resolve the locator so a React rerender cannot leave a stale target.
 pub async fn click_when_ready(

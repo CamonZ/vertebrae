@@ -72,7 +72,7 @@ export function TreeNode({
         // replacement so it never shifts content the way a left border would.
         selected
           ? "bg-[var(--color-selection)] before:absolute before:inset-y-0 before:left-0 before:w-[3px] before:bg-[var(--color-accent)] before:content-['']"
-          : "hover:bg-[var(--color-bg-1)]",
+          : "hover:bg-[var(--color-bg-hover)]",
         className,
       ]
         .filter(Boolean)

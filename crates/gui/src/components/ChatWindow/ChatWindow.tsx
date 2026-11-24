@@ -146,7 +146,8 @@ export function ChatWindow({
   renderObserver,
 }: ChatWindowProps) {
   const panelResize = useSidebarResize({
-    initial: 560,
+    // Wide windows give the side column ~45% so a diff is not clipped.
+    initial: Math.max(560, Math.round(window.innerWidth * 0.45)),
     side: "right",
     label: "Resize side column",
   });
@@ -690,6 +691,7 @@ export function ChatWindow({
         attention={attention}
         isClosing={chat.lifecycle === "closing"}
         canStopGeneration={chat.canStopGeneration}
+        isGenerating={chat.isGenerating}
         onClosePanel={onClosePanel}
         onStartFresh={onStartFresh}
         sideSection={shownSection}
@@ -724,7 +726,9 @@ export function ChatWindow({
               }}
               available={side.available}
               onSection={side.select}
-              onClose={side.requestClose}
+              onReselect={
+                sidePlacement === "view" ? side.toggle : undefined
+              }
             >
               {shownSection === "changes" && worktreePath ? (
                 <WorktreeChanges
@@ -944,6 +948,7 @@ export function ChatWindow({
               onSteer={chat.canSteer ? chat.handleSteer : undefined}
               isSteering={chat.isSteering}
               steeringStatus={chat.steeringStatus}
+              steeringPhase={chat.steeringPhase}
               onStartSession={handleStartSession}
               onHarnessChange={chat.handleHarnessChange}
               onModelChange={chat.handleModelChange}

@@ -662,8 +662,8 @@ describe("WorkflowAtlas", () => {
     // zoom widget + search (the toolbar carries it in graph view too)
     expect(screen.getByLabelText(/fit to view/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/find a workflow/i)).toBeInTheDocument();
-    // The Map legend belongs to the Map view only.
-    expect(document.querySelector(".uv-legend")).not.toBeInTheDocument();
+    // The step-type legend shows on the step graph as it does on the Map.
+    expect(document.querySelector(".uv-legend")).toBeInTheDocument();
   });
 
   it("keeps workflow and step inspectors to the left of normal chat", async () => {

@@ -289,12 +289,7 @@ async fn chat_statechart(world: &mut GuiWorld) {
 
     client.set_window_size(1280, 1024).await.unwrap();
 
-    let widen_selector = Locator::Css("button[aria-label='Expand chat workspace']");
-
-    if let Ok(widen) = client.find(widen_selector).await {
-        gui_acceptance::wait_actionable(&widen).await;
-        widen.click().await.unwrap();
-    }
+    gui_acceptance::expand_chat_workspace(&client).await;
 
     let ready_probe = r#"
         const viewer = document.querySelector('[data-testid="statechart-viewer"]');

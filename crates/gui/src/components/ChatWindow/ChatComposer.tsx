@@ -8,7 +8,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { ChatInput } from "../ChatInput";
-import { formatTokenCount } from "../../utils/modelContextWindow";
+import { ContextRing } from "./ContextRing";
 import type {
   LocalChatHarnessCatalog,
   LocalChatHarnessInfo,
@@ -26,6 +26,13 @@ import {
 import { CommentShortcutHint } from "./CommentShortcutHint";
 import { useCommentCardAnchor } from "./useCommentCardAnchor";
 import { focusPaneTranscript } from "./chatAreas";
+import {
+  CloseGlyph,
+  CodeGlyph,
+  EditGlyph,
+  QuoteGlyph,
+  TrashGlyph,
+} from "./commentIcons";
 import "./chatComments.css";
 
 function CommentCard(props: ComponentPropsWithRef<"div">) {
@@ -44,6 +51,20 @@ function CommentCard(props: ComponentPropsWithRef<"div">) {
 /** A code selection sent to the main chat; its own text is optional. */
 function isAttachment(comment: PendingComment): boolean {
   return comment.kind === "diff" && comment.selectionCode !== undefined;
+}
+
+/** The in-diff bubble of a diff comment, when the diff is on screen. */
+function diffBubbleFor(
+  chips: HTMLElement | null,
+  comment: PendingComment
+): HTMLElement | null {
+  if (comment.kind !== "diff") return null;
+  const workspace = chips?.closest(".chat-with-changes");
+  return (
+    Array.from(
+      workspace?.querySelectorAll<HTMLElement>("[data-diff-comment-id]") ?? []
+    ).find((element) => element.dataset.diffCommentId === comment.id) ?? null
+  );
 }
 
 /** `file.ts:12-14` for a chip; the full path is in the popover. */
@@ -181,6 +202,8 @@ interface ChatComposerProps {
   onSteer?: () => void;
   isSteering?: boolean;
   steeringStatus?: string;
+  /** Steering delivery phase; a failure renders as a warning row. */
+  steeringPhase?: "pending" | "confirmed" | "failed";
   onStartSession: (initialPrompt?: string) => boolean | void;
   onHarnessChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
   onModelChange: (event: React.ChangeEvent<HTMLSelectElement>) => void;
@@ -231,6 +254,7 @@ export function ChatComposer({
   onSteer,
   isSteering,
   steeringStatus,
+  steeringPhase,
   onStartSession,
   onHarnessChange,
   onModelChange,
@@ -453,6 +477,17 @@ export function ChatComposer({
     inputRef.current?.focus();
   };
   const startEditing = (comment: PendingComment) => {
+    // The diff shows this comment's own bubble; edit there, not in a
+    // second floating editor.
+    const bubble = diffBubbleFor(commentsAccessoryRef.current, comment);
+    const edit = bubble?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Edit diff comment"]'
+    );
+    if (edit) {
+      setActiveCommentId(comment.id);
+      edit.click();
+      return;
+    }
     setPinnedCommentId(comment.id);
     setActiveCommentId(comment.id);
     setEditingCommentId(comment.id);
@@ -541,10 +576,24 @@ export function ChatComposer({
           : activeCommentId === comment.id;
         const isEditing = editingCommentId === comment.id;
         const popoverId = `local-chat-comment-details-${comment.id}`;
+        // A diff comment whose bubble is on screen is highlighted there (it
+        // follows the active chip) instead of a floating duplicate card.
+        const showCard =
+          isActive &&
+          (isEditing || !diffBubbleFor(commentsAccessoryRef.current, comment));
+        const chipText =
+          comment.kind === "diff"
+            ? `${diffCommentHomeLabel(comment)} · ${diffCommentLocation(comment)} (${comment.side})${
+                comment.body.trim() ? `: ${comment.body.trim()}` : ""
+              }`
+            : `“${comment.quote.replace(/\s+/g, " ").trim()}”${
+                comment.body.trim() ? `: ${comment.body.trim()}` : ""
+              }`;
 
         return (
           <div
             key={comment.id}
+            className="chat-comment-chip-wrap"
             data-testid="local-chat-pending-comment"
             onMouseEnter={() => setActiveCommentId(comment.id)}
             onMouseLeave={(event) => {
@@ -604,10 +653,10 @@ export function ChatComposer({
               className="chat-comment-chip"
               data-testid={`local-chat-comment-icon-${commentNumber}`}
               aria-label={`Comment ${commentNumber} details`}
-              aria-controls={popoverId}
-              aria-expanded={isActive}
+              aria-controls={showCard ? popoverId : undefined}
+              aria-expanded={showCard}
               aria-pressed={isPinned}
-              title={`Click to ${isPinned ? "close" : "keep open"} comment ${commentNumber}`}
+              title={chipText}
               onClick={() => {
                 if (isPinned) {
                   closeCommentPopover();
@@ -618,17 +667,17 @@ export function ChatComposer({
                 }
               }}
             >
-              <span className="chat-comment-chip-number" aria-hidden="true">
-                {commentNumber}
+              <span className="chat-comment-chip-icon" aria-hidden="true">
+                {comment.kind === "diff" ? <CodeGlyph /> : <QuoteGlyph />}
               </span>
               {comment.kind === "diff" ? (
-                <span className="chat-comment-chip-label" data-mono="">
+                <span className="chat-comment-chip-label">
                   {comment.selectionCode !== undefined && (
                     <span className="selection-chip-label sr-only">
                       {diffCommentLocation(comment)}
                     </span>
                   )}
-                  {chipDiffLabel(comment)}
+                  <span className="mono">{chipDiffLabel(comment)}</span>
                 </span>
               ) : (
                 <span className="chat-comment-chip-label">
@@ -636,7 +685,23 @@ export function ChatComposer({
                 </span>
               )}
             </button>
-            {isActive ? (
+            <button
+              type="button"
+              tabIndex={-1}
+              className="chat-comment-chip-remove"
+              aria-label={`Remove comment ${commentNumber} from reply`}
+              title={`Remove comment ${commentNumber} from reply`}
+              onClick={() => {
+                onRemoveComment?.(comment.id);
+                closeCommentPopover();
+                setChipFocusIndex(
+                  Math.max(0, Math.min(index, pendingComments.length - 2))
+                );
+              }}
+            >
+              <CloseGlyph />
+            </button>
+            {showCard ? (
               <CommentCard
                 ref={commentCardRef}
                 id={popoverId}
@@ -670,20 +735,7 @@ export function ChatComposer({
                         className="chat-comment-icon-button"
                         onClick={() => startEditing(comment)}
                       >
-                        <svg
-                          aria-hidden="true"
-                          width="14"
-                          height="14"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={1.5}
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="M12 20h9" />
-                          <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                        </svg>
+                        <EditGlyph />
                       </button>
                       <button
                         type="button"
@@ -696,22 +748,7 @@ export function ChatComposer({
                           closeCommentPopover();
                         }}
                       >
-                        <svg
-                          aria-hidden="true"
-                          width="14"
-                          height="14"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={1.5}
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="M3 6h18" />
-                          <path d="M8 6V4h8v2" />
-                          <path d="m19 6-1 14H6L5 6" />
-                          <path d="M10 11v5M14 11v5" />
-                        </svg>
+                        <TrashGlyph />
                       </button>
                     </>
                   ) : null}
@@ -842,17 +879,16 @@ export function ChatComposer({
         event.preventDefault();
       }}
     >
-      <div className="hc-ctx">
-        <div
-          className="hc-ctx-fill"
-          data-testid="chat-context-fill"
-          style={{ width: `${ctxPct}%`, background: ctxColor }}
-        />
-      </div>
-      <div className="p-3">
+      <div className="hc-foot-body">
         {steeringStatus && (
-          <div className="hc-composer-alert mb-2" role="status">
-            {steeringStatus}
+          <div
+            className="hc-composer-notice"
+            data-tone={steeringPhase === "failed" ? "warn" : undefined}
+            data-live={steeringPhase === "pending" ? "" : undefined}
+            role="status"
+          >
+            <span className="hc-composer-notice-dot" aria-hidden="true" />
+            <span className="hc-composer-notice-text">{steeringStatus}</span>
           </div>
         )}
         <ChatInput
@@ -1096,30 +1132,18 @@ export function ChatComposer({
                   )}
                 </div>
               ) : null}
+              {usage && usage.max > 0 ? (
+                <ContextRing
+                  pct={ctxPct}
+                  color={ctxColor}
+                  usage={usage}
+                  model={session.model}
+                  threadTotalTokens={threadTotalTokens}
+                />
+              ) : null}
             </div>
           }
         />
-      </div>
-      <div
-        className="hc-foot-meta"
-        aria-hidden={usage && usage.max > 0 ? undefined : true}
-      >
-        {usage && usage.max > 0 ? (
-          <span
-            className="ctx-lbl"
-            title={`${usage.used.toLocaleString()} / ${usage.max.toLocaleString()} current request input context tokens${threadTotalTokens !== undefined ? ` · ${threadTotalTokens.toLocaleString()} total thread tokens` : ""}`}
-          >
-            context <b>{ctxPct}%</b>
-            {session.model
-              ? ` · ${session.model.replace(/^claude-/i, "")} · ${formatTokenCount(usage.used)}/${formatTokenCount(usage.max)}`
-              : ""}
-            {threadTotalTokens !== undefined
-              ? ` · thread ${formatTokenCount(threadTotalTokens)}`
-              : ""}
-          </span>
-        ) : (
-          <span className="ctx-lbl">&nbsp;</span>
-        )}
       </div>
     </div>
   );

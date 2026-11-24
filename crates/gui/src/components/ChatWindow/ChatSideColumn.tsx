@@ -18,8 +18,6 @@ export const SIDE_COLUMN_BESIDE_MIN_WIDTH = 1100;
 
 export type SideCounts = Record<SideSection, number | null>;
 
-const TOGGLE_KEYS = shortcutText(SIDE_COLUMN_SHORTCUTS.toggle);
-
 /**
  * A chat's side column: Changes · Discussions · Background tasks behind one
  * switcher (decision 49d12c2c §1). It always shows its own chat's content.
@@ -32,7 +30,7 @@ export function ChatSideColumn({
   counts,
   available,
   onSection,
-  onClose,
+  onReselect,
   children,
 }: {
   section: SideSection;
@@ -41,7 +39,11 @@ export function ChatSideColumn({
   available(section: SideSection): boolean;
   /** `focus`: the section's content takes the keyboard once shown. */
   onSection(section: SideSection, focus: boolean): void;
-  onClose(): void;
+  /**
+   * Clicking the already-selected tab. Set where the column replaces the
+   * transcript (narrow panels) so the tab doubles as the way back to the chat.
+   */
+  onReselect?(section: SideSection): void;
   /** The shown section's content. */
   children: ReactNode;
 }) {
@@ -72,7 +74,11 @@ export function ChatSideColumn({
               return;
             }
             const step =
-              event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+              event.key === "ArrowRight"
+                ? 1
+                : event.key === "ArrowLeft"
+                  ? -1
+                  : 0;
             if (!step) return;
             event.preventDefault();
             const next = cycleSection(section, step, available);
@@ -84,8 +90,7 @@ export function ChatSideColumn({
           }}
         >
           {SIDE_SECTIONS.map((value) => {
-            const count =
-              value === "discussions" ? discussions : counts[value];
+            const count = value === "discussions" ? discussions : counts[value];
             const selected = value === section;
             return (
               <button
@@ -99,8 +104,14 @@ export function ChatSideColumn({
                 disabled={!available(value)}
                 data-alert={value === "discussions" && alert ? "" : undefined}
                 title={`${SIDE_SECTION_LABEL[value]} · ${shortcutText(SIDE_COLUMN_SHORTCUTS[value])}`}
-                aria-keyshortcuts={ariaKeyShortcut(SIDE_COLUMN_SHORTCUTS[value])}
-                onClick={() => onSection(value, true)}
+                aria-keyshortcuts={ariaKeyShortcut(
+                  SIDE_COLUMN_SHORTCUTS[value]
+                )}
+                onClick={() =>
+                  selected && onReselect
+                    ? onReselect(value)
+                    : onSection(value, true)
+                }
               >
                 {SIDE_SECTION_LABEL[value]}
                 {!!count && (
@@ -110,27 +121,6 @@ export function ChatSideColumn({
             );
           })}
         </div>
-        <button
-          type="button"
-          className="chat-side-close"
-          aria-label="Close side column"
-          aria-keyshortcuts={ariaKeyShortcut(SIDE_COLUMN_SHORTCUTS.toggle)}
-          title={`Close side column · ${TOGGLE_KEYS}`}
-          onClick={onClose}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <path d="m6 6 12 12M6 18 18 6" />
-          </svg>
-        </button>
       </div>
       <div
         ref={panel}

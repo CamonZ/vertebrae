@@ -1039,8 +1039,7 @@ describe("ChatWindow diff review comments", () => {
           await screen.findByRole("button", { name: "Refresh changes" });
         await act(async () => {});
         expect(
-          screen.queryByRole("complementary", { name: "Side column" }) !==
-            null,
+          screen.queryByRole("complementary", { name: "Side column" }) !== null,
           action
         ).toBe(open);
         await waitFor(() =>
@@ -1192,18 +1191,20 @@ describe("ChatWindow diff review comments", () => {
     const composer = screen.getByTestId("local-chat-composer");
     await waitFor(() => expect(composer).toHaveFocus());
 
+    // The diff shows this comment's bubble, so the chip opens no floating
+    // duplicate card: hovering highlights the bubble, Enter edits in it.
+    const chip = screen.getByTestId("local-chat-comment-icon-1");
     fireEvent.mouseEnter(screen.getByTestId("local-chat-pending-comment"));
-    fireEvent.click(screen.getByRole("button", { name: "Edit comment 1" }));
-    const editor = screen.getByTestId("local-chat-comment-editor");
-    expect(editor).toHaveFocus();
+    expect(screen.queryByTestId("local-chat-comment-popover")).toBeNull();
+    expect(screen.getByTestId("diff-comment")).toHaveAttribute("data-active");
+    fireEvent.keyDown(chip, { key: "Enter" });
+    const editor = screen.getByRole("textbox", { name: "Edit comment" });
+    await waitFor(() => expect(editor).toHaveFocus());
     fireEvent.change(editor, { target: { value: "Why X here?" } });
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
 
     await waitFor(() => expect(composer).toHaveFocus());
-    fireEvent.mouseEnter(screen.getByTestId("local-chat-pending-comment"));
-    expect(screen.getByTestId("local-chat-comment-body")).toHaveTextContent(
-      "Why X here?"
-    );
+    expect(screen.getByTestId("diff-comment")).toHaveTextContent("Why X here?");
   });
 
   it.each(["selection", "focused control"])(
@@ -1268,6 +1269,8 @@ describe("ChatWindow diff review comments", () => {
           selection.removeAllRanges();
           selection.addRange(range);
           fireEvent(document, new Event("selectionchange"));
+          // The pill follows a finished selection gesture.
+          fireEvent.mouseUp(paragraph);
         };
         if (intent === "selection") selectParagraph();
         else screen.getByRole("textbox", { name: "Another control" }).focus();

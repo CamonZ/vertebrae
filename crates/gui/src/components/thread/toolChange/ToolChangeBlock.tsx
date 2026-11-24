@@ -85,6 +85,9 @@ export function ChangeUnavailable(): ReactNode {
   );
 }
 
+/** Worktree deltas are observed around a call, not proven to come from it. */
+const ATTRIBUTION_NOTE = "Worktree observation · cause not established";
+
 /**
  * A tool call's worktree changes, shown in place of the call itself: a
  * one-line attribution header followed by the diff.
@@ -129,7 +132,13 @@ export function ToolChangeBlock({
       data-testid="tool-change-block"
       aria-label="Worktree changes"
     >
-      <div className="evtool-hd">
+      {/* The attribution caveat stays reachable as the header's tooltip and
+          description instead of a mono run-on line (DESIGN.md typography). */}
+      <div
+        className="evtool-hd"
+        title={ATTRIBUTION_NOTE}
+        aria-description={ATTRIBUTION_NOTE}
+      >
         <span className="evtool-dot" />
         <span className="evtool-name">
           {n} {n === 1 ? "file" : "files"} changed
@@ -137,9 +146,6 @@ export function ToolChangeBlock({
         {toolName != null ? (
           <span className="evtool-args">recorded around {toolName}</span>
         ) : null}
-        <span className="evtool-sum">
-          worktree observation · cause not established
-        </span>
         {delta.aggregate ? (
           <span className="evtool-sum">includes subagent work</span>
         ) : null}

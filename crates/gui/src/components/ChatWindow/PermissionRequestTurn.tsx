@@ -19,14 +19,10 @@ export function PermissionRequestTurn({
 }) {
   const [updatedInput, setUpdatedInput] = useState(message.input ?? "");
   const [status, setStatus] = useState<
-    | "pending"
-    | "allowing"
-    | "denying"
-    | "resolved"
-    | "unavailable"
-    | "error"
+    "pending" | "allowing" | "denying" | "resolved" | "unavailable" | "error"
   >(message.requestId ? (message.status ?? "pending") : "resolved");
   const [error, setError] = useState<string | null>(null);
+  const [decision, setDecision] = useState<"allow" | "deny" | null>(null);
 
   const resolve = async (behavior: "allow" | "deny") => {
     if (!message.requestId) return;
@@ -59,6 +55,7 @@ export function PermissionRequestTurn({
     });
 
     if (result.status === "ok") {
+      setDecision(behavior);
       setStatus("resolved");
       onSettled?.(message.requestId, "resolved");
     } else {
@@ -77,59 +74,82 @@ export function PermissionRequestTurn({
     status === "resolved" ||
     status === "unavailable";
 
+  const settled = status === "resolved" || status === "unavailable";
+
+  if (settled) {
+    const outcome =
+      status === "unavailable"
+        ? "unavailable"
+        : decision === "allow"
+          ? "approved"
+          : decision === "deny"
+            ? "denied"
+            : "resolved";
+    return (
+      <section
+        className="needs-you-settled"
+        data-outcome={outcome}
+        aria-label={`Permission ${outcome}: ${message.toolName}`}
+      >
+        <span className="needs-you-settled-line">
+          <span aria-hidden="true">{decision === "deny" ? "✕" : "✓"}</span>{" "}
+          {message.toolName} {outcome}
+        </span>
+        {message.input ? (
+          <details className="needs-you-details">
+            <summary>Tool input</summary>
+            <pre className="needs-you-input">{updatedInput}</pre>
+          </details>
+        ) : null}
+      </section>
+    );
+  }
+
   return (
-    <div className="rounded-lg border border-[var(--color-line)] bg-[var(--color-bg-2)] p-3">
-      <p className="mb-2 t-label text-[var(--color-fg-mute)]">
-        Permission required
-      </p>
-      <div className="space-y-3">
-        <div>
-          <p className="font-mono text-xs text-[var(--color-fg)]">
-            {message.toolName}
-          </p>
-          <p className="mt-1 text-sm text-[var(--color-fg-soft)]">
-            {message.message}
-          </p>
-        </div>
-        {message.input && (
-          <textarea
-            value={updatedInput}
-            onChange={(event) => setUpdatedInput(event.target.value)}
-            disabled={disabled}
-            className="h-32 w-full resize-y rounded border border-[var(--color-line)] bg-[var(--color-bg)] p-2 font-mono text-xs text-[var(--color-fg)] outline-none"
-            spellCheck={false}
-          />
-        )}
-        {error && <p className="text-xs text-[var(--color-err)]">{error}</p>}
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => void resolve("allow")}
-            className="rounded border border-[var(--color-ok)]/40 px-3 py-1.5 text-xs font-medium text-[var(--color-ok)] transition-colors hover:bg-[var(--color-ok)]/10 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {status === "allowing" ? "Approving..." : "Approve"}
-          </button>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => void resolve("deny")}
-            className="rounded border border-[var(--color-err)]/40 px-3 py-1.5 text-xs font-medium text-[var(--color-err)] transition-colors hover:bg-[var(--color-err)]/10 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {status === "denying" ? "Denying..." : "Deny"}
-          </button>
-          {status === "resolved" && (
-            <span className="self-center text-xs text-[var(--color-fg-mute)]">
-              Resolved
-            </span>
-          )}
-          {status === "unavailable" && (
-            <span className="self-center text-xs text-[var(--color-fg-mute)]">
-              Unavailable
-            </span>
-          )}
-        </div>
+    <section
+      className="needs-you-card"
+      data-settled={settled ? "" : undefined}
+      aria-label={`Permission required: ${message.toolName}`}
+    >
+      <header className="needs-you-head">
+        <p className="needs-you-eyebrow">Permission required</p>
+        <span className="needs-you-tool">{message.toolName}</span>
+      </header>
+      <p className="needs-you-title">{message.message}</p>
+      {message.input && (
+        <textarea
+          value={updatedInput}
+          onChange={(event) => setUpdatedInput(event.target.value)}
+          disabled={disabled}
+          aria-label="Tool input"
+          className="needs-you-input"
+          spellCheck={false}
+        />
+      )}
+      {error && (
+        <p role="alert" className="needs-you-error">
+          {error}
+        </p>
+      )}
+      <div className="needs-you-actions">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => void resolve("allow")}
+          className="needs-you-btn"
+          data-primary=""
+        >
+          {status === "allowing" ? "Approving..." : "Approve"}
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => void resolve("deny")}
+          className="needs-you-btn"
+        >
+          {status === "denying" ? "Denying..." : "Deny"}
+        </button>
       </div>
-    </div>
+    </section>
   );
 }

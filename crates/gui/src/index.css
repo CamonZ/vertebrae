@@ -34,12 +34,22 @@
   /* Hover wash — a faint off-white veil over a surface. Real themed token (see
      the .light override below), not an alias. */
   --color-bg-hover: rgba(244, 241, 236, 0.04);
+  /* Stronger hover for RAISED surfaces (cards, chips, composer controls,
+     header icon buttons, tabs): ~8% fg tint. --color-bg-hover stays for list
+     rows on recessed/page surfaces. */
+  --color-bg-hover-raised: color-mix(in oklch, var(--color-fg) 8%, transparent);
 
-  /* Task-row hover fill — a PLAIN pre-resolved color (== color-mix(in oklch,
-     --color-bg-1 60%, --color-bg)). Kept plain rather than a live color-mix()
-     because WKWebView flashes a wrong (cool/blue) intermediate when it animates
-     a background TO a color-mix() value; a legacy sRGB hex animates cleanly. */
-  --row-hover: #0e0e0e;
+  /* Chat workspace pane hierarchy (sidebar < well < page): recessed = Projects
+     sidebar, well = Changes code panel, page = the chat column, one step up.
+     Gutters between them show the canvas. */
+  --surface-recessed: var(--color-bg);
+  --surface-well: var(--color-bg);
+  --surface-page: var(--color-bg-2);
+  /* Lit 1px top edge on raised/floating surfaces (== .hc-launch edge). */
+  --edge-lit: color-mix(in oklch, var(--color-fg) 16%, transparent);
+  /* --shadow-1 as a drop-shadow() filter, for SVG shapes box-shadow can't lift. */
+  --drop-1: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+
 
   /* Persistent selection uses a raised neutral surface and an accent indicator. */
   --color-selection: #1f1f1f;
@@ -483,20 +493,33 @@
   --color-step-finish-wash: oklch(0.93 0.06 145);
   --color-step-finish-fg: oklch(0.45 0.141 145);
 
-  /* Light-mode shadows carry visible elevation */
-  --shadow-1: 0 1px 2px rgba(20, 20, 20, 0.08);
+  /* Light-mode shadows carry visible elevation: a warm brown ink (fg warmed
+     toward the tan line tone) at ~16% alpha, never a cool near-black. */
+  --shadow-ink: color-mix(in oklch, var(--color-fg) 62%, var(--color-line-strong));
+  --shadow-1:
+    0 1px 2px color-mix(in oklch, var(--shadow-ink) 18%, transparent),
+    0 2px 6px -2px color-mix(in oklch, var(--shadow-ink) 14%, transparent);
   --shadow-2:
-    0 6px 18px rgba(20, 20, 20, 0.1), 0 0 0 1px rgba(20, 20, 20, 0.06);
+    0 8px 22px -4px color-mix(in oklch, var(--shadow-ink) 16%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--shadow-ink) 9%, transparent);
   --shadow-3:
-    0 18px 44px rgba(20, 20, 20, 0.14), 0 0 0 1px rgba(20, 20, 20, 0.06);
+    0 20px 48px -8px color-mix(in oklch, var(--shadow-ink) 18%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--shadow-ink) 9%, transparent);
 
   /* Hover wash needs a darker ink-on-paper feel */
   --color-bg-hover: rgba(26, 26, 32, 0.04);
+  --color-bg-hover-raised: color-mix(in oklch, var(--color-fg) 9%, transparent);
 
-  /* Plain pre-resolved row-hover fill (== color-mix(in oklch, --color-bg-1 60%,
-     --color-bg) in the light ramp). See the dark `--row-hover` note for why this
-     is a plain hex rather than a live color-mix(). */
-  --row-hover: #f5f1e5;
+  /* Paper hierarchy: page is whiter than the cream canvas; sidebar and the
+     Changes well are recessed one step (bg-1). */
+  --surface-recessed: var(--color-bg-1);
+  --surface-well: var(--color-bg-1);
+  --surface-page: #fffdf8;
+  --edge-lit: rgba(255, 255, 255, 0.82);
+  --drop-1: drop-shadow(
+    0 1px 2px color-mix(in oklch, var(--shadow-ink) 22%, transparent)
+  );
+
 }
 
 /* =============================================================================
@@ -2069,13 +2092,14 @@ html.light ::selection {
   background: var(--bg);
 }
 
+/* Recessed role: lists and navigation. The float-role detail panel sits over
+   it with a gutter, so no hairline separates them. */
 .tasks-v2 .list-col {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg);
-  border-right: 1px solid var(--line);
+  background: var(--surface-recessed);
 }
 
 .tasks-v2 .list-head {
@@ -2085,7 +2109,7 @@ html.light ::selection {
   gap: var(--s-3);
   padding: 8px var(--s-5) 7px;
   border-bottom: 1px solid var(--line);
-  background: var(--bg);
+  background: var(--surface-recessed);
 }
 
 .tasks-v2 .scope-row {
@@ -2274,7 +2298,7 @@ html.light ::selection {
 }
 
 .tasks-v2 .t-summary:hover {
-  background: color-mix(in oklch, var(--bg-1) 60%, var(--bg));
+  background: var(--color-bg-hover);
 }
 
 .tasks-v2 .t-summary .t-indent {
@@ -2761,9 +2785,6 @@ html.light ::selection {
   min-height: 0;
   flex: 1;
 }
-.hc-panel[data-maximized] .hc-workspace {
-  border-left: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
-}
 /* Tonal strip, no borders; the accent is reserved for chats needing you. */
 .hc-panel .hc-tabs {
   display: flex;
@@ -2776,6 +2797,21 @@ html.light ::selection {
   font-family: var(--font-sans);
   user-select: none;
   -webkit-user-select: none;
+}
+/* A single open chat's title already heads the pane: the tab stays in the
+   accessibility tree but draws nothing, leaving "+" and the controls. */
+.hc-panel .hc-tabs[data-empty] {
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.hc-panel .hc-tablist[data-single] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .hc-panel .hc-tabs-main {
   display: flex;
@@ -2944,7 +2980,7 @@ html.light ::selection {
 .hc-panel .hc-tabs-overflow:hover,
 .hc-panel .hc-tabs-switcher:hover,
 .hc-panel .hc-tabs-counter:hover {
-  background: var(--bg-4);
+  background: var(--color-bg-hover-raised);
   color: var(--fg);
 }
 .hc-panel .hc-tabs-switcher {
@@ -2984,17 +3020,27 @@ html.light ::selection {
   flex: 1;
 }
 
-/* Keep the composer surface neutral; its focus outline identifies the active
-   input without tinting the conversation. */
+/* Keep the composer surface neutral; the central focus halo (data-focus-halo
+   "within") identifies the active input without tinting the conversation. */
 .chat-input-shell {
-  background-color: color-mix(in oklch, var(--color-fg) 4%, var(--color-bg));
+  /* Composer card: bg-2 on the pane, borderless at rest (Hearth surfaces). */
+  background-color: var(--color-bg-2);
+  border-color: transparent;
   transition:
     border-color var(--t-fast, 120ms) var(--ease, ease),
     background-color var(--t-fast, 120ms) var(--ease, ease),
     box-shadow var(--t-fast, 120ms) var(--ease, ease);
 }
-.chat-input-shell:focus-within {
-  background-color: var(--color-bg);
+
+/* In the glass chat panel (pane tone already ~bg-2) the composer rises one
+   step above it with a hairline; tokens are shared with the comment cards
+   (chatComments.css). */
+.hc-panel .chat-input-shell {
+  background-color: var(--comment-surface);
+  border-color: var(--color-line-strong);
+  /* Resting lift: in light the composer is paper on a paper pane, so the
+     tone step alone does not separate it. Focus-within replaces this. */
+  box-shadow: var(--shadow-1);
 }
 
 /* Side-panel "drill" open: the panel slides from its anchored screen edge in
@@ -3080,9 +3126,15 @@ html.light ::selection {
   -webkit-user-select: none;
   position: relative;
   flex-shrink: 0;
-  background: color-mix(in oklch, var(--bg-3) 26%, transparent);
-  border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
-  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  /* One quiet chrome layer: the pane's own surface and a single hairline.
+     The title lines up with the transcript's 16px gutter. */
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  min-height: 40px;
+  padding: var(--s-1) var(--s-2) var(--s-1) var(--s-4);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .hc-panel .hc-head-top {
   display: flex;
@@ -3160,9 +3212,11 @@ html.light ::selection {
   min-width: 0;
   max-width: min(14rem, 32%);
   overflow: hidden;
+  /* A project name is a label, not data: sans, muted (DESIGN.md typography). */
   color: var(--fg-mute);
-  font-family: var(--mono);
-  font-size: var(--text-11);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 400;
   letter-spacing: 0;
   line-height: 1.2;
   text-overflow: ellipsis;
@@ -3184,8 +3238,8 @@ html.light ::selection {
   border-radius: var(--r-sm);
   background: var(--bg-2);
   color: var(--err);
-  font-family: var(--mono);
-  font-size: var(--text-11);
+  font-family: var(--sans);
+  font-size: var(--text-12);
 }
 /* Resting status ember; the active/closed dots reuse this footprint. */
 /* Chat attention dot (ticket 1f3f5cc0): one 6px treatment everywhere a chat
@@ -3246,7 +3300,7 @@ html.light ::selection {
   transition: all var(--t-fast) var(--ease);
 }
 .hc-panel .hc-ctrl:hover {
-  background: var(--bg-4);
+  background: var(--color-bg-hover-raised);
   color: var(--fg);
 }
 .hc-panel .hc-ctrl:disabled {
@@ -3276,8 +3330,8 @@ html.light ::selection {
   text-align: center;
 }
 /* Overflow (`⋯`) menu — secondary pane actions live here so headers stay
-   at a few visible controls. Popover sits on bg-2 with a hairline, no shadow
-   elevation beyond a soft drop for legibility over transcript text. */
+   at a few visible controls. Popover sits on bg-2 with a hairline; no
+   shadow elevation (DESIGN.md). */
 .ovf {
   position: relative;
   display: inline-flex;
@@ -3289,10 +3343,9 @@ html.light ::selection {
   z-index: 40;
   min-width: 13rem;
   padding: var(--s-1);
-  border: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
-  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
   background: var(--bg-2);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
 }
 .ovf-item {
   display: flex;
@@ -3318,6 +3371,9 @@ html.light ::selection {
 .ovf-item:disabled {
   cursor: not-allowed;
   opacity: 0.4;
+}
+.ovf-item.danger {
+  color: var(--err);
 }
 .ovf-item.danger:hover:not(:disabled),
 .ovf-item.danger:focus-visible {
@@ -3367,6 +3423,21 @@ html.light ::selection {
   background: var(--err-wash);
   color: var(--err);
 }
+/* Stop appears only while generating, as a labelled control so the one
+   time-sensitive action reads without hovering (UX-01). */
+.hc-panel .hc-ctrl.hc-stop {
+  width: auto;
+  gap: var(--s-1h);
+  padding: 0 var(--s-2);
+  margin-right: var(--s-1);
+  color: var(--fg-soft);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 500;
+}
+.hc-panel .hc-stop-label {
+  line-height: 1;
+}
 .hc-panel .hc-chat-controls {
   display: inline-flex;
   min-width: 0;
@@ -3413,10 +3484,9 @@ html.light ::selection {
   gap: var(--s-1);
   width: 17rem;
   padding: var(--s-2);
-  border: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
-  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
   background: var(--bg-2);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
 }
 .hc-panel .hc-model-pop .hc-model-row {
   display: grid;
@@ -3507,41 +3577,139 @@ html.light ::selection {
   color: var(--err);
 }
 
-/* Composer footer: a thin context-utilization bar rides the top edge, the
-   existing composer sits below, and a context-% readout caps the foot. */
+/* Composer foot: the composer card on the pane surface, no separator. The
+   context readout lives in the ring beside Send. */
 .hc-panel .hc-foot {
   flex-shrink: 0;
-  background: color-mix(in oklch, var(--bg-2) 24%, transparent);
-  border-top: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+  background: transparent;
 }
-.hc-panel .hc-ctx {
-  height: 2px;
-  background: color-mix(in oklch, var(--bg) 50%, transparent);
-  position: relative;
-  overflow: hidden;
+.hc-panel .hc-foot-body {
+  padding: var(--s-2) var(--s-4) var(--s-4);
 }
-.hc-panel .hc-ctx-fill {
-  height: 100%;
-  transition:
-    width var(--t-slow) var(--ease),
-    background var(--t-slow) var(--ease);
+/* A readable measure: transcript content and composer share one centred
+   column (~820px) so a maximized pane never stretches lines edge to edge. */
+.hc-panel .chat-measure {
+  max-width: 820px;
+  margin-inline: auto;
 }
-.hc-panel .hc-foot-meta {
+.hc-panel .hc-foot-body {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(820px + 2 * var(--s-4));
+  margin-inline: auto;
+}
+/* Transient composer notices (steering sent / failed) use the quiet activity
+   row: a flat dot and a muted sans line; only a failure gets the warn tone. */
+.hc-panel .hc-composer-notice {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: 0 var(--s-3) var(--s-2);
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  color: var(--fg-faint);
-  letter-spacing: 0.04em;
-}
-.hc-panel .hc-foot-meta .ctx-lbl {
-  margin-left: auto;
-}
-.hc-panel .hc-foot-meta .ctx-lbl b {
+  gap: var(--s-1h);
+  min-width: 0;
+  padding: 0 var(--s-1) var(--s-2);
   color: var(--fg-mute);
-  font-weight: 500;
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  line-height: var(--leading-tight);
+}
+.hc-panel .hc-composer-notice-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: var(--r-full);
+  background: var(--fg-faint);
+}
+.hc-panel .hc-composer-notice[data-live] .hc-composer-notice-dot {
+  background: var(--accent);
+}
+.hc-panel .hc-composer-notice[data-tone="warn"] {
+  color: var(--warn);
+}
+.hc-panel .hc-composer-notice[data-tone="warn"] .hc-composer-notice-dot {
+  background: var(--warn);
+}
+.hc-panel .hc-composer-notice-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Context ring: 16px, track in line-strong, arc in the severity token. */
+.hc-panel .hc-ctx-ring {
+  position: relative;
+  display: inline-flex;
+}
+.hc-panel .hc-ctx-ring-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease);
+}
+.hc-panel .hc-ctx-ring-trigger:hover,
+.hc-panel .hc-ctx-ring-trigger[aria-expanded="true"] {
+  background: var(--bg-3);
+}
+.hc-panel .hc-ctx-ring-trigger svg {
+  width: 16px;
+  height: 16px;
+  transform: rotate(-90deg);
+}
+.hc-panel .hc-ctx-ring-track,
+.hc-panel .hc-ctx-ring-fill {
+  fill: none;
+  stroke-width: 2;
+}
+.hc-panel .hc-ctx-ring-track {
+  stroke: var(--line-strong);
+}
+.hc-panel .hc-ctx-ring-trigger svg[data-empty] .hc-ctx-ring-track {
+  stroke: var(--line);
+}
+.hc-panel .hc-ctx-ring-dot {
+  fill: var(--fg-mute);
+  stroke: none;
+}
+.hc-panel .hc-ctx-ring-fill {
+  stroke-linecap: round;
+  transition:
+    stroke-dashoffset var(--t-slow) var(--ease),
+    stroke var(--t-slow) var(--ease);
+}
+.hc-panel .hc-ctx-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--s-2));
+  z-index: 60;
+  min-width: 15rem;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--bg-2);
+}
+.hc-panel .hc-ctx-pop dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--s-4);
+  row-gap: var(--s-1h);
+  margin: 0;
+}
+.hc-panel .hc-ctx-pop dt {
+  color: var(--fg-mute);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+}
+.hc-panel .hc-ctx-pop dd {
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--text-12);
+  text-align: right;
+  white-space: nowrap;
 }
 .hc-panel .hc-mini-history {
   flex: 0 0 auto;
@@ -3562,8 +3730,11 @@ html.light ::selection {
   overflow: hidden;
 }
 .hc-panel .hc-mini-history-projects {
-  flex: 0 1 32%;
-  border-bottom: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  /* Sizes to its projects (scrolling past ~a third) instead of reserving a
+     mostly empty block. */
+  flex: 0 0 auto;
+  max-height: 32%;
+  border-bottom: 1px solid var(--line);
 }
 .hc-panel .hc-mini-history-sessions {
   flex: 1 1 68%;
@@ -3604,18 +3775,19 @@ html.light ::selection {
   margin: 0;
   overflow-wrap: anywhere;
   padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
-  border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  letter-spacing: var(--tracking-eyebrow);
-  text-transform: uppercase;
-  color: var(--fg-mute);
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--fg-soft);
 }
 .hc-panel .hc-mini-history-completed-toggle {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  border-bottom: 1px solid color-mix(in oklch, var(--fg) 8%, transparent);
+  border-bottom: 1px solid var(--line-soft);
   gap: var(--s-2);
   padding: var(--s-2) var(--s-3);
   color: var(--fg-mute);
@@ -3664,12 +3836,28 @@ html.light ::selection {
   flex-direction: column;
   overflow: hidden;
 }
+.hc-panel .hc-mini-history-head:has(.hc-mini-history-search) {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--s-1);
+  padding-right: var(--s-2);
+}
 .hc-panel .hc-mini-history-search {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
+}
+.hc-panel .hc-mini-history-filters {
+  flex: 0 0 auto;
+}
+.hc-panel .hc-mini-history-search input::placeholder {
+  font-family: var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
 }
 .hc-panel .hc-mini-history-error {
   flex: 0 0 auto;
-  border-bottom: 1px solid color-mix(in oklch, var(--err) 22%, transparent);
+  border-bottom: 1px solid var(--line);
   background: var(--err-wash);
   padding: var(--s-2);
   font-size: var(--text-11);
@@ -3784,7 +3972,7 @@ html.light ::selection {
 .hc-panel .hc-mini-history-ticket-rows {
   margin-left: 14px;
   padding-left: 8px;
-  border-left: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+  border-left: 1px solid var(--line-soft);
 }
 .hc-panel .hc-mini-history-new {
   display: inline-flex;
@@ -3849,8 +4037,13 @@ html.light ::selection {
 .hc-panel .hc-mini-history-entry .hc-mini-history-open {
   width: 100%;
 }
-.hc-panel .hc-mini-history-row[data-active] {
-  background: color-mix(in oklch, var(--fg) 8%, transparent);
+.hc-panel .hc-mini-history-row:hover {
+  background: var(--color-bg-hover);
+}
+.hc-panel .hc-mini-history-row[data-active],
+.hc-panel .hc-mini-history-row[data-active]:hover {
+  background: var(--color-selection);
+  box-shadow: inset 3px 0 0 var(--color-accent);
 }
 .hc-panel .hc-mini-history-open {
   min-width: 0;
@@ -4273,16 +4466,14 @@ html.light ::selection {
   column-gap: var(--s-3);
   padding: 0 var(--s-5);
   cursor: pointer;
-  /* Opaque resting fill (== page bg, so visually identical to transparent at
-     rest) so both ends of the hover transition are plain sRGB hex colors. */
-  background: var(--bg);
+  background: transparent;
   transition: background var(--t-fast) var(--ease);
 }
 
+/* Shared row hover: --color-bg-hover on recessed/page surfaces (a plain rgba,
+   not a live color-mix(): WKWebView flashes a cool intermediate on those). */
 .tasks-v2 .t-row:hover {
-  /* Plain `--row-hover` token, NOT a live color-mix(): WKWebView flashes a cool
-     (blue) intermediate when animating a background toward a color-mix() value. */
-  background: var(--row-hover);
+  background: var(--color-bg-hover);
 }
 
 .tasks-v2 .t-row.sel {
@@ -4761,6 +4952,67 @@ html.light ::selection {
   transition-duration: var(--t-slow), var(--t-base, 180ms);
   transition-timing-function: var(--ease);
 }
+
+/* Float layer: the side chat panel is the nearest surface — brighter glass
+   than the page beneath, --shadow-3, and a lit 1px top edge (the .hc-launch /
+   .app-sheet vocabulary). Both themes. */
+.hc-panel,
+.light .hc-panel {
+  box-shadow:
+    var(--shadow-3),
+    inset 0 1px 0 var(--edge-lit);
+}
+.light .hc-panel {
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklch, var(--surface-page) 78%, transparent),
+    color-mix(in oklch, var(--color-bg) 66%, transparent)
+  );
+}
+
+/* Maximized chat workspace: three tonal panes on the canvas, separated by 8px
+   gutters instead of hairlines. Projects sidebar = recessed (no shadow, no
+   border); chat column = the page, raised one step (shadow-1 + lit edge);
+   Changes = a rounded code well inside it. */
+.hc-panel[data-maximized],
+.light .hc-panel[data-maximized] {
+  background: var(--color-canvas);
+}
+.hc-panel[data-maximized] .hc-panel-main {
+  gap: var(--s-2);
+  padding: var(--s-2);
+}
+.hc-panel[data-maximized] .hc-mini-history {
+  border-radius: var(--r-lg);
+  background: var(--surface-recessed);
+}
+/* The resize handle keeps its hit area, now centred in the 8px gutter. */
+.hc-panel[data-maximized] .hc-history-resize-handle {
+  transform: translateX(calc(var(--s-2) + 4px));
+}
+.hc-panel[data-maximized] .hc-workspace {
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--surface-page);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 1px 0 var(--edge-lit);
+}
+.hc-panel[data-maximized] .changes-side-panel {
+  margin: 0 var(--s-2) var(--s-2) 0;
+  border-radius: var(--r-lg);
+  background: var(--surface-well);
+}
+.hc-panel[data-maximized] .changes-resize-handle {
+  flex-basis: var(--s-2);
+  background: none;
+}
+.hc-panel[data-maximized] .changes-resize-handle:hover,
+.hc-panel[data-maximized] .changes-resize-handle:active,
+.hc-panel[data-maximized] .changes-resize-handle:focus-visible {
+  background: linear-gradient(var(--changes-divider), var(--changes-divider))
+    center / 2px 32px no-repeat;
+}
 .detail.detail-float {
   transition: box-shadow var(--t-base, 180ms) var(--ease);
 }
@@ -4789,11 +5041,15 @@ html.light ::selection {
 
 /* Task, artifact, workflow and step details share an opaque surface, avoiding
    backdrop recomposition as the page updates. Chat keeps its translucent shell. */
-.detail-opaque.detail.detail-float {
-  background: var(--bg-1);
+.detail-opaque.detail.detail-float,
+.light .detail-opaque.detail.detail-float {
+  background: var(--surface-page);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  box-shadow: none;
+  /* Float role: nearest surface, --shadow-3 and a lit top edge. */
+  box-shadow:
+    var(--shadow-3),
+    inset 0 1px 0 var(--edge-lit);
 }
 
 .detail-opaque.detail.detail-float:not(.is-closing) {
@@ -4930,8 +5186,8 @@ html.light ::selection {
 }
 
 /* Compact traces entry point at the foot of the detail body
-   (docs/design tasks-detail.jsx `.t-traces`): a dashed full-width button that
-   resolves to a solid accent outline on hover. */
+   (docs/design tasks-detail.jsx `.t-traces`): a solid-outlined full-width button
+   that turns to an accent outline on hover. */
 .tasks-v2-detail-shell .t-traces-slot {
   padding: var(--s-3) var(--s-5) var(--s-5);
 }
@@ -4944,10 +5200,10 @@ html.light ::selection {
   width: 100%;
   padding: var(--s-2) var(--s-3);
   background: transparent;
-  border: 1px dashed var(--line-strong);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-sm);
-  font-family: var(--mono);
-  font-size: var(--text-11);
+  font-family: var(--sans);
+  font-size: var(--text-12);
   color: var(--fg-mute);
   cursor: pointer;
   transition: all var(--t-fast) var(--ease);
@@ -4960,10 +5216,12 @@ html.light ::selection {
   background: var(--accent-wash);
 }
 
+/* Counts are sans tabular figures: the serif italic zero read as a stray "o". */
 .tasks-v2-detail-shell .t-traces em {
   color: var(--fg);
-  font-family: var(--serif);
-  font-style: italic;
+  font-family: var(--sans);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 
 .tasks-v2-detail-shell .t-traces .arr {
@@ -5215,14 +5473,18 @@ html.light ::selection {
 .cmdk-search {
   display: flex;
   align-items: center;
-  gap: var(--s-2);
-  padding: var(--s-3) var(--s-4);
+  gap: var(--s-1);
+  padding: var(--s-2) var(--s-3) var(--s-2) var(--s-4);
   color: var(--fg-mute);
 }
+/* The focus halo draws on the input's own box, so the text keeps an inset
+   from that edge instead of touching it. */
 .cmdk-input {
   flex: 1;
   min-width: 0;
+  padding: var(--s-1) var(--s-2);
   border: 0;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--fg);
   font: inherit;
@@ -5488,6 +5750,12 @@ html.light ::selection {
 }
 .ctl-outline {
   border-color: var(--ctl-line);
+}
+/* Composer controls (permission/model pickers) sit on the raised composer card,
+   which is already bg-3: tint over it instead of repeating its tone. */
+.hc-foot .ctl:hover,
+.hc-foot .ctl[aria-expanded="true"] {
+  background-color: var(--color-bg-hover-raised);
 }
 .ctl-outline:hover,
 .ctl-outline[aria-expanded="true"] {
@@ -6016,12 +6284,14 @@ input.no-spin {
   /* dot · name/meta · status · capabilities · concurrency · last seen */
   grid-template-columns: 8px minmax(0, 1fr) 120px 150px 110px 90px;
   width: 100%;
+  /* Cap the table so data columns stay near the name on wide windows. */
+  max-width: 64rem;
   align-items: center;
   column-gap: var(--s-3);
   padding: 10px var(--s-3);
   border: 1px solid transparent;
   border-radius: var(--r-md);
-  background-color: color-mix(in oklch, var(--fg) 2.5%, transparent);
+  background-color: transparent;
   text-align: left;
   transition:
     background-color var(--t-fast) var(--ease),
@@ -6029,13 +6299,13 @@ input.no-spin {
     box-shadow var(--t-fast) var(--ease);
 }
 .daemon-row:hover {
-  background-color: color-mix(in oklch, var(--fg) 5%, transparent);
-  border-color: var(--ctl-line);
+  background-color: var(--color-bg-hover);
 }
-.daemon-row[aria-pressed="true"] {
-  background-color: var(--bg-2);
-  border-color: var(--ctl-line-hover);
-  box-shadow: 0 1px 0 color-mix(in oklch, var(--fg) 6%, transparent) inset;
+/* Shared selected treatment: selection surface + accent bar on the leading edge. */
+.daemon-row[aria-pressed="true"],
+.daemon-row[aria-pressed="true"]:hover {
+  background-color: var(--color-selection);
+  box-shadow: inset 3px 0 0 var(--color-accent);
 }
 
 .daemon-row-dot {
@@ -6048,8 +6318,9 @@ input.no-spin {
 .daemon-row[data-status="active"] .daemon-row-dot {
   background: var(--ok);
 }
+/* Pending is already said by its badge and group header: its dot stays quiet. */
 .daemon-row[data-status="pending"] .daemon-row-dot {
-  background: var(--warn);
+  background: var(--fg-faint);
 }
 .daemon-row[data-status="revoked"] .daemon-row-dot,
 .daemon-row[data-status="removed"] .daemon-row-dot {
@@ -6090,6 +6361,13 @@ input.no-spin {
 .daemon-row-health {
   color: var(--warn);
 }
+/* Empty cell: the one muted placeholder for every null column. */
+.daemon-col-empty {
+  color: var(--fg-faint);
+}
+.daemons-page [role="group"][data-testid="daemon-fleet-list"] section {
+  max-width: 64rem;
+}
 .daemon-col,
 .daemon-col-status {
   min-width: 0;
@@ -6107,6 +6385,7 @@ input.no-spin {
 .daemon-list-head {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 120px 150px 110px 90px;
+  max-width: 64rem;
   column-gap: var(--s-3);
   padding: 0 calc(var(--s-3) + 1px) var(--s-2)
     calc(var(--s-3) + 1px + 8px + var(--s-3));

@@ -449,6 +449,15 @@ describe("ChatTabStrip controls", () => {
   });
 });
 
+describe("ChatTabStrip single chat", () => {
+  it("keeps the lone tab out of the tab order and visually hidden", () => {
+    render(<Strip initial={seed(["a"])} />);
+    expect(screen.getByRole("tablist")).toHaveAttribute("data-single");
+    expect(screen.getByRole("tab")).toHaveAttribute("tabindex", "-1");
+    expect(screen.getByRole("button", { name: "New chat" })).toBeVisible();
+  });
+});
+
 describe("ChatTabStrip compact", () => {
   it("switches chats from a title menu instead of tabs", () => {
     const spies = handlers();
@@ -464,12 +473,29 @@ describe("ChatTabStrip compact", () => {
       name: /^Switch chat: Chat a/,
     });
     expect(switcher).toHaveTextContent("2");
+    // The pane header below owns the visible title; the switcher does not
+    // repeat it (its accessible name still names the chat).
+    expect(switcher).not.toHaveTextContent("Chat a");
     fireEvent.click(switcher);
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: /^Chat b/ }));
     expect(spies.onEnterChat).toHaveBeenCalledWith("e-b");
+    // History and expand live in the pane header's menu, not a second row.
     expect(
-      screen.getByRole("button", { name: "Expand chat workspace" })
-    ).toBeVisible();
+      screen.queryByRole("button", { name: "Expand chat workspace" })
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Chat history" })).toBeNull();
+  });
+
+  it("collapses the whole row when there is nothing to switch or answer", () => {
+    render(<Strip initial={seed(["a"])} props={{ expanded: false }} />);
+    expect(screen.getByTestId("chat-tab-strip")).toHaveAttribute("data-empty");
+  });
+
+  it("keeps the row for several chats or chats needing you", () => {
+    render(<Strip initial={seed(["a", "b"])} props={{ expanded: false }} />);
+    expect(screen.getByTestId("chat-tab-strip")).not.toHaveAttribute(
+      "data-empty"
+    );
   });
 
   it("shows no switcher for a single chat", () => {

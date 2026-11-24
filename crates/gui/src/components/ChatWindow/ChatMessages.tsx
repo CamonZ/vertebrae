@@ -2,6 +2,7 @@ import { withFileReferenceReplyIds } from "../../utils/fileReferenceReplyIds";
 import { LiveAssistantText } from "./LiveAssistantText";
 import { liveAssistantKey } from "../../stores/liveAssistantMessages";
 import { ChatSessionContext } from "../thread/toolChange/ChatSessionContext";
+import { TurnLiveContext } from "../thread/toolActivity/TurnLiveContext";
 import { preloadDiffRenderer } from "../thread/toolChange/useWorktreeDelta";
 import {
   memo,
@@ -40,7 +41,7 @@ import {
   type PendingTextComment,
   type TextSelectionAnchor,
 } from "./assistantTextComments";
-import { useCommentHighlights } from "./commentHighlight";
+import { useCommentHighlights, useDraftHighlight } from "./commentHighlight";
 import { CommentHighlightMarkers } from "./CommentHighlightMarkers";
 import { useCommentHover } from "./useCommentHover";
 import { TranscriptCommentCard } from "./TranscriptCommentCard";
@@ -388,6 +389,7 @@ export function ChatTranscript({
   assistantLabel,
   gate,
   isActive,
+  turnLive = true,
   streamingAssistant,
   registerRef,
 }: {
@@ -396,6 +398,8 @@ export function ChatTranscript({
   assistantLabel: string;
   gate?: LocalChatGateBinding | null;
   isActive: boolean;
+  /** False once the turn has ended; stale pending tool calls stop reading as in flight. */
+  turnLive?: boolean;
   streamingAssistant: StreamingAssistantMessage | null;
   registerRef?: (id: string, element: HTMLElement | null) => void;
 }) {
@@ -459,7 +463,7 @@ export function ChatTranscript({
   }, [assistantLabel, messages, streamingAssistant]);
 
   return (
-    <>
+    <TurnLiveContext.Provider value={turnLive}>
       <HistoricalChatItems
         items={renderItems}
         sessionId={sessionId}
@@ -484,7 +488,7 @@ export function ChatTranscript({
           </ChatSessionContext.Provider>
         </div>
       )}
-    </>
+    </TurnLiveContext.Provider>
   );
 }
 
@@ -697,12 +701,31 @@ export function ChatMessages({
     hoveredCommentId,
     commentRangesRef
   );
+  // The selection is dropped when the card's textarea takes focus; keep what
+  // is being commented on marked until the card closes.
+  useDraftHighlight(
+    commentEditorOpen && selectionAction ? selectionAction.range : null
+  );
   // Tool calls with file changes render as diffs; warm Pierre ahead of them.
   useEffect(preloadDiffRenderer, []);
+  // The pill (and so the card) opens from an explicit gesture only: a
+  // finished pointer selection (pointerup/mouseup) or keyboard selection
+  // (caret mode, or key-up). A bare selectionchange may only refresh or clear
+  // a selection the pill already follows, so a stale selection that merely
+  // changes under the pointer never raises it.
+  const followsSelectionRef = useRef(false);
+  const followsSelection = selectionAction !== null || cursor.state !== "off";
+  useLayoutEffect(() => {
+    followsSelectionRef.current = followsSelection;
+  }, [followsSelection]);
   useEffect(() => {
-    document.addEventListener("selectionchange", updateTextSelection);
+    const onSelectionChange = () => {
+      if (!followsSelectionRef.current) return;
+      updateTextSelection();
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
     return () =>
-      document.removeEventListener("selectionchange", updateTextSelection);
+      document.removeEventListener("selectionchange", onSelectionChange);
   }, [updateTextSelection]);
   useEffect(() => {
     setSelectionAction(null);
@@ -1094,7 +1117,11 @@ export function ChatMessages({
           {isEmpty && !isActive && !isLoadingInitialHistory && (
             <ChatEmptyState notice={notice} />
           )}
-          <div ref={contentRef} className="min-w-0 flex flex-col gap-3">
+          {/* One turn rhythm: 16px between items, matching the bare event log. */}
+          <div
+            ref={contentRef}
+            className="chat-measure min-w-0 flex flex-col gap-4"
+          >
             {isLoadingInitialHistory && (
               <div
                 className="text-center text-xs text-[var(--color-fg-mute)]"
@@ -1135,6 +1162,7 @@ export function ChatMessages({
               assistantLabel={assistantLabel}
               gate={gate}
               isActive={isActive}
+              turnLive={isWaiting || streamingAssistant !== null}
               streamingAssistant={streamingAssistant}
               registerRef={registerMessageRef}
             />

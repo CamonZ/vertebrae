@@ -1,4 +1,12 @@
-import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   diffCommentHomeLabel,
   diffCommentLocation,
@@ -15,6 +23,7 @@ import {
   DIFF_COMPOSER_SUBMIT_SHORTCUT,
   shortcutText,
 } from "../../ChatWindow/chatShortcuts";
+import { EditGlyph, TrashGlyph } from "../../ChatWindow/commentIcons";
 import { DiffReviewContext, type DiffReviewFocus } from "./DiffReviewContext";
 import { focusKeepProps } from "../../../utils/focusKeep";
 import { useKeepFocus } from "../../../hooks/useKeepFocus";
@@ -27,6 +36,45 @@ export interface ReviewAnnotation {
   draft: boolean;
   /** No comments or draft: the line only carries a label row. */
   labelOnly?: true;
+}
+
+/** Grow the textarea with its text; CSS caps it and it scrolls beyond. */
+function fitTextarea(textarea: HTMLTextAreaElement) {
+  const borders = textarea.offsetHeight - textarea.clientHeight;
+  textarea.style.height = "auto";
+  textarea.style.height = `${textarea.scrollHeight + borders}px`;
+}
+
+const FOCUS_ATTEMPTS = 30;
+
+/**
+ * Focus the input once it is rendered. A diff annotation is slotted into
+ * Pierre's shadow tree, which can attach it a frame or two after React
+ * mounts it; `autoFocus` alone then focuses a not-yet-rendered element and
+ * silently does nothing, so typing after the keyboard shortcut went nowhere.
+ * Retry for a few frames while nothing else took focus.
+ */
+function useFocusOnMount(ref: RefObject<HTMLTextAreaElement | null>) {
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    let frame = 0;
+    let attempts = 0;
+    const attempt = () => {
+      if (!element.isConnected || document.activeElement === element) return;
+      const active = document.activeElement;
+      const taken =
+        attempts > 0 &&
+        (active instanceof HTMLTextAreaElement ||
+          active instanceof HTMLInputElement);
+      if (taken) return;
+      element.focus({ preventScroll: true });
+      if (document.activeElement !== element && ++attempts < FOCUS_ATTEMPTS)
+        frame = requestAnimationFrame(attempt);
+    };
+    attempt();
+    return () => cancelAnimationFrame(frame);
+  }, [ref]);
 }
 
 function CommentCard({
@@ -52,34 +100,6 @@ function CommentCard({
       data-focused={focus ? "" : undefined}
       data-active={review?.activeCommentId === comment.id ? "" : undefined}
     >
-      <div className="diff-comment-meta">
-        <span className="diff-comment-where">
-          {diffCommentHomeLabel(comment)} · {diffCommentLocation(comment)} (
-          {comment.side})
-        </span>
-        {comment.outdated ? (
-          <span className="diff-comment-outdated">outdated</span>
-        ) : null}
-        <span className="diff-comment-actions">
-          <button
-            type="button"
-            aria-label="Edit diff comment"
-            onClick={() => {
-              setText(comment.body);
-              setEditing(true);
-            }}
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            aria-label="Remove diff comment"
-            onClick={() => review?.removeComment(comment.id)}
-          >
-            Remove
-          </button>
-        </span>
-      </div>
       {editing ? (
         <CommentEditor
           label="Edit comment"
@@ -94,8 +114,50 @@ function CommentCard({
           onCancel={() => setEditing(false)}
         />
       ) : (
-        <p className="diff-comment-body">{comment.body}</p>
+        <div className="diff-comment-main">
+          <p
+            className="diff-comment-body"
+            data-empty={comment.body.trim() ? undefined : ""}
+          >
+            {comment.body.trim()
+              ? comment.body
+              : "No comment — attached as context"}
+          </p>
+          <span className="diff-comment-actions">
+            <button
+              type="button"
+              className="chat-comment-icon-button"
+              aria-label="Edit diff comment"
+              title="Edit comment"
+              onClick={() => {
+                setText(comment.body);
+                setEditing(true);
+              }}
+            >
+              <EditGlyph />
+            </button>
+            <button
+              type="button"
+              className="chat-comment-icon-button"
+              data-tone="danger"
+              aria-label="Remove diff comment"
+              title="Remove comment"
+              onClick={() => review?.removeComment(comment.id)}
+            >
+              <TrashGlyph />
+            </button>
+          </span>
+        </div>
       )}
+      <div className="diff-comment-meta">
+        <span className="diff-comment-where">
+          {diffCommentHomeLabel(comment)} · {diffCommentLocation(comment)} (
+          {comment.side})
+        </span>
+        {comment.outdated ? (
+          <span className="diff-comment-outdated">outdated</span>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -128,6 +190,10 @@ function CommentEditor({
   const canSubmit = !!value.trim() && !disabled;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useKeepFocus(inputRef);
+  useFocusOnMount(inputRef);
+  useLayoutEffect(() => {
+    if (inputRef.current) fitTextarea(inputRef.current);
+  }, [value]);
   return (
     <div className="diff-comment-editor">
       <textarea
@@ -138,7 +204,7 @@ function CommentEditor({
         placeholder={placeholder}
         data-testid={`${testIdPrefix}-input`}
         value={value}
-        rows={3}
+        rows={2}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;
@@ -147,7 +213,8 @@ function CommentEditor({
             onCancel();
             return;
           }
-          if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey)) return;
+          if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey))
+            return;
           event.preventDefault();
           if (event.shiftKey) onSendToMain?.();
           else if (canSubmit) onSubmit();
@@ -244,12 +311,21 @@ export function DiffCommentThread({
         />
       ))}
       {annotation.draft ? (
-        <div role="dialog" aria-label={onSaveDraft ? "Comment on selected code" : "Discuss selected code"}>
+        <div
+          role="dialog"
+          aria-label={
+            onSaveDraft ? "Comment on selected code" : "Discuss selected code"
+          }
+        >
           {onDiscussDraft && <DiscussionModelNotice />}
           <CommentEditor
             disabled={!!onDiscussDraft && !!choice?.error}
-            label={onSaveDraft ? "New diff comment" : "New selection discussion"}
-            placeholder={onDiscussDraft ? "Ask about selected code…" : "Write a comment…"}
+            label={
+              onSaveDraft ? "New diff comment" : "New selection discussion"
+            }
+            placeholder={
+              onDiscussDraft ? "Ask about selected code…" : "Write a comment…"
+            }
             value={draft}
             onChange={setDraft}
             submitLabel={onDiscussDraft ? "Discuss inline" : "Add comment"}
