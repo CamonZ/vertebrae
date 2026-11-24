@@ -1145,15 +1145,19 @@ fn apply_entry(
 pub(super) async fn save_pending_legacy(
     state: &AppState,
     path: &Path,
-    mut sessions: Vec<LocalChatSessionIndexEntry>,
+    sessions: &[LocalChatSessionIndexEntry],
+    unsupported: &[Value],
 ) -> Result<bool, CommandError> {
     let Some(access) = CatalogAccess::open(state).await? else {
         return Ok(false);
     };
     let catalog = load(&access.path(false).await?)?;
-    sessions.retain(|session| !migration::can_retire(&catalog, session));
+    let mut pending = sessions
+        .iter()
+        .filter(|session| !migration::can_retire(&catalog, session))
+        .peekable();
 
-    if sessions.is_empty() {
+    if pending.peek().is_none() && unsupported.is_empty() {
         match fs::remove_file(path) {
             Ok(()) => fs::File::open(&access.root)
                 .and_then(|directory| directory.sync_all())
@@ -1162,13 +1166,26 @@ pub(super) async fn save_pending_legacy(
             Err(_) => return Err(error()),
         }
     } else {
-        durable_write(
-            path,
-            &serde_json::to_vec(&json!({"version": 1, "sessions": sessions}))
-                .map_err(|_| error())?,
-        )?;
+        write_legacy_index(path, pending, unsupported)?;
     }
     Ok(true)
+}
+
+pub(super) fn write_legacy_index<'a>(
+    path: &Path,
+    sessions: impl IntoIterator<Item = &'a LocalChatSessionIndexEntry>,
+    unsupported: &[Value],
+) -> Result<(), CommandError> {
+    let mut rows = sessions
+        .into_iter()
+        .map(serde_json::to_value)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| error())?;
+    rows.extend_from_slice(unsupported);
+    durable_write(
+        path,
+        &serde_json::to_vec(&json!({"version": 1, "sessions": rows})).map_err(|_| error())?,
+    )
 }
 
 /// Preserve other-account local-only sidecars when replacing the selected
