@@ -88,7 +88,11 @@ export function ComparisonControls({
           />
         </label>
       </div>
-      <div role="group" aria-label="Diff layout" className="document-views">
+      <div
+        role="group"
+        aria-label="Diff layout"
+        className="document-views workspace-tabs"
+      >
         {(["unified", "split"] as const).map((style) => (
           <button
             key={style}

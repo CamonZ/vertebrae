@@ -35,6 +35,25 @@ export function ChangedFilesList({
           const label = item.old_path
             ? `${item.old_path} → ${item.path}`
             : item.path;
+          // The current name stays first so it never truncates. The muted
+          // line leads with the source: just its name for a rename in place,
+          // its full path for a move.
+          const oldSlash = item.old_path?.lastIndexOf("/") ?? -1;
+          const sameDirectory =
+            item.old_path != null &&
+            item.old_path.slice(0, Math.max(oldSlash, 0)) ===
+              item.path.slice(0, Math.max(slash, 0));
+          const source = item.old_path
+            ? sameDirectory
+              ? item.old_path.slice(oldSlash + 1)
+              : item.old_path
+            : null;
+          const muted = [
+            source ? `from ${source}` : null,
+            slash >= 0 ? directory : null,
+          ]
+            .filter(Boolean)
+            .join(" · ");
           return (
             <li
               key={item.path}
@@ -56,15 +75,12 @@ export function ChangedFilesList({
                 >
                   {STATUS_LETTER[item.status]}
                 </span>
+                {/* One line: the name, then its source and directory
+                    muted; the title has the full label. */}
                 <span className="changes-file-path">
                   <span className="changes-file-name">{name}</span>
-                  {slash >= 0 && (
-                    <span className="changes-file-directory">{directory}</span>
-                  )}
-                  {item.old_path && (
-                    <span className="changes-file-directory">
-                      from {item.old_path}
-                    </span>
+                  {muted && (
+                    <span className="changes-file-directory">{muted}</span>
                   )}
                 </span>
                 {item.totals.binary_files === 0 && (

@@ -9,6 +9,7 @@ import {
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WorktreeChanges } from "./WorktreeChanges";
+import { useChatSideColumnStore } from "../../stores/chatSideColumnStore";
 import { useWorktreeWatch } from "./workspace/useWorktreeWatch";
 import {
   commands,
@@ -398,6 +399,40 @@ it("hides and shows the file list from the Changes palette", async () => {
   expect(
     screen.getByRole("button", { name: "Jump to src/app.ts" })
   ).toHaveFocus();
+});
+
+it("starts compact with the file list collapsed, reachable from the palette", async () => {
+  load.mockResolvedValue({ status: "ok", data: modified });
+  const view = render(
+    <WorktreeChanges sessionId="chat" worktreePath="/worktree" compact />
+  );
+  const toggle = await screen.findByRole("button", { name: "Show files" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  expect(
+    screen.queryByRole("button", { name: "Jump to src/app.ts" })
+  ).toBeNull();
+
+  const changes = screen.getByRole("region", { name: "Worktree changes" });
+  changes.focus();
+  openPaletteAt(changes);
+  const labels = changesEntries().map((item) => item.label);
+  act(() => useCommandPaletteStore.getState().closePalette());
+  expect(labels).not.toContain("Hide file list");
+
+  await runChangesCommand(changes, "Show file list");
+  const first = screen.getByRole("button", { name: "Jump to src/app.ts" });
+  expect(first).toHaveFocus();
+  expect(fireEvent.keyDown(first, { key: "ArrowDown" })).toBe(false);
+  expect(
+    screen.getByRole("button", { name: "Jump to gone.txt" })
+  ).toHaveFocus();
+
+  // Widening past the beside threshold opens the explorer again.
+  view.rerender(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
+  expect(screen.getByRole("button", { name: "Hide files" })).toHaveAttribute(
+    "aria-expanded",
+    "true"
+  );
 });
 
 it("moves focus with the arrow keys inside the changed-file list", async () => {
@@ -1571,4 +1606,34 @@ it("always shows the line diff with semantic data, without a mode switch", async
   const labels = changesEntries().map((item) => item.label);
   expect(labels).not.toContain("Semantic diff");
   expect(labels).not.toContain("Line diff");
+});
+
+describe("restored file outside the comparison", () => {
+  afterEach(() => useChatSideColumnStore.getState().forget("restored-chat"));
+
+  it("notes a restored file without a diff when other files changed", async () => {
+    useChatSideColumnStore
+      .getState()
+      .saveChanges("restored-chat", "/worktree", { activePath: "README.md" });
+    load.mockResolvedValue({ status: "ok", data: modified });
+    render(
+      <WorktreeChanges sessionId="restored-chat" worktreePath="/worktree" />
+    );
+    expect(
+      await screen.findByText(/README\.md has no diff against this baseline/)
+    ).toBeVisible();
+  });
+
+  it("leaves an empty comparison to the empty state alone", async () => {
+    useChatSideColumnStore
+      .getState()
+      .saveChanges("restored-chat", "/worktree", { activePath: "README.md" });
+    render(
+      <WorktreeChanges sessionId="restored-chat" worktreePath="/worktree" />
+    );
+    expect(
+      await screen.findByRole("status", { name: "No changes" })
+    ).toBeVisible();
+    expect(screen.queryByText(/has no diff against this baseline/)).toBeNull();
+  });
 });
