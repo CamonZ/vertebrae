@@ -44,7 +44,9 @@ async fn interrupted_readback_retains_sources_then_restart_verifies_and_retires_
     let root = tempfile::tempdir().unwrap();
     let index = root.path().join("local-chat-session-index.json");
     let chat = session("chat");
-    let source = json!({"version": 1, "sessions": [&chat]}).to_string();
+    let unsupported =
+        json!({"id": "preview", "harness": "future_test_harness", "providerDetails": ["opaque"]});
+    let source = json!({"version": 1, "sessions": [chat, unsupported]}).to_string();
     fs::write(&index, &source).unwrap();
     let annotations = root.path().join("local-chat-annotations");
     fs::create_dir(&annotations).unwrap();
@@ -140,7 +142,8 @@ async fn interrupted_readback_retains_sources_then_restart_verifies_and_retires_
     .await
     .unwrap();
 
-    assert!(!index.exists());
+    let remaining: Value = serde_json::from_slice(&fs::read(&index).unwrap()).unwrap();
+    assert_eq!(remaining, json!({"version": 1, "sessions": [unsupported]}));
     assert_eq!(remote.lock().unwrap().writes, 1);
     assert_eq!(
         restarted.chat("project", "chat").unwrap().remote.payload,
@@ -196,7 +199,8 @@ async fn interrupted_readback_retains_sources_then_restart_verifies_and_retires_
     )
     .await
     .unwrap();
-    assert!(!index.exists());
+    let remaining: Value = serde_json::from_slice(&fs::read(&index).unwrap()).unwrap();
+    assert_eq!(remaining, json!({"version": 1, "sessions": [unsupported]}));
 }
 
 #[test]
@@ -257,6 +261,9 @@ fn cleanup_preserves_foreign_unmapped_unknown_and_malformed_sources() {
     catalog.migration.verified.insert("project/chat".into());
     let mut unknown = serde_json::to_value(session("future")).unwrap();
     unknown["futureField"] = json!("retain");
+    let unsupported_harness = json!({
+        "id": "preview", "harness": "future_test_harness", "providerDetails": {"opaque": true}
+    });
     let foreign = session("foreign");
     let unmapped = session("unmapped");
     let rows = vec![
@@ -264,15 +271,18 @@ fn cleanup_preserves_foreign_unmapped_unknown_and_malformed_sources() {
         serde_json::to_value(&foreign).unwrap(),
         serde_json::to_value(&unmapped).unwrap(),
         unknown,
+        unsupported_harness.clone(),
     ];
     fs::write(&path, json!({"version": 1, "sessions": rows}).to_string()).unwrap();
 
     cleanup_index(root.path(), &catalog).unwrap();
     let remaining: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-    assert_eq!(remaining["sessions"].as_array().unwrap().len(), 3);
+    assert_eq!(remaining["sessions"].as_array().unwrap().len(), 4);
     assert_eq!(remaining["sessions"][0]["id"], "foreign");
     assert_eq!(remaining["sessions"][1]["id"], "unmapped");
     assert_eq!(remaining["sessions"][2]["futureField"], "retain");
+
+    assert_eq!(remaining["sessions"][3], unsupported_harness);
 
     fs::write(&path, "{damaged").unwrap();
     assert!(cleanup_index(root.path(), &catalog).is_err());

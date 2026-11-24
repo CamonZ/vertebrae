@@ -3,6 +3,7 @@ use crate::local_chat::{
     LocalChatAnnotation, LocalChatAnnotationStore, LocalChatHarnessKind, LocalChatTurnSettings,
 };
 use crate::types::PermissionMode;
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -251,11 +252,22 @@ pub struct LoadLocalChatSessionReplayOutput {
     pub has_more: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct LocalChatSessionIndexFile {
-    version: u32,
+#[derive(Default)]
+struct LocalChatSessionIndex {
     sessions: Vec<LocalChatSessionIndexEntry>,
+    // Future or preview harness rows stay local and round-trip as opaque JSON.
+    unsupported: Vec<Value>,
+}
+
+impl LocalChatSessionIndex {
+    fn session_ids(&self) -> std::collections::HashSet<String> {
+        self.sessions
+            .iter()
+            .map(|session| session.id.as_str())
+            .chain(self.unsupported.iter().filter_map(|row| row["id"].as_str()))
+            .map(str::to_owned)
+            .collect()
+    }
 }
 
 fn local_chat_session_index_path() -> Result<PathBuf, CommandError> {
@@ -625,45 +637,66 @@ pub async fn infer_local_chat_session_title(
 
 /// Read the session index at `path`. Annotation files are swept only after
 /// the index was read and decoded successfully.
-fn read_session_index(path: &Path) -> Result<Vec<LocalChatSessionIndexEntry>, CommandError> {
-    if !path.exists() {
-        return Ok(Vec::new());
-    }
-
-    let raw = fs::read_to_string(path).map_err(|error| CommandError {
-        message: format!("Failed to read local chat session index: {}", error),
-    })?;
+fn read_session_index(path: &Path) -> Result<LocalChatSessionIndex, CommandError> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(LocalChatSessionIndex::default());
+        }
+        Err(error) => {
+            return Err(CommandError {
+                message: format!("Failed to read local chat session index: {error}"),
+            });
+        }
+    };
     if raw.trim().is_empty() {
-        return Ok(Vec::new());
+        return Ok(LocalChatSessionIndex::default());
     }
 
-    let value = serde_json::from_str::<serde_json::Value>(&raw).map_err(|error| CommandError {
-        message: format!("Failed to parse local chat session index: {}", error),
+    let value = serde_json::from_str::<Value>(&raw).map_err(|error| CommandError {
+        message: format!("Failed to parse local chat session index: {error}"),
     })?;
+    let rows = match value {
+        Value::Array(rows) => rows,
+        Value::Object(mut fields) => {
+            if fields
+                .keys()
+                .any(|key| key != "version" && key != "sessions")
+            {
+                return Err(CommandError {
+                    message: "Unsupported local chat session index fields; source retained".into(),
+                });
+            }
+            if fields.remove("version").and_then(|v| v.as_u64()) != Some(1) {
+                return Err(CommandError {
+                    message: "Unsupported local chat session index version; source retained".into(),
+                });
+            }
+            match fields.remove("sessions") {
+                Some(Value::Array(rows)) => rows,
+                _ => return Err(invalid_session_index()),
+            }
+        }
+        _ => return Err(invalid_session_index()),
+    };
 
-    if value.as_object().is_some_and(|fields| {
-        fields
-            .keys()
-            .any(|key| key != "version" && key != "sessions")
-    }) {
-        return Err(CommandError {
-            message: "Unsupported local chat session index fields; source retained".into(),
-        });
-    }
-    let rows = if value.is_array() {
-        value.as_array()
-    } else {
-        value.get("sessions").and_then(serde_json::Value::as_array)
-    }
-    .ok_or_else(|| CommandError {
-        message: "Invalid local chat session index; source retained".into(),
-    })?;
+    let mut index = LocalChatSessionIndex::default();
     for row in rows {
-        let session: LocalChatSessionIndexEntry =
-            serde_json::from_value(row.clone()).map_err(|_| CommandError {
-                message: "Invalid local chat session metadata; source retained".into(),
-            })?;
-        let known = serde_json::to_value(session).expect("session serialization");
+        // Only a string discriminant unknown to this build is forward-compatible.
+        // A missing, null, or malformed harness still fails typed decoding below.
+        let harness = &row["harness"];
+        if harness.as_str().is_some_and(|name| !name.trim().is_empty())
+            && LocalChatHarnessKind::deserialize(harness).is_err()
+        {
+            let id = row["id"].as_str().ok_or_else(invalid_session_metadata)?;
+            crate::local_chat::annotations::validate_session_id(id)
+                .map_err(|_| invalid_session_metadata())?;
+            index.unsupported.push(row);
+            continue;
+        }
+        let session = LocalChatSessionIndexEntry::deserialize(&row)
+            .map_err(|_| invalid_session_metadata())?;
+        let known = serde_json::to_value(&session).expect("session serialization");
         if row
             .as_object()
             .is_none_or(|fields| fields.keys().any(|key| known.get(key).is_none()))
@@ -672,27 +705,28 @@ fn read_session_index(path: &Path) -> Result<Vec<LocalChatSessionIndexEntry>, Co
                 message: "Unsupported local chat session fields; source retained".into(),
             });
         }
+        index.sessions.push(session);
     }
 
-    let sessions = if value.is_array() {
-        serde_json::from_value::<Vec<LocalChatSessionIndexEntry>>(value)
-    } else {
-        let index = serde_json::from_value::<LocalChatSessionIndexFile>(value).map_err(|_| {
-            CommandError {
-                message: "Failed to decode local chat session index".into(),
-            }
-        })?;
-        if index.version != 1 {
-            return Err(CommandError {
-                message: "Unsupported local chat session index version; source retained".into(),
-            });
-        }
-        Ok(index.sessions)
+    if !index.unsupported.is_empty() {
+        log::warn!(
+            "[ChatCatalogSync] retained {} local index entries with unsupported harnesses",
+            index.unsupported.len()
+        );
     }
-    .map_err(|error| CommandError {
-        message: format!("Failed to decode local chat session index: {error}"),
-    })?;
-    Ok(sessions)
+    Ok(index)
+}
+
+fn invalid_session_index() -> CommandError {
+    CommandError {
+        message: "Invalid local chat session index; source retained".into(),
+    }
+}
+
+fn invalid_session_metadata() -> CommandError {
+    CommandError {
+        message: "Invalid local chat session metadata; source retained".into(),
+    }
 }
 
 #[cfg(test)]
@@ -701,9 +735,9 @@ async fn read_session_index_and_sweep(
     annotation_store: &LocalChatAnnotationStore,
     local_chat_manager: &LocalChatSessionManager,
 ) -> Result<Vec<LocalChatSessionIndexEntry>, CommandError> {
-    let sessions = read_session_index(path)?;
-    sweep_orphaned_annotations(path, annotation_store, local_chat_manager, &sessions).await;
-    Ok(sessions)
+    let index = read_session_index(path)?;
+    sweep_orphaned_annotations(path, annotation_store, local_chat_manager, &index).await;
+    Ok(index.sessions)
 }
 
 /// Load the app-managed local chat metadata index from local state only.
@@ -758,13 +792,13 @@ async fn read_index_for_load(
 ) -> Result<(std::fs::File, Vec<LocalChatSessionIndexEntry>), CommandError> {
     let path = local_chat_session_index_path()?;
     let index_file = super::chat_catalog::lock_index(&path).await?;
-    let sessions = read_session_index(&path)?;
+    let index = read_session_index(&path)?;
     // The legacy index is not the complete session set after migration. In
     // backend mode annotation deletion is explicit, never inferred from it.
     if state.sacrum_client.read().await.is_none() {
-        sweep_orphaned_annotations(&path, annotation_store, local_chat_manager, &sessions).await;
+        sweep_orphaned_annotations(&path, annotation_store, local_chat_manager, &index).await;
     }
-    Ok((index_file, sessions))
+    Ok((index_file, index.sessions))
 }
 
 /// Attach Codex transcript lineage so history can group without opening chats.
@@ -839,47 +873,34 @@ pub async fn save_local_chat_session_index(
     super::chat_catalog::preserve_sidecars(
         &state,
         &mut input.sessions,
-        previous,
+        previous.sessions,
         &input.deleted_ids,
     )
     .await?;
 
-    if super::chat_catalog::save_pending_legacy(&state, &path, input.sessions.clone()).await? {
+    let index = LocalChatSessionIndex {
+        sessions: input.sessions,
+        unsupported: previous.unsupported,
+    };
+    if super::chat_catalog::save_pending_legacy(&state, &path, &index.sessions, &index.unsupported)
+        .await?
+    {
         return Ok(());
     }
 
-    write_session_index_and_sweep(
-        &path,
-        input.sessions,
-        &annotation_store,
-        &local_chat_manager,
-    )
-    .await
+    write_session_index_and_sweep(&path, index, &annotation_store, &local_chat_manager).await
 }
 
 /// Atomically replace the session index at `path`, then sweep annotation
 /// files of sessions it no longer lists.
 async fn write_session_index_and_sweep(
     path: &Path,
-    sessions: Vec<LocalChatSessionIndexEntry>,
+    index: LocalChatSessionIndex,
     annotation_store: &LocalChatAnnotationStore,
     local_chat_manager: &LocalChatSessionManager,
 ) -> Result<(), CommandError> {
-    let index = LocalChatSessionIndexFile {
-        version: 1,
-        sessions,
-    };
-    let serialized = serde_json::to_string_pretty(&index).map_err(|error| CommandError {
-        message: format!("Failed to serialize local chat session index: {}", error),
-    })?;
-    let tmp_path = path.with_extension("json.tmp");
-    fs::write(&tmp_path, serialized).map_err(|error| CommandError {
-        message: format!("Failed to write local chat session index: {}", error),
-    })?;
-    fs::rename(&tmp_path, path).map_err(|error| CommandError {
-        message: format!("Failed to replace local chat session index: {}", error),
-    })?;
-    sweep_orphaned_annotations(path, annotation_store, local_chat_manager, &index.sessions).await;
+    super::chat_catalog::write_legacy_index(path, index.sessions.iter(), &index.unsupported)?;
+    sweep_orphaned_annotations(path, annotation_store, local_chat_manager, &index).await;
     Ok(())
 }
 
@@ -890,7 +911,7 @@ async fn sweep_orphaned_annotations(
     index_path: &Path,
     annotation_store: &LocalChatAnnotationStore,
     local_chat_manager: &LocalChatSessionManager,
-    sessions: &[LocalChatSessionIndexEntry],
+    index: &LocalChatSessionIndex,
 ) {
     // Once any account has catalog state, the legacy index no longer lists
     // every session. This also applies when the backend is temporarily unconfigured.
@@ -902,10 +923,7 @@ async fn sweep_orphaned_annotations(
         _ => return,
     }
 
-    let known_session_ids = sessions
-        .iter()
-        .map(|session| session.id.clone())
-        .collect::<std::collections::HashSet<_>>();
+    let known_session_ids = index.session_ids();
     let live_session_ids = local_chat_manager.live_chat_session_ids().await;
     let store = annotation_store.clone();
     let swept = tauri::async_runtime::spawn_blocking(move || {
@@ -1617,9 +1635,17 @@ mod tests {
         let index = dir.path().join("local-chat-session-index.json");
         fs::write(dir.path().join("chat-catalog-ownership.json"), "{}").unwrap();
 
-        write_session_index_and_sweep(&index, vec![index_entry("legacy")], &store, &manager)
-            .await
-            .unwrap();
+        write_session_index_and_sweep(
+            &index,
+            LocalChatSessionIndex {
+                sessions: vec![index_entry("legacy")],
+                ..Default::default()
+            },
+            &store,
+            &manager,
+        )
+        .await
+        .unwrap();
         read_session_index_and_sweep(&index, &store, &manager)
             .await
             .unwrap();
@@ -1647,6 +1673,74 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unsupported_harness_rows_survive_supported_edits_and_annotation_sweeps() {
+        let dir = tempdir().unwrap();
+        let (store, annotations) =
+            annotation_fixture(dir.path(), &["claude", "future-chat", "orphan"]);
+        let manager = LocalChatSessionManager::with_harnesses_for_tests(Vec::new());
+        let path = dir.path().join("local-chat-session-index.json");
+        let claude = index_entry("claude");
+        let mut codex = index_entry("codex");
+        codex.harness = LocalChatHarnessKind::Codex;
+        let unsupported = serde_json::json!({
+            "id": "future-chat",
+            "harness": "future_test_harness",
+            "futureField": {"provider": ["opaque", null]}
+        });
+        let rows = serde_json::json!([claude, unsupported, codex]);
+        for document in [
+            rows.clone(),
+            serde_json::json!({"version": 1, "sessions": rows}),
+        ] {
+            fs::write(&path, document.to_string()).unwrap();
+            let visible = read_session_index_and_sweep(&path, &store, &manager)
+                .await
+                .unwrap();
+            assert_eq!(
+                visible.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+                ["claude", "codex"]
+            );
+            assert!(annotations.join("future-chat.jsonl").exists());
+            assert!(!annotations.join("orphan.jsonl").exists());
+
+            let mut index = read_session_index(&path).unwrap();
+            index.sessions[0].label = "Edited".into();
+            write_session_index_and_sweep(&path, index, &store, &manager)
+                .await
+                .unwrap();
+
+            let reloaded = read_session_index(&path).unwrap();
+            assert_eq!(reloaded.sessions[0].label, "Edited");
+            assert_eq!(reloaded.unsupported, [unsupported.clone()]);
+            assert!(annotations.join("future-chat.jsonl").exists());
+        }
+    }
+
+    #[test]
+    fn malformed_harness_or_unsupported_identity_retains_the_source() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("local-chat-session-index.json");
+        let mut missing_harness = serde_json::to_value(index_entry("chat")).unwrap();
+        missing_harness.as_object_mut().unwrap().remove("harness");
+        for row in [
+            missing_harness,
+            serde_json::json!({"id": "chat", "harness": null}),
+            serde_json::json!({"id": "chat", "harness": 7}),
+            serde_json::json!({"id": "chat", "harness": ""}),
+            serde_json::json!({"harness": "future_test_harness"}),
+            serde_json::json!({"id": 7, "harness": "future_test_harness"}),
+        ] {
+            let source = serde_json::json!({"version": 1, "sessions": [row]}).to_string();
+            fs::write(&path, &source).unwrap();
+            assert_eq!(
+                read_session_index(&path).err().unwrap().message,
+                "Invalid local chat session metadata; source retained"
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), source);
+        }
+    }
+
+    #[tokio::test]
     async fn reading_and_saving_the_index_sweep_annotations_of_unknown_sessions() {
         let dir = tempdir().unwrap();
         let (store, annotations) = annotation_fixture(dir.path(), &["kept", "dropped", "later"]);
@@ -1655,7 +1749,10 @@ mod tests {
 
         write_session_index_and_sweep(
             &index,
-            vec![index_entry("kept"), index_entry("later")],
+            LocalChatSessionIndex {
+                sessions: vec![index_entry("kept"), index_entry("later")],
+                ..Default::default()
+            },
             &store,
             &manager,
         )
