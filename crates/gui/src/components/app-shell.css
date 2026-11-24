@@ -52,6 +52,12 @@
   gap: 5px;
   color: var(--fg-mute);
 }
+/* The resting colour above sits in a later layer than \`.ctl\`'s hover and
+   open states, so restate them here; an unread bell keeps its own tone. */
+.notifications-trigger:hover,
+.notifications-trigger[aria-expanded="true"] {
+  color: var(--fg);
+}
 .notifications-trigger[data-unread] {
   color: var(--fg-soft);
 }

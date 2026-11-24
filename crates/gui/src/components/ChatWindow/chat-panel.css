@@ -750,91 +750,6 @@
   line-height: 13px;
   text-align: center;
 }
-/* Overflow (`⋯`) menu — secondary pane actions live here so headers stay
-   at a few visible controls. Popover sits on bg-2 with a hairline; no
-   shadow elevation (DESIGN.md). */
-.ovf {
-  position: relative;
-  display: inline-flex;
-}
-.ovf-menu {
-  position: absolute;
-  top: calc(100% + var(--s-1));
-  right: 0;
-  z-index: 40;
-  min-width: 13rem;
-  padding: var(--s-1);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-lg);
-  background: var(--bg-2);
-}
-.ovf-item {
-  display: flex;
-  width: 100%;
-  align-items: center;
-  gap: var(--s-2);
-  padding: 6px var(--s-2);
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--fg-soft);
-  font-family: var(--sans);
-  font-size: var(--text-12);
-  line-height: 1.2;
-  text-align: left;
-  cursor: pointer;
-}
-.ovf-item:hover:not(:disabled),
-.ovf-item:focus-visible {
-  background: var(--bg-4);
-  color: var(--fg);
-}
-.ovf-item:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
-.ovf-item.danger {
-  color: var(--err);
-}
-.ovf-item.danger:hover:not(:disabled),
-.ovf-item.danger:focus-visible {
-  background: var(--err-wash);
-  color: var(--err);
-}
-.ovf-icon {
-  display: inline-flex;
-  width: 16px;
-  flex-shrink: 0;
-  justify-content: center;
-  color: var(--fg-mute);
-}
-.ovf-label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ovf-badge {
-  min-width: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: var(--accent-wash);
-  color: var(--accent);
-  font-family: var(--mono);
-  font-size: var(--text-10);
-  line-height: 16px;
-  text-align: center;
-}
-.ovf-check {
-  color: var(--accent);
-  font-size: var(--text-11);
-}
-.ovf-sep {
-  height: 1px;
-  margin: var(--s-1) var(--s-1h);
-  background: color-mix(in oklch, var(--fg) 8%, transparent);
-}
 .hc-panel .hc-title-spinner {
   display: inline-flex;
   flex-shrink: 0;
@@ -1214,41 +1129,6 @@
   color: var(--fg-mute);
   font-size: var(--text-11);
 }
-.app-toggle {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  width: 26px;
-  height: 16px;
-  padding: 2px;
-  border: 1px solid color-mix(in oklch, var(--fg) 20%, transparent);
-  border-radius: 999px;
-  background: color-mix(in oklch, var(--fg) 5%, transparent);
-  cursor: pointer;
-}
-.app-toggle {
-  transition:
-    background-color 140ms ease,
-    border-color 140ms ease;
-}
-.app-toggle > span {
-  transition:
-    transform 140ms ease,
-    background-color 140ms ease;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--fg-mute);
-}
-.app-toggle[aria-checked="true"] {
-  background: color-mix(in oklch, var(--fg) 18%, transparent);
-  border-color: color-mix(in oklch, var(--fg) 35%, transparent);
-}
-.app-toggle[aria-checked="true"] > span {
-  transform: translateX(10px);
-  background: var(--fg);
-}
-
 .hc-panel .hc-mini-history-body {
   min-width: 0;
   min-height: 0;

@@ -129,7 +129,11 @@ export function Dropdown({
       const preferred = placement === "up" ? above : below;
       const other = placement === "up" ? below : above;
       menu.style.removeProperty("--dd-available-height");
-      const flip = preferred < menu.offsetHeight && other > preferred;
+      // The menu sits a gap away from its trigger; it fits only if that gap
+      // and its height both fit in the preferred space.
+      const box = menu.getBoundingClientRect();
+      const gap = Math.max(0, menu.hasAttribute("data-up") ? anchor.top - box.bottom : box.top - anchor.bottom);
+      const flip = preferred - gap < menu.offsetHeight && other > preferred;
       menu.toggleAttribute("data-up", flip ? placement === "down" : placement === "up");
       menu.style.setProperty("--dd-available-height", `${Math.max(0, flip ? other : preferred)}px`);
     };
