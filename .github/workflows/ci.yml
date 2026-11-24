@@ -128,7 +128,7 @@ jobs:
           cache-dependency-path: crates/gui/package-lock.json
       - run: npm ci
         working-directory: crates/gui
-      - run: npm run test:sidecars && npm run lint && npm run typecheck
+      - run: npm run test:sidecars && npm run lint && npm run lint:css && npm run typecheck
         working-directory: crates/gui
       - name: Test acceptance orchestration contracts
         run: python3 -m unittest discover -s scripts/tests -p 'test_acceptance*.py'

@@ -1,0 +1,147 @@
+/* Typeface preview cards (Settings → Appearance). Each card carries its own
+   data-type, so it renders in its pairing regardless of the active one. */
+.type-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--s-2);
+}
+.type-card {
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  min-width: 0;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid var(--ctl-line);
+  border-radius: var(--r-lg);
+  background-color: color-mix(in oklch, var(--fg) 2%, transparent);
+  color: var(--fg-soft);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.type-card:hover {
+  border-color: var(--ctl-line-hover);
+  background-color: color-mix(in oklch, var(--fg) 4%, transparent);
+}
+.type-card[aria-checked="true"] {
+  border-color: color-mix(in oklch, var(--accent) 45%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
+}
+
+.type-card-display {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  line-height: 1.1;
+  letter-spacing: var(--display-tracking);
+  color: var(--fg);
+}
+
+/* Settings tree: grouped pages, the current page expanded to its sections. */
+.split-nav nav.settings-tree {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.settings-tree ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-tree-group-label {
+  margin: 0 0 var(--s-1);
+  padding: 0 var(--s-3);
+  font-family: var(--font-sans);
+  font-size: var(--text-11);
+  font-weight: 600;
+  color: var(--fg-faint);
+}
+.settings-tree-sections {
+  position: relative;
+  margin: 2px 0 var(--s-1) var(--s-3) !important;
+  padding-left: var(--s-2) !important;
+  border-left: 1px solid color-mix(in oklch, var(--fg) 10%, transparent);
+}
+.settings-tree-section {
+  display: block;
+  width: 100%;
+  padding: 4px var(--s-2);
+  border-radius: var(--r-sm);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  text-align: left;
+  color: var(--fg-mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    color var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease);
+}
+.settings-tree-section[data-depth="2"] {
+  padding-left: calc(var(--s-2) + 12px);
+  font-size: 12px;
+}
+.settings-tree-section:hover {
+  color: var(--fg);
+  background-color: color-mix(in oklch, var(--fg) 4%, transparent);
+}
+.settings-tree-section[aria-current="location"] {
+  color: var(--fg);
+}
+.settings-tree-section[aria-current="location"]::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  width: 2px;
+  height: 18px;
+  margin-top: 1px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+/* Settings › Appearance › Accent: one swatch per accent. Each button carries
+   data-accent, so its chip shows that accent (ACCENTS below). */
+.accent-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px;
+}
+.accent-swatch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-1);
+  color: var(--color-fg-soft);
+  font-size: 13px;
+  text-align: left;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+.accent-swatch:hover {
+  border-color: var(--color-line-strong);
+}
+.accent-swatch[aria-checked="true"] {
+  border-color: var(--color-accent);
+  background: var(--color-accent-wash);
+  color: var(--color-fg);
+}
+
+.accent-swatch-chip {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--color-accent);
+  box-shadow: inset 0 0 0 1px var(--hearth-accent-swatch-shadow);
+}

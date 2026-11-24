@@ -1,0 +1,71 @@
+/* =============================================================================
+   TAURI WINDOW CONTROLS
+   ============================================================================= */
+.titlebar {
+  -webkit-app-region: drag;
+}
+
+.titlebar-button {
+  -webkit-app-region: no-drag;
+}
+
+/* =============================================================================
+   NEURAL GRID BACKGROUND
+   Hearth is flat — the dot pattern is intentionally suppressed.
+   Class kept as a no-op so existing call sites keep compiling.
+   ============================================================================= */
+.neural-grid {
+  background-image: none;
+}
+
+/* ── Depth: content sheet on a canvas ───────────────────────────────────────
+   The titlebar and rail sit on the darker canvas; the routed page is a sheet
+   resting on it — inset from the window edge, rounded, with a lit top edge
+   and a soft shadow. Floating side panels then read as a third, nearer layer.
+   Inside the sheet `--bg` is the sheet tone, so page backgrounds follow. */
+.app-sheet {
+  --color-bg: var(--hearth-sheet-dark-backdrop);
+  --bg: var(--color-bg);
+  margin: 0 6px 6px 0;
+  border: 1px solid color-mix(in oklch, var(--fg) 7%, transparent);
+  border-radius: var(--r-lg);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, var(--fg) 5%, transparent) inset,
+    0 0 0 1px var(--hearth-black-40),
+    0 18px 40px -24px var(--hearth-black-90);
+}
+.light .app-sheet {
+  --color-bg: var(--hearth-sheet-light-backdrop);
+  --bg: var(--color-bg);
+  border-color: color-mix(in oklch, var(--fg) 10%, transparent);
+  box-shadow:
+    0 1px 0 var(--hearth-white-90) inset,
+    0 1px 2px var(--hearth-warm-ink-8),
+    0 18px 40px -26px var(--hearth-warm-ink-35);
+}
+
+/* Activity (notifications) trigger: a quiet header control with a bell; an
+   unread count rides as a small accent badge instead of a boxed "N new". */
+.notifications-trigger {
+  height: 26px;
+  padding: 0 7px;
+  gap: 5px;
+  color: var(--fg-mute);
+}
+.notifications-trigger[data-unread] {
+  color: var(--fg-soft);
+}
+.notifications-trigger-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background-color: color-mix(in oklch, var(--accent) 18%, transparent);
+  color: var(--accent);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

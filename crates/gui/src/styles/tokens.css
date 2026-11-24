@@ -1,0 +1,1021 @@
+/* =============================================================================
+   VERTEBRAE · HEARTH — Mulberry and rose identity
+   Rose quartz accent on charcoal surfaces, serif moments via Newsreader, mono
+   via JetBrains.
+   Seven step types: llm_inference / structured_inference / route /
+   human_input / wait_children / stop / finish.
+   Tokens are layered: Hearth primitives (--color-*, --spacing-*, --radius-*)
+   are the single source of truth and own all values; the docs/design v2 adapter
+   below re-exports them under the compact prototype vocabulary (--bg, --fg,
+   --s-*, --r-*) so v2 React ports can consume the design system directly.
+   ============================================================================= */
+
+@theme {
+  /* ---------------------------------------------------------------------------
+     HEARTH PRIMITIVES — neutral dark by default. .light overrides below.
+     --------------------------------------------------------------------------- */
+
+  /* Surfaces — neutral charcoal, five steps from near-black to raised. */
+  --color-bg: #0a0a0a;
+  /* Canvas: the shell (titlebar + rail) the content sheet rests on. */
+  --color-canvas: #050505;
+  --color-bg-1: #111111;
+  --color-bg-2: #161616;
+  --color-bg-3: #1f1f1f;
+  --color-bg-4: #2a2a2a;
+  /* Hover wash — a faint off-white veil over a surface. Real themed token (see
+     the .light override below), not an alias. */
+  --color-bg-hover: rgba(244, 241, 236, 0.04);
+  /* Stronger hover for RAISED surfaces (cards, chips, composer controls,
+     header icon buttons, tabs): ~8% fg tint. --color-bg-hover stays for list
+     rows on recessed/page surfaces. */
+  --color-bg-hover-raised: color-mix(in oklch, var(--color-fg) 8%, transparent);
+
+  /* Chat workspace pane hierarchy (sidebar < well < page): recessed = Projects
+     sidebar, well = Changes code panel, page = the chat column, one step up.
+     Gutters between them show the canvas. */
+  --surface-recessed: var(--color-bg);
+  --surface-well: var(--color-bg);
+  --surface-page: var(--color-bg-2);
+  /* Lit 1px top edge on raised/floating surfaces (== .hc-launch edge). */
+  --edge-lit: color-mix(in oklch, var(--color-fg) 16%, transparent);
+  /* --shadow-1 as a drop-shadow() filter, for SVG shapes box-shadow can't lift. */
+  --drop-1: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.4));
+
+
+  /* Persistent selection uses a raised neutral surface and an accent indicator. */
+  --color-selection: #1f1f1f;
+  /* Text selection is an accent tint: the neutral row-selection surface is
+     nearly invisible behind text on the charcoal/cream panels. */
+  --color-text-selection: oklch(0.78 0.11 345 / 0.3);
+
+  /* Text — off-white neutrals, five steps to ghost. */
+  --color-fg: #f4f1ec;
+  --color-fg-soft: #b8b5af;
+  --color-fg-mute: #6f6c66;
+  --color-fg-faint: #4a4742;
+  --color-fg-ghost: #2a2a2a;
+
+  /* Lines — neutral steps shared with the surface ramp. */
+  --color-line: #1f1f1f;
+  --color-line-soft: #161616;
+  --color-line-strong: #2a2a2a;
+  /* Semantic aliases for the `border-border` / `border-border-focus` (and
+     `ring-border-focus`) utilities. Resolve through the line tokens so they
+     follow the .light override automatically; without them Tailwind v4 falls
+     back to currentColor (bright fg) and borders read white. */
+  --color-border: var(--color-line);
+  --color-border-focus: var(--color-line-strong);
+
+  /* Accent (default Orchid; others via html[data-accent], see ACCENTS at the
+     end of this file). Selection surfaces stay neutral, with the accent
+     reserved for markers, primary actions and small washes. */
+  --color-accent: oklch(0.78 0.11 345);
+  --color-accent-deep: oklch(0.85 0.083 345);
+  --color-accent-mute: oklch(0.69 0.099 345);
+  --color-accent-wash: oklch(0.27 0.031 345);
+  --color-accent-glow: oklch(0.78 0.11 345 / 0.08);
+
+  /* Action roles keep filled controls readable independently of surface/text
+     tokens. Both the legacy .btn and shared React controls consume these. */
+  --color-primary: var(--color-accent);
+  --color-primary-hover: var(--color-accent-deep);
+  --color-primary-pressed: oklch(0.69 0.099 345);
+  --color-on-primary: #0a0a0a;
+  --color-disabled-bg: #1f1f1f;
+  --color-disabled-fg: #b8b5af;
+  --color-disabled-border: #2a2a2a;
+
+  /* User turns have their own reading surface, distinct from neutral replies
+     and primary action fills. Shared by main and inline conversations. */
+  --color-user-message-bg: #1f1f1f;
+  --color-user-message-fg: #f4f1ec;
+  --color-user-message-border: #1f1f1f;
+  --color-user-message-label: #6f6c66;
+
+  /* Status — four semantic states, each with a wash background variant */
+  --color-ok: oklch(0.78 0.15 145);
+  --color-ok-wash: oklch(0.32 0.1 145);
+  --color-warn: oklch(0.78 0.15 75);
+  --color-warn-wash: oklch(0.32 0.069 70);
+  --color-err: oklch(0.72 0.174 25);
+  --color-err-wash: oklch(0.32 0.12 25);
+  --color-info: oklch(0.78 0.13 220);
+  --color-info-wash: oklch(0.32 0.058 220);
+  /* Readable text on status washes; distinct from decorative status marks. */
+  --color-ok-fg: var(--color-ok);
+  --color-warn-fg: var(--color-warn);
+
+  /* Step kinds, each with bar / wash / fg variants.
+     bar  = top accent strip on a step node
+     wash = subtle background tint on tinted surfaces
+     fg   = readable foreground on the wash background */
+  --color-step-llm: oklch(0.72 0.151 285); /* violet — agent runs code */
+  --color-step-llm-wash: oklch(0.32 0.12 285);
+  --color-step-llm-fg: oklch(0.82 0.093 285);
+
+  --color-step-structured: oklch(
+    0.78 0.13 200
+  ); /* teal — structured inference */
+  --color-step-structured-wash: oklch(0.32 0.054 200);
+  --color-step-structured-fg: oklch(0.85 0.12 200);
+
+  --color-step-route: oklch(0.82 0.18 135); /* lime — routing decision */
+  --color-step-route-wash: oklch(0.32 0.093 135);
+  --color-step-route-fg: oklch(0.88 0.16 135);
+
+  --color-step-human: oklch(0.8 0.15 70); /* warm amber — human acts */
+  --color-step-human-wash: oklch(0.32 0.069 70);
+  --color-step-human-fg: oklch(0.85 0.117 70);
+
+  --color-step-wait: oklch(0.72 0.08 70); /* muted amber — paused on children */
+  --color-step-wait-wash: oklch(0.3 0.05 70);
+  --color-step-wait-fg: oklch(0.79 0.08 70);
+
+  --color-step-stop: oklch(
+    0.56 0.07 65
+  ); /* dark warm neutral — inactive boundary */
+  --color-step-stop-wash: oklch(0.26 0.03 65);
+  --color-step-stop-fg: oklch(0.68 0.07 65);
+
+  --color-step-finish: oklch(0.78 0.15 145); /* green — completes the task */
+  --color-step-finish-wash: oklch(0.32 0.1 145);
+  --color-step-finish-fg: oklch(0.88 0.14 145);
+
+  /* ---------------------------------------------------------------------------
+     TYPOGRAPHY — three stacks
+     --------------------------------------------------------------------------- */
+  --font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-sans: "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+  /* Type scale — matches docs/design/tokens.css */
+  --text-eyebrow: 0.6875rem; /* 11px */
+  --text-2xs: 0.625rem; /* 10px */
+  --text-xs: 0.75rem; /* 12px */
+  --text-sm: 0.875rem; /* 14px */
+  --text-base: 0.9375rem; /* 15px — Hearth body */
+  --text-lg: 1rem; /* 16px */
+  --text-xl: 1.125rem; /* 18px */
+  --text-2xl: 1.25rem; /* 20px */
+  --text-3xl: 1.5rem; /* 24px */
+  --text-4xl: 2.25rem; /* 36px — h2 */
+  --text-5xl: 3.5rem; /* 56px — h1 */
+  --text-13: 0.8125rem; /* 13px — promoted so Tailwind emits text-13 utility */
+  --text-display: clamp(
+    4.5rem,
+    11vw,
+    8.75rem
+  ); /* rem so it breathes with root font-size */
+
+  /* letter-spacing scale — collapses the hardcoded 0.01/0.04/0.08/0.16em variants */
+  --tracking-tight: -0.01em;
+  --tracking-wide: 0.04em;
+  --tracking-wider: 0.08em;
+  --tracking-eyebrow: 0.16em;
+  /* line-height scale */
+  --leading-tight: 1.35;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.6;
+
+  /* ---------------------------------------------------------------------------
+     SPACING — 4px base unit, Hearth scale
+     --------------------------------------------------------------------------- */
+  --spacing-1: 0.25rem; /* 4 */
+  --spacing-2: 0.5rem; /* 8 */
+  --spacing-3: 0.75rem; /* 12 */
+  --spacing-4: 1rem; /* 16 */
+  --spacing-5: 1.25rem; /* 20 */
+  --spacing-6: 1.5rem; /* 24 */
+  --spacing-7: 1.75rem; /* 28 */
+  --spacing-8: 2rem; /* 32 */
+  --spacing-10: 2.5rem; /* 40 */
+  --spacing-12: 3rem; /* 48 */
+  --spacing-16: 4rem; /* 64 */
+  --spacing-20: 5rem; /* 80 */
+  --spacing-24: 6rem; /* 96 */
+
+  /* ---------------------------------------------------------------------------
+     RADII — between sharp Console and soft Imprint
+     --------------------------------------------------------------------------- */
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  /* ---------------------------------------------------------------------------
+     ELEVATION — dark theme: contact + ambient shadow with a ring on the higher
+     tiers. Matches docs/design/tokens.css (plain shadows, no inset top-light).
+     --------------------------------------------------------------------------- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--color-line-strong);
+  --shadow-3:
+    0 24px 56px rgba(0, 0, 0, 0.6), 0 0 0 1px var(--color-line-strong);
+  --shadow-glow: 0 0 20px var(--color-accent-glow);
+  --shadow-glow-sm: 0 0 10px var(--color-accent-glow);
+  --shadow-inner-glow: inset 0 0 20px var(--color-accent-glow);
+
+  /* ---------------------------------------------------------------------------
+     MOTION
+     --------------------------------------------------------------------------- */
+  --ease-default: cubic-bezier(0.16, 1, 0.3, 1);
+  --t-fast: 100ms;
+  --t-base: 180ms;
+  --t-slow: 280ms;
+  --t-pulse: 2s;
+}
+
+@layer hearth.tokens {
+  /* Fixed colors used by surface, shadow, and provider-mark rules. */
+  :root {
+    --hearth-sheet-dark-backdrop: #0c0c0c;
+    --hearth-sheet-light-backdrop: #fbf8f1;
+    --hearth-claude-mark: #dd7354;
+    --hearth-codex-cloud: #4f73ff;
+    --hearth-codex-cloud-shadow: #8aa7ff;
+    --hearth-codex-cloud-edge: #9eb4ff;
+    --hearth-codex-cloud-highlight: #b5a7ff;
+    --hearth-codex-glyph: #f7fbff;
+    --hearth-association-menu-shadow: #0004;
+    --hearth-worktree-addition-fallback: #6fbf73;
+    --hearth-worktree-deletion-fallback: #e07979;
+    --hearth-call-diagram-addition-fallback: #68ad71;
+    --hearth-call-diagram-deletion-fallback: #e06c75;
+    --hearth-accent-swatch-shadow: rgb(0 0 0 / 0.18);
+    --hearth-worktree-menu-shadow: rgb(0 0 0 / 24%);
+    --hearth-black-25: rgba(0, 0, 0, 0.25);
+    --hearth-black-35: rgba(0, 0, 0, 0.35);
+    --hearth-black-40: rgba(0, 0, 0, 0.4);
+    --hearth-black-45: rgba(0, 0, 0, 0.45);
+    --hearth-black-50: rgba(0, 0, 0, 0.5);
+    --hearth-black-55: rgba(0, 0, 0, 0.55);
+    --hearth-black-60: rgba(0, 0, 0, 0.6);
+    --hearth-black-70: rgba(0, 0, 0, 0.7);
+    --hearth-black-75: rgba(0, 0, 0, 0.75);
+    --hearth-black-90: rgba(0, 0, 0, 0.9);
+    --hearth-white-60: rgba(255, 255, 255, 0.6);
+    --hearth-white-82: rgba(255, 255, 255, 0.82);
+    --hearth-white-90: rgba(255, 255, 255, 0.9);
+    --hearth-white-95: rgba(255, 255, 255, 0.95);
+    --hearth-warm-ink-8: rgba(68, 52, 31, 0.08);
+    --hearth-warm-ink-10: rgba(68, 52, 31, 0.1);
+    --hearth-warm-ink-18: rgba(68, 52, 31, 0.18);
+    --hearth-warm-ink-20: rgba(68, 52, 31, 0.2);
+    --hearth-warm-ink-28: rgba(68, 52, 31, 0.28);
+    --hearth-warm-ink-30: rgba(68, 52, 31, 0.3);
+    --hearth-warm-ink-32: rgba(68, 52, 31, 0.32);
+    --hearth-warm-ink-35: rgba(68, 52, 31, 0.35);
+  }
+
+  /* =============================================================================
+     DOCS/DESIGN V2 TOKEN ADAPTER
+     The v2 prototype uses compact names (--bg, --fg, --s-*, --r-*). Keep those
+     names as a thin compatibility layer over production Hearth tokens so v2 React
+     ports can consume the visual vocabulary without copying prototype CSS or
+     creating a second source of truth.
+     ============================================================================= */
+  :root {
+    /* Inline code (Settings > Appearance overrides these on the root element) */
+    --inline-code-fg: var(--color-accent);
+    --inline-code-bg: color-mix(in oklab, var(--color-bg) 80%, transparent);
+    /* Ordinary prose links (Markdown URLs, entity links) follow the Appearance
+       inline code text color, so one setting colors both. Declared on :root with
+       the inline override, so a changed setting re-resolves existing links. */
+    --link-fg: var(--inline-code-fg);
+
+    /* Surfaces */
+    --bg: var(--color-bg);
+    --bg-1: var(--color-bg-1);
+    --bg-2: var(--color-bg-2);
+    --bg-3: var(--color-bg-3);
+    --bg-4: var(--color-bg-4);
+    --selection: var(--color-selection);
+
+    /* Text */
+    --fg: var(--color-fg);
+    --fg-soft: var(--color-fg-soft);
+    --fg-mute: var(--color-fg-mute);
+    --fg-faint: var(--color-fg-faint);
+    --fg-ghost: var(--color-fg-ghost);
+
+    /* Lines */
+    --line: var(--color-line);
+    --line-soft: var(--color-line-soft);
+    --line-strong: var(--color-line-strong);
+
+    /* Accent and status */
+    --accent: var(--color-accent);
+    --accent-deep: var(--color-accent-deep);
+    --accent-mute: var(--color-accent-mute);
+    --accent-wash: var(--color-accent-wash);
+    --accent-glow: var(--color-accent-glow);
+    --ok: var(--color-ok);
+    --ok-wash: var(--color-ok-wash);
+    --warn: var(--color-warn);
+    --warn-wash: var(--color-warn-wash);
+    --err: var(--color-err);
+    --err-wash: var(--color-err-wash);
+    --info: var(--color-info);
+    --info-wash: var(--color-info-wash);
+
+    /* Step kinds */
+    --step-llm: var(--color-step-llm);
+    --step-llm-wash: var(--color-step-llm-wash);
+    --step-llm-fg: var(--color-step-llm-fg);
+    --step-structured: var(--color-step-structured);
+    --step-structured-wash: var(--color-step-structured-wash);
+    --step-structured-fg: var(--color-step-structured-fg);
+    --step-route: var(--color-step-route);
+    --step-route-wash: var(--color-step-route-wash);
+    --step-route-fg: var(--color-step-route-fg);
+    --step-human: var(--color-step-human);
+    --step-human-wash: var(--color-step-human-wash);
+    --step-human-fg: var(--color-step-human-fg);
+    --step-wait: var(--color-step-wait);
+    --step-wait-wash: var(--color-step-wait-wash);
+    --step-wait-fg: var(--color-step-wait-fg);
+    --step-stop: var(--color-step-stop);
+    --step-stop-wash: var(--color-step-stop-wash);
+    --step-stop-fg: var(--color-step-stop-fg);
+    --step-finish: var(--color-step-finish);
+    --step-finish-wash: var(--color-step-finish-wash);
+    --step-finish-fg: var(--color-step-finish-fg);
+
+    /* Typography */
+    --serif: var(--font-serif);
+    --sans: var(--font-sans);
+    --mono: var(--font-mono);
+    --display: var(--text-display);
+    --h1: var(--text-5xl);
+    --h2: var(--text-4xl);
+    --h3: var(--text-2xl);
+    --eyebrow: var(--text-eyebrow);
+    --body: var(--text-base);
+    --body-sm: var(--text-sm);
+    --caption: var(--text-xs);
+    /* Pixel-named type scale — mirror docs/design/tokens.css so the v2 prototype
+       vocabulary stays defined in the production adapter (see
+       styles/hearthTokenAdapter). --text-8/9 are intentional sub-text decoration
+       glyphs and stay as literal px; all others now alias @theme rem tokens so
+       they ride the root font-size ladder. */
+    --text-8: 8px;
+    --text-9: 9px;
+    --text-10: var(--text-2xs); /* 10px */
+    --text-11: var(--text-eyebrow); /* 11px */
+    --text-12: var(--text-xs); /* 12px */
+    /* --text-13 is defined directly in @theme; re-aliasing it here would be a
+       self-referential cycle that invalidates every var(--text-13). */
+    --text-14: var(--text-sm); /* 14px */
+    --text-15: var(--text-base); /* 15px */
+    --text-16: var(--text-lg); /* 16px */
+    --text-20: var(--text-2xl); /* 20px */
+    --text-22: 1.375rem; /* 22px — rem so it scales with root */
+    --text-40: 2.5rem; /* 40px — rem so it scales with root */
+
+    /* Space */
+    --s-1: var(--spacing-1);
+    --s-2: var(--spacing-2);
+    --s-3: var(--spacing-3);
+    --s-4: var(--spacing-4);
+    --s-5: var(--spacing-5);
+    --s-6: var(--spacing-6);
+    --s-7: var(--spacing-7);
+    --s-8: var(--spacing-8);
+    --s-10: var(--spacing-10);
+    --s-12: var(--spacing-12);
+    --s-16: var(--spacing-16);
+    --s-20: var(--spacing-20);
+    --s-24: var(--spacing-24);
+    /* Micro + half-steps and row indents — mirror docs/design/tokens.css. The
+       prototype uses these for hairline insets and task-list indentation; the
+       Hearth primitive scale has no half-steps, so these carry literal px. */
+    --s-0: 2px;
+    --s-1h: 6px;
+    --s-2h: 10px;
+    --s-3h: 14px;
+    --indent-1: calc(var(--s-2h) + var(--s-4)); /* 26px — row pad + glyph + gap */
+    --indent-2: 44px; /* +1 level */
+
+    /* Radii, elevation, and motion */
+    --r-xs: var(--radius-xs);
+    --r-sm: var(--radius-sm);
+    --r-md: var(--radius-md);
+    --r-lg: var(--radius-lg);
+    --r-xl: var(--radius-xl);
+    --r-full: var(--radius-full);
+    --ease: var(--ease-default);
+
+    /* Graph edges — link/transition vocabulary (Atlas map + Workflow graph).
+       One source of truth for the dash/width/opacity values that were previously
+       inlined (and drifting) across the canvas pages. Ported verbatim from
+       docs/design/tokens.css (lines ~137-148). Consumed by the .gedge / .edge-label
+       rules below and by WorkflowAtlas/GraphEdge — never inline these on a path. */
+    --edge-color: var(--line-strong); /* resting stroke */
+    --edge-color-lit: var(--accent); /* forward edge on an active trace */
+    --edge-color-back: var(--fg); /* back/return edge on a trace — max contrast */
+    --edge-color-loop: var(--step-route); /* loop-back hue */
+    --edge-w: 1.5; /* resting width */
+    --edge-w-lit: 2; /* lit width */
+    --edge-o: 0.85; /* resting opacity */
+    --edge-o-loop: 0.72; /* loop-backs rest a touch quieter */
+    --edge-o-dim: 0.15; /* faded out of a trace */
+    --edge-dash: 5 4; /* handoff / cross-workflow */
+    --edge-dash-loop: 3 3; /* loop-back */
+    --edge-glow: drop-shadow(0 0 5px var(--accent-glow));
+    --edge-glow-back: drop-shadow(
+      0 0 5px color-mix(in oklch, var(--fg) 45%, transparent)
+    );
+    --edge-glow-loop: drop-shadow(
+      0 0 4px color-mix(in oklch, var(--step-route) 50%, transparent)
+    );
+  }
+
+  /* ── Density attribute (Retina-aware + manual). Auto-set by useDensity():
+     comfortable when scaleFactor < 1.5 (non-Retina) OR innerWidth < 1400.
+     Placed after the :root adapter so these overrides win the cascade. ── */
+  :root[data-density="comfortable"] {
+    --text-2xs: 0.6875rem; /* 10→11 */
+    --text-eyebrow: 0.75rem; /* 11→12 */
+    --text-xs: 0.8125rem; /* 12→13 */
+    --text-sm: 0.9375rem; /* 14→15 */
+  }
+  :root[data-density="compact"] {
+    --text-2xs: 0.5625rem;
+    --text-eyebrow: 0.625rem;
+    --text-xs: 0.6875rem;
+    --text-sm: 0.8125rem;
+  }
+
+  /* =============================================================================
+     LIGHT THEME — applied to <html> via the .light class (see hooks/useTheme.ts)
+     ============================================================================= */
+  .light {
+    --color-bg: #faf6ec; /* warm cream paper */
+    --color-canvas: #ebe4d2;
+    --color-bg-1: #f2ede0;
+    --color-bg-2: #e9e3d3;
+    --color-bg-3: #dcd4c1;
+    --color-bg-4: #cac0a8;
+    --color-selection: #e9e3d3;
+    --color-text-selection: oklch(0.48 0.11 345 / 0.2);
+
+    --color-fg: #1a1a20;
+    --color-fg-soft: #3a3a44;
+    --color-fg-mute: #66665e;
+    --color-fg-faint: #8e8e83;
+    --color-fg-ghost: #b6b5aa;
+
+    --color-line: #dcd4c1;
+    --color-line-soft: #e9e3d3;
+    --color-line-strong: #b9b09c;
+
+    /* Mulberry gives controls emphasis without tinting the paper surfaces. */
+    --color-accent: oklch(0.48 0.11 345);
+    --color-accent-deep: oklch(0.42 0.11 345);
+    --color-accent-mute: oklch(0.48 0.11 345);
+    --color-accent-wash: oklch(0.945 0.024 345);
+    --color-accent-glow: oklch(0.48 0.11 345 / 0.08);
+    --color-primary-pressed: oklch(0.35 0.099 345);
+    --color-on-primary: #faf6ec;
+    --color-disabled-bg: #e9e3d3;
+    --color-disabled-fg: #66665e;
+    --color-disabled-border: #b9b09c;
+    --color-user-message-bg: #e9e3d3;
+    --color-user-message-fg: #1a1a20;
+    --color-user-message-border: #e9e3d3;
+    --color-user-message-label: #66665e;
+
+    --color-ok: oklch(0.5 0.15 145);
+    --color-ok-wash: oklch(0.92 0.05 145);
+    --color-warn: oklch(0.55 0.119 70);
+    --color-warn-wash: oklch(0.93 0.057 75);
+    --color-err: oklch(0.5 0.18 25);
+    --color-err-wash: oklch(0.93 0.035 25);
+    --color-info: oklch(0.48 0.087 220);
+    --color-info-wash: oklch(0.93 0.04 220);
+    --color-ok-fg: oklch(0.45 0.13 145);
+    --color-warn-fg: oklch(0.48 0.103 70);
+
+    --color-step-llm: oklch(0.52 0.18 285);
+    --color-step-llm-wash: oklch(0.93 0.034 285);
+    --color-step-llm-fg: oklch(0.42 0.18 285);
+
+    --color-step-structured: oklch(0.52 0.088 200);
+    --color-step-structured-wash: oklch(0.93 0.05 200);
+    --color-step-structured-fg: oklch(0.4 0.068 200);
+
+    --color-step-route: oklch(0.55 0.16 135);
+    --color-step-route-wash: oklch(0.93 0.07 135);
+    --color-step-route-fg: oklch(0.45 0.131 135);
+
+    --color-step-human: oklch(0.55 0.119 70);
+    --color-step-human-wash: oklch(0.93 0.057 75);
+    --color-step-human-fg: oklch(0.45 0.097 70);
+
+    --color-step-wait: oklch(0.52 0.08 70);
+    --color-step-wait-wash: oklch(0.92 0.03 70);
+    --color-step-wait-fg: oklch(0.42 0.08 70);
+
+    --color-step-stop: oklch(0.38 0.07 65);
+    --color-step-stop-wash: oklch(0.9 0.03 65);
+    --color-step-stop-fg: oklch(0.32 0.07 65);
+
+    --color-step-finish: oklch(0.55 0.15 145);
+    --color-step-finish-wash: oklch(0.93 0.06 145);
+    --color-step-finish-fg: oklch(0.45 0.141 145);
+
+    /* Light-mode shadows carry visible elevation: a warm brown ink (fg warmed
+       toward the tan line tone) at ~16% alpha, never a cool near-black. */
+    --shadow-ink: color-mix(in oklch, var(--color-fg) 62%, var(--color-line-strong));
+    --shadow-1:
+      0 1px 2px color-mix(in oklch, var(--shadow-ink) 18%, transparent),
+      0 2px 6px -2px color-mix(in oklch, var(--shadow-ink) 14%, transparent);
+    --shadow-2:
+      0 8px 22px -4px color-mix(in oklch, var(--shadow-ink) 16%, transparent),
+      0 0 0 1px color-mix(in oklch, var(--shadow-ink) 9%, transparent);
+    --shadow-3:
+      0 20px 48px -8px color-mix(in oklch, var(--shadow-ink) 18%, transparent),
+      0 0 0 1px color-mix(in oklch, var(--shadow-ink) 9%, transparent);
+
+    /* Hover wash needs a darker ink-on-paper feel */
+    --color-bg-hover: rgba(26, 26, 32, 0.04);
+    --color-bg-hover-raised: color-mix(in oklch, var(--color-fg) 9%, transparent);
+
+    /* Paper hierarchy: page is whiter than the cream canvas; sidebar and the
+       Changes well are recessed one step (bg-1). */
+    --surface-recessed: var(--color-bg-1);
+    --surface-well: var(--color-bg-1);
+    --surface-page: #fffdf8;
+    --edge-lit: rgba(255, 255, 255, 0.82);
+    --drop-1: drop-shadow(
+      0 1px 2px color-mix(in oklch, var(--shadow-ink) 22%, transparent)
+    );
+
+  }
+
+  :root {
+    --focus-edge: color-mix(
+      in oklch,
+      var(--color-accent) 32%,
+      var(--color-line-strong)
+    );
+    --focus-halo-opacity: 9%;
+    --focus-depth: 0 6px 18px -8px rgb(0 0 0 / 45%);
+    --focus-halo: color-mix(
+      in oklch,
+      var(--color-accent) var(--focus-halo-opacity),
+      transparent
+    );
+    --focus-shadow:
+      inset 0 0 0 1px var(--focus-edge), 0 0 0 3px var(--focus-halo),
+      var(--focus-depth);
+  }
+  .light {
+    --focus-halo-opacity: 10%;
+    --focus-depth: 0 6px 18px -10px rgb(68 52 31 / 25%);
+  }
+
+  :root {
+    --ctl-h: 26px;
+    --ctl-radius: var(--r-md);
+    --ctl-line: color-mix(in oklch, var(--fg) 10%, transparent);
+    --ctl-line-hover: color-mix(in oklch, var(--fg) 18%, transparent);
+    --ctl-ring: color-mix(in oklch, var(--accent) 55%, transparent);
+    --ctl-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+
+  /* ── Typeface pairings ──────────────────────────────────────────────────────
+     Four roles, used the same way on every surface:
+       --font-sans    UI: controls, labels, titles, short text
+       --font-prose   reading text: chat replies, descriptions, artifacts
+       --font-serif   display: page titles and the wordmark family
+       --font-mono    data: IDs, code, paths, counts
+     html[data-type] picks a pairing (Settings → Appearance → Typeface). */
+  :root,
+  [data-type] {
+    --font-sans: var(--pairing-font-sans);
+    --font-prose: var(--pairing-font-prose);
+    --font-serif: var(--pairing-font-serif);
+    --font-mono: var(--pairing-font-mono);
+  }
+
+  :root,
+  [data-type="editorial"] {
+    --pairing-font-sans: "Instrument Sans", system-ui, -apple-system, sans-serif;
+    --pairing-font-prose: "Newsreader", "Iowan Old Style", Georgia, serif;
+    --pairing-font-serif: "Instrument Serif", "Newsreader", Georgia, serif;
+    --pairing-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+    --font-features: normal;
+    --prose-base-size: 15px;
+    --prose-leading: 1.6;
+    --display-tracking: -0.01em;
+  }
+  [data-type="technical"] {
+    --pairing-font-sans: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    --pairing-font-prose: "IBM Plex Sans", system-ui, sans-serif;
+    --pairing-font-serif: "IBM Plex Serif", Georgia, serif;
+    --pairing-font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+    --font-features: normal;
+    --prose-base-size: 14px;
+    --prose-leading: 1.65;
+    --display-tracking: -0.02em;
+  }
+  [data-type="humanist"] {
+    --pairing-font-sans:
+      "Bricolage Grotesque", system-ui, -apple-system, sans-serif;
+    --pairing-font-prose: "Literata", Georgia, serif;
+    --pairing-font-serif: "Fraunces", Georgia, serif;
+    --pairing-font-mono: "Spline Sans Mono", ui-monospace, "SF Mono", monospace;
+    --font-features: normal;
+    --prose-base-size: 14px;
+    --prose-leading: 1.65;
+    --display-tracking: -0.02em;
+  }
+  [data-type="classic"] {
+    --pairing-font-sans: "Geist", system-ui, -apple-system, sans-serif;
+    --pairing-font-prose: "Geist", system-ui, sans-serif;
+    --pairing-font-serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+    --pairing-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+    --font-features: "ss01", "cv11";
+    --prose-base-size: 13px;
+    --prose-leading: 1.6;
+    --display-tracking: -0.025em;
+  }
+
+  [data-type="atelier"] {
+    --pairing-font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
+    --pairing-font-prose: "DM Serif Text", Georgia, serif;
+    --pairing-font-serif: "DM Serif Display", Georgia, serif;
+    --pairing-font-mono: "DM Mono", ui-monospace, "SF Mono", monospace;
+    --font-features: normal;
+    --prose-base-size: 15px;
+    --prose-leading: 1.6;
+    --display-tracking: -0.01em;
+  }
+  [data-type="terminal"] {
+    --pairing-font-sans: "Space Grotesk", system-ui, -apple-system, sans-serif;
+    --pairing-font-prose: "Space Grotesk", system-ui, sans-serif;
+    --pairing-font-serif: "Space Grotesk", system-ui, sans-serif;
+    --pairing-font-mono: "Space Mono", ui-monospace, "SF Mono", monospace;
+    --font-features: normal;
+    --prose-base-size: 14px;
+    --prose-leading: 1.6;
+    --display-tracking: -0.03em;
+  }
+  [data-type="gazette"] {
+    --pairing-font-sans: "Public Sans", system-ui, -apple-system, sans-serif;
+    --pairing-font-prose: "Source Serif 4", Georgia, serif;
+    --pairing-font-serif: "Playfair Display", Georgia, serif;
+    --pairing-font-mono: "Source Code Pro", ui-monospace, "SF Mono", monospace;
+    --font-features: normal;
+    --prose-base-size: 15px;
+    --prose-leading: 1.6;
+    --display-tracking: -0.015em;
+  }
+  [data-type="modernist"] {
+    --pairing-font-sans: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
+    --pairing-font-prose: "Hanken Grotesk", system-ui, sans-serif;
+    --pairing-font-serif: "Syne", system-ui, sans-serif;
+    --pairing-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+    --font-features: normal;
+    --prose-base-size: 14px;
+    --prose-leading: 1.65;
+    --display-tracking: -0.02em;
+  }
+  [data-type="soft"] {
+    --pairing-font-sans: "Onest", system-ui, -apple-system, sans-serif;
+    --pairing-font-prose: "Lora", Georgia, serif;
+    --pairing-font-serif: "Young Serif", Georgia, serif;
+    --pairing-font-mono: "Fira Code", ui-monospace, "SF Mono", monospace;
+    --font-features: normal;
+    --prose-base-size: 15px;
+    --prose-leading: 1.62;
+    --display-tracking: -0.01em;
+  }
+
+  :root {
+    --reading-scale: 1;
+    --chat-user-size: calc(var(--text-13) * var(--reading-scale));
+    --chat-composer-size: calc(var(--text-sm) * var(--reading-scale));
+    --chat-composer-leading: calc(var(--spacing-6) * var(--reading-scale));
+  }
+
+  /* Every native single-line select draws the same caret, whichever component
+     renders it, so Settings, editors and the composer cannot drift apart. */
+  :root {
+    --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a8780' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+  .light {
+    --select-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2376705f' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  }
+
+  /* =============================================================================
+     ACCENTS — html[data-accent] (uiStore.accent, set by useTheme); any element
+     with data-accent (e.g. a Settings swatch) takes that accent locally. Every value
+     is oklch with its chroma held inside sRGB, so the accent looks the same on
+     standard and HDR/wide-gamut displays; the color-gamut: p3 block below lifts
+     chroma (≤1.3×) where the screen can show it. Generated: the lightness and
+     chroma steps per role are fixed, only hue and the chroma cap vary.
+     ============================================================================= */
+  [data-accent="orchid"] {
+    --color-accent: oklch(0.78 0.11 345);
+    --color-accent-deep: oklch(0.85 0.083 345);
+    --color-accent-mute: oklch(0.69 0.099 345);
+    --color-accent-wash: oklch(0.27 0.031 345);
+    --color-accent-glow: oklch(0.78 0.11 345 / 0.08);
+    --color-primary-pressed: oklch(0.69 0.099 345);
+    --color-text-selection: oklch(0.78 0.11 345 / 0.3);
+  }
+  .light[data-accent="orchid"],
+  .light [data-accent="orchid"] {
+    --color-accent: oklch(0.48 0.11 345);
+    --color-accent-deep: oklch(0.42 0.11 345);
+    --color-accent-mute: oklch(0.48 0.11 345);
+    --color-accent-wash: oklch(0.945 0.024 345);
+    --color-accent-glow: oklch(0.48 0.11 345 / 0.08);
+    --color-primary-pressed: oklch(0.35 0.099 345);
+    --color-text-selection: oklch(0.48 0.11 345 / 0.2);
+  }
+  [data-accent="ember"] {
+    --color-accent: oklch(0.76 0.12 40);
+    --color-accent-deep: oklch(0.83 0.09 40);
+    --color-accent-mute: oklch(0.67 0.108 40);
+    --color-accent-wash: oklch(0.27 0.034 40);
+    --color-accent-glow: oklch(0.76 0.12 40 / 0.08);
+    --color-primary-pressed: oklch(0.67 0.108 40);
+    --color-text-selection: oklch(0.76 0.12 40 / 0.3);
+  }
+  .light[data-accent="ember"],
+  .light [data-accent="ember"] {
+    --color-accent: oklch(0.52 0.12 40);
+    --color-accent-deep: oklch(0.46 0.12 40);
+    --color-accent-mute: oklch(0.52 0.12 40);
+    --color-accent-wash: oklch(0.945 0.026 40);
+    --color-accent-glow: oklch(0.52 0.12 40 / 0.08);
+    --color-primary-pressed: oklch(0.39 0.108 40);
+    --color-text-selection: oklch(0.52 0.12 40 / 0.2);
+  }
+  [data-accent="jade"] {
+    --color-accent: oklch(0.8 0.11 168);
+    --color-accent-deep: oklch(0.87 0.083 168);
+    --color-accent-mute: oklch(0.71 0.099 168);
+    --color-accent-wash: oklch(0.27 0.031 168);
+    --color-accent-glow: oklch(0.8 0.11 168 / 0.08);
+    --color-primary-pressed: oklch(0.71 0.099 168);
+    --color-text-selection: oklch(0.8 0.11 168 / 0.3);
+  }
+  .light[data-accent="jade"],
+  .light [data-accent="jade"] {
+    --color-accent: oklch(0.5 0.078 168);
+    --color-accent-deep: oklch(0.44 0.078 168);
+    --color-accent-mute: oklch(0.5 0.078 168);
+    --color-accent-wash: oklch(0.945 0.017 168);
+    --color-accent-glow: oklch(0.5 0.078 168 / 0.08);
+    --color-primary-pressed: oklch(0.37 0.07 168);
+    --color-text-selection: oklch(0.5 0.078 168 / 0.2);
+  }
+  [data-accent="lagoon"] {
+    --color-accent: oklch(0.79 0.1 215);
+    --color-accent-deep: oklch(0.86 0.075 215);
+    --color-accent-mute: oklch(0.7 0.09 215);
+    --color-accent-wash: oklch(0.27 0.028 215);
+    --color-accent-glow: oklch(0.79 0.1 215 / 0.08);
+    --color-primary-pressed: oklch(0.7 0.09 215);
+    --color-text-selection: oklch(0.79 0.1 215 / 0.3);
+  }
+  .light[data-accent="lagoon"],
+  .light [data-accent="lagoon"] {
+    --color-accent: oklch(0.5 0.068 215);
+    --color-accent-deep: oklch(0.44 0.068 215);
+    --color-accent-mute: oklch(0.5 0.068 215);
+    --color-accent-wash: oklch(0.945 0.015 215);
+    --color-accent-glow: oklch(0.5 0.068 215 / 0.08);
+    --color-primary-pressed: oklch(0.37 0.061 215);
+    --color-text-selection: oklch(0.5 0.068 215 / 0.2);
+  }
+  [data-accent="cobalt"] {
+    --color-accent: oklch(0.72 0.13 262);
+    --color-accent-deep: oklch(0.79 0.098 262);
+    --color-accent-mute: oklch(0.63 0.117 262);
+    --color-accent-wash: oklch(0.27 0.036 262);
+    --color-accent-glow: oklch(0.72 0.13 262 / 0.08);
+    --color-primary-pressed: oklch(0.63 0.117 262);
+    --color-text-selection: oklch(0.72 0.13 262 / 0.3);
+  }
+  .light[data-accent="cobalt"],
+  .light [data-accent="cobalt"] {
+    --color-accent: oklch(0.48 0.112 262);
+    --color-accent-deep: oklch(0.42 0.112 262);
+    --color-accent-mute: oklch(0.48 0.112 262);
+    --color-accent-wash: oklch(0.945 0.025 262);
+    --color-accent-glow: oklch(0.48 0.112 262 / 0.08);
+    --color-primary-pressed: oklch(0.35 0.101 262);
+    --color-text-selection: oklch(0.48 0.112 262 / 0.2);
+  }
+  [data-accent="iris"] {
+    --color-accent: oklch(0.74 0.13 300);
+    --color-accent-deep: oklch(0.81 0.098 300);
+    --color-accent-mute: oklch(0.65 0.117 300);
+    --color-accent-wash: oklch(0.27 0.036 300);
+    --color-accent-glow: oklch(0.74 0.13 300 / 0.08);
+    --color-primary-pressed: oklch(0.65 0.117 300);
+    --color-text-selection: oklch(0.74 0.13 300 / 0.3);
+  }
+  .light[data-accent="iris"],
+  .light [data-accent="iris"] {
+    --color-accent: oklch(0.48 0.13 300);
+    --color-accent-deep: oklch(0.42 0.13 300);
+    --color-accent-mute: oklch(0.48 0.13 300);
+    --color-accent-wash: oklch(0.945 0.029 300);
+    --color-accent-glow: oklch(0.48 0.13 300 / 0.08);
+    --color-primary-pressed: oklch(0.35 0.117 300);
+    --color-text-selection: oklch(0.48 0.13 300 / 0.2);
+  }
+
+  /* Wide-gamut screens: richer accents and status/step hues. The base values
+     above are the sRGB-safe versions of the same colours. */
+  @media (color-gamut: p3) {
+    :root:not(.light) {
+      --color-warn-wash: oklch(0.32 0.079 70);
+      --color-err: oklch(0.72 0.18 25);
+      --color-info-wash: oklch(0.32 0.077 220);
+      --color-step-llm: oklch(0.72 0.16 285);
+      --color-step-llm-fg: oklch(0.82 0.102 285);
+      --color-step-structured-wash: oklch(0.32 0.072 200);
+      --color-step-route-wash: oklch(0.32 0.109 135);
+      --color-step-human-wash: oklch(0.32 0.079 70);
+      --color-step-human-fg: oklch(0.85 0.14 70);
+    }
+    :root.light {
+      --color-warn: oklch(0.55 0.136 70);
+      --color-warn-wash: oklch(0.93 0.06 75);
+      --color-err-wash: oklch(0.93 0.046 25);
+      --color-info: oklch(0.48 0.115 220);
+      --color-warn-fg: oklch(0.48 0.119 70);
+      --color-step-llm-wash: oklch(0.93 0.038 285);
+      --color-step-structured: oklch(0.52 0.118 200);
+      --color-step-structured-fg: oklch(0.4 0.091 200);
+      --color-step-route: oklch(0.55 0.18 135);
+      --color-step-route-fg: oklch(0.45 0.154 135);
+      --color-step-human: oklch(0.55 0.136 70);
+      --color-step-human-wash: oklch(0.93 0.06 75);
+      --color-step-human-fg: oklch(0.45 0.111 70);
+      --color-step-finish-fg: oklch(0.45 0.15 145);
+    }
+    [data-accent="orchid"] {
+      --color-accent: oklch(0.78 0.143 345);
+      --color-accent-deep: oklch(0.85 0.107 345);
+      --color-accent-mute: oklch(0.69 0.129 345);
+      --color-accent-wash: oklch(0.27 0.04 345);
+      --color-accent-glow: oklch(0.78 0.143 345 / 0.08);
+      --color-primary-pressed: oklch(0.69 0.129 345);
+      --color-text-selection: oklch(0.78 0.143 345 / 0.3);
+    }
+    .light[data-accent="orchid"],
+    .light [data-accent="orchid"] {
+      --color-accent: oklch(0.48 0.143 345);
+      --color-accent-deep: oklch(0.42 0.143 345);
+      --color-accent-mute: oklch(0.48 0.143 345);
+      --color-accent-wash: oklch(0.945 0.031 345);
+      --color-accent-glow: oklch(0.48 0.143 345 / 0.08);
+      --color-primary-pressed: oklch(0.35 0.129 345);
+      --color-text-selection: oklch(0.48 0.143 345 / 0.2);
+    }
+    [data-accent="ember"] {
+      --color-accent: oklch(0.76 0.156 40);
+      --color-accent-deep: oklch(0.83 0.117 40);
+      --color-accent-mute: oklch(0.67 0.14 40);
+      --color-accent-wash: oklch(0.27 0.044 40);
+      --color-accent-glow: oklch(0.76 0.156 40 / 0.08);
+      --color-primary-pressed: oklch(0.67 0.14 40);
+      --color-text-selection: oklch(0.76 0.156 40 / 0.3);
+    }
+    .light[data-accent="ember"],
+    .light [data-accent="ember"] {
+      --color-accent: oklch(0.52 0.144 40);
+      --color-accent-deep: oklch(0.46 0.144 40);
+      --color-accent-mute: oklch(0.52 0.144 40);
+      --color-accent-wash: oklch(0.945 0.032 40);
+      --color-accent-glow: oklch(0.52 0.144 40 / 0.08);
+      --color-primary-pressed: oklch(0.39 0.13 40);
+      --color-text-selection: oklch(0.52 0.144 40 / 0.2);
+    }
+    [data-accent="jade"] {
+      --color-accent: oklch(0.8 0.143 168);
+      --color-accent-deep: oklch(0.87 0.107 168);
+      --color-accent-mute: oklch(0.71 0.129 168);
+      --color-accent-wash: oklch(0.27 0.04 168);
+      --color-accent-glow: oklch(0.8 0.143 168 / 0.08);
+      --color-primary-pressed: oklch(0.71 0.129 168);
+      --color-text-selection: oklch(0.8 0.143 168 / 0.3);
+    }
+    .light[data-accent="jade"],
+    .light [data-accent="jade"] {
+      --color-accent: oklch(0.5 0.102 168);
+      --color-accent-deep: oklch(0.44 0.102 168);
+      --color-accent-mute: oklch(0.5 0.102 168);
+      --color-accent-wash: oklch(0.945 0.022 168);
+      --color-accent-glow: oklch(0.5 0.102 168 / 0.08);
+      --color-primary-pressed: oklch(0.37 0.092 168);
+      --color-text-selection: oklch(0.5 0.102 168 / 0.2);
+    }
+    [data-accent="lagoon"] {
+      --color-accent: oklch(0.79 0.13 215);
+      --color-accent-deep: oklch(0.86 0.098 215);
+      --color-accent-mute: oklch(0.7 0.117 215);
+      --color-accent-wash: oklch(0.27 0.036 215);
+      --color-accent-glow: oklch(0.79 0.13 215 / 0.08);
+      --color-primary-pressed: oklch(0.7 0.117 215);
+      --color-text-selection: oklch(0.79 0.13 215 / 0.3);
+    }
+    .light[data-accent="lagoon"],
+    .light [data-accent="lagoon"] {
+      --color-accent: oklch(0.5 0.089 215);
+      --color-accent-deep: oklch(0.44 0.089 215);
+      --color-accent-mute: oklch(0.5 0.089 215);
+      --color-accent-wash: oklch(0.945 0.02 215);
+      --color-accent-glow: oklch(0.5 0.089 215 / 0.08);
+      --color-primary-pressed: oklch(0.37 0.08 215);
+      --color-text-selection: oklch(0.5 0.089 215 / 0.2);
+    }
+    [data-accent="cobalt"] {
+      --color-accent: oklch(0.72 0.145 262);
+      --color-accent-deep: oklch(0.79 0.109 262);
+      --color-accent-mute: oklch(0.63 0.13 262);
+      --color-accent-wash: oklch(0.27 0.041 262);
+      --color-accent-glow: oklch(0.72 0.145 262 / 0.08);
+      --color-primary-pressed: oklch(0.63 0.13 262);
+      --color-text-selection: oklch(0.72 0.145 262 / 0.3);
+    }
+    .light[data-accent="cobalt"],
+    .light [data-accent="cobalt"] {
+      --color-accent: oklch(0.48 0.123 262);
+      --color-accent-deep: oklch(0.42 0.123 262);
+      --color-accent-mute: oklch(0.48 0.123 262);
+      --color-accent-wash: oklch(0.945 0.027 262);
+      --color-accent-glow: oklch(0.48 0.123 262 / 0.08);
+      --color-primary-pressed: oklch(0.35 0.111 262);
+      --color-text-selection: oklch(0.48 0.123 262 / 0.2);
+    }
+    [data-accent="iris"] {
+      --color-accent: oklch(0.74 0.155 300);
+      --color-accent-deep: oklch(0.81 0.116 300);
+      --color-accent-mute: oklch(0.65 0.139 300);
+      --color-accent-wash: oklch(0.27 0.043 300);
+      --color-accent-glow: oklch(0.74 0.155 300 / 0.08);
+      --color-primary-pressed: oklch(0.65 0.139 300);
+      --color-text-selection: oklch(0.74 0.155 300 / 0.3);
+    }
+    .light[data-accent="iris"],
+    .light [data-accent="iris"] {
+      --color-accent: oklch(0.48 0.146 300);
+      --color-accent-deep: oklch(0.42 0.146 300);
+      --color-accent-mute: oklch(0.48 0.146 300);
+      --color-accent-wash: oklch(0.945 0.032 300);
+      --color-accent-glow: oklch(0.48 0.146 300 / 0.08);
+      --color-primary-pressed: oklch(0.35 0.131 300);
+      --color-text-selection: oklch(0.48 0.146 300 / 0.2);
+    }
+  }
+
+  /* Fixed accent colours, independent of the chosen app accent (e.g. the
+     Settings › Code › Inline code text choices). Same values as each accent's
+     --color-accent above. */
+  :root {
+    --accent-orchid: oklch(0.78 0.11 345);
+    --accent-ember: oklch(0.76 0.12 40);
+    --accent-jade: oklch(0.8 0.11 168);
+    --accent-lagoon: oklch(0.79 0.1 215);
+    --accent-cobalt: oklch(0.72 0.13 262);
+    --accent-iris: oklch(0.74 0.13 300);
+  }
+  :root.light {
+    --accent-orchid: oklch(0.48 0.11 345);
+    --accent-ember: oklch(0.52 0.12 40);
+    --accent-jade: oklch(0.5 0.078 168);
+    --accent-lagoon: oklch(0.5 0.068 215);
+    --accent-cobalt: oklch(0.48 0.112 262);
+    --accent-iris: oklch(0.48 0.13 300);
+  }
+  @media (color-gamut: p3) {
+    :root:not(.light) {
+      --accent-orchid: oklch(0.78 0.143 345);
+      --accent-ember: oklch(0.76 0.156 40);
+      --accent-jade: oklch(0.8 0.143 168);
+      --accent-lagoon: oklch(0.79 0.13 215);
+      --accent-cobalt: oklch(0.72 0.145 262);
+      --accent-iris: oklch(0.74 0.155 300);
+    }
+    :root.light {
+      --accent-orchid: oklch(0.48 0.143 345);
+      --accent-ember: oklch(0.52 0.144 40);
+      --accent-jade: oklch(0.5 0.102 168);
+      --accent-lagoon: oklch(0.5 0.089 215);
+      --accent-cobalt: oklch(0.48 0.123 262);
+      --accent-iris: oklch(0.48 0.146 300);
+    }
+  }
+}

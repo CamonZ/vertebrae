@@ -1,0 +1,102 @@
+/* Artifact Markdown previews should use the same compact body scale as the
+   task-detail panel. Keep this scoped here because the shared MarkdownContent
+   renderer is also used by chat and other surfaces with intentionally larger
+   prose. */
+.artifact-inspector-body .markdown-content p,
+.artifact-inspector-body .markdown-content ul,
+.artifact-inspector-body .markdown-content ol,
+.artifact-inspector-body .markdown-content blockquote {
+  font-size: var(--text-sm);
+}
+
+/* Artifact inspector title: file name first, folder path muted before it. */
+.artifact-inspector-title {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: ltr;
+}
+.artifact-inspector-folder {
+  color: var(--fg-mute);
+  font-weight: 400;
+}
+
+/* Artifacts list: name column grows with the window; type, size and
+   updated sit in fixed columns at the right edge, headed by .artifact-list-head. */
+.artifact-list-head {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  /* Match the tree rows: tree padding + row padding on the right; on the
+     left, also the chevron and icon, so "Name" sits over the labels. */
+  padding: 0 4px 0 calc(var(--s-2) + 8px + 24px + 6px);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.artifact-list-head > span:first-child {
+  flex: 1;
+}
+.artifact-cols {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.artifact-list-head .artifact-cols {
+  font-size: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.artifact-col-type {
+  width: 120px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-mute);
+}
+.artifact-col-type[data-kind]::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--fg-faint);
+}
+.artifact-col-type[data-kind="markdown"]::before {
+  background: var(--info);
+}
+.artifact-col-type[data-kind="json"]::before {
+  background: var(--warn);
+}
+.artifact-col-type[data-kind="conversation"]::before {
+  background: var(--accent);
+}
+.artifact-col-type[data-kind="statechart"]::before,
+.artifact-col-type[data-kind="flow"]::before {
+  background: var(--color-step-llm);
+}
+.artifact-col-size,
+.artifact-col-when {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-mute);
+}
+.artifact-col-size {
+  width: 80px;
+}
+.artifact-col-when {
+  width: 88px;
+}
+.artifact-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--fg-faint);
+}
+.artifact-icon.folder {
+  color: var(--fg-mute);
+}

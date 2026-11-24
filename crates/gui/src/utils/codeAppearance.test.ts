@@ -88,7 +88,7 @@ describe("codeAppearance", () => {
   });
 
   it("declares a fixed token for every accent in each theme", () => {
-    const css = readFileSync(resolve(__dirname, "../index.css"), "utf8");
+    const css = readFileSync(resolve(__dirname, "../styles/tokens.css"), "utf8");
     const fixed = css.slice(css.indexOf("Fixed accent colours"));
     for (const accent of ACCENTS) {
       expect(fixed.match(new RegExp(`--accent-${accent.value}:`, "g"))).toHaveLength(4);

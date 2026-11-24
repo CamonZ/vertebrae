@@ -1,0 +1,207 @@
+/* ── Daemons page ── */
+.daemons-toolbar {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: var(--s-2);
+  padding: var(--s-3) var(--s-4);
+  border-bottom: 1px solid var(--line);
+}
+.daemons-search {
+  flex: 1;
+  min-width: 12rem;
+  max-width: 22rem;
+  margin-left: auto;
+}
+.daemons-search input {
+  height: var(--ctl-h);
+  font-size: var(--text-12);
+}
+.daemon-register {
+  flex-shrink: 0;
+}
+.daemon-row {
+  display: grid;
+  /* dot · name/meta · status · capabilities · concurrency · last seen */
+  grid-template-columns: 8px minmax(0, 1fr) 120px 150px 110px 90px;
+  width: 100%;
+  /* Cap the table so data columns stay near the name on wide windows. */
+  max-width: 64rem;
+  align-items: center;
+  column-gap: var(--s-3);
+  padding: 10px var(--s-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-md);
+  background-color: transparent;
+  text-align: left;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.daemon-row:hover {
+  background-color: var(--color-bg-hover);
+}
+/* Shared selected treatment: selection surface + accent bar on the leading edge. */
+.daemon-row[aria-pressed="true"],
+.daemon-row[aria-pressed="true"]:hover {
+  background-color: var(--color-selection);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.daemon-row-dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+.daemon-row[data-status="active"] .daemon-row-dot {
+  background: var(--ok);
+}
+/* Pending is already said by its badge and group header: its dot stays quiet. */
+.daemon-row[data-status="pending"] .daemon-row-dot {
+  background: var(--fg-faint);
+}
+.daemon-row[data-status="revoked"] .daemon-row-dot,
+.daemon-row[data-status="removed"] .daemon-row-dot {
+  background: var(--fg-ghost, var(--fg-faint));
+}
+.daemon-row-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--fg);
+}
+.daemon-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 0;
+  margin-top: 2px;
+  font-family: var(--font-sans);
+  font-size: var(--text-12);
+  color: var(--fg-mute);
+}
+.daemon-row-meta > span + span::before {
+  content: "·";
+  margin: 0 6px;
+  color: var(--fg-faint);
+}
+.daemon-row-body {
+  min-width: 0;
+}
+.daemon-row-id {
+  font-family: var(--font-mono);
+  font-size: var(--text-11);
+  color: var(--fg-mute);
+}
+.daemon-row-health {
+  color: var(--warn);
+}
+/* Empty cell: the one muted placeholder for every null column. */
+.daemon-col-empty {
+  color: var(--fg-faint);
+}
+.daemons-page [role="group"][data-testid="daemon-fleet-list"] section {
+  max-width: 64rem;
+}
+.daemon-col,
+.daemon-col-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-12);
+  color: var(--fg-mute);
+}
+.daemon-col-seen {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* Column labels over the fleet, on the same grid as .daemon-row. */
+.daemon-list-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 120px 150px 110px 90px;
+  max-width: 64rem;
+  column-gap: var(--s-3);
+  padding: 0 calc(var(--s-3) + 1px) var(--s-2)
+    calc(var(--s-3) + 1px + 8px + var(--s-3));
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+@media (max-width: 980px) {
+  .daemon-row {
+    grid-template-columns: 8px minmax(0, 1fr) 120px 90px;
+  }
+  .daemon-row > .daemon-col:not(.daemon-col-seen) {
+    display: none;
+  }
+  .daemon-list-head {
+    grid-template-columns: minmax(0, 1fr) 120px 90px;
+  }
+  .daemon-list-head > span:nth-child(3),
+  .daemon-list-head > span:nth-child(4) {
+    display: none;
+  }
+}
+
+/* Daemon status groups replace the status filter bar: each status is a
+   collapsible heading with its count. */
+.daemons-search {
+  margin-left: 0;
+  max-width: 28rem;
+}
+.daemons-toolbar .daemon-register {
+  margin-left: auto;
+}
+.daemon-group-head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--s-1h);
+  padding: 4px var(--s-1);
+  border-radius: var(--r-sm);
+  color: var(--fg-soft);
+  text-align: left;
+  cursor: pointer;
+}
+.daemon-group-head:hover {
+  color: var(--fg);
+  background-color: color-mix(in oklch, var(--fg) 3%, transparent);
+}
+
+.daemon-group-head h2 {
+  font-family: var(--font-sans);
+  font-size: var(--text-12);
+  font-weight: 600;
+}
+.daemon-group-chev {
+  width: 12px;
+  height: 12px;
+  color: var(--fg-mute);
+  transition: transform var(--t-fast) var(--ease);
+}
+.daemon-group-head[aria-expanded="true"] .daemon-group-chev {
+  transform: rotate(90deg);
+}
+.daemon-group-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background-color: color-mix(in oklch, var(--fg) 7%, transparent);
+  color: var(--fg-mute);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

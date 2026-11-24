@@ -61,7 +61,7 @@
   --comment-chip-surface-hover: var(--color-bg-1);
   --comment-float: var(--color-bg);
   --comment-well: var(--color-bg-1);
-  --comment-edge: rgba(255, 255, 255, 0.82);
+  --comment-edge: var(--hearth-white-82);
 }
 
 /* Wide-gamut: the accent gains chroma, so the same percentages read

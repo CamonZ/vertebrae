@@ -1,0 +1,1980 @@
+/* ── Floating project chat: launcher pill + glass side panel ──
+   Adapted from docs/design/lib/lib-chat.jsx (.hc-launch / .hc-panel).
+   The pill floats bottom-right; clicking it opens the local project chat in a
+   fixed floating-glass panel anchored at the same edge. Kept minimal — no drag,
+   no snap-dock. */
+.hc-launch {
+  position: fixed;
+  right: var(--s-3);
+  bottom: 22px;
+  /* Keep the launcher actionable above entity detail panels. It remains below
+     the open chat surface (z-index: 70), which hides the launcher anyway. */
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  height: 38px;
+  padding: 0 var(--s-4) 0 var(--s-3);
+  background: color-mix(in oklch, var(--bg-2) 50%, transparent);
+  color: var(--fg);
+  -webkit-backdrop-filter: blur(20px) brightness(1.5) saturate(1);
+  backdrop-filter: blur(20px) brightness(1.5) saturate(1);
+  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  border-radius: var(--r-full);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 1px 0 color-mix(in oklch, var(--fg) 16%, transparent);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    border-color var(--t-base) var(--ease),
+    box-shadow var(--t-base) var(--ease),
+    transform var(--t-base) var(--ease);
+}
+/* Glow means running: the pill pulses the running glow (the active
+   status-indicator animation) only while a chat is working. A pseudo-element
+   carries it so the pill keeps its own shadows. */
+.hc-launch[data-running]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: pulse-glow var(--t-pulse) ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .hc-launch[data-running]::after {
+    animation: none;
+    box-shadow: var(--shadow-glow-sm);
+  }
+}
+/* Hover wears the shared focus halo (edge + soft ring), not a solid accent line. */
+.hc-launch:hover {
+  border-color: var(--focus-edge);
+  box-shadow:
+    0 0 0 3px var(--focus-halo),
+    var(--shadow-2);
+  transform: translateY(-1px);
+}
+
+.hc-launch .ic {
+  display: inline-flex;
+  color: var(--accent);
+}
+/* Keyboard hint — same chip vocabulary as the search box `/` hint
+   (SearchInput.tsx): mono, line-strong border, bg-2, --text-10. */
+.hc-launch .hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.hc-launch .key {
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  line-height: 1;
+  color: var(--fg-mute);
+  padding: 2px 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xs);
+  background: color-mix(in oklch, var(--bg-2) 70%, transparent);
+}
+/* Shown only while a chat needs the user; flat, since glow means running. */
+.hc-launch .ember {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.hc-resume-prompt p {
+  margin: 0;
+  line-height: 1.45;
+}
+.hc-resume-prompt a,
+.hc-resume-prompt button {
+  color: var(--accent);
+  font: inherit;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.hc-resume-prompt a[aria-disabled="true"],
+.hc-resume-prompt button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.hc-resume-prompt button {
+  padding: 0;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.hc-resume-prompt-error {
+  margin-top: var(--s-2);
+  color: var(--err);
+  font-size: var(--text-xs);
+}
+
+.hc-panel {
+  position: fixed;
+  right: var(--s-3);
+  /* Match the task-detail float's vertical insets so the two side panels are
+     exactly the same height (38px clears the shell titlebar; see
+     `.detail-float`). */
+  top: calc(38px + var(--s-3));
+  bottom: var(--s-3);
+  /* Chat sits above unfocused detail panels. Paired inspectors have their
+     own layer when they overlap an expanded chat. */
+  z-index: 70;
+  width: 384px;
+  height: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklch, var(--bg-3) 34%, transparent),
+    color-mix(in oklch, var(--bg-2) 28%, transparent)
+  );
+  -webkit-backdrop-filter: blur(30px) brightness(1.5) saturate(1);
+  backdrop-filter: blur(30px) brightness(1.5) saturate(1);
+  border-radius: var(--r-lg);
+  /* Drill open through the fixed right edge. */
+  animation: panel-drill-right var(--t-slow) var(--ease);
+  transition: width var(--t-slow) var(--ease);
+}
+.hc-panel[data-resizing],
+.hc-panel.is-closing {
+  transition: none;
+}
+.hc-panel .hc-panel-main {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+.hc-panel .hc-history-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 20;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.hc-panel .hc-history-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background var(--t-fast, 120ms) var(--ease, ease);
+}
+.hc-panel .hc-history-resize-handle:hover::after,
+.hc-panel .hc-history-resize-handle[data-resizing]::after,
+.hc-panel .hc-history-resize-handle:focus-visible::after {
+  background: var(--fg-mute);
+}
+
+.hc-panel .hc-chat-panes {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+}
+
+.hc-panel .hc-chat-pane {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  position: relative;
+  outline: none;
+}
+.hc-panel .hc-chat-pane > * {
+  min-width: 0;
+  flex: 1;
+}
+/* Chat workspace (ticket 736f94f3): the tab strip over the visible chats. */
+.hc-panel .hc-workspace {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+/* Tonal strip, no borders; the accent is reserved for chats needing you. */
+.hc-panel .hc-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 var(--s-2);
+  background: color-mix(in oklch, var(--bg-1) 40%, transparent);
+  font-family: var(--font-sans);
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* A single open chat's title already heads the pane: the tab stays in the
+   accessibility tree but draws nothing, leaving "+" and the controls. */
+.hc-panel .hc-tabs[data-empty] {
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.hc-panel .hc-tablist[data-single] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.hc-panel .hc-tabs-main {
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  gap: var(--s-1);
+  min-width: 0;
+  flex: 1;
+}
+.hc-panel .hc-tablist {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 2px;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding-top: 4px;
+}
+.hc-panel .hc-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* An explicit width: WebKit sizes an auto-basis tablist by content. */
+  width: 200px;
+  min-width: 0;
+  flex: 0 1 auto;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+  color: var(--fg-soft);
+  transition: background var(--t-fast) var(--ease);
+}
+.hc-panel .hc-tab:hover {
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+}
+.hc-panel .hc-tab[data-active] {
+  background: color-mix(in oklch, var(--bg-3) 70%, transparent);
+  color: var(--fg);
+}
+/* A bar under the active tab marks the chat shown. */
+.hc-panel .hc-tab[data-active]::after {
+  content: "";
+  position: absolute;
+  left: var(--s-2);
+  right: var(--s-2);
+  bottom: 0;
+  height: 2px;
+  border-radius: var(--r-full);
+  background: var(--fg-soft);
+}
+.hc-panel .hc-tab[data-drop-before]::before,
+.hc-panel .hc-tab[data-drop-after]::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: var(--r-full);
+  background: var(--fg-mute);
+}
+.hc-panel .hc-tab[data-drop-before]::before {
+  left: -2px;
+}
+.hc-panel .hc-tab[data-drop-after]::before {
+  right: -2px;
+}
+.hc-panel .hc-tab-tip {
+  display: flex;
+  align-self: stretch;
+  min-width: 0;
+  flex: 1;
+}
+.hc-panel .hc-tab-button {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+  min-width: 0;
+  flex: 1;
+  height: 100%;
+  padding: 0 var(--s-1) 0 var(--s-2);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  outline: none;
+  border-radius: inherit;
+}
+.hc-panel .hc-tab[data-active] .hc-tab-button {
+  font-weight: 500;
+}
+.hc-panel .hc-tab-dot-slot {
+  width: 6px;
+  flex-shrink: 0;
+}
+.hc-panel .hc-tab-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-tab-kind,
+.hc-panel .hc-tab-project {
+  flex-shrink: 0;
+  font-size: var(--text-11);
+  color: var(--fg-mute);
+}
+.hc-panel .hc-tab-project {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 40%;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin-right: var(--s-1);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-mute);
+  cursor: pointer;
+  opacity: 0;
+}
+.hc-panel .hc-tab:hover .hc-tab-close,
+.hc-panel .hc-tab[data-active] .hc-tab-close {
+  opacity: 1;
+}
+.hc-panel .hc-tab-close:hover {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.hc-panel .hc-tabs-fill {
+  flex: 1;
+  min-width: 0;
+}
+.hc-panel .hc-tabs-spacer {
+  min-width: 0;
+}
+.hc-panel .hc-tabs-overflow,
+.hc-panel .hc-tabs-switcher,
+.hc-panel .hc-tabs-counter {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+  height: 24px;
+  padding: 0 var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-soft);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.hc-panel .hc-tabs-overflow {
+  font-family: var(--mono);
+  font-size: var(--text-11);
+}
+.hc-panel .hc-tabs-overflow:hover,
+.hc-panel .hc-tabs-switcher:hover,
+.hc-panel .hc-tabs-counter:hover {
+  background: var(--color-bg-hover-raised);
+  color: var(--fg);
+}
+.hc-panel .hc-tabs-switcher {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--fg);
+  font-weight: 500;
+}
+.hc-panel .hc-tabs .ovf:has(.hc-tabs-switcher) {
+  min-width: 0;
+}
+.hc-panel .hc-tabs .ovf:has(.hc-tabs-switcher) .ovf-menu {
+  left: 0;
+  right: auto;
+}
+.hc-panel .hc-tabs-count {
+  font-family: var(--mono);
+  font-size: var(--text-11);
+  font-weight: 400;
+  color: var(--fg-mute);
+}
+.hc-panel .hc-tabs-counter {
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  color: var(--fg);
+}
+.hc-panel .hc-tabs .hc-ctrl[aria-pressed="true"] {
+  color: var(--fg);
+}
+.hc-panel[data-maximized] .hc-chat-pane {
+  flex-basis: 360px;
+  min-width: 360px;
+}
+.hc-panel .hc-chat-pane-slot {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+/* Keep the composer surface neutral; the central focus halo (data-focus-halo
+   "within") identifies the active input without tinting the conversation. */
+.chat-input-shell {
+  /* Composer card: bg-2 on the pane, borderless at rest (Hearth surfaces). */
+  background-color: var(--color-bg-2);
+  border-color: transparent;
+  transition:
+    border-color var(--t-fast, 120ms) var(--ease, ease),
+    background-color var(--t-fast, 120ms) var(--ease, ease),
+    box-shadow var(--t-fast, 120ms) var(--ease, ease);
+}
+
+/* In the glass chat panel (pane tone already ~bg-2) the composer rises one
+   step above it with a hairline; tokens are shared with the comment cards
+   (chatComments.css). */
+.hc-panel .chat-input-shell {
+  background-color: var(--comment-surface);
+  border-color: var(--color-line-strong);
+  /* Resting lift: in light the composer is paper on a paper pane, so the
+     tone step alone does not separate it. Focus-within replaces this. */
+  box-shadow: var(--shadow-1);
+}
+
+/* Side-panel "drill" open: the panel slides from its anchored screen edge in
+   toward the center, fading as it lands. */
+@keyframes panel-drill-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+/* Exit "drill": reverse the entrance — slide back out to the anchored edge and
+   fade. Faster than the entrance (--t-base vs --t-slow) so dismissing feels
+   snappy; `forwards` holds the off-screen end frame until React unmounts the
+   node (the JS timer in usePanelExitTransition is matched to --t-base = 180ms). */
+.hc-panel.is-closing {
+  animation: panel-drill-right-out var(--t-base) var(--ease) forwards;
+}
+.detail.detail-float.is-closing {
+  animation: panel-drill-right-out var(--t-base) var(--ease) forwards;
+}
+@keyframes panel-drill-right-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hc-panel,
+  .hc-panel.is-closing,
+  .detail.detail-float,
+  .detail.detail-float.is-closing {
+    animation: none;
+    transition: none;
+  }
+}
+
+/* Left-edge drag handle for horizontal resize. Sits inside the panel (the
+   surface is overflow-clipped for its rounded corners) and floats above the
+   content. The neutral indicator only paints on hover / while dragging. Mirrors
+   `.detail-resize-handle`: both surfaces are right-anchored. */
+.hc-panel .hc-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 60;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.hc-panel .hc-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background var(--t-fast, 120ms) var(--ease, ease);
+}
+.hc-panel .hc-resize-handle:hover::after,
+.hc-panel .hc-resize-handle[data-resizing]::after {
+  background: var(--fg-mute);
+}
+
+/* ── Chat header + footer ───────────────────────────────────────────────────
+   Single header band (title + status indicator + control buttons) and the
+   composer footer with its context-utilization bar. Ported from
+   docs/design/lib/lib-chat.jsx
+   (`.hc-head` / `.hc-foot`). The reference's drag/dock affordances are dropped
+   (the panel is fixed-anchored, not draggable), so `.hc-head` is not a grab
+   handle here. */
+.hc-panel .hc-head {
+  user-select: none;
+  -webkit-user-select: none;
+  position: relative;
+  flex-shrink: 0;
+  /* One quiet chrome layer: the pane's own surface and a single hairline.
+     The title lines up with the transcript's 16px gutter. */
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  min-height: 40px;
+  padding: var(--s-1) var(--s-2) var(--s-1) var(--s-4);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.hc-panel .hc-head-top {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+}
+.hc-panel .hc-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+  font-family: var(--sans);
+  font-size: var(--text-13);
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.2;
+  color: var(--fg);
+}
+.hc-panel .hc-title .label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-title-button {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.hc-panel .hc-title-button:hover,
+.hc-panel .hc-title-button:focus-visible {
+  color: var(--accent);
+}
+.hc-panel .hc-title-button:disabled {
+  cursor: default;
+}
+.hc-panel .hc-title-editor {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--s-1h);
+}
+.hc-panel .hc-title-input {
+  min-width: 0;
+  width: 100%;
+  padding: 2px var(--s-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-1);
+  color: var(--fg);
+  font: inherit;
+  line-height: 1.2;
+}
+.hc-panel .hc-title-edit-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+}
+.hc-panel .hc-title-regenerate {
+  flex-shrink: 0;
+}
+.hc-panel .hc-project-context {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: min(14rem, 32%);
+  overflow: hidden;
+  /* A project name is a label, not data: sans, muted (DESIGN.md typography). */
+  color: var(--fg-mute);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 520px) {
+  .hc-panel .hc-project-context {
+    flex-basis: 27%;
+  }
+}
+.hc-panel .hc-title-error {
+  position: absolute;
+  top: calc(100% + var(--s-1));
+  left: var(--s-3);
+  z-index: 2;
+  max-width: calc(100% - var(--s-6));
+  padding: var(--s-1) var(--s-2);
+  border: 1px solid color-mix(in oklch, var(--err) 35%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--err);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+}
+/* Resting status ember; the active/closed dots reuse this footprint. */
+/* Chat attention dot (ticket 1f3f5cc0): one 6px treatment everywhere a chat
+   appears. Glow means running, nothing else; error and needs-you stay flat. */
+.chat-attention-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-full);
+}
+.chat-attention-dot[data-tone="accent"] {
+  background: var(--accent);
+}
+.chat-attention-dot[data-tone="err"] {
+  background: var(--err);
+}
+.chat-attention-dot[data-tone="mute"] {
+  background: var(--fg-mute);
+}
+.chat-attention-dot[data-tone="ok"] {
+  background: var(--ok);
+  box-shadow: 0 0 6px color-mix(in oklch, var(--ok) 60%, transparent);
+}
+.chat-attention-dot[data-tone="hollow"] {
+  border: 1px solid var(--fg-faint);
+}
+/* Reason beside the header dot; quiet sans meta, truncated before the title. */
+.hc-panel .hc-title .hc-attention-reason {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-11);
+  font-weight: 400;
+  color: var(--fg-soft);
+}
+.hc-panel .hc-title .hc-attention-reason[data-attention="error"] {
+  color: var(--err);
+}
+.hc-panel .hc-ctrls {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+.hc-panel .hc-ctrl {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-mute);
+  border: none;
+  background: transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: all var(--t-fast) var(--ease);
+}
+.hc-panel .hc-ctrl:hover {
+  background: var(--color-bg-hover-raised);
+  color: var(--fg);
+}
+.hc-panel .hc-ctrl:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+.hc-panel .hc-ctrl:disabled:hover {
+  background: transparent;
+  color: var(--fg-mute);
+}
+.hc-panel .hc-ctrl:has(.hc-ctrl-badge) {
+  position: relative;
+}
+.hc-panel .hc-ctrl-badge {
+  position: absolute;
+  top: -2px;
+  right: -3px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--accent);
+  color: var(--bg-1);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 13px;
+  text-align: center;
+}
+/* Overflow (`⋯`) menu — secondary pane actions live here so headers stay
+   at a few visible controls. Popover sits on bg-2 with a hairline; no
+   shadow elevation (DESIGN.md). */
+.ovf {
+  position: relative;
+  display: inline-flex;
+}
+.ovf-menu {
+  position: absolute;
+  top: calc(100% + var(--s-1));
+  right: 0;
+  z-index: 40;
+  min-width: 13rem;
+  padding: var(--s-1);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--bg-2);
+}
+.ovf-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px var(--s-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--fg-soft);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+.ovf-item:hover:not(:disabled),
+.ovf-item:focus-visible {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.ovf-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.ovf-item.danger {
+  color: var(--err);
+}
+.ovf-item.danger:hover:not(:disabled),
+.ovf-item.danger:focus-visible {
+  background: var(--err-wash);
+  color: var(--err);
+}
+.ovf-icon {
+  display: inline-flex;
+  width: 16px;
+  flex-shrink: 0;
+  justify-content: center;
+  color: var(--fg-mute);
+}
+.ovf-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ovf-badge {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent-wash);
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  line-height: 16px;
+  text-align: center;
+}
+.ovf-check {
+  color: var(--accent);
+  font-size: var(--text-11);
+}
+.ovf-sep {
+  height: 1px;
+  margin: var(--s-1) var(--s-1h);
+  background: color-mix(in oklch, var(--fg) 8%, transparent);
+}
+.hc-panel .hc-title-spinner {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--fg-mute);
+}
+.hc-panel .hc-ctrl.danger:hover {
+  background: var(--err-wash);
+  color: var(--err);
+}
+/* Stop appears only while generating, as a labelled control so the one
+   time-sensitive action reads without hovering (UX-01). */
+.hc-panel .hc-ctrl.hc-stop {
+  width: auto;
+  gap: var(--s-1h);
+  padding: 0 var(--s-2);
+  margin-right: var(--s-1);
+  color: var(--fg-soft);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 500;
+}
+.hc-panel .hc-stop-label {
+  line-height: 1;
+}
+.hc-panel .hc-chat-controls {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.hc-panel .hc-chat-controls.right {
+  justify-content: flex-end;
+}
+/* Composer model chip — provider, model, effort and speed collapse into one
+   control whose popover holds the full pickers. */
+.hc-panel .hc-model-settings {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+/* Shape, type and states come from `.ctl.ctl-quiet`. */
+.hc-panel .hc-model-chip {
+  min-width: 0;
+  max-width: 18rem;
+}
+.hc-panel .hc-model-chip.attention {
+  border-color: color-mix(in oklch, var(--warn) 45%, transparent);
+  color: var(--warn);
+}
+.hc-panel .hc-model-chip-provider {
+  flex-shrink: 0;
+  color: var(--fg-mute);
+}
+.hc-panel .hc-model-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-model-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--s-2));
+  z-index: 60;
+  display: grid;
+  gap: var(--s-1);
+  width: 17rem;
+  padding: var(--s-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--bg-2);
+}
+.hc-panel .hc-model-pop .hc-model-row {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-2);
+  max-width: none;
+}
+.hc-panel .hc-model-pop .hc-model-row > span {
+  color: var(--fg-mute);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+}
+.hc-panel .hc-model-pop .hc-model-row select {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+/* Permission mode is a `.ctl.ctl-quiet` select sized to its label. */
+.hc-panel .hc-chat-controls .hc-permission-picker .dd-trigger {
+  max-width: 13rem;
+  field-sizing: content;
+}
+.hc-panel .hc-composer-alert {
+  color: var(--warn);
+  font-size: var(--text-11);
+}
+.hc-panel .hc-model-picker,
+.hc-panel .hc-effort-picker,
+.hc-panel .hc-speed-picker,
+.hc-panel .hc-provider-picker {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: var(--s-1);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-mute);
+}
+.hc-panel .hc-permission-picker {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+}
+.hc-panel .hc-model-picker select:not(.ctl),
+.hc-panel .hc-effort-picker select:not(.ctl),
+.hc-panel .hc-speed-picker select:not(.ctl),
+.hc-panel .hc-provider-picker select:not(.ctl) {
+  min-width: 78px;
+  max-width: 132px;
+  height: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-xs);
+  background-color: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  outline: none;
+}
+.hc-panel .hc-provider-picker select {
+  max-width: 104px;
+}
+.hc-panel .hc-effort-picker select {
+  max-width: 112px;
+}
+
+.hc-panel .hc-model-picker select:disabled,
+.hc-panel .hc-effort-picker select:disabled,
+.hc-panel .hc-speed-picker select:disabled,
+.hc-panel .hc-provider-picker select:disabled,
+.hc-panel .hc-permission-picker select:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.hc-panel .hc-catalog-save-warning {
+  color: var(--warn);
+  flex-shrink: 0;
+}
+
+.hc-panel .hc-provider-unavailable {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--err);
+}
+
+/* Composer foot: the composer card on the pane surface, no separator. The
+   context readout lives in the ring beside Send. */
+.hc-panel .hc-foot {
+  flex-shrink: 0;
+  background: transparent;
+}
+.hc-panel .hc-foot-body {
+  padding: var(--s-2) var(--s-4) var(--s-4);
+}
+/* A readable measure: transcript content and composer share one centred
+   column (~820px) so a maximized pane never stretches lines edge to edge. */
+.hc-panel .chat-measure {
+  max-width: 820px;
+  margin-inline: auto;
+}
+.hc-panel .hc-foot-body {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(820px + 2 * var(--s-4));
+  margin-inline: auto;
+}
+/* Transient composer notices (steering sent / failed) use the quiet activity
+   row: a flat dot and a muted sans line; only a failure gets the warn tone. */
+.hc-panel .hc-composer-notice {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1h);
+  min-width: 0;
+  padding: 0 var(--s-1) var(--s-2);
+  color: var(--fg-mute);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  line-height: var(--leading-tight);
+}
+.hc-panel .hc-composer-notice-dot {
+  width: 5px;
+  height: 5px;
+  flex: 0 0 auto;
+  border-radius: var(--r-full);
+  background: var(--fg-faint);
+}
+.hc-panel .hc-composer-notice[data-live] .hc-composer-notice-dot {
+  background: var(--accent);
+}
+.hc-panel .hc-composer-notice[data-tone="warn"] {
+  color: var(--warn);
+}
+.hc-panel .hc-composer-notice[data-tone="warn"] .hc-composer-notice-dot {
+  background: var(--warn);
+}
+.hc-panel .hc-composer-notice-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Context ring: 16px, track in line-strong, arc in the severity token. */
+.hc-panel .hc-ctx-ring {
+  position: relative;
+  display: inline-flex;
+}
+.hc-panel .hc-ctx-ring-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease);
+}
+.hc-panel .hc-ctx-ring-trigger:hover,
+.hc-panel .hc-ctx-ring-trigger[aria-expanded="true"] {
+  background: var(--bg-3);
+}
+.hc-panel .hc-ctx-ring-trigger svg {
+  width: 16px;
+  height: 16px;
+  transform: rotate(-90deg);
+}
+.hc-panel .hc-ctx-ring-track,
+.hc-panel .hc-ctx-ring-fill {
+  fill: none;
+  stroke-width: 2;
+}
+.hc-panel .hc-ctx-ring-track {
+  stroke: var(--line-strong);
+}
+.hc-panel .hc-ctx-ring-trigger svg[data-empty] .hc-ctx-ring-track {
+  stroke: var(--line);
+}
+.hc-panel .hc-ctx-ring-dot {
+  fill: var(--fg-mute);
+  stroke: none;
+}
+.hc-panel .hc-ctx-ring-fill {
+  stroke-linecap: round;
+  transition:
+    stroke-dashoffset var(--t-slow) var(--ease),
+    stroke var(--t-slow) var(--ease);
+}
+.hc-panel .hc-ctx-pop {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + var(--s-2));
+  z-index: 60;
+  min-width: 15rem;
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--bg-2);
+}
+.hc-panel .hc-ctx-pop dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--s-4);
+  row-gap: var(--s-1h);
+  margin: 0;
+}
+.hc-panel .hc-ctx-pop dt {
+  color: var(--fg-mute);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+}
+.hc-panel .hc-ctx-pop dd {
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--text-12);
+  text-align: right;
+  white-space: nowrap;
+}
+.hc-panel .hc-mini-history {
+  flex: 0 0 auto;
+  min-width: 272px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--bg-2) 34%, transparent);
+}
+/* Both history panes own a bounded scroll region; search stays above sessions. */
+.hc-panel .hc-mini-history-projects,
+.hc-panel .hc-mini-history-sessions {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.hc-panel .hc-mini-history-projects {
+  /* Sizes to its projects (scrolling past ~a third) instead of reserving a
+     mostly empty block. */
+  flex: 0 0 auto;
+  max-height: 32%;
+  border-bottom: 1px solid var(--line);
+}
+.hc-panel .hc-mini-history-sessions {
+  flex: 1 1 68%;
+}
+.hc-panel .hc-mini-history-projects[data-collapsed] {
+  flex: 0 0 auto;
+}
+.hc-panel .hc-mini-history-projects-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.hc-panel .hc-mini-history-projects-toggle .hc-mini-history-project-label {
+  margin-left: auto;
+  text-transform: none;
+}
+
+.hc-panel .hc-mini-history-list[hidden] {
+  display: none;
+}
+.hc-panel .hc-mini-history-group-title[data-selected] {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.hc-panel .hc-mini-history-head {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--s-1);
+  min-height: 42px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--fg-soft);
+}
+.hc-panel .hc-mini-history-completed-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line-soft);
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  color: var(--fg-mute);
+  font-size: var(--text-11);
+}
+.app-toggle {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 16px;
+  padding: 2px;
+  border: 1px solid color-mix(in oklch, var(--fg) 20%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--fg) 5%, transparent);
+  cursor: pointer;
+}
+.app-toggle {
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease;
+}
+.app-toggle > span {
+  transition:
+    transform 140ms ease,
+    background-color 140ms ease;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--fg-mute);
+}
+.app-toggle[aria-checked="true"] {
+  background: color-mix(in oklch, var(--fg) 18%, transparent);
+  border-color: color-mix(in oklch, var(--fg) 35%, transparent);
+}
+.app-toggle[aria-checked="true"] > span {
+  transform: translateX(10px);
+  background: var(--fg);
+}
+
+.hc-panel .hc-mini-history-body {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.hc-panel .hc-mini-history-head:has(.hc-mini-history-search) {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--s-1);
+  padding-right: var(--s-2);
+}
+.hc-panel .hc-mini-history-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+.hc-panel .hc-mini-history-filters {
+  flex: 0 0 auto;
+}
+.hc-panel .hc-mini-history-search input::placeholder {
+  font-family: var(--sans);
+  letter-spacing: normal;
+  text-transform: none;
+}
+.hc-panel .hc-mini-history-error {
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--err-wash);
+  padding: var(--s-2);
+  font-size: var(--text-11);
+  color: var(--err);
+}
+.hc-panel .hc-mini-history-empty {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-3);
+  text-align: center;
+  font-size: var(--text-12);
+  color: var(--fg-mute);
+}
+.hc-panel .hc-mini-history-more {
+  display: flex;
+  justify-content: center;
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--text-12);
+  color: var(--fg-mute);
+}
+.hc-panel .hc-mini-history-more button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.hc-panel .hc-mini-history-list {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--s-2) var(--s-1) var(--s-3);
+  touch-action: pan-y;
+}
+.hc-panel .hc-mini-history-group {
+  margin-bottom: var(--s-2);
+}
+.hc-panel .hc-mini-history-group:last-child {
+  margin-bottom: 0;
+}
+.hc-panel .hc-mini-history-group-title {
+  display: flex;
+  align-items: stretch;
+  margin: 0;
+  border-radius: var(--radius-md);
+  font-size: var(--text-12);
+  font-weight: 500;
+  color: var(--fg-mute);
+}
+.hc-panel .hc-mini-history-project-title {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  min-height: 28px;
+  padding: var(--s-1) var(--s-2);
+  overflow-wrap: anywhere;
+}
+.hc-panel .hc-mini-history-project-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hc-panel .hc-mini-history-ticket-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: var(--s-1) var(--s-2);
+}
+
+.hc-panel .hc-mini-history-chevron {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.hc-panel .hc-mini-history-chevron[data-expanded] {
+  transform: rotate(90deg);
+}
+
+.hc-panel .hc-mini-history-ticket-id {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-soft);
+}
+
+.hc-panel .hc-mini-history-ticket-label {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-11);
+  font-weight: 400;
+}
+
+.hc-panel .hc-mini-history-ticket-count {
+  flex: 0 0 auto;
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  color: var(--fg-mute);
+}
+
+.hc-panel .hc-mini-history-ticket-rows {
+  margin-left: 14px;
+  padding-left: 8px;
+  border-left: 1px solid var(--line-soft);
+}
+.hc-panel .hc-mini-history-new {
+  display: inline-flex;
+  align-self: center;
+  margin-right: var(--s-2);
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid transparent;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--fg-mute);
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 1;
+  cursor: pointer;
+}
+.hc-panel .hc-mini-history-new:hover,
+.hc-panel .hc-mini-history-new:focus-visible {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.hc-panel .hc-mini-history-new:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.hc-panel .hc-mini-history-toggle {
+  border: none;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.hc-panel .hc-mini-history-group-title:has(.hc-mini-history-toggle):hover {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.hc-panel .hc-mini-history-toggle:focus-visible {
+  color: var(--fg);
+}
+.hc-panel .hc-mini-history-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  min-height: 36px;
+  border-radius: var(--r-xs);
+  padding: 0 var(--s-1) 0 var(--s-2);
+}
+.hc-panel .hc-mini-history-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  position: relative;
+  min-width: 0;
+  flex: 1;
+  padding-block: var(--s-1);
+}
+.hc-panel .hc-mini-history-entry .hc-mini-history-open {
+  width: 100%;
+}
+.hc-panel .hc-mini-history-row:hover {
+  background: var(--color-bg-hover);
+}
+.hc-panel .hc-mini-history-row[data-active],
+.hc-panel .hc-mini-history-row[data-active]:hover {
+  background: var(--color-selection);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+.hc-panel .hc-mini-history-open {
+  min-width: 0;
+  min-height: var(--s-5);
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-2);
+  border: none;
+  background: transparent;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.hc-panel .hc-mini-history-open .label,
+.hc-panel .hc-mini-history-secondary .meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-mini-history-open .label {
+  line-height: var(--s-5);
+  font-size: var(--text-12);
+  font-weight: 400;
+  color: var(--fg);
+}
+.hc-panel .hc-mini-history-secondary {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: var(--s-5);
+  min-width: 0;
+}
+.hc-panel .hc-mini-history-secondary .meta {
+  min-width: 0;
+  margin-left: auto;
+  text-align: right;
+  font-size: var(--text-11);
+  color: var(--fg-mute);
+}
+/* Keep the title and live activity primary; disclose idle details on intent. */
+.hc-panel .hc-mini-history-row-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+
+  padding-left: var(--s-2);
+  border-radius: var(--r-xs);
+  background: var(--bg-2);
+
+  opacity: 0;
+  pointer-events: none;
+}
+
+.hc-panel .hc-mini-history-row:hover .hc-mini-history-row-actions,
+.hc-panel .hc-mini-history-row:focus-within .hc-mini-history-row-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hc-panel .hc-mini-history-row:hover .hc-mini-history-secondary .meta,
+.hc-panel .hc-mini-history-row:focus-within .hc-mini-history-secondary .meta {
+  visibility: hidden;
+}
+
+.hc-panel .hc-mini-history-row[data-activity] .hc-mini-history-row-actions {
+  position: static;
+  background: transparent;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.hc-panel .hc-mini-history-projects .hc-mini-history-new {
+  opacity: 0;
+}
+
+.hc-panel
+  .hc-mini-history-projects
+  .hc-mini-history-group-title:hover
+  .hc-mini-history-new,
+.hc-panel
+  .hc-mini-history-projects
+  .hc-mini-history-group-title:focus-within
+  .hc-mini-history-new,
+.hc-panel
+  .hc-mini-history-projects
+  .hc-mini-history-group-title[data-selected]
+  .hc-mini-history-new {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .hc-panel .hc-mini-history-row-actions {
+    position: static;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .hc-panel .hc-mini-history-secondary .meta {
+    display: none;
+  }
+
+  .hc-panel .hc-mini-history-projects .hc-mini-history-new,
+  .hc-panel .hc-mini-history-row .hc-ctrl {
+    opacity: 1;
+  }
+}
+.hc-panel .hc-mini-history-row .hc-mini-history-secondary .hc-ctrl {
+  width: var(--s-5);
+  height: var(--s-5);
+}
+.hc-panel .hc-mini-history-other-title {
+  padding: var(--s-2);
+  font-size: var(--text-11);
+}
+
+.hc-panel .hc-mini-history-agents-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 24px;
+  margin-left: var(--s-3);
+  padding: var(--s-1) var(--s-2);
+  color: var(--fg-muted);
+  font-size: var(--text-11);
+}
+
+.hc-panel .hc-mini-history-agents-toggle:hover {
+  background: color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+.hc-panel .hc-mini-history-agent {
+  width: calc(100% - var(--s-3));
+  min-height: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--s-2);
+  margin-left: var(--s-3);
+  border: none;
+  border-radius: var(--r-xs);
+  background: transparent;
+  padding: 0 var(--s-2) 0 var(--s-1);
+  color: var(--fg-mute);
+  text-align: left;
+  cursor: pointer;
+}
+.hc-panel .hc-mini-history-agent[data-working] {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.hc-panel .hc-mini-history-agent:hover,
+.hc-panel .hc-mini-history-agent:focus-visible {
+  background: color-mix(in oklch, var(--fg) 7%, transparent);
+  color: var(--fg);
+}
+.hc-panel .hc-mini-history-agent[data-active] {
+  background: color-mix(in oklch, var(--fg) 8%, transparent);
+  color: var(--fg);
+}
+
+.hc-panel .hc-mini-history-agent .label,
+.hc-panel .hc-mini-history-agent .meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-panel .hc-mini-history-agent .label {
+  font-size: var(--text-12);
+  font-weight: 400;
+}
+.hc-panel .hc-mini-history-agent .meta {
+  justify-self: end;
+  font-size: var(--text-10);
+  color: var(--fg-faint);
+}
+.hc-panel .hc-find {
+  display: flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: var(--s-1) var(--s-2);
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-bg-1);
+}
+.hc-panel .hc-find-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px var(--s-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  font-size: var(--text-12);
+}
+.hc-panel .hc-find-count {
+  min-width: 3.5em;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--text-10);
+  color: var(--fg-faint);
+}
+.hc-panel [data-find-match] {
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--color-warn) 10%, transparent);
+}
+.hc-panel [data-find-current] {
+  outline: 2px solid color-mix(in oklch, var(--color-warn) 70%, transparent);
+  outline-offset: 1px;
+}
+.hc-panel .hc-mini-history-run-status {
+  font-family: var(--font-mono);
+  font-size: var(--text-10);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-faint);
+}
+.hc-panel .hc-mini-history-run-status[data-status="executing"],
+.hc-panel .hc-mini-history-run-status[data-status="queued"] {
+  color: var(--color-ok);
+}
+.hc-panel .hc-mini-history-run-status[data-status="waiting"] {
+  color: var(--color-warn);
+}
+.hc-panel .hc-mini-history-run-status[data-status="failed"] {
+  color: var(--color-err);
+}
+.hc-panel .hc-mini-history-harness {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  color: var(--hearth-claude-mark);
+}
+.hc-panel .hc-mini-history-harness[data-harness="claude"] {
+  color: var(--hearth-claude-mark);
+}
+.hc-panel .hc-mini-history-harness[data-harness="codex"] {
+  color: var(--hearth-codex-cloud);
+}
+.hc-panel .hc-mini-history-activity {
+  width: auto;
+  min-width: 18px;
+}
+.hc-panel .hc-mini-history-harness svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+}
+.hc-panel .hc-mini-history-harness .anthropic-mark {
+  fill: currentColor;
+  stroke: none;
+}
+.hc-panel .hc-mini-history-harness .codex-cloud-shadow {
+  fill: var(--hearth-codex-cloud-shadow);
+  opacity: 0.56;
+}
+.hc-panel .hc-mini-history-harness .codex-cloud {
+  fill: var(--hearth-codex-cloud);
+  stroke: var(--hearth-codex-cloud-edge);
+  stroke-width: 0.9;
+}
+.hc-panel .hc-mini-history-harness .codex-cloud-highlight {
+  fill: var(--hearth-codex-cloud-highlight);
+  opacity: 0.68;
+  stroke: none;
+}
+.hc-panel .hc-mini-history-harness .codex-glyph {
+  fill: none;
+  stroke: var(--hearth-codex-glyph);
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.hc-panel .hc-mini-history-row .hc-ctrl {
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+}
+.hc-panel .hc-mini-history-row:hover .hc-ctrl,
+.hc-panel .hc-mini-history-row:focus-within .hc-ctrl {
+  opacity: 1;
+}
+
+.hc-panel .hc-shortcuts-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--s-4);
+  background: color-mix(in oklch, var(--bg) 58%, transparent);
+  -webkit-backdrop-filter: blur(16px) brightness(1.18);
+  backdrop-filter: blur(16px) brightness(1.18);
+}
+.hc-panel .hc-shortcuts {
+  width: min(640px, 100%);
+  max-height: min(680px, calc(100% - var(--s-4)));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--fg) 14%, transparent);
+  border-radius: var(--r-lg);
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklch, var(--bg-3) 56%, transparent),
+    color-mix(in oklch, var(--bg-2) 52%, transparent)
+  );
+  box-shadow:
+    var(--shadow-3),
+    inset 0 1px 0 color-mix(in oklch, var(--fg) 12%, transparent);
+}
+.hc-panel .hc-shortcuts-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+  padding: var(--s-3) var(--s-3) var(--s-2);
+  border-bottom: 1px solid color-mix(in oklch, var(--fg) 9%, transparent);
+}
+.hc-panel .hc-shortcuts-eyebrow {
+  margin: 0 0 3px;
+  font-family: var(--mono);
+  font-size: var(--text-9);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.hc-panel .hc-shortcuts h2 {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: var(--text-xl);
+  font-style: italic;
+  font-weight: 400;
+  line-height: 1.1;
+  color: var(--fg);
+}
+.hc-panel .hc-shortcuts-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--s-3);
+}
+.hc-panel .hc-shortcuts-section + .hc-shortcuts-section {
+  margin-top: var(--s-4);
+}
+.hc-panel .hc-shortcuts-section h3 {
+  margin: 0 0 var(--s-2);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  font-weight: 600;
+  letter-spacing: var(--tracking-wider);
+  text-transform: uppercase;
+  color: var(--fg-faint);
+}
+.hc-panel .hc-shortcuts-section dl {
+  margin: 0;
+  display: grid;
+  gap: 1px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--line);
+}
+.hc-panel .hc-shortcuts-section dl > div {
+  display: grid;
+  grid-template-columns: minmax(128px, 0.48fr) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 38px;
+  padding: var(--s-2) var(--s-2h);
+  background: color-mix(in oklch, var(--bg-1) 72%, transparent);
+}
+.hc-panel .hc-shortcuts dt {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.hc-panel .hc-shortcuts dd {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--text-12);
+  color: var(--fg-soft);
+}
+.hc-panel .hc-shortcuts kbd {
+  min-width: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xs);
+  background: color-mix(in oklch, var(--bg) 72%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--fg) 10%, transparent);
+  font-family: var(--mono);
+  font-size: var(--text-10);
+  line-height: 1.2;
+  color: var(--fg-mute);
+}
+
+.hc-panel {
+  transition-property: width, box-shadow;
+  transition-duration: var(--t-slow), var(--t-base, 180ms);
+  transition-timing-function: var(--ease);
+}
+
+.light .hc-panel {
+  background: linear-gradient(
+    155deg,
+    color-mix(in oklch, var(--surface-page) 78%, transparent),
+    color-mix(in oklch, var(--color-bg) 66%, transparent)
+  );
+  -webkit-backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
+  backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
+}
+
+/* Maximized chat workspace: three tonal panes on the canvas, separated by 8px
+   gutters instead of hairlines. Projects sidebar = recessed (no shadow, no
+   border); chat column = the page, raised one step (shadow-1 + lit edge);
+   Changes = a rounded code well inside it. */
+.hc-panel[data-maximized],
+.light .hc-panel[data-maximized] {
+  background: var(--color-canvas);
+}
+.hc-panel[data-maximized] .hc-panel-main {
+  gap: var(--s-2);
+  padding: var(--s-2);
+}
+.hc-panel[data-maximized] .hc-mini-history {
+  border-radius: var(--r-lg);
+  background: var(--surface-recessed);
+}
+/* The resize handle keeps its hit area, now centred in the 8px gutter. */
+.hc-panel[data-maximized] .hc-history-resize-handle {
+  transform: translateX(calc(var(--s-2) + 4px));
+}
+.hc-panel[data-maximized] .hc-workspace {
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--surface-page);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 1px 0 var(--edge-lit);
+}
+.hc-panel[data-maximized] .changes-side-panel {
+  margin: 0 var(--s-2) var(--s-2) 0;
+  border-radius: var(--r-lg);
+  background: var(--surface-well);
+}
+.hc-panel[data-maximized] .changes-resize-handle {
+  flex-basis: var(--s-2);
+  background: none;
+}
+.hc-panel[data-maximized] .changes-resize-handle:hover,
+.hc-panel[data-maximized] .changes-resize-handle:active,
+.hc-panel[data-maximized] .changes-resize-handle:focus-visible {
+  background: linear-gradient(var(--changes-divider), var(--changes-divider))
+    center / 2px 32px no-repeat;
+}
+.light .hc-launch {
+  background: color-mix(in oklch, var(--bg-2) 34%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35) brightness(1.03);
+  backdrop-filter: blur(20px) saturate(1.35) brightness(1.03);
+  border-color: color-mix(in oklch, var(--fg) 18%, transparent);
+  box-shadow:
+    var(--shadow-2),
+    inset 0 1px 0 var(--hearth-white-82);
+}
+
+@keyframes completed-conversation-appear {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.hc-panel .hc-mini-history-row[data-completed] {
+  animation: completed-conversation-appear 140ms ease-out;
+}
+
+/* Shared typography for chat, review comments, and inline discussions. */
+.evrow--user .ev-text,
+.chat-comment-body,
+.diff-comment-body {
+  font-family: var(--font-sans);
+  font-size: var(--chat-user-size);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+.chat-composer-input,
+.chat-comment-textarea,
+.diff-comment-editor textarea {
+  font-family: var(--font-sans);
+  font-size: var(--chat-composer-size);
+  line-height: var(--chat-composer-leading);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-panel .hc-mini-history-row[data-completed] {
+    animation: none;
+  }
+}

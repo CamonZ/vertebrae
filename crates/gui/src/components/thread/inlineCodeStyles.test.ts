@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import indexCss from "../../index.css?raw";
+import tokensCss from "../../styles/tokens.css?raw";
 import threadCss from "./thread.css?raw";
 
 // thread.css is unlayered, so any of its rules beats the Tailwind utilities
@@ -49,12 +49,12 @@ describe("thread.css inline code", () => {
   });
 });
 
-describe("index.css link token", () => {
+describe("styles/tokens.css link token", () => {
   const rootDeclaration = (property: string) =>
     [
-      ...indexCss
+      ...tokensCss
         .replace(/\/\*[\s\S]*?\*\//g, "")
-        .matchAll(/(?:^|})\s*:root\s*\{([^}]*)\}/g),
+        .matchAll(/^\s*:root\s*\{([^}]*)\}/gm),
     ]
       .map(([, body]) => declaration(body, property))
       .find(Boolean);

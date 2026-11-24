@@ -1,6 +1,6 @@
 .call-diagram {
-  --call-diagram-added: var(--diffs-addition-color-override, #68ad71);
-  --call-diagram-removed: var(--diffs-deletion-color-override, #e06c75);
+  --call-diagram-added: var(--diffs-addition-color-override, var(--hearth-call-diagram-addition-fallback));
+  --call-diagram-removed: var(--diffs-deletion-color-override, var(--hearth-call-diagram-deletion-fallback));
   margin: 0 0 8px;
   overflow: hidden;
   border: 1px solid var(--color-border);

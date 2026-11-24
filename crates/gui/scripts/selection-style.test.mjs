@@ -3,24 +3,20 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const stylesheet = readFileSync(
-  fileURLToPath(new URL("../src/index.css", import.meta.url)),
-  "utf8"
-);
-const workflowStylesheet = readFileSync(
-  fileURLToPath(
-    new URL(
-      "../src/components/WorkflowAtlas/WorkflowAtlas.css",
-      import.meta.url
-    )
-  ),
-  "utf8"
-);
+const readStylesheet = (path) =>
+  readFileSync(fileURLToPath(new URL(`../src/${path}`, import.meta.url)), "utf8");
 
-function ruleFor(selector) {
+const base = readStylesheet("styles/base.css");
+const chat = readStylesheet("components/ChatWindow/chat-panel.css");
+const chrome = readStylesheet("components/floating-panel-chrome.css");
+const panels = readStylesheet("components/entity-panels.css");
+const tasks = readStylesheet("pages/tasks.css");
+const workflowStylesheet = readStylesheet("components/WorkflowAtlas/WorkflowAtlas.css");
+
+function ruleFor(stylesheet, selector) {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const match = stylesheet.match(
-    new RegExp(`(?:^|\\n)${escapedSelector}\\s*\\{([^}]*)\\}`, "m")
+    new RegExp(`(?:^|\\n)[ \t]*${escapedSelector}\\s*\\{([^}]*)\\}`, "m")
   );
 
   assert.ok(match, `Missing CSS rule for ${selector}`);
@@ -28,7 +24,7 @@ function ruleFor(selector) {
 }
 
 test("dark selection uses the accent text-selection tint with readable text", () => {
-  const darkSelection = ruleFor("::selection");
+  const darkSelection = ruleFor(base, "::selection");
 
   assert.match(
     darkSelection,
@@ -38,7 +34,7 @@ test("dark selection uses the accent text-selection tint with readable text", ()
 });
 
 test("light selection uses the accent text-selection tint with readable foreground text", () => {
-  const lightSelection = ruleFor("html.light ::selection");
+  const lightSelection = ruleFor(base, "html.light ::selection");
 
   assert.match(
     lightSelection,
@@ -48,40 +44,32 @@ test("light selection uses the accent text-selection tint with readable foregrou
 });
 
 test("light chat panels retain a frosted surface treatment", () => {
-  const lightPanel = ruleFor(".light .hc-panel");
+  const lightPanel = ruleFor(chat, ".light .hc-panel");
 
   assert.match(lightPanel, /background:\s*linear-gradient/);
   assert.match(lightPanel, /,\s*transparent\)/);
-  assert.match(lightPanel, /var\(--bg-3\) 24%/);
+  assert.match(lightPanel, /var\(--surface-page\) 78%/);
   assert.match(lightPanel, /backdrop-filter:\s*blur\(30px\)/);
 });
 
 test("chat and entity side panels share the neutral gray shell border", () => {
   assert.match(
-    stylesheet,
-    /\.hc-panel,\s*\.detail\.detail-float\s*\{[\s\S]*?border:\s*1px solid var\(--panel-border\);/
+    chrome,
+    /\.hc-panel,\s*\.detail\.detail-float\s*\{[^}]*--panel-border-opacity: 12%;[^}]*border: 1px solid var\(--panel-border\);/
   );
   assert.match(
-    stylesheet,
-    /\.light \.hc-panel,\s*\.light \.detail\.detail-float\s*\{[\s\S]*?border-color:\s*var\(--panel-border\);/
-  );
-  assert.match(
-    stylesheet,
-    /\.hc-panel,\s*\.detail\.detail-float\s*\{[\s\S]*?--panel-border:\s*color-mix\(in oklch, var\(--fg\) 12%, transparent\);/
-  );
-  assert.match(
-    stylesheet,
-    /\.light \.hc-panel,\s*\.light \.detail\.detail-float\s*\{[\s\S]*?--panel-border:\s*color-mix\(in oklch, var\(--fg\) 18%, transparent\);/
+    chrome,
+    /\.light \.hc-panel,\s*\.light \.detail\.detail-float\s*\{[^}]*--panel-border-opacity: 18%;/
   );
 });
 
 test("entity detail chrome uses the neutral panel border", () => {
   assert.match(
-    stylesheet,
+    panels,
     /\.detail\.detail-float \.detail-resize-handle:hover::after,[\s\S]*?background:\s*var\(--fg-mute\);/
   );
   assert.match(
-    stylesheet,
+    tasks,
     /\.tasks-v2-detail-shell \.t-detail-head::after\s*\{[\s\S]*?background:\s*linear-gradient\(90deg, var\(--panel-border\),/
   );
   for (const selector of [
@@ -105,7 +93,7 @@ test("entity detail chrome uses the neutral panel border", () => {
 
 test("task row focus does not add an accent border", () => {
   assert.doesNotMatch(
-    stylesheet,
+    tasks,
     /\.tasks-v2 \.t-row:focus-visible\s*\{[\s\S]*?box-shadow:\s*[^;}]*var\(--accent\)/
   );
 });
