@@ -183,6 +183,86 @@ describe("MarkdownContent", () => {
     document.documentElement.classList.remove("light");
   });
 
+  describe("diagram blocks", () => {
+    const call = (label: string, line: number) => ({
+      label,
+      path: "src/calls.ts",
+      line,
+    });
+    const fence = (language: string, payload: unknown) =>
+      "```" + language + "\n" + JSON.stringify(payload) + "\n```";
+    it.each([
+      ["mermaid", "graph TD\n  A --> B", "Mermaid"],
+      ["dot", "digraph { a -> b }", "DOT"],
+    ])(
+      "puts a %s diagram in a resizable block with cinema mode",
+      async (language, body, label) => {
+        render(<MarkdownContent text={`\`\`\`${language}\n${body}\n\`\`\``} />);
+        const frame = await screen.findByTitle(`${label} diagram`);
+        const block = screen.getByRole("region", { name: `${label} diagram` });
+        expect(block).toContainElement(frame);
+        expect(
+          screen.getByRole("separator", { name: `${label} diagram height` })
+        ).toBeInTheDocument();
+        // A chosen height fills the box; the SVG fits inside it.
+        fireEvent.keyDown(
+          screen.getByRole("separator", { name: `${label} diagram height` }),
+          { key: "End" }
+        );
+        expect(frame).toHaveStyle({ flex: "1 1 0" });
+        expect(frame.getAttribute("srcdoc")).toContain(
+          "height: 100% !important"
+        );
+        fireEvent.click(
+          screen.getByRole("button", {
+            name: `Open ${label} diagram in cinema mode`,
+          })
+        );
+        expect(
+          screen.getByRole("dialog", { name: `${label} diagram, cinema mode` })
+        ).toContainElement(frame);
+        fireEvent.click(
+          screen.getByRole("button", { name: "Close cinema mode" })
+        );
+        fireEvent.click(
+          screen.getByRole("button", { name: `Reset ${label} diagram size` })
+        );
+      }
+    );
+
+    it("puts call trees and statecharts in resizable blocks with cinema mode", () => {
+      render(
+        <MarkdownContent
+          text={`${fence("calltree", {
+            snapshot: "working-tree",
+            direction: "incoming",
+            root: { ...call("dispatch", 5), children: [] },
+          })}\n\n\`\`\`statechart\n${JSON.stringify({
+            id: "delivery",
+            initial: "Work",
+            states: { Work: { on: { DONE: "Done" } }, Done: { type: "final" } },
+          })}\n\`\`\``}
+        />
+      );
+      for (const label of ["Call tree", "Statechart"]) {
+        expect(
+          screen.getByRole("region", { name: `${label} diagram` })
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole("button", {
+            name: `Open ${label} diagram in cinema mode`,
+          })
+        ).toBeInTheDocument();
+      }
+      // The call tree's own caption names it once.
+      expect(screen.getAllByText("Call tree")).toHaveLength(1);
+      // The statechart's own grip gives way to the block's.
+      expect(
+        screen.queryByRole("separator", { name: "Resize statechart" })
+      ).toBeNull();
+    });
+  });
+
   describe("plain text rendering", () => {
     it("renders plain text in a paragraph", () => {
       render(<MarkdownContent text="Hello world" />);

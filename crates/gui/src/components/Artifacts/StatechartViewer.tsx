@@ -1,5 +1,13 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { InlineResizeHandle } from "../shared/InlineResizeHandle";
+import { useDiagramBox } from "../shared/diagramBox";
 import type { Statechart } from "./statechart";
 import { useStatechartZoom } from "./useStatechartZoom";
 import { useStatechartViewport } from "./useStatechartViewport";
@@ -48,6 +56,20 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
     return new Map(entries);
   }, [machine]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // In a chat diagram block the block owns sizing; with a box height the
+  // viewer fills it and refits whenever the box changes size.
+  const box = useDiagramBox();
+  const fill = box?.fill ?? false;
+  const fitRef = useRef<() => void>(() => {});
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!fill || !layoutReady || !canvas) return;
+    fitRef.current();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => fitRef.current());
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [canvasRef, fill, layoutReady]);
   const markerId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const marker = `statechart-arrow-${markerId}`;
   const selected = machine.nodes.find((node) => node.id === selectedId);
@@ -93,7 +115,7 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
 
     const horizontal = (canvas.clientWidth - 16) / layout.width;
     const vertical = (canvas.clientHeight - 16) / layout.height;
-    const availableZoom = Math.min(1, horizontal, vertical);
+    const availableZoom = Math.min(box?.maxFitZoom ?? 1, horizontal, vertical);
     const fitted = Math.max(0.05, availableZoom);
 
     setZoom(fitted, true);
@@ -101,17 +123,22 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
     canvas.scrollLeft = 0;
     canvas.scrollTop = 0;
   }
+  fitRef.current = fit;
 
   return (
     <span
       className="flex min-w-0 max-w-full flex-col overflow-hidden rounded-md border border-border bg-bg"
       ref={viewport.containerRef}
-      style={{
-        width: "90%",
-        maxWidth: "90%",
-        marginInline: "auto",
-        height: viewport.height,
-      }}
+      style={
+        fill
+          ? { width: "100%", flex: "1 1 0", minHeight: 0 }
+          : {
+              width: box ? "100%" : "90%",
+              maxWidth: box ? "100%" : "90%",
+              marginInline: "auto",
+              height: viewport.height,
+            }
+      }
       data-testid="statechart-viewer"
     >
       <span className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
@@ -448,14 +475,16 @@ export function StatechartViewer({ machine }: { machine: Statechart }) {
           "Select a state to inspect its description and transitions. Drag or scroll to pan; use + and − to zoom."
         )}
       </span>
-      <InlineResizeHandle
-        label="Resize statechart"
-        value={viewport.height}
-        minimum={320}
-        maximum={1600}
-        resizing={viewport.dragging}
-        {...viewport.resizeHandlers}
-      />
+      {!box && (
+        <InlineResizeHandle
+          label="Resize statechart"
+          value={viewport.height}
+          minimum={320}
+          maximum={1600}
+          resizing={viewport.dragging}
+          {...viewport.resizeHandlers}
+        />
+      )}
     </span>
   );
 }

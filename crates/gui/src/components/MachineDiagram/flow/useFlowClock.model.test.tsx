@@ -20,6 +20,7 @@ import {
   retarget,
   shownBeat,
   shownTime,
+  TEMPO,
   type ClockAction,
   type ClockState,
 } from "./clockModel";
@@ -244,7 +245,7 @@ describe("useFlowClock", () => {
     };
     const slow = run(1);
     const fast = run(2);
-    check(slow > 0.5, `1× moved only ${slow}`);
+    check(slow > 0.5 * TEMPO, `1× moved only ${slow}`);
     check(Math.abs(fast - 2 * slow) < 1e-6, `2× moved ${fast}, 1× ${slow}`);
   });
 });

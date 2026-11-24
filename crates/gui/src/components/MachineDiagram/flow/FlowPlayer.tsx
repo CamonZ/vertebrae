@@ -32,6 +32,7 @@ import type { ArrangementName } from "./spec";
 import { useArrangementMorph } from "./useArrangementMorph";
 import { useFlowClock, type FlowClock } from "./useFlowClock";
 import { useReducedMotion } from "../useReducedMotion";
+import { diagramFillClass, useDiagramBox } from "../../shared/diagramBox";
 import {
   beatAnnouncement,
   cardLabel,
@@ -189,6 +190,7 @@ export function FlowPlayer({
   );
   const hasBeats = diagram.beats.length > 0;
   const root = useRef<HTMLDivElement>(null);
+  const box = useDiagramBox();
   const playingHidden = suspended && clock.playing;
   useEffect(() => {
     if (playingHidden) clock.pause();
@@ -357,7 +359,7 @@ export function FlowPlayer({
       aria-keyshortcuts={`Space ArrowLeft ArrowRight Shift+ArrowLeft Shift+ArrowRight Home End C S N Shift+N${names.length > 1 ? " B Shift+B" : ""}`}
       tabIndex={0}
       onKeyDown={onKeyDown}
-      className="flex flex-col gap-2 rounded-[var(--radius-md)]"
+      className={`flex flex-col gap-2 rounded-[var(--radius-md)] ${diagramFillClass(box)}`}
       data-testid="flow-player"
       data-arrangement={diagram.arrangement}
       data-phased={phased ? "true" : undefined}

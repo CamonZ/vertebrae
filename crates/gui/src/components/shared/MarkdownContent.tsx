@@ -28,6 +28,8 @@ import { useNearViewport } from "../../hooks/useNearViewport";
 import { StatechartDiagramBlock } from "./StatechartDiagramBlock";
 import { FlowBlock } from "./FlowBlock";
 import { CallDiffBlock, CallTreeBlock } from "./CallDiagramBlock";
+import { DiagramFrame } from "./DiagramFrame";
+import { useDiagramBox } from "./diagramBox";
 import { VtbEntityMarkdownLink } from "./VtbEntityLink";
 import { parseVtbEntityHref } from "./vtbEntityLinkTarget";
 
@@ -169,6 +171,8 @@ type DiagramRenderer =
       kind: "component";
       label: string;
       component: ComponentType<{ source: string }>;
+      /** The component draws its own title (call diagrams). */
+      titled?: boolean;
     };
 
 const diagramRenderers: Record<string, DiagramRenderer> = {
@@ -186,11 +190,13 @@ const diagramRenderers: Record<string, DiagramRenderer> = {
     kind: "component",
     label: "Call tree",
     component: CallTreeBlock,
+    titled: true,
   },
   calldiff: {
     kind: "component",
     label: "Call diff",
     component: CallDiffBlock,
+    titled: true,
   },
   mermaid: {
     kind: "svg",
@@ -333,8 +339,8 @@ function buildSandboxedSvgDocument(svg: string): string {
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;" />
   <style>
-    html, body { margin: 0; background: transparent; overflow: hidden; }
-    svg { display: block; width: 100%; max-width: 100%; height: auto; }
+    html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+    svg { display: block; width: 100% !important; height: 100% !important; max-width: none !important; }
   </style>
 </head>
 <body>${svg}</body>
@@ -463,27 +469,47 @@ function DiagramBlock({ language, source, renderer }: DiagramBlockProps) {
   }
 
   return (
-    <div className="mb-2 max-w-full overflow-hidden rounded-md border border-border/50 bg-bg">
-      <div className="flex items-center border-b border-border/50 px-3 py-1">
-        <span className="font-mono text-meta text-fg-mute">
-          {renderer.label}
-        </span>
-      </div>
+    <DiagramFrame label={renderer.label} language={language} source={source}>
       {result.status === "rendering" ? (
         <div className="px-3 py-4 font-mono text-meta text-fg-mute">
           Rendering {renderer.label} diagram...
         </div>
       ) : (
-        <iframe
-          className="block w-full bg-transparent"
-          sandbox=""
-          scrolling="no"
-          srcDoc={result.document}
-          style={result.frameStyle}
-          title={`${renderer.label} diagram`}
+        <SvgDiagramFrame
+          document={result.document}
+          frameStyle={result.frameStyle}
+          label={renderer.label}
         />
       )}
-    </div>
+    </DiagramFrame>
+  );
+}
+
+/**
+ * The sandboxed SVG. Inline it keeps the diagram's aspect ratio and natural
+ * maximum width; widened it scales to the block's width; in a box with a
+ * height (resized or cinema) it fills the box and the SVG fits inside.
+ */
+function SvgDiagramFrame({
+  document,
+  frameStyle,
+  label,
+}: RenderedDiagram & { label: string }) {
+  const box = useDiagramBox();
+  const style: React.CSSProperties = box?.fill
+    ? { flex: "1 1 0", minHeight: 0 }
+    : box?.widened
+      ? { aspectRatio: frameStyle.aspectRatio }
+      : frameStyle;
+  return (
+    <iframe
+      className="block w-full bg-transparent"
+      sandbox=""
+      scrolling="no"
+      srcDoc={document}
+      style={style}
+      title={`${label} diagram`}
+    />
   );
 }
 
@@ -756,10 +782,15 @@ function MarkdownCode({
       if (renderer.kind === "component") {
         const DiagramComponent = renderer.component;
         return (
-          <DiagramComponent
+          <DiagramFrame
             key={`${language}:${codeString}`}
+            label={renderer.label}
+            language={language}
             source={codeString}
-          />
+            hideLabel={renderer.titled}
+          >
+            <DiagramComponent source={codeString} />
+          </DiagramFrame>
         );
       }
       return (

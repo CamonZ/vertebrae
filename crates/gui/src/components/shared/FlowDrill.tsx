@@ -16,6 +16,7 @@ import { FlowPlayer } from "../MachineDiagram/flow/FlowPlayer";
 import type { CompiledFlow, DrillTarget } from "../MachineDiagram/flow";
 import { FlowSpecErrors, FlowSpecProgress } from "./FlowSpecStatus";
 import { useFlowSpec } from "./useFlowSpec";
+import { diagramFillClass, useDiagramBox } from "./diagramBox";
 
 /** One drill-down below the top diagram: the part opened and what it opens. */
 interface DrillLevel {
@@ -112,9 +113,10 @@ export function FlowDrill({
   };
 
   const depth = path.length;
+  const fill = diagramFillClass(useDiagramBox());
   return (
     <div
-      className="flex flex-col gap-2"
+      className={`flex flex-col gap-2 ${fill}`}
       data-testid="flow-drill"
       data-depth={depth}
     >
@@ -127,6 +129,7 @@ export function FlowDrill({
         }}
         hidden={depth > 0}
         tabIndex={-1}
+        className={fill}
         data-drill-level={0}
       >
         <LevelPlayer flow={flow} suspended={depth > 0} onOpen={openAt(0)} />
@@ -139,7 +142,7 @@ export function FlowDrill({
           }}
           hidden={i + 1 < depth}
           tabIndex={-1}
-          className=""
+          className={fill}
           data-drill-level={i + 1}
           data-drill-part={level.partId}
         >

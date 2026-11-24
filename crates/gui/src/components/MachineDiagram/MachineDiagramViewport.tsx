@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useStatechartViewport } from "../Artifacts/useStatechartViewport";
 import { useStatechartZoom } from "../Artifacts/useStatechartZoom";
 import { InlineResizeHandle } from "../shared/InlineResizeHandle";
+import { useDiagramBox } from "../shared/diagramBox";
 import { EdgeLabel } from "../WorkflowAtlas/EdgeLabel";
 import { ZoomWidget } from "../WorkflowAtlas/ZoomWidget";
 import "../WorkflowAtlas/WorkflowAtlas.css";
@@ -88,7 +89,7 @@ export const ZOOM_GUTTER = 62;
 export function MachineDiagramViewport({
   width,
   height,
-  mode = "embedded",
+  mode: requestedMode = "embedded",
   ready = true,
   labels = [],
   fitOnMount = false,
@@ -98,6 +99,12 @@ export function MachineDiagramViewport({
   fitInsets = NO_INSETS,
   children,
 }: MachineDiagramViewportProps) {
+  // In a chat diagram block the block owns sizing: fill its box when it has
+  // a height, drop the own grip, and refit whenever the box changes size.
+  const box = useDiagramBox();
+  const mode = box?.fill ? "full-page" : requestedMode;
+  const maxFitZoom = box?.maxFitZoom ?? 1;
+  const followBox = box !== null;
   const viewport = useStatechartViewport({
     minHeight,
     maxHeight: MAX_HEIGHT,
@@ -126,7 +133,7 @@ export function MachineDiagramViewport({
     const fitted = Math.max(
       MIN_ZOOM,
       Math.min(
-        1,
+        maxFitZoom,
         room / width,
         mode === "full-page"
           ? Math.max(1, canvas.clientHeight - inset.bottom) / height
@@ -135,6 +142,7 @@ export function MachineDiagramViewport({
     );
     initialFit.current = false;
     setZoom(fitted, true);
+    if (followBox) viewport.resetPan();
     if (mode === "embedded")
       setFittedHeight(
         Math.max(minHeight, Math.ceil(height * fitted) + inset.bottom)
@@ -145,14 +153,18 @@ export function MachineDiagramViewport({
     fitInitial.current();
     const canvas = viewport.canvasRef.current;
     if (!canvas || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => fitInitial.current());
+    const observer = new ResizeObserver(() => {
+      if (followBox) initialFit.current = true;
+      fitInitial.current();
+    });
     observer.observe(canvas);
     return () => observer.disconnect();
-  }, [viewport.canvasRef]);
+  }, [viewport.canvasRef, followBox]);
 
   useLayoutEffect(() => {
+    if (followBox) initialFit.current = true;
     fitInitial.current();
-  }, [ready, width, height, mode]);
+  }, [ready, width, height, mode, followBox, maxFitZoom]);
 
   function fit() {
     const canvas = viewport.canvasRef.current;
@@ -178,11 +190,15 @@ export function MachineDiagramViewport({
     <span
       className="md-viewport"
       ref={viewport.containerRef}
-      style={{
-        display: "block",
-        height: mode === "full-page" ? "100%" : frameHeight,
-        width: mode === "full-page" ? "100%" : undefined,
-      }}
+      style={
+        box?.fill
+          ? { display: "block", flex: "1 1 0", minHeight: 0, width: "100%" }
+          : {
+              display: "block",
+              height: mode === "full-page" ? "100%" : frameHeight,
+              width: mode === "full-page" ? "100%" : undefined,
+            }
+      }
       data-dragging={viewport.dragging ? "true" : "false"}
       data-testid="machine-diagram-viewport"
     >
@@ -224,7 +240,7 @@ export function MachineDiagramViewport({
     </span>
   );
 
-  if (!resizeLabel || mode === "full-page") return frame;
+  if (!resizeLabel || mode === "full-page" || box) return frame;
   return (
     <span className="md-resizable" data-testid="machine-diagram-resizable">
       {frame}
