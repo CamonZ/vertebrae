@@ -1141,13 +1141,22 @@ for historical/latest navigation, retention refs, capture limits and failure beh
 
 ## Diff review comments
 
-The Changes icon in the conversation header toggles a resizable side panel
-beside the mounted conversation. There is no Conversation/Changes tab strip.
-The main composer draft and conversation scroll survive opening and closing it.
-The splitter can use the available window width without a fixed pixel or
-percentage cap, keeping only a 180px usable minimum for each surface. Narrower
-windows scroll horizontally rather than switching to exclusive views.
-Closing the panel retains the existing unsaved-document Save/Discard/Cancel gate.
+The Changes icon in the conversation header toggles the chat's side column
+(Changes · Discussions · Background tasks), a resizable panel beside the
+mounted conversation. The main composer draft and conversation scroll survive
+opening and closing it. The splitter can use the available window width without
+a fixed pixel or percentage cap, keeping only a 180px usable minimum for each
+surface. Closing the panel retains the existing unsaved-document
+Save/Discard/Cancel gate.
+
+The side column always sits beside the transcript; it never replaces it.
+Showing any section while the chat panel is compact expands the panel to the
+full (maximized) view, and switching sections keeps it expanded. Closing the
+side column, or Escape outside a control that handles Escape itself, returns
+to the compact chat. A chat the user expanded stays expanded when the column
+closes, and collapsing the panel while a section is shown closes the column.
+Below a 1100px chat width only source evidence (file references) replaces the
+transcript as the chat's view, keeping the composer.
 **⌘⇧B** toggles Changes for the active conversation only when its associated
 worktree has changed files against the default Changes baseline. The shortcut
 checks Git on demand, is inert without an associated worktree, and ignores a

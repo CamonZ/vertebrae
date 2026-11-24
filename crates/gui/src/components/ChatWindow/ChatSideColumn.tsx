@@ -13,7 +13,10 @@ import {
 import { useDiscussionSummary } from "./selectionDiscussionState";
 import { CHAT_AREA_ATTRIBUTE } from "./chatAreas";
 
-/** Below this chat width the column replaces the transcript (§1). */
+/**
+ * Below this chat width source evidence replaces the transcript; the side
+ * column expands the chat instead (69c30538).
+ */
 export const SIDE_COLUMN_BESIDE_MIN_WIDTH = 1100;
 
 export type SideCounts = Record<SideSection, number | null>;
@@ -30,7 +33,6 @@ export function ChatSideColumn({
   counts,
   available,
   onSection,
-  onReselect,
   children,
 }: {
   section: SideSection;
@@ -39,11 +41,6 @@ export function ChatSideColumn({
   available(section: SideSection): boolean;
   /** `focus`: the section's content takes the keyboard once shown. */
   onSection(section: SideSection, focus: boolean): void;
-  /**
-   * Clicking the already-selected tab. Set where the column replaces the
-   * transcript (narrow panels) so the tab doubles as the way back to the chat.
-   */
-  onReselect?(section: SideSection): void;
   /** The shown section's content. */
   children: ReactNode;
 }) {
@@ -107,11 +104,7 @@ export function ChatSideColumn({
                 aria-keyshortcuts={ariaKeyShortcut(
                   SIDE_COLUMN_SHORTCUTS[value]
                 )}
-                onClick={() =>
-                  selected && onReselect
-                    ? onReselect(value)
-                    : onSection(value, true)
-                }
+                onClick={() => onSection(value, true)}
               >
                 {SIDE_SECTION_LABEL[value]}
                 {!!count && (

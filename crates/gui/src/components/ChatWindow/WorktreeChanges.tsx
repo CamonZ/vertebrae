@@ -122,14 +122,8 @@ export function WorktreeChanges({
   onTurnVersionChange,
   onExit,
   sessionId,
-  compact = false,
 }: {
   ref?: Ref<HTMLElement>;
-  /**
-   * Changes is the chat's whole view (narrower than the side column's
-   * beside threshold): the files explorer starts collapsed to its toggle.
-   */
-  compact?: boolean;
   /**
    * The chat whose Changes this is: the comparison, active file and line
    * cursor live in its side column store, so a remount finds them in place.
@@ -236,13 +230,7 @@ export function WorktreeChanges({
     if (diffReady && section && section.ownerDocument.activeElement === section)
       resumeLineCursor(section);
   }, [diffReady]);
-  const [filesOpen, setFilesOpen] = useState(!compact);
-  // Crossing the beside/view threshold resets the explorer to its default.
-  const [placedCompact, setPlacedCompact] = useState(compact);
-  if (placedCompact !== compact) {
-    setPlacedCompact(compact);
-    setFilesOpen(!compact);
-  }
+  const [filesOpen, setFilesOpen] = useState(true);
   const [mode, setMode] = useState<SidebarMode>("changes");
   // Back on Changes: scroll to the file the chat left it on.
   const [jumpTarget, setJumpTarget] = useState<JumpTarget | null>(() =>

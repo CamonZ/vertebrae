@@ -401,38 +401,15 @@ it("hides and shows the file list from the Changes palette", async () => {
   ).toHaveFocus();
 });
 
-it("starts compact with the file list collapsed, reachable from the palette", async () => {
+it("opens with the file list shown", async () => {
   load.mockResolvedValue({ status: "ok", data: modified });
-  const view = render(
-    <WorktreeChanges sessionId="chat" worktreePath="/worktree" compact />
-  );
-  const toggle = await screen.findByRole("button", { name: "Show files" });
-  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  render(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
   expect(
-    screen.queryByRole("button", { name: "Jump to src/app.ts" })
-  ).toBeNull();
-
-  const changes = screen.getByRole("region", { name: "Worktree changes" });
-  changes.focus();
-  openPaletteAt(changes);
-  const labels = changesEntries().map((item) => item.label);
-  act(() => useCommandPaletteStore.getState().closePalette());
-  expect(labels).not.toContain("Hide file list");
-
-  await runChangesCommand(changes, "Show file list");
-  const first = screen.getByRole("button", { name: "Jump to src/app.ts" });
-  expect(first).toHaveFocus();
-  expect(fireEvent.keyDown(first, { key: "ArrowDown" })).toBe(false);
+    await screen.findByRole("button", { name: "Hide files" })
+  ).toHaveAttribute("aria-expanded", "true");
   expect(
-    screen.getByRole("button", { name: "Jump to gone.txt" })
-  ).toHaveFocus();
-
-  // Widening past the beside threshold opens the explorer again.
-  view.rerender(<WorktreeChanges sessionId="chat" worktreePath="/worktree" />);
-  expect(screen.getByRole("button", { name: "Hide files" })).toHaveAttribute(
-    "aria-expanded",
-    "true"
-  );
+    await screen.findByRole("button", { name: "Jump to src/app.ts" })
+  ).toBeInTheDocument();
 });
 
 it("moves focus with the arrow keys inside the changed-file list", async () => {

@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  type RefObject,
+} from "react";
 import { commands } from "../../bindings";
 import {
   openingSection,
@@ -9,6 +15,7 @@ import {
 import type { SideColumnControls } from "./ChatPaneList";
 import { CHAT_AREA_ATTRIBUTE } from "./chatAreas";
 import { dirtyPaths } from "./workspace/documentStore";
+import { useShellStore } from "../../stores/shellStore";
 
 /**
  * A chat's side column controls (db5160ff): which section shows, and the
@@ -180,11 +187,52 @@ export function useChatSideColumn({
     [available, toggle]
   );
 
+  // The side column never replaces the transcript (69c30538): a section
+  // shown in the compact chat expands the panel so it sits beside the
+  // conversation. Narrowing the chat while a section is shown closes it.
+  const presentation = useShellStore((state) => state.chatPanelPresentation);
+  const expandedFor = useShellStore((state) => state.sideColumnExpandedFor);
+  const expandForSideColumn = useShellStore(
+    (state) => state.expandForSideColumn
+  );
+  const setPresentation = useShellStore(
+    (state) => state.setChatPanelPresentation
+  );
+  const lastPresentation = useRef(presentation);
+  // Before paint, so a section never draws inside the compact panel.
+  useLayoutEffect(() => {
+    const was = lastPresentation.current;
+    lastPresentation.current = presentation;
+    if (!active || !shownSection || presentation !== "compact") return;
+    if (was !== "compact") requestClose();
+    else expandForSideColumn(sessionId);
+  }, [
+    active,
+    shownSection,
+    presentation,
+    requestClose,
+    expandForSideColumn,
+    sessionId,
+  ]);
+  // The column that expanded the chat closed: back to the compact chat.
+  const expandedByColumn = expandedFor === sessionId;
+  useEffect(() => {
+    if (expandedByColumn && !view.open && presentation === "expanded")
+      setPresentation("compact");
+  }, [expandedByColumn, view.open, presentation, setPresentation]);
+
+  /** Escape while the column holds the chat expanded: close the column. */
+  const leaveExpanded = useCallback((): boolean => {
+    if (!expandedByColumn || !view.open) return false;
+    requestClose();
+    return true;
+  }, [expandedByColumn, view.open, requestClose]);
+
   useEffect(() => {
     if (!register || !active) return;
-    register({ toggle: toggleColumn, toggleSection });
+    register({ toggle: toggleColumn, toggleSection, leaveExpanded });
     return () => register(null);
-  }, [register, active, toggleColumn, toggleSection]);
+  }, [register, active, toggleColumn, toggleSection, leaveExpanded]);
 
   return {
     changesShown,

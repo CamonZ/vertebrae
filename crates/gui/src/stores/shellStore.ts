@@ -15,6 +15,13 @@ interface ShellState {
   /** Expanded chat can be suspended while another route is viewed. */
   chatPanelPresentation: ChatPanelPresentation;
   setChatPanelPresentation: (presentation: ChatPanelPresentation) => void;
+  /**
+   * The chat whose side column expanded the panel (69c30538). Closing the
+   * column returns to the compact chat; any return to compact clears it.
+   */
+  sideColumnExpandedFor: string | null;
+  /** Expand the chat panel so `sessionId`'s side column fits beside it. */
+  expandForSideColumn: (sessionId: string) => void;
 }
 
 /**
@@ -31,5 +38,13 @@ export const useShellStore = create<ShellState>((set) => ({
 
   chatPanelPresentation: "compact",
   setChatPanelPresentation: (chatPanelPresentation) =>
-    set({ chatPanelPresentation }),
+    set(
+      chatPanelPresentation === "compact"
+        ? { chatPanelPresentation, sideColumnExpandedFor: null }
+        : { chatPanelPresentation }
+    ),
+
+  sideColumnExpandedFor: null,
+  expandForSideColumn: (sideColumnExpandedFor) =>
+    set({ chatPanelPresentation: "expanded", sideColumnExpandedFor }),
 }));

@@ -21,6 +21,11 @@ export interface SideColumnControls {
   toggle(): boolean;
   /** Show `section`, or close the column showing it; false if unavailable. */
   toggleSection(section: SideSection): boolean;
+  /**
+   * Close the column when it expanded the chat, returning to the compact
+   * chat; false when it did not.
+   */
+  leaveExpanded(): boolean;
 }
 
 export type RegisterSideColumn = (
