@@ -19,6 +19,12 @@ import { beatIndex, beatOutcomeTime, type Timeline } from "../timeline";
 export const MAX_FRAME_DT = 0.1;
 /** One frame step, in timeline seconds. */
 export const FRAME = 1 / 30;
+/**
+ * Timeline seconds played per wall-clock second at 1×. Verb durations are
+ * authored for a brisk pace; playback runs at half of it so each beat can be
+ * followed. Speeds scale this tempo.
+ */
+export const TEMPO = 0.5;
 /** Playback speeds offered by the player, slowest first. */
 export const SPEEDS = [0.25, 0.5, 1, 2] as const;
 
@@ -26,7 +32,7 @@ export interface ClockState {
   /** Running position, 0 ≤ raw < period. */
   readonly raw: number;
   readonly playing: boolean;
-  /** Timeline seconds per wall-clock second. */
+  /** Multiplier on TEMPO (1 = the standard pace). */
   readonly speed: number;
   /** Loop at the period; otherwise play once and stop at `playEnd`. */
   readonly loop: boolean;
@@ -176,7 +182,7 @@ export function clockStep(
     case "tick": {
       if (!s.playing || !(tl.period > 0)) return s;
       const dt = Math.min(MAX_FRAME_DT, Math.max(0, a.dt || 0));
-      const next = s.raw + dt * s.speed;
+      const next = s.raw + dt * s.speed * TEMPO;
       if (s.until !== null && next >= s.until) return rest(s, s.until);
       const end = playEnd(tl);
       if (!s.loop && s.raw < end && next >= end) return rest(s, end);

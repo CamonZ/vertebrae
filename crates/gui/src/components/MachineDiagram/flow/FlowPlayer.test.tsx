@@ -92,6 +92,7 @@ describe("keyboard control", () => {
     key("Home");
     expect(shownBeat()).toBe(0);
     expect(shownT()).toBe(starts[0]);
+    expect(player()).toHaveAttribute("data-speed", "1");
     key("+");
     expect(player()).toHaveAttribute("data-speed", "2");
     key("-");
@@ -255,14 +256,15 @@ describe("beat hairline, note and announcements", () => {
     renderPlayer();
     key(" ");
     const seen = new Set<string>();
-    for (let k = 0; k < 400 && player().dataset.playing === "true"; k++) {
+    // 1× plays at TEMPO (half the authored pace), so allow twice the time.
+    for (let k = 0; k < 800 && player().dataset.playing === "true"; k++) {
       act(() => vi.advanceTimersByTime(80));
       expect(noteCaption()).toHaveTextContent(after.beats[shownBeat()].caption);
       seen.add(noteCaption().textContent ?? "");
     }
     expect(player()).toHaveAttribute("data-playing", "false");
     expect(seen.size).toBe(after.beats.length);
-  }, 30_000);
+  }, 60_000);
 
   it("hovering or focusing another dot shows its caption beside it", () => {
     renderPlayer();

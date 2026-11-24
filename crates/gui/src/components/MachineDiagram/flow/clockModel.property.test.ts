@@ -25,6 +25,7 @@ import {
   retarget,
   shownBeat,
   shownTime,
+  TEMPO,
   type ClockState,
 } from "./clockModel";
 import { compileFlowOrThrow, parseFlowSpec } from "./index";
@@ -248,7 +249,7 @@ const clockMachine: hegel.stateful.StateMachine<Machine> = {
         check(next === m.s, "a tick moved a paused clock");
       } else {
         check(next.speed === m.s.speed, "a tick changed the speed");
-        const want = Math.min(MAX_FRAME_DT, dt) * m.s.speed;
+        const want = Math.min(MAX_FRAME_DT, dt) * m.s.speed * TEMPO;
         const end = playEnd(m.tl);
         if (m.s.until !== null && m.s.raw + want >= m.s.until) {
           // Playing one beat: the tick that reaches its outcome stops there.
@@ -281,7 +282,7 @@ const clockMachine: hegel.stateful.StateMachine<Machine> = {
       const beatStop = m.s.until;
       const target = beatStop ?? playEnd(m.tl);
       const dt = tc.draw(gs.floats({ minValue: 0.01, maxValue: MAX_FRAME_DT }));
-      const limit = Math.ceil(m.tl.period / (dt * m.s.speed)) + 2;
+      const limit = Math.ceil(m.tl.period / (dt * m.s.speed * TEMPO)) + 2;
       let s = m.s;
       let ticks = 0;
       while (s.playing && ticks < limit) {
@@ -516,7 +517,7 @@ test("playing once always ends on the last beat, and plays again from the start"
       reduced
     );
     s = clockStep(tl, s, { type: "play" }, reduced);
-    const limit = Math.ceil(tl.period / (MAX_FRAME_DT * speed)) + 2;
+    const limit = Math.ceil(tl.period / (MAX_FRAME_DT * speed * TEMPO)) + 2;
     let ticks = 0;
     let last = shownTime(tl, s, reduced);
     while (s.playing && ticks < limit) {
@@ -589,7 +590,7 @@ test("play after any landing animates the landed beat from its start", () =>
     // Small ticks pass through the whole beat, from its start, before the next.
     const dt = 0.005;
     const drawn = [shownTime(tl, s, false)];
-    const limit = Math.ceil((end - start) / (dt * s.speed)) + 2;
+    const limit = Math.ceil((end - start) / (dt * s.speed * TEMPO)) + 2;
     for (let k = 0; s.playing && k < limit && s.raw < end; k++) {
       s = clockStep(tl, s, { type: "tick", dt }, false);
       drawn.push(shownTime(tl, s, false));
@@ -602,7 +603,7 @@ test("play after any landing animates the landed beat from its start", () =>
       );
     for (let k = 1; k < drawn.length; k++)
       check(
-        drawn[k] - drawn[k - 1] <= dt * s.speed + EPS,
+        drawn[k] - drawn[k - 1] <= dt * s.speed * TEMPO + EPS,
         `skipped ${drawn[k - 1]} → ${drawn[k]} inside beat ${i}`
       );
     check(

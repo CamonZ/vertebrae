@@ -100,6 +100,33 @@ describe("```flow blocks in chat", () => {
     expect(screen.getByTestId("machine-diagram-viewport")).toBeInTheDocument();
   });
 
+  it("sits in a resizable block whose cinema window keeps the same player", () => {
+    renderFlow(inlineDiscussions);
+    const block = screen.getByRole("region", { name: "Flow diagram" });
+    // The block owns sizing: no second grip inside the diagram.
+    expect(
+      screen.queryByRole("separator", { name: "Resize diagram" })
+    ).toBeNull();
+    expect(
+      screen.getByRole("separator", { name: "Flow diagram height" })
+    ).toBeInTheDocument();
+    const before = player();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open Flow diagram in cinema mode" })
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Flow diagram, cinema mode",
+    });
+    // Moved, not remounted: playback, drill-down and camera survive.
+    expect(dialog).toContainElement(before);
+    expect(player()).toBe(before);
+    expect(player()).toHaveClass("diagram-fill");
+    fireEvent.keyDown(player(), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(block).toContainElement(before);
+    expect(player()).not.toHaveClass("diagram-fill");
+  });
+
   it("renders a part kind registered only in this test, via the registry context", () => {
     const beacon: PartKindDef = {
       kind: "test beacon",
@@ -222,7 +249,8 @@ describe("flow playback", () => {
     // Opens on beat 1's start, so Play animates beat 1.
     expect(start).toBe(afterStarts[0]);
     fireEvent.click(screen.getByRole("button", { name: "Play" }));
-    act(() => vi.advanceTimersByTime(500));
+    // Half speed by default: 1 s of wall time is 0.5 s of diagram time.
+    act(() => vi.advanceTimersByTime(1000));
     const playing = shownT();
     expect(playing).toBeGreaterThan(start + 0.3);
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));

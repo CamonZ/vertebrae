@@ -1,0 +1,233 @@
+/* Chat diagram blocks: in-place resize and the cinema window.
+   The block owns its chrome (header, edge and bottom grips) so nothing sits
+   over the diagram itself; the flow player's right side stays clear. */
+
+.diagram-block-slot {
+  min-width: 0;
+  margin-bottom: var(--s-2);
+}
+
+.diagram-block {
+  --diagram-block-line: color-mix(in oklch, var(--color-border) 50%, transparent);
+  /* Header and body share one column; the width grip runs the full height
+     beside both, so the header never reaches past the diagram. */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "head"
+    "body"
+    "bottom";
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--diagram-block-line);
+  border-radius: var(--radius-md);
+  background: var(--color-bg);
+  white-space: normal;
+  transition:
+    width var(--t-base) var(--ease),
+    margin-left var(--t-base) var(--ease);
+}
+/* A drag tracks the pointer directly; easing would restart on every move
+   and make the edge trail the cursor (and refit the diagram each frame). */
+.diagram-block[data-resizing] {
+  transition: none;
+}
+.diagram-block[data-widenable] {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "head edge"
+    "body edge"
+    "bottom corner";
+}
+.diagram-block-head,
+.diagram-cinema-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 32px;
+  padding: var(--s-0) var(--s-1) var(--s-0) var(--s-3);
+  border-bottom: 1px solid var(--diagram-block-line);
+}
+.diagram-block-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-0);
+}
+
+.diagram-block-head {
+  grid-area: head;
+}
+.diagram-block-body {
+  grid-area: body;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+/* A height the user chose: content that cannot rescale scrolls inside. */
+.diagram-block-body[data-fill] {
+  overflow: auto;
+}
+
+.diagram-block-mount,
+.diagram-block-host,
+.diagram-block-content,
+.diagram-fill {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.diagram-fill {
+  flex-basis: 0;
+}
+.diagram-block-mount:empty {
+  display: none;
+}
+
+.diagram-block-placeholder {
+  margin: auto;
+  padding: var(--s-4);
+  color: var(--fg-mute);
+  font-size: var(--text-meta);
+}
+
+/* Call diagrams draw their own frame; inside a block it is the block's. */
+.diagram-block-content .call-diagram {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+/* ── Grips: the shared inline-grip look on both axes ─────────────────── */
+.diagram-block-edge,
+.diagram-block-bottom,
+.diagram-block-corner {
+  position: relative;
+  flex: none;
+  background: var(--bg-2);
+  touch-action: none;
+}
+.diagram-block-edge {
+  grid-area: edge;
+  width: 10px;
+  border-left: 1px solid var(--line);
+  cursor: ew-resize;
+}
+.diagram-block-bottom {
+  grid-area: bottom;
+  height: 10px;
+  border-top: 1px solid var(--line);
+  cursor: ns-resize;
+}
+.diagram-block-corner {
+  grid-area: corner;
+  width: 10px;
+  height: 10px;
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  cursor: nwse-resize;
+}
+.diagram-block-edge::after,
+.diagram-block-bottom::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  border-radius: 2px;
+  background: var(--line-strong);
+  transform: translate(-50%, -50%);
+  transition: background var(--t-fast) var(--ease);
+}
+.diagram-block-edge::after {
+  width: 3px;
+  height: 32px;
+}
+.diagram-block-bottom::after {
+  width: 32px;
+  height: 3px;
+}
+.diagram-block-edge:hover::after,
+.diagram-block-edge:focus-visible::after,
+.diagram-block[data-resizing="x"] .diagram-block-edge::after,
+.diagram-block[data-resizing="xy"] .diagram-block-edge::after,
+.diagram-block-bottom:hover::after,
+.diagram-block-bottom:focus-visible::after,
+.diagram-block[data-resizing="y"] .diagram-block-bottom::after,
+.diagram-block[data-resizing="xy"] .diagram-block-bottom::after {
+  background: var(--accent);
+}
+.diagram-block-corner:hover,
+.diagram-block[data-resizing="xy"] .diagram-block-corner {
+  background: color-mix(in oklch, var(--accent) 30%, var(--bg-2));
+}
+
+/* ── Cinema: a float-layer window over the whole app ──────────────────── */
+.diagram-cinema {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+}
+.diagram-cinema-scrim {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in oklch, var(--bg) 55%, transparent);
+  animation: diagram-cinema-fade var(--t-base) var(--ease);
+}
+.diagram-cinema-window {
+  --diagram-block-line: color-mix(in oklch, var(--color-border) 50%, transparent);
+  /* Clear the window titlebar (Header's 38px) and its traffic lights. */
+  --diagram-cinema-titlebar: 38px;
+  position: absolute;
+  inset: calc(var(--diagram-cinema-titlebar) + var(--s-2)) var(--s-2)
+    var(--s-2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--fg) 12%, transparent);
+  border-radius: var(--radius-lg);
+  background: var(--bg-1);
+  box-shadow:
+    var(--shadow-3),
+    inset 0 1px 0 var(--edge-lit);
+  transition: inset var(--t-base) var(--ease);
+  animation: diagram-cinema-in var(--t-base) var(--ease);
+}
+.diagram-cinema[data-inset] .diagram-cinema-window {
+  inset: calc(var(--diagram-cinema-titlebar) + var(--s-8)) var(--s-8)
+    var(--s-8);
+}
+.diagram-cinema-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--s-2);
+}
+
+@keyframes diagram-cinema-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes diagram-cinema-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diagram-block,
+  .diagram-cinema-window,
+  .diagram-cinema-scrim {
+    transition: none;
+    animation: none;
+  }
+}

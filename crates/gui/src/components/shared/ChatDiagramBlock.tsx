@@ -12,6 +12,7 @@ import { readRecord } from "../../hooks/useChatAssociation";
 import { ChatSessionContext } from "../thread/toolChange/ChatSessionContext";
 import { VtbEntityMarkdownLink } from "./VtbEntityLink";
 import { parseVtbEntityHref } from "./vtbEntityLinkTarget";
+import { diagramFillClass, useDiagramBox } from "./diagramBox";
 
 export type SaveDiagram = (
   body: string,
@@ -69,6 +70,7 @@ function ScopedDiagramBlock({
 }: ChatDiagramBlockProps & { generation: number; ticketId: string | null }) {
   const [save, setSave] = useState<SaveState>({ status: "idle" });
   const saving = useRef(false);
+  const box = useDiagramBox();
 
   async function saveArtifact() {
     if (!ticketId || saving.current) return;
@@ -102,8 +104,9 @@ function ScopedDiagramBlock({
       ? parseVtbEntityHref(`vtb://artifact/${save.artifact.id}`)
       : null;
   return (
+    // The enclosing DiagramFrame draws the block's border and chrome.
     <div
-      className="mb-2 max-w-full overflow-hidden rounded-md border border-border/50 bg-bg p-3 whitespace-normal"
+      className={`min-w-0 max-w-full overflow-hidden p-3 whitespace-normal ${diagramFillClass(box)}`}
       data-testid={testId}
     >
       {!target && children}
@@ -116,7 +119,7 @@ function ScopedDiagramBlock({
         ) : (
           <button
             type="button"
-            className="mt-2 rounded border border-border px-2 py-1 text-content text-accent disabled:opacity-50"
+            className="mt-2 shrink-0 self-start rounded border border-border px-2 py-1 text-content text-accent disabled:opacity-50"
             disabled={save.status === "saving"}
             onClick={() => void saveArtifact()}
           >
