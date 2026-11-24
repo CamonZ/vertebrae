@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 /**
- * The focus halo lives in one block of index.css. Components must not draw
+ * The focus halo lives in one block of styles/focus-halo.css. Components must not draw
  * their own focus outline, ring, border or shadow; they opt into variants
  * with aria-invalid or data-focus-halo instead.
  */
@@ -45,14 +45,14 @@ describe("focus halo", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("is only styled by the central block in index.css", () => {
+  it("is only styled by the central block in styles/focus-halo.css", () => {
     const offenders = Object.entries(stylesheets).flatMap(([path, css]) =>
       focusRules(css)
         .filter(({ selector, body }) => {
           if (!HALO_PROPERTIES.test(body)) return false;
           // The central block and the forced-colors fallback.
           return !(
-            path === "./index.css" &&
+            path === "./styles/focus-halo.css" &&
             (selector.startsWith(":root") || selector.includes("forced-colors"))
           );
         })
@@ -63,13 +63,13 @@ describe("focus halo", () => {
 
   it("outranks state styles that also set box-shadow", () => {
     // Active chips, selected cards and hover glows must not hide focus.
-    expect(stylesheets["./index.css"]).toContain(
+    expect(stylesheets["./styles/focus-halo.css"]).toContain(
       "box-shadow: var(--focus-shadow) !important;"
     );
   });
 
   it("removes the browser focus ring from elements that opt out", () => {
-    const rules = focusRules(stylesheets["./index.css"]).filter(
+    const rules = focusRules(stylesheets["./styles/focus-halo.css"]).filter(
       ({ selector }) =>
         selector.includes('[data-focus-halo="none"]:focus-visible')
     );

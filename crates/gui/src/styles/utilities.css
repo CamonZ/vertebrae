@@ -1,0 +1,19 @@
+/* =============================================================================
+   UTILITY OVERRIDES FOR TAILWIND
+   Hand-written utilities for cases Tailwind does not generate from @theme.
+   `bg-bg-hover` is kept because it sees direct use in JSX; the glow shadows are
+   non-standard composites. Accent color/border utilities (text-accent,
+   bg-accent, bg-accent/10, border-accent, …) are intentionally absent — Tailwind
+   v4 auto-generates them from the --color-accent theme token.
+   ============================================================================= */
+.bg-bg-hover {
+  background-color: var(--color-bg-hover);
+}
+
+.shadow-glow {
+  box-shadow: var(--shadow-glow);
+}
+
+.shadow-glow-sm {
+  box-shadow: var(--shadow-glow-sm);
+}

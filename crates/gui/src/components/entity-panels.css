@@ -1,0 +1,114 @@
+.detail {
+  width: 420px;
+  max-width: min(420px, 36vw);
+  background: var(--bg-1);
+  border-left-color: var(--line);
+}
+
+/* Detail panel — floating glass overlay. Ported from docs/design/tasks-v2.html
+   (`.detail`, lines 67-77): a fixed, full-height translucent surface that
+   floats over the full-width list so the rows blur through it. Mirrors the
+   chat / Design inspector. The 38px top inset clears the shell titlebar
+   (Header.tsx, h-[38px]). Width is owned by the component's inline style
+   (horizontal drag-to-resize); the panel is right-anchored so only the left
+   edge moves. */
+.detail.detail-float {
+  position: fixed;
+  top: calc(38px + var(--s-3));
+  /* Normal chat reserves its live width plus one gap while both surfaces fit. */
+  right: calc(var(--s-3) + var(--detail-panel-right-offset, 0px));
+  bottom: var(--s-3);
+  height: auto;
+  /* The component only reserves adjacent chat space while at least its minimum
+     width fits. This clamp handles widths between that minimum and the desired
+     persisted width, keeping the left resize handle inside the viewport. */
+  max-width: max(
+    0px,
+    min(
+      92vw,
+      calc(
+        100vw - var(--s-3) - var(--s-3) - var(--detail-panel-right-offset, 0px)
+      )
+    )
+  );
+  z-index: 65;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: linear-gradient(
+    205deg,
+    color-mix(in oklch, var(--bg-3) 40%, transparent),
+    color-mix(in oklch, var(--bg-2) 34%, transparent)
+  );
+  -webkit-backdrop-filter: blur(30px) brightness(1.4) saturate(1);
+  backdrop-filter: blur(30px) brightness(1.4) saturate(1);
+  border-radius: var(--r-lg);
+  /* Drill open: slide in from the right edge toward center (right-anchored). */
+  animation: panel-drill-right var(--t-slow) var(--ease);
+}
+
+/* Notifications are deliberately independent of the side-panel stack: keep
+   the activity surface at the upper-right and above chat, task, artifact, and
+   other floating surfaces even when chat is maximized. */
+.detail.detail-float.notifications-panel {
+  left: auto;
+  right: var(--s-3);
+  z-index: 1000;
+  max-width: max(0px, min(92vw, calc(100vw - var(--s-3) - var(--s-3))));
+  animation-name: panel-drill-right;
+}
+
+/* ── Light-theme glass ──────────────────────────────────────────────────────
+   Light surfaces need a visible tinted glass layer and edge highlight to
+   separate them from the paper-colored page beneath. Use the darker light
+   theme surfaces at low alpha so content and color can soften through the
+   panel, while the highlight and warm shadow provide depth. */
+.light .detail.detail-float {
+  background: linear-gradient(
+    205deg,
+    color-mix(in oklch, var(--bg-3) 24%, transparent),
+    color-mix(in oklch, var(--bg-2) 18%, transparent)
+  );
+  -webkit-backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
+  backdrop-filter: blur(30px) saturate(1.35) brightness(1.03);
+}
+
+.detail.detail-float {
+  transition: box-shadow var(--t-base, 180ms) var(--ease);
+}
+.detail.detail-float[data-above-chat] {
+  z-index: 71;
+}
+.detail.detail-float:not(.notifications-panel)[data-focused] {
+  z-index: 72;
+}
+/* Left-edge drag handle for horizontal resize. Sits inside the panel (the
+   surface is overflow-clipped for its rounded corners) and floats above the
+   content. Match chat's neutral resize affordance on hover / while dragging. */
+.detail.detail-float .detail-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 60;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.detail.detail-float .detail-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background var(--t-fast, 120ms) var(--ease, ease);
+}
+
+.detail.detail-float .detail-resize-handle:hover::after,
+.detail.detail-float .detail-resize-handle[data-resizing]::after {
+  background: var(--fg-mute);
+}

@@ -1,0 +1,107 @@
+/* ── Focus halo ────────────────────────────────────────────────────────────
+   The single focus indicator for everything that can take focus. Do not set
+   outline, box-shadow, ring or border on :focus / :focus-visible anywhere else
+   (CSS or Tailwind `focus:` utilities); focusHalo.test.ts enforces this.
+   Variants only adjust this block:
+   - [aria-invalid="true"]          error tint for the same halo
+   - [data-focus-halo="within"]     a composite field (e.g. the chat composer)
+                                    draws the halo while any descendant has
+                                    focus; its text field draws none, its
+                                    buttons keep their own
+   - [data-focus-halo="surface"]    a floating surface tied to the current
+                                    selection (the Comment trigger, the comment
+                                    card) always wears the halo as its border;
+                                    its text field draws none. Keep the
+                                    surface's own elevation in --surface-shadow
+   - [data-focus-halo="overlay"]    a full-bleed viewer whose content covers
+                                    it and whose scroller clips an outer ring
+                                    (the Changes diff): the halo is drawn
+                                    as a soft inner glow (no edge line)
+                                    above the content; --focus-overlay-inset
+                                    keeps it off a scrollbar track,
+                                    --focus-overlay-glow retints it
+   - [data-focus-halo="none"]       the element shows focus another way (resize
+                                    grips, the transcript caret); the
+                                    browser's own focus ring is removed too,
+                                    or it shows through as a blue edge
+   SVG parts can't take box-shadow; they use --focus-edge / --focus-halo in
+   their own stroke rules.
+   The halo is !important on purpose: state styles (an active chip, a selected
+   card, a hover glow) set box-shadow too and must not hide keyboard focus.
+   The inset edge stays visible when a scroll container clips the halo. */
+
+@layer hearth.overrides {
+  :root [aria-invalid="true"] {
+    --focus-edge: color-mix(
+      in oklch,
+      var(--color-err) 55%,
+      var(--color-line-strong)
+    );
+    --focus-halo: color-mix(in oklch, var(--color-err) 14%, transparent);
+  }
+  :root
+    :where(
+      button,
+      a,
+      input,
+      textarea,
+      select,
+      summary,
+      [tabindex],
+      [contenteditable]
+    ):not(:where([data-focus-halo="none"])):focus-visible {
+    outline: 1px solid transparent !important;
+    outline-offset: -1px !important;
+    box-shadow: var(--focus-shadow) !important;
+  }
+  @media not (forced-colors: active) {
+    :root [data-focus-halo="none"]:focus-visible {
+      outline: 1px solid transparent !important;
+    }
+  }
+  :root [data-focus-halo="within"]:focus-within {
+    border-color: var(--focus-edge) !important;
+    box-shadow:
+      0 0 0 3px var(--focus-halo),
+      var(--focus-depth) !important;
+  }
+  :root
+    :is([data-focus-halo="within"], [data-focus-halo="surface"])
+    :where(textarea, input, [contenteditable]):focus-visible {
+    box-shadow: none !important;
+  }
+  :root [data-focus-halo="overlay"] {
+    position: relative;
+  }
+  :root [data-focus-halo="overlay"]:focus {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+  /* On :focus, not :focus-visible: the overlay marks the pane that receives
+     keys (the diff line cursor), however it was focused. */
+  :root [data-focus-halo="overlay"]:focus::after {
+    content: "";
+    position: absolute;
+    inset: var(--focus-overlay-inset, 0);
+    z-index: 20;
+    pointer-events: none;
+    border-radius: inherit;
+    box-shadow: inset 0 0 18px 2px var(--focus-overlay-glow, var(--focus-halo));
+  }
+
+  @media (forced-colors: active) {
+    :root :focus-visible {
+      outline: 1px solid Highlight !important;
+      box-shadow: none !important;
+    }
+  }
+}
+
+/* Comment cards and triggers set an unlayered border shorthand. Their halo
+   keeps the same precedence so its border color can win by specificity. */
+:root [data-focus-halo="surface"] {
+  border-color: var(--focus-edge);
+  box-shadow:
+    0 0 0 3px var(--focus-halo),
+    var(--surface-shadow, var(--focus-depth));
+}

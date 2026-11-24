@@ -1,0 +1,22 @@
+{
+  "files": {
+    "includes": ["src/**/*.css"],
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true,
+    },
+  },
+  "linter": {
+    "rules": {
+      // The existing cascade uses specificity and !important for focus,
+      // forced colors, and vendor overrides. Preserve those rules in this move.
+      "complexity": {
+        "noImportantStyles": "off",
+      },
+      "style": {
+        "noDescendingSpecificity": "off",
+      },
+    },
+  },
+}

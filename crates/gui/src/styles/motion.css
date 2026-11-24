@@ -1,0 +1,116 @@
+/* =============================================================================
+   ANIMATIONS — pulse, signal, fade
+   ============================================================================= */
+
+/* Breathing pulse for active elements */
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--color-accent-glow);
+  }
+  50% {
+    box-shadow: 0 0 12px 4px var(--color-accent-glow);
+  }
+}
+
+/* Signal traveling animation */
+@keyframes signal-flow {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Fade in with slight rise */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Staggered list animation */
+@keyframes stagger-in {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Status pulse for in-progress items */
+@keyframes status-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+/* Flash border animation for task assignment highlight */
+@keyframes flash-border {
+  0% {
+    border-color: inherit;
+  }
+  20% {
+    border-color: var(--color-warn);
+  }
+  45% {
+    border-color: inherit;
+  }
+  65% {
+    border-color: var(--color-warn);
+  }
+  100% {
+    border-color: inherit;
+  }
+}
+
+/* Futuristic waiting-state matrix: a soft accent-color wave through radial rings. */
+/* min 18px to sit in icon slots; grows to the 40px compact thinking line */
+.thinking-indicator--compact {
+  display: inline-flex;
+  min-width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow var(--t-pulse) ease-in-out infinite;
+}
+
+.animate-flash-border {
+  animation: flash-border 250ms ease-in-out;
+}
+
+.animate-signal-flow {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-accent-wash) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: signal-flow 3s linear infinite;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up var(--t-slow) ease-out;
+}
+
+.animate-status-pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}

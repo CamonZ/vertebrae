@@ -1,0 +1,258 @@
+/* =============================================================================
+   REACT FLOW OVERRIDES — Hearth theme
+   ============================================================================= */
+.react-flow {
+  background-color: var(--color-bg) !important;
+}
+
+.react-flow__renderer,
+.react-flow__viewport,
+.react-flow__container {
+  background-color: transparent !important;
+}
+
+.react-flow__background {
+  background-color: var(--color-bg) !important;
+}
+
+.react-flow__background pattern circle,
+.react-flow__background pattern rect {
+  fill: var(--color-line) !important;
+}
+
+.react-flow__node {
+  transition: box-shadow var(--t-base);
+}
+
+.react-flow__node.selected:not(:focus-visible) {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* React Flow selection styling is separate from keyboard focus. */
+.react-flow__node-stepNode.selected:not(:focus-visible),
+.react-flow__node-taskZoneNode.selected:not(:focus-visible) {
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+/* Hover state for task zone nodes — tonal, no glow */
+.react-flow__node-taskZoneNode:hover .taskZoneNode {
+  border-color: var(--color-line-strong) !important;
+}
+
+.react-flow__node-taskZoneNode {
+  background-color: transparent !important;
+  border: none !important;
+}
+
+.taskZoneNode {
+  background-color: var(--color-bg-1) !important;
+  border: 1px solid var(--color-line) !important;
+  border-radius: var(--radius-lg) !important;
+  box-shadow: var(--shadow-1) !important;
+}
+
+/* Edges */
+.react-flow__edge-path {
+  stroke: var(--color-line);
+  stroke-width: 2;
+}
+
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--color-accent) !important;
+  stroke-dasharray: 5 5;
+  animation: dashdraw 0.5s linear infinite;
+}
+
+@keyframes dashdraw {
+  from {
+    stroke-dashoffset: 10;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* Controls panel */
+.react-flow__controls {
+  background-color: var(--color-bg-2) !important;
+  border: 1px solid var(--color-line) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-2) !important;
+}
+
+.react-flow__controls-button {
+  background-color: var(--color-bg-2) !important;
+  border-bottom: 1px solid var(--color-line) !important;
+  fill: var(--color-fg-soft) !important;
+}
+
+.react-flow__controls-button:hover {
+  background-color: var(--color-bg-hover) !important;
+  fill: var(--color-fg) !important;
+}
+
+.react-flow__controls-button svg {
+  fill: inherit !important;
+}
+
+/* Minimap */
+.react-flow__minimap {
+  background-color: var(--color-bg-2) !important;
+  border: 1px solid var(--color-line) !important;
+  border-radius: var(--radius-md) !important;
+}
+
+.react-flow__minimap-mask {
+  fill: var(--hearth-black-60) !important;
+}
+
+.react-flow__minimap-node {
+  fill: var(--color-accent) !important;
+}
+
+/* Attribution */
+.react-flow__attribution {
+  background-color: transparent !important;
+}
+
+.react-flow__attribution a {
+  color: var(--color-fg-mute) !important;
+}
+
+/* =============================================================================
+   WORKFLOW ATLAS / GRAPH — canvas edge + kind vocabulary
+   Ported from docs/design/lib/components-lib.css. The cross-page primitives live
+   here: the .k-<kind> palette carriers, the routed-edge .gedge vocabulary, and
+   the inspector .kindspine. Every value reads through the --edge-* tokens above
+   and the step-kind hues so the canvas never inlines a stroke color and stays in
+   lockstep with both themes. (The page-local chrome — edge labels, the kind
+   legend, column headers — lives in WorkflowAtlas.css alongside its callers.)
+   ============================================================================= */
+
+/* ── Kind palette carriers ──────────────────────────────────────────────────
+   Bind a kind class to the local trio --kc (core hue), --kf (foreground/text),
+   --kw (wash). Every kind-aware surface (edge swatches, the inspector spine,
+   step nodes, strips) reads these three locals rather than the raw step tokens,
+   so one carrier on an ancestor recolors a whole subtree. These are the REAL
+   backend step types — there is no synthetic entry/final kind. */
+.k-llm {
+  --kc: var(--step-llm);
+  --kf: var(--step-llm-fg);
+  --kw: var(--step-llm-wash);
+}
+.k-structured {
+  --kc: var(--step-structured);
+  --kf: var(--step-structured-fg);
+  --kw: var(--step-structured-wash);
+}
+.k-execute {
+  --kc: var(--line-strong);
+  --kf: var(--fg-soft);
+  --kw: var(--bg-1);
+}
+.k-route {
+  --kc: var(--step-route);
+  --kf: var(--step-route-fg);
+  --kw: var(--step-route-wash);
+}
+.k-human {
+  --kc: var(--step-human);
+  --kf: var(--step-human-fg);
+  --kw: var(--step-human-wash);
+}
+.k-wait {
+  --kc: var(--step-wait);
+  --kf: var(--step-wait-fg);
+  --kw: var(--step-wait-wash);
+}
+.k-stop {
+  --kc: var(--step-stop);
+  --kf: var(--step-stop-fg);
+  --kw: var(--step-stop-wash);
+}
+.k-finish {
+  --kc: var(--step-finish);
+  --kf: var(--step-finish-fg);
+  --kw: var(--step-finish-wash);
+}
+
+/* ── Edge (.gedge) — link/transition vocabulary ─────────────────────────────
+   A single routed <path>. Style is class-driven off the --edge-* tokens, never
+   inline attributes, so every canvas stays in sync.
+     kind:   k-step (within a workflow) · k-handoff (between workflows, dashed) ·
+             k-loop (back-edge, route hue)
+     state:  (base) · lit (on an active trace) · dim (faded back)
+     .solid  force a handoff to render solid (high-level map edges)
+     .live   legacy animated-accent variant
+   Pair with <GraphMarkers/> in the same <svg> for the arrowheads. */
+.gedge {
+  fill: none;
+  stroke: var(--edge-color);
+  stroke-width: var(--edge-w);
+  stroke-opacity: var(--edge-o);
+  transition:
+    stroke var(--t-fast) var(--ease),
+    stroke-width var(--t-fast) var(--ease),
+    stroke-opacity var(--t-fast) var(--ease);
+}
+.gedge.k-handoff {
+  stroke-dasharray: var(--edge-dash);
+}
+.gedge.k-loop {
+  stroke: var(--edge-color-loop);
+  stroke-dasharray: var(--edge-dash-loop);
+  stroke-opacity: var(--edge-o-loop);
+}
+.gedge.solid {
+  stroke-dasharray: none;
+}
+
+/* trace states — handoffs accent on a live trace; step links light only when
+   a step trace reaches them, in the accent (out) or, via .back, white (in). */
+.gedge.dim {
+  stroke-opacity: var(--edge-o-dim);
+}
+.gedge.k-step.lit {
+  stroke: var(--edge-color-lit);
+  stroke-width: var(--edge-w-lit);
+  stroke-opacity: 1;
+}
+.gedge.k-handoff.lit {
+  stroke: var(--edge-color-lit);
+  stroke-width: var(--edge-w-lit);
+  stroke-opacity: 1;
+  filter: var(--edge-glow);
+}
+.gedge.k-loop.lit {
+  stroke-width: var(--edge-w-lit);
+  stroke-opacity: 1;
+  filter: var(--edge-glow-loop);
+}
+
+/* back/return edges on a trace read in max-contrast white instead of the
+   forward accent, so tracing a hub (e.g. Human Review) separates the work
+   flowing forward (accent) from the paths returning back (white). Placed after
+   the kind-lit rules so it wins on equal specificity. */
+.gedge.lit.back {
+  stroke: var(--edge-color-back);
+  filter: var(--edge-glow-back);
+}
+
+/* live — animated dashed accent (kept for backward compatibility) */
+.gedge.live {
+  stroke: var(--edge-color-lit);
+  stroke-width: var(--edge-w-lit);
+  stroke-dasharray: 4 4;
+  filter: var(--edge-glow);
+}
+
+/* ── Kind carrier ───────────────────────────────────────────────────────────
+   The inspector (WorkflowInspector / StepInspector) pairs `.kindspine` with a
+   `.k-<kind>` carrier so its accents (eyebrow dot, chips) read --kc; workflow
+   panels fall back to the accent when no kind is set. The class is retained as
+   the positioning context / kind carrier — the left ember line was removed. */
+.kindspine {
+  position: relative;
+}

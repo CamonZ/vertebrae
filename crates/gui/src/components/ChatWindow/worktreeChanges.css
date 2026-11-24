@@ -201,8 +201,8 @@
 /* Viewed is status, not an action: a quiet tinted pill when set. */
 .changes-viewed-button[aria-pressed="true"] {
   border-color: transparent;
-  background: color-mix(in oklch, var(--color-ok, #6fbf73) 10%, transparent);
-  color: var(--color-ok, #6fbf73);
+  background: color-mix(in oklch, var(--color-ok, var(--hearth-worktree-addition-fallback)) 10%, transparent);
+  color: var(--color-ok, var(--hearth-worktree-addition-fallback));
 }
 
 .changes-tab-close:hover,
@@ -394,7 +394,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border: 1px solid var(--color-danger, #e07979);
+  border: 1px solid var(--color-danger, var(--hearth-worktree-deletion-fallback));
   border-radius: var(--radius-md, 6px);
   font-size: 12px;
 }
@@ -607,7 +607,7 @@
   border: 1px solid var(--color-line-strong);
   border-radius: var(--radius-md);
   background: var(--color-bg-2);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+  box-shadow: 0 8px 24px var(--hearth-worktree-menu-shadow);
   font: 400 13px/1.5 var(--font-sans);
   color: var(--color-fg);
 }

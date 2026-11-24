@@ -1,0 +1,738 @@
+/* =============================================================================
+   GLOWING BORDERS
+   Kept as a no-op so any references continue to compile.
+   ============================================================================= */
+.glow-border {
+  position: relative;
+}
+
+/* =============================================================================
+   STATUS INDICATORS
+   ============================================================================= */
+.status-indicator {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-indicator::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  opacity: 0;
+  transition: opacity var(--t-base);
+}
+
+.status-indicator--active::after {
+  animation: pulse-glow var(--t-pulse) ease-in-out infinite;
+}
+
+/* =============================================================================
+   DATA TABLE STYLES
+   ============================================================================= */
+.data-row {
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast);
+}
+
+.data-row:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.data-row--selected,
+.data-row--selected:hover {
+  background-color: var(--color-selection);
+  border-left: 2px solid var(--color-accent);
+}
+
+/* =============================================================================
+   CARD STYLES
+   ============================================================================= */
+.card {
+  background-color: var(--color-bg-1);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--t-base);
+}
+
+.card:hover {
+  border-color: var(--color-line-strong);
+}
+
+.card--elevated {
+  background-color: var(--color-bg-2);
+  box-shadow: var(--shadow-2);
+}
+
+/* =============================================================================
+   BADGE STYLES — consistent status badges
+   ============================================================================= */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.125rem 0.5rem;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  border-radius: var(--radius-full);
+  white-space: nowrap;
+}
+
+.badge--primary {
+  background-color: var(--color-accent-wash);
+  color: var(--color-accent);
+}
+
+.badge--success {
+  background-color: var(--color-ok-wash);
+  color: var(--color-ok);
+}
+
+.badge--warning {
+  background-color: var(--color-warn-wash);
+  color: var(--color-warn);
+}
+
+.badge--error {
+  background-color: var(--color-err-wash);
+  color: var(--color-err);
+}
+
+.badge--info {
+  background-color: var(--color-info-wash);
+  color: var(--color-info);
+}
+
+.badge--muted {
+  background-color: var(--color-bg-2);
+  color: var(--color-fg-soft);
+}
+
+/* =============================================================================
+   BUTTON STYLES
+   ============================================================================= */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  border-radius: var(--radius-md);
+  transition: all var(--t-fast);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+/* Shared action treatment for native, legacy and React controls. Keep these
+   rules outside utility layers so disabled/pressed states win over utilities. */
+.action-primary,
+.btn--primary {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+  transition:
+    background-color var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast);
+}
+
+.action-primary:enabled:hover,
+.btn--primary:enabled:hover {
+  background-color: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
+}
+
+.action-primary:enabled:active,
+.btn--primary:enabled:active {
+  background-color: var(--color-primary-pressed);
+  border-color: var(--color-primary-pressed);
+}
+
+.action-primary:disabled,
+.btn--primary:disabled {
+  background-color: var(--color-disabled-bg);
+  border-color: var(--color-disabled-border);
+  color: var(--color-disabled-fg);
+  opacity: 1;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.btn--ghost {
+  background-color: transparent;
+  color: var(--color-fg-soft);
+}
+
+.btn--ghost:hover {
+  background-color: var(--color-bg-hover);
+  color: var(--color-fg);
+}
+
+.btn--outline {
+  background-color: transparent;
+  border-color: var(--color-line);
+  color: var(--color-fg-soft);
+}
+
+.btn--outline:hover {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background-color: var(--color-accent-wash);
+}
+
+/* =============================================================================
+   INPUT STYLES
+   ============================================================================= */
+.input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-sm);
+  background-color: var(--color-bg-2);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  color: var(--color-fg);
+  transition:
+    border-color var(--t-fast),
+    box-shadow var(--t-fast);
+}
+
+.input::placeholder {
+  color: var(--color-fg-faint);
+}
+
+/* =============================================================================
+   TAB STYLES
+   ============================================================================= */
+.tab {
+  position: relative;
+  padding: 0.5rem 0.75rem;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--color-fg-mute);
+  transition: color var(--t-fast);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--color-fg-soft);
+}
+
+.tab--active {
+  color: var(--color-accent);
+}
+
+.tab--active::after {
+  content: "";
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--color-accent);
+}
+
+/* =============================================================================
+   TIMELINE STYLES — for execution history
+   ============================================================================= */
+.timeline-line {
+  width: 2px;
+  background: linear-gradient(
+    180deg,
+    var(--color-accent) 0%,
+    var(--color-line) 100%
+  );
+}
+
+.timeline-node {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-full);
+  background-color: var(--color-bg-2);
+  border: 2px solid var(--color-line);
+  z-index: 1;
+}
+
+.timeline-node--active {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-glow-sm);
+}
+
+.timeline-node--completed {
+  background-color: var(--color-ok-wash);
+  border-color: var(--color-ok);
+}
+
+.timeline-node--failed {
+  background-color: var(--color-err-wash);
+  border-color: var(--color-err);
+}
+
+/* Status filters (Tasks scopes, Daemon statuses) are one segmented control:
+   a recessed track with the chosen segment raised out of it. */
+.tasks-v2 .scope-primary,
+.daemons-page .daemons-status-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  flex-wrap: wrap;
+  padding: 2px;
+  border: 1px solid var(--ctl-line);
+  border-radius: var(--r-md);
+  background-color: color-mix(in oklch, var(--color-canvas) 60%, transparent);
+  box-shadow: inset 0 1px 2px var(--hearth-black-25);
+}
+.light .tasks-v2 .scope-primary,
+.light .daemons-page .daemons-status-filters {
+  box-shadow: inset 0 1px 2px var(--hearth-warm-ink-10);
+}
+
+.tasks-v2 .scope-chip,
+.daemons-page .scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--r-md) - 2px);
+  background: transparent;
+  color: var(--fg-mute);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--t-fast) var(--ease),
+    color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+
+.tasks-v2 .scope-chip:hover,
+.daemons-page .scope-chip:hover {
+  color: var(--fg);
+}
+
+.tasks-v2 .scope-chip.active,
+.daemons-page .scope-chip.active {
+  background: var(--bg-3);
+  color: var(--fg);
+  border-color: transparent;
+  box-shadow:
+    0 1px 0 color-mix(in oklch, var(--fg) 8%, transparent) inset,
+    0 1px 3px var(--hearth-black-45);
+}
+.light .tasks-v2 .scope-chip.active,
+.light .daemons-page .scope-chip.active {
+  background: var(--color-bg);
+  box-shadow:
+    0 1px 0 var(--hearth-white-90) inset,
+    0 1px 3px var(--hearth-warm-ink-20);
+}
+/* Nothing to show: still reachable, but recedes. */
+.tasks-v2 .scope-chip[data-empty],
+.daemons-page .scope-chip[data-empty] {
+  color: var(--fg-faint);
+}
+
+/* Thin divider that splits the scope chips into groups (Recent | Queued),
+   mirroring docs/design ScopeBar. */
+.tasks-v2 .scope-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--line);
+  margin: 0 6px;
+}
+
+/* RunChip — ported verbatim from the design reference (docs/design/
+   components-v2.css). Single source of truth for run-state chips across the
+   app; the React component supplies `c-run-chip <state>` and these rules style
+   it. Keep in sync with that mockup. */
+.c-run-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  padding: 0 8px 0 9px;
+  font-family: var(--sans);
+  font-size: var(--text-eyebrow);
+  font-weight: 500;
+  background: var(--bg-2);
+  color: var(--fg-mute);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xs);
+  white-space: nowrap;
+  position: relative;
+}
+
+.c-run-chip::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  border-radius: 2px 0 0 2px;
+  background: var(--fg-faint);
+}
+
+.c-run-chip.running {
+  color: var(--accent);
+  background: var(--accent-wash);
+  border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+}
+
+.c-run-chip.running::before {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+}
+
+.c-run-chip.waiting {
+  color: var(--warn);
+  background: color-mix(in oklch, var(--warn-wash) 40%, var(--bg-2));
+  border-color: color-mix(in oklch, var(--warn) 30%, transparent);
+}
+
+.c-run-chip.waiting::before {
+  background: var(--warn);
+}
+
+.c-run-chip.queued {
+  color: var(--fg-mute);
+}
+
+.c-run-chip.queued::before {
+  background: var(--fg-ghost);
+}
+
+.c-run-chip.completed {
+  color: var(--ok);
+  background: color-mix(in oklch, var(--ok-wash) 35%, var(--bg-2));
+  border-color: color-mix(in oklch, var(--ok) 30%, transparent);
+}
+
+.c-run-chip.completed::before {
+  background: var(--ok);
+}
+
+.c-run-chip.failed {
+  color: var(--err);
+  background: color-mix(in oklch, var(--err-wash) 40%, var(--bg-2));
+  border-color: color-mix(in oklch, var(--err) 30%, transparent);
+}
+
+.c-run-chip.failed::before {
+  background: var(--err);
+}
+
+.c-run-chip .spinner {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: c-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.c-run-chip .runtime {
+  color: inherit;
+  opacity: 0.8;
+  font-weight: 400;
+}
+
+.c-run-chip.sm {
+  height: 17px;
+  padding: 0 6px 0 7px;
+  font-size: var(--text-2xs);
+}
+
+.c-run-chip.sm .spinner {
+  width: 7px;
+  height: 7px;
+}
+
+@keyframes c-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* IdChip — copyable id chip, ported verbatim from the design reference
+   (docs/design/components-v2.css). The whole chip copies on click; the
+   copy-mark reveals on hover and swaps to the ok-mark while `copied`. */
+.c-id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--mono);
+  font-size: var(--text-2xs);
+  color: var(--fg-faint);
+  padding: 2px 5px;
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--t-fast) var(--ease);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.c-id-chip:hover {
+  background: var(--bg-2);
+  color: var(--fg-mute);
+}
+
+.c-id-chip:active {
+  background: var(--bg-3);
+}
+
+/* In the task detail panel, id chips sit directly on the glass surface — keep
+   them transparent on hover/active rather than filling, so they match the rest
+   of the panel. The `.copied` green confirmation wash is preserved. */
+.tasks-v2-detail-shell .c-id-chip:hover:not(.copied),
+.tasks-v2-detail-shell .c-id-chip:active:not(.copied) {
+  background: transparent;
+}
+
+.c-id-chip .copy-mark {
+  opacity: 0;
+  transition: opacity var(--t-fast) var(--ease);
+  flex-shrink: 0;
+}
+
+.c-id-chip:hover .copy-mark {
+  opacity: 1;
+}
+
+.c-id-chip .ok-mark {
+  display: none;
+  color: var(--ok);
+  flex-shrink: 0;
+}
+
+.c-id-chip.copied {
+  background: color-mix(in oklch, var(--ok-wash) 40%, transparent);
+  color: var(--ok);
+}
+
+.c-id-chip.copied .copy-mark {
+  display: none;
+}
+
+.c-id-chip.copied .ok-mark {
+  display: inline-block;
+  opacity: 1;
+}
+
+.app-toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.app-toggle[data-active-color="primary"] {
+  --toggle-color: var(--accent);
+}
+.app-toggle[data-active-color="warning"] {
+  --toggle-color: var(--warn);
+}
+.app-toggle[data-active-color="success"] {
+  --toggle-color: var(--ok);
+}
+.app-toggle[data-active-color="error"] {
+  --toggle-color: var(--err);
+}
+.app-toggle[data-active-color="info"] {
+  --toggle-color: var(--info);
+}
+.app-toggle[data-active-color]:not(
+    [data-active-color="neutral"]
+  )[aria-checked="true"] {
+  background: color-mix(in oklch, var(--toggle-color) 22%, transparent);
+  border-color: var(--toggle-color);
+}
+
+/* ── Controls ────────────────────────────────────────────────────────────────
+   One shape for every compact control: composer chips, toolbar selects and
+   buttons, header actions. 26px tall, 6px radius, sans 12px, one caret.
+   `ctl-quiet` sits in context (no edge until hover); `ctl-outline` sits in a
+   toolbar (hairline edge). Selects get the caret from the global `select` rule
+   wrapper so native selects and custom chips draw the same chevron. */
+
+.ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1h);
+  height: var(--ctl-h);
+  padding: 0 var(--s-2);
+  border: 1px solid transparent;
+  border-radius: var(--ctl-radius);
+  background-color: transparent;
+  color: var(--fg-soft);
+  font-family: var(--sans);
+  font-size: var(--text-12);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  outline: none;
+  transition:
+    color var(--t-fast) var(--ease),
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease),
+    box-shadow var(--t-fast) var(--ease);
+}
+.ctl:hover,
+.ctl[aria-expanded="true"] {
+  background-color: var(--bg-3);
+  color: var(--fg);
+}
+.ctl-outline {
+  border-color: var(--ctl-line);
+}
+/* Composer controls (permission/model pickers) sit on the raised composer card,
+   which is already bg-3: tint over it instead of repeating its tone. */
+.hc-foot .ctl:hover,
+.hc-foot .ctl[aria-expanded="true"] {
+  background-color: var(--color-bg-hover-raised);
+}
+.ctl-outline:hover,
+.ctl-outline[aria-expanded="true"] {
+  background-color: var(--bg-2);
+  border-color: var(--ctl-line-hover);
+}
+/* Keyboard focus: a soft halo instead of a hard 2px outline. */
+
+.ctl:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+select.ctl {
+  width: auto;
+  min-width: 0;
+  padding-right: calc(var(--s-2) + 14px);
+  text-overflow: ellipsis;
+}
+select.ctl.ctl-field {
+  width: 100%;
+}
+/* Buttons that open a menu draw the same caret as native selects. */
+.ctl-caret {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  background-color: var(--fg-mute);
+  -webkit-mask: var(--ctl-caret) center / contain no-repeat;
+  mask: var(--ctl-caret) center / contain no-repeat;
+  pointer-events: none;
+}
+/* Form-row size of the same control (Settings, editors, dialogs). */
+.ctl-field {
+  height: 32px;
+  padding-left: 10px;
+  font-size: var(--text-13);
+}
+.ctl[aria-expanded="true"] .ctl-caret {
+  transform: rotate(180deg);
+}
+.ctl-caret {
+  display: inline-block;
+}
+
+/* Dropdown: a `.ctl` trigger opening the shared menu surface (`.ovf-menu`),
+   so pickers open like the ⋯ menu instead of the platform popup. */
+.dd {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+.dd-field {
+  display: flex;
+  width: 100%;
+}
+.dd-field .dd-trigger {
+  width: 100%;
+  justify-content: space-between;
+}
+.dd-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dd-menu {
+  left: 0;
+  right: auto;
+  min-width: max(100%, 10rem);
+  max-height: min(18rem, calc(var(--dd-available-height, 100vh) - var(--s-1)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  list-style: none;
+  outline: none;
+  z-index: 80;
+  background-color: var(--bg-2);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, var(--fg) 6%, transparent) inset,
+    0 12px 32px -8px var(--hearth-black-55);
+}
+.light .dd-menu {
+  box-shadow:
+    0 1px 0 var(--hearth-white-90) inset,
+    0 12px 32px -10px var(--hearth-warm-ink-30);
+}
+.dd-menu.end {
+  left: auto;
+  right: 0;
+}
+.dd-menu[data-up] {
+  top: auto;
+  bottom: calc(100% + var(--s-1));
+}
+.dd-item[data-active] {
+  background: var(--bg-4);
+  color: var(--fg);
+}
+.dd-item[aria-selected="true"] {
+  color: var(--fg);
+}
+.dd-item[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.dd-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--fg) 16%, transparent);
+}
+.dd-field .dd-trigger .dd-swatch + .dd-value {
+  margin-right: auto;
+}
+.dd-check {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.dd-trigger[aria-invalid="true"] {
+  border-color: var(--err);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-toggle,
+  .app-toggle > span {
+    transition: none;
+  }
+}

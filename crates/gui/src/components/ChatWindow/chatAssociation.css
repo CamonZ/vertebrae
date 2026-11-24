@@ -60,7 +60,7 @@
   border: 1px solid var(--color-line);
   border-radius: var(--radius-md, 6px);
   background: var(--color-bg-1);
-  box-shadow: 0 8px 24px #0004;
+  box-shadow: 0 8px 24px var(--hearth-association-menu-shadow);
   font: 12px/1.5 var(--sans, sans-serif);
   color: var(--color-fg);
 }
