@@ -1,0 +1,387 @@
+/* GitHub review threads in Changes. GitHub-facing controls stay neutral and
+   carry the GitHub glyph; rose is reserved for private Vertebrae actions. */
+
+.gh-mute {
+  color: var(--color-fg-mute);
+}
+
+.gh-spacer {
+  flex: 1 1 auto;
+}
+
+.gh-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.gh-icon-button {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 24px;
+  block-size: 24px;
+  border-radius: var(--radius-sm);
+  color: var(--color-fg-mute);
+}
+
+.gh-icon-button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg);
+}
+
+.gh-avatar {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  inline-size: 20px;
+  block-size: 20px;
+  border-radius: 50%;
+  background: oklch(from var(--color-avatar) l c var(--gh-hue));
+  color: var(--color-fg);
+  font: 600 var(--text-meta) / 1 var(--font-sans);
+}
+
+/* Thread cards, inline under their line. */
+.gh-thread-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px;
+  font: 400 var(--text-secondary) / var(--leading-normal) var(--font-sans);
+  white-space: normal;
+}
+
+.gh-thread {
+  max-inline-size: 72ch;
+  border: 1px solid var(--color-line);
+  border-inline-start: 3px solid var(--color-fg-mute);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-1);
+  color: var(--color-fg-soft);
+}
+
+.gh-thread[data-resolved] {
+  border-inline-start-color: var(--color-ok);
+}
+
+.gh-thread-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border-block-end: 1px solid var(--color-line-soft);
+  font-size: var(--text-meta);
+}
+
+.gh-thread-where {
+  min-width: 0;
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+}
+
+/* State badges keep their words when the head is tight. */
+.gh-badge {
+  flex: none;
+}
+
+.gh-anchor-note {
+  margin: 8px 10px 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-info-wash);
+  color: var(--color-fg-soft);
+  font-size: var(--text-meta);
+}
+
+.gh-anchor-note[data-kind="outdated"] {
+  background: var(--color-bg-2);
+}
+
+.gh-snippet {
+  display: flex;
+  flex-direction: column;
+  margin: 6px 0 0;
+  padding: 4px 0;
+  overflow-x: auto;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg);
+  font: 400 var(--text-code) / 1.5 var(--font-mono);
+}
+
+.gh-snippet-line {
+  padding-inline-end: 8px;
+  white-space: pre;
+  color: var(--color-fg-mute);
+}
+
+.gh-snippet-line[data-focus] {
+  background: var(--color-bg-3);
+  color: var(--color-fg);
+}
+
+.gh-snippet-number {
+  display: inline-block;
+  min-inline-size: 4ch;
+  padding-inline: 0 1ch;
+  text-align: end;
+  color: var(--color-fg-faint);
+  user-select: none;
+}
+
+.gh-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+}
+
+.gh-comment {
+  display: flex;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.gh-comment-main {
+  min-inline-size: 0;
+  flex: 1 1 auto;
+}
+
+.gh-comment-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--text-meta);
+  color: var(--color-fg-mute);
+}
+
+.gh-login {
+  color: var(--color-fg);
+  font-weight: 600;
+}
+
+.gh-comment-body {
+  color: var(--color-fg);
+  overflow-wrap: anywhere;
+}
+
+.gh-thread-note {
+  margin: 0 10px 8px;
+  font-size: var(--text-meta);
+}
+
+.gh-thread-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 8px 8px;
+}
+
+.gh-github-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-block-size: 24px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  color: var(--color-fg-soft);
+  font-size: var(--text-meta);
+}
+
+.gh-github-action:hover {
+  border-color: var(--color-line-strong);
+  color: var(--color-fg);
+}
+
+/* A file header's Outdated pill. */
+.gh-outdated-toggle {
+  min-block-size: 22px;
+  padding: 0 8px;
+  border: 1px dashed var(--color-line-strong);
+  border-radius: var(--radius-full);
+  color: var(--color-fg-soft);
+  font: 500 var(--text-meta) / 1 var(--font-sans);
+  white-space: nowrap;
+}
+
+.gh-outdated-toggle:hover,
+.gh-outdated-toggle[aria-expanded="true"] {
+  border-style: solid;
+  color: var(--color-fg);
+}
+
+/* PR bar entry into the Review rail. */
+.gh-thread-count {
+  display: inline-flex;
+  flex: none;
+  white-space: nowrap;
+  align-items: center;
+  gap: 5px;
+  min-block-size: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  color: var(--color-fg-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.gh-thread-count:hover,
+.gh-thread-count[aria-expanded="true"] {
+  border-color: var(--color-line-strong);
+  color: var(--color-fg);
+}
+
+/* The Review rail beside the diff. */
+.gh-rail {
+  display: flex;
+  /* Never more than a third of the workspace, so the diff keeps its room. */
+  flex: 0 1 clamp(220px, 32cqi, 320px);
+  flex-direction: column;
+  min-block-size: 0;
+  min-inline-size: 0;
+  border: 1px solid var(--color-line-soft);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-1);
+  font: 400 var(--text-secondary) / var(--leading-normal) var(--font-sans);
+}
+
+/* Too narrow for the diff and the rail side by side: the rail overlays it. */
+@container changes-workspace (max-width: 640px) {
+  .gh-rail {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: 5;
+    inline-size: min(320px, 88cqi);
+    box-shadow: var(--shadow-2);
+  }
+}
+
+.gh-rail-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border-block-end: 1px solid var(--color-line-soft);
+}
+
+.gh-rail-head h2 {
+  margin: 0;
+  color: var(--color-fg);
+  font: 600 var(--text-secondary) / 1.4 var(--font-sans);
+}
+
+.gh-rail-body {
+  min-block-size: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 6px 0 10px;
+}
+
+.gh-rail-empty {
+  margin: 8px 10px;
+}
+
+.gh-rail-section {
+  margin: 4px 10px 6px;
+  color: var(--color-fg-mute);
+  font: 600 var(--text-meta) / 1.4 var(--font-sans);
+  text-transform: none;
+}
+
+.gh-rail-file + .gh-rail-file {
+  margin-block-start: 6px;
+}
+
+.gh-rail-file ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gh-rail-path {
+  margin: 0;
+  padding: 2px 10px;
+  overflow: hidden;
+  color: var(--color-fg-soft);
+  font: 500 var(--text-meta) / 1.4 var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-rail-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  inline-size: 100%;
+  padding: 4px 10px;
+  text-align: start;
+  color: var(--color-fg-soft);
+}
+
+.gh-rail-entry:hover {
+  background: var(--color-bg-hover);
+}
+
+.gh-rail-entry[data-resolved] {
+  color: var(--color-fg-mute);
+}
+
+.gh-rail-entry-where {
+  color: var(--color-fg-mute);
+  font: 400 var(--text-meta) / 1.4 var(--font-mono);
+}
+
+.gh-rail-entry-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.gh-rail-card {
+  padding: 2px 8px 6px;
+}
+
+.gh-text-button {
+  min-block-size: 24px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--color-fg-soft);
+  font: 500 var(--text-meta) / 1 var(--font-sans);
+}
+
+.gh-text-button:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg);
+}
+
+/* A resolved thread, folded to its first comment. */
+.gh-thread-folded {
+  margin: 0;
+  padding: 2px 8px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gh-rail-checks {
+  margin-block-start: 10px;
+  padding-block-start: 6px;
+  border-block-start: 1px solid var(--color-line-soft);
+}
+
+.gh-rail-checks .pr-checks-list {
+  padding: 0 6px;
+}
+
+/* "GitHub reports no checks": inset like the rail's other notes. */
+.gh-rail-checks > .pr-assoc-mute {
+  margin: 4px 10px 8px;
+}
+
+.gh-sep {
+  margin-inline: 0.4em;
+}

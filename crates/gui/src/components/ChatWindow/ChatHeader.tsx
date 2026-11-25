@@ -55,6 +55,8 @@ interface ChatHeaderProps {
   linkedPr?: LinkedPr | null;
   /** Check counts of the linked PR, from the same refresh as Changes. */
   linkedPrChecks?: PrCheckCounts | null;
+  /** Unresolved GitHub review threads on the linked PR, once read. */
+  linkedPrOpenThreads?: number | null;
   /** Shows the Changes panel from the PR chip; without it the chip is static. */
   onOpenPrInChanges?: () => void;
 }
@@ -235,6 +237,7 @@ export function ChatHeader({
   entity = null,
   linkedPr = null,
   linkedPrChecks = null,
+  linkedPrOpenThreads = null,
   onOpenPrInChanges,
 }: ChatHeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -656,6 +659,7 @@ export function ChatHeader({
             <ChatHeaderPrChip
               pr={linkedPr}
               checks={linkedPrChecks}
+              openThreads={linkedPrOpenThreads}
               onOpenChanges={onOpenPrInChanges}
             />
           )}

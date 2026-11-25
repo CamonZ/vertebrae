@@ -302,5 +302,8 @@ pub async fn get_worktree_published_head(
     .map_err(|err| GithubFailure::other(format!("Git lookup task failed: {err}")))
 }
 
+mod review_threads;
+pub use review_threads::*;
+
 #[cfg(test)]
 mod tests;

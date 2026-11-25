@@ -1248,6 +1248,69 @@ and cleared on send. They are in-memory only; the DocumentEditor diff has none.
 - CodeView only republishes an item when its `version` changes, so
   `AllChangesView` bumps the version when annotations or the diff change.
 
+### GitHub review threads in Changes
+
+When the chat's pinned branch has a linked PR, Changes shows the PR's review
+threads read-only. GitHub reads and local placement are kept apart:
+
+- `get_github_pr_review_threads` reads the threads of the PR the caller
+  names through `crates/github`, at most 10 pages of 50 threads and 30
+  comments per thread, and reports truncation. The backend caches answers
+  for 20 seconds (64 PRs, keyed by host, repository and PR) and shares a read
+  already in flight; `refresh` bypasses the cache.
+- `stores/prSync.ts` owns the threads, like the rest of a branch's PR state:
+  they live in the branch's `worktreePrStore` entry (`reviewThreads`) and
+  reset whenever its link changes. A shown branch's threads are read with
+  each fresh read of its PR, so they share the poller's cadence, its pause
+  while the window is hidden, its backoff and GitHub's rate-limit hold-off.
+  Refreshing the PR re-reads them past the cache. One read per branch is in
+  flight at a time, an answer a later read replaced is dropped, and a failed
+  read keeps the threads already shown. `useWorktreePr` exposes them and the
+  open (unresolved) count.
+- `stores/reviewThreadNotices.ts` records a PR's thread IDs on its first read;
+  a later read that finds threads not seen before adds one `info`
+  notification to the Activity panel.
+- `map_worktree_pr_review_threads` places each published anchor on the shown
+  comparison through `src-tauri/src/review_anchors/`, the one line mapper
+  (Vertebrae discussions use it too). It reruns on every Changes load, so
+  local edits move threads without another GitHub read. A thread is placed:
+  - on its unchanged lines (a range for multi-line comments), possibly moved
+    by local edits or by a different comparison base;
+  - edited, which keeps the published line and published code;
+  - outdated, with the original code;
+  - unverified, when the PR head isn't fetched locally;
+  - unplaceable, when the anchor is invalid or the file can't be read;
+  - at file level, or not shown in this comparison.
+- `workspace/githubReview/` holds the Changes side: `model.ts` (placement to
+  markers, outdated groups and the rail's files), `useGithubPlacement.ts`,
+  `useReviewController.ts`, `useWorktreeReview.ts`, `markers.ts`,
+  `diffAnnotations.tsx` (the `AllChangesView` adapter), `GithubThreadCard.tsx`
+  and `ReviewRail.tsx`.
+- `markers.ts` draws one neutral avatar marker per side and line into
+  Pierre's rows. A file with markers gives every drawn line a lane on the
+  right (`markers.shadow.css`), so markers never cover code. Threads that
+  share a line share one marker. The marker has no text nodes: its initials,
+  count and drift glyph come from CSS. Activating it expands its threads in
+  the line's annotation slot. Resolved threads fold to their first line
+  until shown.
+- Each file header has an **Outdated n** pill that lists that file's outdated
+  threads in the first diff row's annotation slot, beside any line threads
+  there.
+- The Review rail lists every thread grouped by file in line order, then the
+  PR's checks. It opens from the PR bar's thread count or from the header PR
+  chip; on a narrow Changes pane it folds the file list or overlays the
+  diff. Choosing an entry shows its thread in the diff (an overlaying rail
+  closes so it does not cover the thread). A thread the diff can't show
+  expands in the rail instead.
+- Focus returns to what opened a card (a marker, an Outdated pill, a rail
+  entry) and, when the rail closes, to the bar control that opened it.
+  Targets are logical and resolved inside the Changes pane, so Pierre's
+  recycled rows and a second pane never take the focus.
+- ⌥↑/⌥↓ stop at marker lines. `o` on a line without a Vertebrae discussion
+  toggles its GitHub threads.
+- Open threads and the rail survive comparison switches. A switch keeps the
+  topmost visible line in place.
+
 ### Tool activity disclosure
 
 The shared Thread renderer groups consecutive normalized tool calls with

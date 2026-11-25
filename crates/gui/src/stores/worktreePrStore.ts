@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type {
   GithubFailure,
   GithubPrChecks,
+  GithubPrReviewThreads,
   GithubPullRequest,
   Result,
   WorktreeGithub,
@@ -59,7 +60,30 @@ export interface RepoOpenPrs {
   complete: boolean;
 }
 
-/** The linked PR's checks, reset whenever the link changes. */
+/**
+ * The linked PR's review threads. Read with the PR: when the branch comes on
+ * screen, after every fresh read of the PR while it is shown, and (forced
+ * past the backend's short cache) on refresh.
+ */
+export interface PrReviewThreadsState {
+  /** Last read; kept while a later read is out or failed. */
+  data: GithubPrReviewThreads | null;
+  loading: boolean;
+  error: GithubFailure | null;
+}
+
+const IDLE_REVIEW_THREADS: PrReviewThreadsState = {
+  data: null,
+  loading: false,
+  error: null,
+};
+
+/** Unresolved threads, for counts on entry points. */
+export function openThreadCount(threads: PrReviewThreadsState): number {
+  return threads.data?.threads.filter((thread) => !thread.resolved).length ?? 0;
+}
+
+/** The linked PR's checks and threads, reset whenever the link changes. */
 export interface PrChecksState {
   snapshot: GithubPrChecks | null;
   fetchedAt: number | null;
@@ -69,6 +93,7 @@ export interface PrChecksState {
   awaitingHead: string | null;
   /** Reads spent waiting for `awaitingHead`. */
   awaitingPolls: number;
+  reviewThreads: PrReviewThreadsState;
 }
 
 export interface WorktreePrEntry extends PrChecksState {
@@ -96,6 +121,7 @@ export const IDLE_CHECKS: PrChecksState = {
   cancels: {},
   awaitingHead: null,
   awaitingPolls: 0,
+  reviewThreads: IDLE_REVIEW_THREADS,
 };
 
 export const IDLE_PR_ENTRY: WorktreePrEntry = {

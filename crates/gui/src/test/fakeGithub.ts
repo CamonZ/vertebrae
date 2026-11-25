@@ -7,6 +7,7 @@ import type {
   GithubPrPollRequest,
   GithubPullRequest,
   GithubRemotePoll,
+  GithubReviewThread,
   WorktreeGithub,
   commands as Commands,
 } from "../bindings";
@@ -32,7 +33,8 @@ type GithubCommands = Pick<
   | "rerunGithubPrCheck"
   | "cancelGithubPrCheck"
   | "getWorktreePublishedHead"
->;
+> &
+  Partial<Pick<typeof Commands, "getGithubPrReviewThreads">>;
 
 export const GITHUB_COMMANDS = [
   "resolveWorktreeGithub",
@@ -42,6 +44,7 @@ export const GITHUB_COMMANDS = [
   "rerunGithubPrCheck",
   "cancelGithubPrCheck",
   "getWorktreePublishedHead",
+  "getGithubPrReviewThreads",
 ] as const;
 
 export function pullRequest(
@@ -127,6 +130,10 @@ export interface FakeGithub {
   headSha: string;
   /** Branches whose open-PR list GitHub cuts short. */
   incomplete: Set<string>;
+  /** Review threads by `owner/name#number`; a PR without an entry has none. */
+  reviewThreads: Map<string, GithubReviewThread[]>;
+  /** Fails every review-thread read until cleared. */
+  failThreads: GithubFailure | null;
 }
 
 export const prId = (repo: string, number: number) =>
@@ -142,6 +149,8 @@ export function fakeGithub(): FakeGithub {
     publishedHead: null,
     headSha: "abc1234",
     incomplete: new Set(),
+    reviewThreads: new Map(),
+    failThreads: null,
   };
 }
 
@@ -266,6 +275,20 @@ export function installFakeGithub(commands: GithubCommands, world: FakeGithub) {
   vi.mocked(commands.getWorktreePublishedHead).mockImplementation(async () =>
     ok(world.publishedHead)
   );
+  if (commands.getGithubPrReviewThreads)
+    vi.mocked(commands.getGithubPrReviewThreads).mockImplementation(
+      async (_worktreePath, _branch, repo, prNumber) =>
+        world.failThreads
+          ? err(world.failThreads)
+          : ok({
+              repo,
+              prNumber,
+              headOid: "1".repeat(40),
+              baseOid: "2".repeat(40),
+              threads: world.reviewThreads.get(prId(repo, prNumber)) ?? [],
+              truncated: false,
+            })
+    );
 }
 
 export function linkedPr(

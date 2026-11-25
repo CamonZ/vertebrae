@@ -1509,6 +1509,30 @@ async getWorktreePublishedHead(worktreePath: string, branch: string) : Promise<R
 }
 },
 /**
+ * Review threads of PR `pr_number` in `repo` (one of the worktree's GitHub
+ * remotes). Answers from a short-lived cache unless `refresh`; never writes
+ * to GitHub.
+ */
+async getGithubPrReviewThreads(worktreePath: string, branch: string, repo: string, prNumber: number, refresh: boolean | null) : Promise<Result<GithubPrReviewThreads, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_github_pr_review_threads", { worktreePath, branch, repo, prNumber, refresh }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Place published review-thread anchors on the shown comparison. Local only.
+ */
+async mapWorktreePrReviewThreads(worktreePath: string, request: GithubThreadMappingRequest) : Promise<Result<GithubThreadPosition[], GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("map_worktree_pr_review_threads", { worktreePath, request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Semantic edits and their one-hop call relations for a comparison.
  */
 async compareChangedSymbols(worktreePath: string, comparison: ComparisonSnapshot, paths: ChangedPath[]) : Promise<Result<ChangedSymbols, CodeIntelligenceError>> {
@@ -2513,6 +2537,7 @@ multiple: boolean;
  * The string `format` hint, such as `date` or `email`.
  */
 format: string | null }
+export type GithubAnchoredThread = { threadId: string; anchor: GithubThreadAnchor }
 export type GithubBranchPrs = { branch: string;
 /**
  * Open PRs whose head is the branch, from any repository.
@@ -2567,9 +2592,111 @@ branches: string[];
  * Linked PRs to read with their checks.
  */
 numbers: number[] }
+/**
+ * One read of a PR's review threads.
+ */
+export type GithubPrReviewThreads = { repo: string; prNumber: number;
+/**
+ * Commit the published `Right` anchors refer to.
+ */
+headOid: string; baseOid: string; threads: GithubReviewThread[]; truncated: boolean }
 export type GithubPrState = "open" | "draft" | "merged" | "closed"
 export type GithubPullRequest = { owner: string; repo: string; number: number; title: string; state: GithubPrState; headRef: string; headRepo: string | null; baseRef: string; url: string; author: string | null; updatedAt: string | null }
 export type GithubRemotePoll = { host: string; repo: string; openPrs: GithubOpenPrsPoll; pullRequests: GithubPolledPr[] }
+export type GithubReviewAuthor = { login: string }
+export type GithubReviewComment = { id: string;
+/**
+ * `None` when the author's account was deleted.
+ */
+author: GithubReviewAuthor | null;
+/**
+ * GitHub-flavoured Markdown as written; untrusted.
+ */
+body: string; createdAt: string | null; url: string }
+export type GithubReviewThread = { id: string; anchor: GithubThreadAnchor; resolved: boolean; viewerCanResolve: boolean; viewerCanUnresolve: boolean; viewerCanReply: boolean; comments: GithubReviewComment[]; commentsTruncated: boolean }
+export type GithubSnippetLine = { number: number; text: string;
+/**
+ * One of the commented lines.
+ */
+focus: boolean }
+/**
+ * Where a thread is anchored on the PR's published diff, as GitHub
+ * reports it.
+ */
+export type GithubThreadAnchor = { path: string;
+/**
+ * Side of the last commented line.
+ */
+side: ReviewThreadSide;
+/**
+ * Side of the first commented line; `None` for a single line.
+ */
+startSide: ReviewThreadSide | null;
+/**
+ * Published range on the PR head; `None` once the thread is outdated.
+ */
+line: number | null; startLine: number | null;
+/**
+ * Range on the commit the thread was written against.
+ */
+originalLine: number | null; originalStartLine: number | null; originalCommitOid: string | null; fileLevel: boolean; outdated: boolean }
+/**
+ * The published commits and the comparison Changes shows.
+ */
+export type GithubThreadMappingRequest = { headOid: string; baseOid: string;
+/**
+ * The shown new side: a commit, or the working tree when `None`.
+ */
+shownTarget: string | null;
+/**
+ * The shown old side.
+ */
+shownBase: string; threads: GithubAnchoredThread[] }
+export type GithubThreadPlacement =
+/**
+ * The commented lines are unchanged in the shown comparison; local
+ * edits above them may have moved them from `published_line`, the
+ * published end line.
+ */
+{ kind: "anchored"; startLine: number; line: number; publishedLine: number } |
+/**
+ * Local edits changed the commented lines: the thread stays at its
+ * published range, with the published text.
+ */
+{ kind: "edited"; startLine: number; line: number; published: GithubSnippetLine[] } |
+/**
+ * GitHub no longer places the thread on the PR's diff; `original` is
+ * the commented code where its commit is available locally.
+ */
+{ kind: "outdated"; originalStartLine: number | null; originalLine: number | null; original: GithubSnippetLine[] } |
+/**
+ * A commit is not available locally (fetch to verify): shown at the
+ * published range as GitHub reports it.
+ */
+{ kind: "unverified"; startLine: number; line: number } |
+/**
+ * The thread cannot be placed locally.
+ */
+{ kind: "unplaceable"; reason: GithubUnplaceableReason } |
+/**
+ * The thread comments on the whole file.
+ */
+{ kind: "file_level" } |
+/**
+ * The file is absent from the shown side of the comparison, or HEAD is
+ * unborn and the working tree is shown.
+ */
+{ kind: "not_shown" }
+export type GithubThreadPosition = { threadId: string; placement: GithubThreadPlacement }
+export type GithubUnplaceableReason =
+/**
+ * The published range does not exist in the published file.
+ */
+"invalid_anchor" |
+/**
+ * The file is not readable text (binary, too large, or a Git failure).
+ */
+"unreadable"
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
 export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
 export type HistoryFailure = { kind: HistoryFailureKind; message: string; retryable: boolean }
@@ -3066,6 +3193,9 @@ export type ReviewAnchorParent = { chatId: string; projectPath: string | null }
 export type ReviewAnchorRequest = { worktree: string; threadId: string; location: ReviewAnchorLocation; range: ReviewLineRange; selectedText: string; parent: ReviewAnchorParent | null }
 export type ReviewAnchorSource = { kind: "worktree"; commit: string | null } | { kind: "full_file"; turn: ReviewAnchorTurn | null } | { kind: "tool_call"; chatId: string; toolUseId: string }
 export type ReviewAnchorTurn = { sessionId: string; turnId: string }
+/**
+ * Lines `start_line..=line`, 1-based.
+ */
 export type ReviewLineRange = { startLine: number; line: number }
 export type ReviewMappingRequest = { threadId: string; originalBlobId: string; range: ReviewLineRange; location: ReviewAnchorLocation }
 export type ReviewMappingStatus = "open" | "outdated" | "unavailable"

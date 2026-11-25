@@ -35,6 +35,25 @@ function focusRules(css: string): { selector: string; body: string }[] {
 const HALO_PROPERTIES =
   /(?:^|;|\s)(?:outline(?:-offset)?|box-shadow|border(?:-color)?)\s*:/;
 
+/**
+ * The central block cannot reach into a shadow root (Pierre's diff rows), so
+ * a stylesheet injected there (`*.shadow.css`) may restate the halo, and
+ * only the halo: the shared shadow over a transparent outline.
+ */
+function restatesHalo(path: string, body: string): boolean {
+  if (!path.endsWith(".shadow.css")) return false;
+  const declarations = body
+    .split(";")
+    .map((declaration) => declaration.trim().replace(/\s+/g, " "))
+    .filter(Boolean);
+  return declarations.every(
+    (declaration) =>
+      declaration === "outline: 1px solid transparent" ||
+      declaration === "box-shadow: var(--focus-shadow)" ||
+      !HALO_PROPERTIES.test(declaration)
+  );
+}
+
 describe("focus halo", () => {
   it("is not redrawn by Tailwind focus utilities in components", () => {
     const offenders = Object.entries(components).flatMap(([path, source]) =>
@@ -50,6 +69,7 @@ describe("focus halo", () => {
       focusRules(css)
         .filter(({ selector, body }) => {
           if (!HALO_PROPERTIES.test(body)) return false;
+          if (restatesHalo(path, body)) return false;
           // The central block and the forced-colors fallback.
           return !(
             path === "./styles/focus-halo.css" &&

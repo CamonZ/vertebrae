@@ -36,7 +36,8 @@
 
 .pr-assoc-title {
   min-width: 0;
-  flex: 1 1 160px;
+  /* Shrinks before the row's controls wrap. */
+  flex: 1 1 48px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
