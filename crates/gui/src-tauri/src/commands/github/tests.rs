@@ -1030,3 +1030,5 @@ fn github_errors_map_to_typed_failure_kinds() {
     assert_eq!(limited.kind, GithubErrorKind::RateLimited);
     assert_eq!(limited.retry_after_secs, Some(u32::MAX));
 }
+
+mod checks;

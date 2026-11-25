@@ -8,18 +8,16 @@ import {
 } from "../bindings";
 import { errorMessage } from "../query";
 
-/**
- * How often a mounted, linked PR is re-read in the background. The backend
- * answers from its own cache until its linked-PR TTL lapses, so this bounds
- * GitHub traffic to roughly one query per interval per mounted worktree.
+/*
+ * A linked PR is kept current by the shared PR poller
+ * (`worktreePrChecksStore`), which reads it together with its checks and
+ * hands the fresh PR here through `receivePolledPr`.
  */
-export const LINKED_PR_REVALIDATE_MS = 30_000;
 
 export type WorktreePrPhase =
   | "idle"
   | "discovering"
   | "ready"
-  | "revalidating"
   | "refreshing"
   | "mutating";
 
@@ -100,14 +98,6 @@ export function githubFailureOf(error: unknown): GithubFailure {
     : { kind: "other", message: errorMessage(error), retryAfterSecs: null };
 }
 
-/** States that only the user can fix; background reads must not poll them. */
-function needsUserFix(association: WorktreePrAssociation | null): boolean {
-  return (
-    association?.status === "gh_missing" ||
-    association?.status === "auth_expired"
-  );
-}
-
 export function worktreePrKey(worktreePath: string, branch: string): string {
   return JSON.stringify([worktreePath, branch]);
 }
@@ -124,7 +114,6 @@ let requestCounter = 0;
 const latestRequest = new Map<string, number>();
 const backgroundRead = new Map<string, Promise<void>>();
 const consumers = new Map<string, number>();
-const revalidateTimers = new Map<string, ReturnType<typeof setInterval>>();
 
 function entryOf(key: string): WorktreePrEntry | undefined {
   return useWorktreePrStore.getState().entries[key];
@@ -178,7 +167,7 @@ function acceptBackground(
 function readInBackground(
   worktreePath: string,
   branch: string,
-  phase: "discovering" | "revalidating"
+  phase: "discovering"
 ): Promise<void> {
   const key = worktreePrKey(worktreePath, branch);
   const pending = backgroundRead.get(key);
@@ -207,14 +196,23 @@ function readInBackground(
   return shared;
 }
 
-export function revalidateWorktreePr(
+/**
+ * A linked PR re-read by the poller. Applied only while the entry is settled
+ * and still linked to the same PR, so it never overrides a user's link,
+ * unlink or refresh in flight.
+ */
+export function receivePolledPr(
   worktreePath: string,
-  branch: string
-): Promise<void> {
-  const entry = entryOf(worktreePrKey(worktreePath, branch));
-  if (!entry || entry.phase !== "ready" || needsUserFix(entry.association))
-    return Promise.resolve();
-  return readInBackground(worktreePath, branch, "revalidating");
+  branch: string,
+  association: WorktreePrAssociation
+) {
+  const key = worktreePrKey(worktreePath, branch);
+  const entry = entryOf(key);
+  const current = linkedPullRequest(entry?.association ?? null);
+  const fresh = linkedPullRequest(association);
+  if (!entry || entry.phase !== "ready" || !current || !fresh) return;
+  if (current.number !== fresh.number || current.url !== fresh.url) return;
+  update(key, (latest) => acceptBackground(latest, association));
 }
 
 async function runExplicit(
@@ -290,9 +288,6 @@ function evict(key: string) {
   consumers.delete(key);
   latestRequest.delete(key);
   backgroundRead.delete(key);
-  const timer = revalidateTimers.get(key);
-  if (timer !== undefined) clearInterval(timer);
-  revalidateTimers.delete(key);
   useWorktreePrStore.setState((state) => {
     if (!(key in state.entries)) return state;
     const entries = { ...state.entries };
@@ -308,15 +303,6 @@ export function acquireWorktreePr(
 ): () => void {
   const key = worktreePrKey(worktreePath, branch);
   consumers.set(key, (consumers.get(key) ?? 0) + 1);
-  if (!revalidateTimers.has(key)) {
-    revalidateTimers.set(
-      key,
-      setInterval(() => {
-        if (entryOf(key)?.association?.status === "linked")
-          void revalidateWorktreePr(worktreePath, branch);
-      }, LINKED_PR_REVALIDATE_MS)
-    );
-  }
   if ((entryOf(key)?.phase ?? "idle") === "idle")
     void readInBackground(worktreePath, branch, "discovering");
 
@@ -332,8 +318,6 @@ export function acquireWorktreePr(
 }
 
 export function resetWorktreePrStore() {
-  for (const timer of revalidateTimers.values()) clearInterval(timer);
-  revalidateTimers.clear();
   consumers.clear();
   latestRequest.clear();
   backgroundRead.clear();

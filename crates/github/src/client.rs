@@ -7,13 +7,17 @@ use crate::{
     },
     GitHubError, OpenPrSearchResult, PullRequestSummary, RepoRef,
 };
+use crate::{checks::FailedStepCache, rest::RateLimitStatus};
 use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT},
     StatusCode,
 };
 use serde::de::DeserializeOwned;
 use serde_json::json;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::{
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 const DEFAULT_API_BASE_URL: &str = "https://api.github.com";
 
@@ -74,8 +78,10 @@ query GetPullRequest($owner: String!, $repo: String!, $number: Int!) {
 /// The pool is shared, but credentials are supplied per request.
 #[derive(Debug, Clone)]
 pub struct GitHubClient {
-    http: reqwest::Client,
-    base_url: url::Url,
+    pub(crate) http: reqwest::Client,
+    pub(crate) base_url: url::Url,
+    /// Steps of failed check runs, which never change once a run completes.
+    pub(crate) failed_steps: Arc<FailedStepCache>,
 }
 
 fn validate_base_url(raw: &str) -> Result<url::Url, GitHubError> {
@@ -110,7 +116,7 @@ impl GitHubClient {
         Self::with_base_url(DEFAULT_API_BASE_URL)
     }
 
-    fn with_base_url(base_url: &str) -> Result<Self, GitHubError> {
+    pub(crate) fn with_base_url(base_url: &str) -> Result<Self, GitHubError> {
         let base_url = validate_base_url(base_url)?;
 
         let mut default_headers = HeaderMap::new();
@@ -134,7 +140,11 @@ impl GitHubClient {
                 message: format!("Could not initialize HTTP client: {err}"),
             })?;
 
-        Ok(Self { http, base_url })
+        Ok(Self {
+            http,
+            base_url,
+            failed_steps: Arc::default(),
+        })
     }
 
     /// Uses GitHub's GraphQL `headRefName` filter so GitHub filters server-side
@@ -243,6 +253,23 @@ impl GitHubClient {
         query: &str,
         variables: serde_json::Value,
     ) -> Result<T, GitHubError> {
+        let (envelope, _) = self.graphql_envelope(token, query, variables).await?;
+        if !envelope.errors.is_empty() {
+            return Err(map_graphql_errors(envelope.errors));
+        }
+        envelope.data.ok_or_else(|| GitHubError::Decode {
+            message: "GraphQL response contained neither data nor errors".into(),
+        })
+    }
+
+    /// The raw envelope, for queries whose aliases can fail independently,
+    /// with the rate-limit window GitHub reported for it.
+    pub(crate) async fn graphql_envelope<T: DeserializeOwned>(
+        &self,
+        token: &GitHubToken,
+        query: &str,
+        variables: serde_json::Value,
+    ) -> Result<(GraphQlResponse<T>, Option<RateLimitStatus>), GitHubError> {
         let url = self
             .base_url
             .join("graphql")
@@ -264,24 +291,17 @@ impl GitHubClient {
             .send()
             .await
             .map_err(map_transport_error)?;
+        let rate_limit = RateLimitStatus::from_headers(response.headers());
 
         let bytes = read_checked_response(response).await?;
-        let envelope: GraphQlResponse<T> =
-            serde_json::from_slice(&bytes).map_err(|err| GitHubError::Decode {
-                message: format!("Invalid GraphQL response JSON: {err}"),
-            })?;
-
-        if !envelope.errors.is_empty() {
-            return Err(map_graphql_errors(envelope.errors));
-        }
-
-        envelope.data.ok_or_else(|| GitHubError::Decode {
-            message: "GraphQL response contained neither data nor errors".into(),
-        })
+        let envelope = serde_json::from_slice(&bytes).map_err(|err| GitHubError::Decode {
+            message: format!("Invalid GraphQL response JSON: {err}"),
+        })?;
+        Ok((envelope, rate_limit))
     }
 }
 
-fn map_graphql_errors(errors: Vec<GraphQlError>) -> GitHubError {
+pub(crate) fn map_graphql_errors(errors: Vec<GraphQlError>) -> GitHubError {
     let joined = bounded_message(
         &errors
             .iter()
@@ -305,7 +325,7 @@ fn map_graphql_errors(errors: Vec<GraphQlError>) -> GitHubError {
     }
 }
 
-fn map_transport_error(err: reqwest::Error) -> GitHubError {
+pub(crate) fn map_transport_error(err: reqwest::Error) -> GitHubError {
     let message = if err.is_timeout() {
         "GitHub request timed out".to_string()
     } else if err.is_connect() {
@@ -316,7 +336,9 @@ fn map_transport_error(err: reqwest::Error) -> GitHubError {
     GitHubError::Network { message }
 }
 
-async fn read_checked_response(mut response: reqwest::Response) -> Result<Vec<u8>, GitHubError> {
+pub(crate) async fn read_checked_response(
+    mut response: reqwest::Response,
+) -> Result<Vec<u8>, GitHubError> {
     let status = response.status();
     let headers = response.headers().clone();
     let too_large = || GitHubError::Decode {
@@ -377,7 +399,7 @@ fn map_http_status(status: StatusCode, headers: &HeaderMap, message: String) -> 
     }
 }
 
-fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+pub(crate) fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name)?.to_str().ok().map(str::trim)
 }
 

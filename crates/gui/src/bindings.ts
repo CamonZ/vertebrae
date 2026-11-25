@@ -1469,6 +1469,54 @@ async unlinkWorktreePr(worktreePath: string, branch: string) : Promise<Result<Wo
 }
 },
 /**
+ * Refresh the linked PR and its checks for each worktree branch. Branches
+ * whose PRs share a repository are read with one GitHub request.
+ */
+async pollWorktreePrs(targets: WorktreeBranch[]) : Promise<Result<WorktreePrPollBatch, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("poll_worktree_prs", { targets }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Cancel the GitHub Actions workflow run of a queued or running job
+ * (`checkId` from [`poll_worktree_prs`]); every job in that run stops.
+ * Posts to GitHub.
+ */
+async cancelWorktreePrCheck(worktreePath: string, branch: string, checkId: string) : Promise<Result<null, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cancel_worktree_pr_check", { worktreePath, branch, checkId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Re-run one failed GitHub Actions job (`checkId` from
+ * [`poll_worktree_prs`]) on the PR linked to `branch`. Posts to GitHub.
+ */
+async rerunWorktreePrCheck(worktreePath: string, branch: string, checkId: string) : Promise<Result<null, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rerun_worktree_pr_check", { worktreePath, branch, checkId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The local remote-tracking commit `branch` is pushed to; never queries GitHub.
+ */
+async getWorktreePublishedHead(worktreePath: string, branch: string) : Promise<Result<string | null, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_worktree_published_head", { worktreePath, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Semantic edits and their one-hop call relations for a comparison.
  */
 async compareChangedSymbols(worktreePath: string, comparison: ComparisonSnapshot, paths: ChangedPath[]) : Promise<Result<ChangedSymbols, CodeIntelligenceError>> {
@@ -2473,8 +2521,23 @@ multiple: boolean;
  * The string `format` hint, such as `date` or `email`.
  */
 format: string | null }
+export type GithubCheckCancel = "allowed" | "no_permission" | "provider" | "not_applicable"
+export type GithubCheckOutcome = "success" | "neutral" | "skipped" | "failure" | "cancelled" | "timed_out" | "action_required" | "startup_failure" | "stale" | "error"
+export type GithubCheckRerun = "allowed" | "no_permission" | "pull_request_closed" | "provider" | "not_applicable"
+export type GithubCheckStatus = "failed" | "running" | "queued" | "passed"
 export type GithubErrorKind = "gh_missing" | "auth_expired" | "rate_limited" | "not_found" | "other"
 export type GithubFailure = { kind: GithubErrorKind; message: string; retryAfterSecs: number | null }
+export type GithubPrCheck = { id: string; name: string; provider: string; status: GithubCheckStatus; outcome: GithubCheckOutcome | null; startedAt: string | null; completedAt: string | null; url: string | null; summary: string | null; failedStep: string | null;
+/**
+ * A GitHub Actions job: its page and logs live on GitHub.
+ */
+actionsJob: boolean;
+/**
+ * The Actions workflow run the job belongs to; cancelling cancels every
+ * job sharing it.
+ */
+actionsRun: string | null; rerun: GithubCheckRerun; cancel: GithubCheckCancel }
+export type GithubPrChecks = { prNumber: number; repo: string; headSha: string; checks: GithubPrCheck[]; truncated: boolean }
 export type GithubPrState = "open" | "draft" | "merged" | "closed"
 export type GithubPullRequest = { owner: string; repo: string; number: number; title: string; state: GithubPrState; headRef: string; headRepo: string | null; baseRef: string; url: string; author: string | null; updatedAt: string | null }
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
@@ -3996,6 +4059,10 @@ workflow: Workflow;
  * Tasks associated with this workflow
  */
 tasks: Task[] }
+/**
+ * A worktree branch to poll.
+ */
+export type WorktreeBranch = { worktreePath: string; branch: string }
 export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; totals: DiffTotals; marker: MarkerReason | null }
 export type WorktreeChangedEvent = { watch_id: string }
 export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[]; comparison: ComparisonSnapshot; totals: DiffTotals }
@@ -4006,6 +4073,21 @@ export type WorktreePrAssociation = { status: "linked"; branch: string; repo: st
  * GitHub is not queried and the UI stays quiet.
  */
 { status: "not_applicable"; branch: string | null; reason: string }
+export type WorktreePrPoll = { worktreePath: string; branch: string; result: WorktreePrPollResult }
+export type WorktreePrPollBatch = { results: WorktreePrPoll[];
+/**
+ * Seconds to hold off polling: GitHub's hourly budget is nearly spent.
+ */
+holdOffSecs: number | null }
+export type WorktreePrPollResult =
+/**
+ * The linked PR, refreshed, with its checks.
+ */
+{ status: "linked"; association: WorktreePrAssociation; checks: GithubPrChecks } |
+/**
+ * No PR is linked; polling has nothing to read for this branch.
+ */
+{ status: "not_linked" } | { status: "failed"; failure: GithubFailure }
 
 /** tauri-specta globals **/
 

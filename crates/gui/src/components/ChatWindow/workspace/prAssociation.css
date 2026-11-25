@@ -1,6 +1,7 @@
 /* Rose identifies local link and unlink actions. GitHub-facing controls stay neutral. */
 
 .pr-assoc-bar {
+  container: pr-review-bar / inline-size;
   display: flex;
   flex-direction: column;
   gap: 8px;

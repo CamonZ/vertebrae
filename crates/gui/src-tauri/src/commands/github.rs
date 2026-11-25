@@ -29,7 +29,14 @@ use vertebrae_github::{
     PullRequestState, PullRequestSummary, RepoRef,
 };
 
-// Below the frontend's 30 s revalidation so each tick reaches GitHub.
+mod checks;
+pub use checks::{
+    GithubCheckCancel, GithubCheckOutcome, GithubCheckRerun, GithubCheckStatus, GithubPrCheck,
+    GithubPrChecks, WorktreeBranch, WorktreePrPoll, WorktreePrPollBatch, WorktreePrPollResult,
+};
+
+// A stored link younger than this answers association reads without GitHub;
+// the checks poller rewrites it on every poll.
 const LINKED_STALE_TTL_SECS: i64 = 20;
 const DISPLAY_CACHE_TTL: Duration = Duration::from_secs(60);
 
@@ -943,6 +950,65 @@ pub async fn unlink_worktree_pr(
     };
     let store = PrAssociationStore::app().await?;
     unlink(&store, &ctx).await
+}
+
+/// Refresh the linked PR and its checks for each worktree branch. Branches
+/// whose PRs share a repository are read with one GitHub request.
+#[tauri::command]
+#[specta::specta]
+pub async fn poll_worktree_prs(
+    targets: Vec<WorktreeBranch>,
+) -> Result<WorktreePrPollBatch, GithubFailure> {
+    let store = PrAssociationStore::app().await?;
+    let mut resolved = Vec::with_capacity(targets.len());
+    for target in targets {
+        let ctx = require_git_context(target.worktree_path.clone(), target.branch.clone()).await;
+        resolved.push((target, ctx));
+    }
+    Ok(checks::poll_prs(&store, resolved, &GitHubLookup::default(), now_unix_secs()).await)
+}
+
+/// Re-run one failed GitHub Actions job (`checkId` from
+/// [`poll_worktree_prs`]) on the PR linked to `branch`. Posts to GitHub.
+#[tauri::command]
+#[specta::specta]
+pub async fn rerun_worktree_pr_check(
+    worktree_path: String,
+    branch: String,
+    check_id: String,
+) -> Result<(), GithubFailure> {
+    let ctx = require_git_context(worktree_path, branch).await?;
+    let store = PrAssociationStore::app().await?;
+    checks::rerun_check(&store, &ctx, &check_id, &GitHubLookup::default()).await
+}
+
+/// Cancel the GitHub Actions workflow run of a queued or running job
+/// (`checkId` from [`poll_worktree_prs`]); every job in that run stops.
+/// Posts to GitHub.
+#[tauri::command]
+#[specta::specta]
+pub async fn cancel_worktree_pr_check(
+    worktree_path: String,
+    branch: String,
+    check_id: String,
+) -> Result<(), GithubFailure> {
+    let ctx = require_git_context(worktree_path, branch).await?;
+    let store = PrAssociationStore::app().await?;
+    checks::cancel_check(&store, &ctx, &check_id, &GitHubLookup::default()).await
+}
+
+/// The local remote-tracking commit `branch` is pushed to; never queries GitHub.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_worktree_published_head(
+    worktree_path: String,
+    branch: String,
+) -> Result<Option<String>, GithubFailure> {
+    tokio::task::spawn_blocking(move || {
+        checks::published_head(&PathBuf::from(worktree_path), &branch)
+    })
+    .await
+    .map_err(|err| GithubFailure::other(format!("Git lookup task failed: {err}")))
 }
 
 #[cfg(test)]

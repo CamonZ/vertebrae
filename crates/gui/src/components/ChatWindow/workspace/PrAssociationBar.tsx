@@ -1,4 +1,5 @@
 import {
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -11,12 +12,17 @@ import type {
   WorktreePrAssociation,
 } from "../../../bindings";
 import { useWorktreePrAssociation } from "../../../hooks/useWorktreePrAssociation";
+import {
+  useChecksFreshness,
+  useWorktreePrChecks,
+} from "../../../hooks/useWorktreePrChecks";
 import type { WorktreePrPhase } from "../../../stores/worktreePrStore";
 import {
   isAbsoluteHttpUrl,
   openExternalUrl,
 } from "../../../utils/openExternalUrl";
 import { Button } from "../../atoms/Button";
+import { Icon } from "../../atoms/Icon";
 import { OverflowMenu } from "../../molecules/OverflowMenu";
 import { Spinner } from "../../Spinner";
 import {
@@ -25,8 +31,16 @@ import {
   PrNumber,
   PrStateBadge,
 } from "../GithubPr";
+import {
+  LinkGlyph,
+  NewPrGlyph,
+  RefreshGlyph,
+  UnlinkGlyph,
+} from "../githubActionGlyphs";
 import { ManualPrLink } from "./ManualPrLink";
 import { PrCandidateList } from "./PrCandidateList";
+import { CheckCounts, ChecksRefreshLine, PrChecksDrawer } from "./PrChecks";
+import { checkCountsLabel } from "./prChecksView";
 import { needsGhSetup, staleRefreshNote } from "./githubFailure";
 import { AuthExpiredText, GhMissingText, GithubFailureText } from "./PrFailure";
 import "./prAssociation.css";
@@ -86,7 +100,7 @@ function CheckAgainButton({ phase, busy, refresh }: BarActions) {
       // aria-disabled keeps focus on the button while it runs.
       aria-disabled={busy || undefined}
       aria-busy={checking || undefined}
-      iconLeft={checking ? <Spinner className="h-3 w-3" /> : undefined}
+      iconLeft={checking ? <Spinner className="h-3 w-3" /> : <RefreshGlyph />}
       onClick={() => {
         if (!busy) refresh();
       }}
@@ -96,86 +110,157 @@ function CheckAgainButton({ phase, busy, refresh }: BarActions) {
   );
 }
 
+type PrChecks = ReturnType<typeof useWorktreePrChecks>;
+
 function LinkedBar({
   association,
   actions,
+  checks,
 }: {
   association: Linked;
   actions: BarActions;
+  checks: PrChecks;
 }) {
   const { pr, staleError } = association;
   const canOpen = isAbsoluteHttpUrl(pr.url);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const drawerId = useId();
+  const { now, freshness } = useChecksFreshness(checks.entry);
+  const checksBusy = freshness.kind === "refreshing";
+  const checksFailed = freshness.kind === "failed";
+
+  // The checks line speaks for GitHub's freshness; the PR's own refresh
+  // notices show only when the checks line does not already say the same.
   let status: ReactNode = null;
-  if (actions.phase === "refreshing")
+  if (actions.phase === "refreshing" && !checksBusy)
     status = (
       <span className="pr-assoc-mute pr-assoc-inline" role="status">
         <Spinner className="h-3 w-3" />
         Checking GitHub…
       </span>
     );
-  else if (staleError)
+  else if (staleError && !checksFailed)
     status = (
       <span className="pr-assoc-mute" role="status" title={staleError.message}>
         Couldn’t refresh · {staleRefreshNote(staleError)}
       </span>
     );
 
+  const countsLabel = checkCountsLabel(checks.counts);
+  const snapshot = checks.entry.snapshot;
+  const closeDrawer = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setDrawerOpen(false);
+    toggleRef.current?.focus();
+  };
+
   return (
-    <div className="pr-assoc-row">
-      <GitHubGlyph />
-      {canOpen ? (
-        <button
-          type="button"
-          className="pr-assoc-link"
-          {...focusTarget}
-          aria-label={`Open PR #${pr.number} on GitHub`}
-          onClick={() => openExternalUrl(pr.url)}
-        >
+    <>
+      <div className="pr-assoc-row">
+        <GitHubGlyph />
+        {canOpen ? (
+          <button
+            type="button"
+            className="pr-assoc-link"
+            {...focusTarget}
+            aria-label={`Open PR #${pr.number} on GitHub`}
+            onClick={() => openExternalUrl(pr.url)}
+          >
+            <PrNumber number={pr.number} />
+            <ExternalLinkGlyph />
+          </button>
+        ) : (
           <PrNumber number={pr.number} />
-          <ExternalLinkGlyph />
-        </button>
-      ) : (
-        <PrNumber number={pr.number} />
-      )}
-      <PrStateBadge state={pr.state} />
-      <span className="pr-assoc-title" title={pr.title}>
-        {pr.title}
-      </span>
-      {status}
-      <span className="pr-assoc-actions">
-        <OverflowMenu
-          label={`PR #${pr.number} actions`}
-          testId="pr-actions-menu"
-          items={[
-            ...(canOpen
-              ? [
-                  {
-                    key: "open",
-                    label: "Open on GitHub",
-                    onSelect: () => openExternalUrl(pr.url),
-                    icon: <GitHubGlyph />,
-                  },
-                ]
-              : []),
-            {
-              key: "refresh",
-              label:
-                actions.phase === "refreshing" ? "Checking…" : "Refresh PR",
-              onSelect: actions.refresh,
-              disabled: actions.busy,
-            },
-            {
-              key: "unlink",
-              label: "Unlink PR (local only)",
-              onSelect: actions.unlink,
-              disabled: actions.busy,
-              separatorBefore: canOpen,
-              testId: "pr-unlink-action",
-            },
-          ]}
+        )}
+        <PrStateBadge state={pr.state} />
+        <span className="pr-assoc-title" title={pr.title}>
+          {pr.title}
+        </span>
+        {status}
+        {snapshot && (
+          <button
+            ref={toggleRef}
+            type="button"
+            className="pr-checks-toggle"
+            aria-expanded={drawerOpen}
+            aria-controls={drawerOpen ? drawerId : undefined}
+            aria-label={`Checks: ${countsLabel}. ${drawerOpen ? "Hide" : "Show"} details`}
+            data-testid="pr-checks-toggle"
+            onClick={() => setDrawerOpen((open) => !open)}
+          >
+            <CheckCounts counts={checks.counts} />
+            <ChevronGlyph up={drawerOpen} />
+          </button>
+        )}
+        <ChecksRefreshLine
+          freshness={freshness}
+          now={now}
+          onRefresh={() => void checks.refresh()}
         />
-      </span>
-    </div>
+        <span className="pr-assoc-actions">
+          <OverflowMenu
+            label={`PR #${pr.number} actions`}
+            testId="pr-actions-menu"
+            items={[
+              ...(canOpen
+                ? [
+                    {
+                      key: "open",
+                      label: "Open on GitHub",
+                      onSelect: () => openExternalUrl(pr.url),
+                      icon: <ExternalLinkGlyph />,
+                    },
+                  ]
+                : []),
+              {
+                key: "refresh",
+                label:
+                  actions.phase === "refreshing" ? "Checking…" : "Refresh PR",
+                onSelect: () => {
+                  actions.refresh();
+                  void checks.refresh();
+                },
+                disabled: actions.busy,
+                icon: <RefreshGlyph />,
+              },
+              {
+                key: "unlink",
+                label: "Unlink PR (local only)",
+                onSelect: actions.unlink,
+                disabled: actions.busy,
+                separatorBefore: canOpen,
+                icon: <UnlinkGlyph />,
+                testId: "pr-unlink-action",
+              },
+            ]}
+          />
+        </span>
+      </div>
+      {drawerOpen && snapshot && (
+        <div onKeyDown={closeDrawer}>
+          <PrChecksDrawer
+            id={drawerId}
+            prNumber={pr.number}
+            checks={checks.checks}
+            truncated={snapshot.truncated}
+            now={now}
+            onRerun={(checkId) => void checks.rerun(checkId)}
+            onCancel={(checkId) => void checks.cancel(checkId)}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+function ChevronGlyph({ up }: { up: boolean }) {
+  return (
+    <Icon size="sm" strokeWidth={1.5}>
+      <path d={up ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} />
+    </Icon>
   );
 }
 
@@ -314,6 +399,7 @@ function NoPrBar({
             size="sm"
             {...focusTarget}
             aria-expanded={linkOpen}
+            iconLeft={<LinkGlyph />}
             onClick={() => setLinkOpen((value) => !value)}
           >
             Link PR…
@@ -322,7 +408,7 @@ function NoPrBar({
             <Button
               variant="secondary"
               size="sm"
-              iconLeft={<GitHubGlyph size="xs" />}
+              iconLeft={<NewPrGlyph />}
               iconRight={<ExternalLinkGlyph />}
               onClick={() => openExternalUrl(createPrUrl)}
             >
@@ -350,11 +436,13 @@ function AssociationBody({
   association,
   lookupFailure,
   actions,
+  checks,
   listOpenPrs,
 }: {
   association: WorktreePrAssociation | null;
   lookupFailure: GithubFailure | null;
   actions: BarActions;
+  checks: PrChecks;
   listOpenPrs: () => Promise<GithubPullRequest[]>;
 }): ReactNode {
   if (!association && lookupFailure)
@@ -393,7 +481,13 @@ function AssociationBody({
         </PrStatusRow>
       );
     case "linked":
-      return <LinkedBar association={association} actions={actions} />;
+      return (
+        <LinkedBar
+          association={association}
+          actions={actions}
+          checks={checks}
+        />
+      );
     case "ambiguous":
       return (
         <AmbiguousBar
@@ -442,6 +536,7 @@ export function PrAssociationBar({
     unlinkPr,
     listOpenPrs,
   } = useWorktreePrAssociation(worktreePath, branch);
+  const checks = useWorktreePrChecks(worktreePath, branch);
   const rootRef = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef(false);
 
@@ -483,6 +578,7 @@ export function PrAssociationBar({
         association={association}
         lookupFailure={lookupFailure}
         actions={actions}
+        checks={checks}
         listOpenPrs={listOpenPrs}
       />
       {error && (

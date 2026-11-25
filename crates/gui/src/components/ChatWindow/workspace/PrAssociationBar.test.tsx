@@ -14,13 +14,19 @@ import {
   type GithubFailure,
   type GithubPullRequest,
   type WorktreePrAssociation,
+  type WorktreePrPollBatch,
 } from "../../../bindings";
 import { useWorktreePrAssociation } from "../../../hooks/useWorktreePrAssociation";
 import {
-  LINKED_PR_REVALIDATE_MS,
   linkedPullRequest,
   resetWorktreePrStore,
+  useWorktreePrStore,
+  worktreePrKey,
 } from "../../../stores/worktreePrStore";
+import {
+  pollWatchedWorktreePrsNow,
+  resetWorktreePrChecksStore,
+} from "../../../stores/worktreePrChecksStore";
 import { ChatHeader } from "../ChatHeader";
 import { ChatHeaderPrChip } from "../GithubPr";
 import { OPEN_PR_LIST_LIMIT } from "./ManualPrLink";
@@ -37,6 +43,10 @@ vi.mock("../../../bindings", () => ({
     listWorktreeOpenPrs: vi.fn(),
     linkWorktreePr: vi.fn(),
     unlinkWorktreePr: vi.fn(),
+    pollWorktreePrs: vi.fn(),
+    rerunWorktreePrCheck: vi.fn(),
+    cancelWorktreePrCheck: vi.fn(),
+    getWorktreePublishedHead: vi.fn(),
   },
 }));
 
@@ -44,6 +54,8 @@ const getAssociation = vi.mocked(commands.getWorktreePrAssociation);
 const listOpen = vi.mocked(commands.listWorktreeOpenPrs);
 const link = vi.mocked(commands.linkWorktreePr);
 const unlink = vi.mocked(commands.unlinkWorktreePr);
+const poll = vi.mocked(commands.pollWorktreePrs);
+const publishedHead = vi.mocked(commands.getWorktreePublishedHead);
 
 const REPO = "example/demo-repo";
 const BRANCH = "feature/retry";
@@ -155,9 +167,45 @@ function HeaderConsumer({
   return pr ? <ChatHeaderPrChip pr={pr} /> : null;
 }
 
+/** What GitHub says on the next poll; the stored association by default. */
+let polledAssociation: (
+  worktreePath: string,
+  branch: string
+) => WorktreePrAssociation | null = (worktreePath, branch) =>
+  useWorktreePrStore.getState().entries[worktreePrKey(worktreePath, branch)]
+    ?.association ?? null;
+
+function pollAnswer(targets: { worktreePath: string; branch: string }[]) {
+  return ok<WorktreePrPollBatch>({
+    results: targets.map((target) => {
+      const association = polledAssociation(target.worktreePath, target.branch);
+      const pr = linkedPullRequest(association);
+      return {
+        ...target,
+        result:
+          association && pr
+            ? {
+                status: "linked" as const,
+                association,
+                checks: {
+                  prNumber: pr.number,
+                  repo: REPO,
+                  headSha: "abc1234",
+                  checks: [],
+                  truncated: false,
+                },
+              }
+            : { status: "not_linked" as const },
+      };
+    }),
+    holdOffSecs: null,
+  });
+}
+
+/** One scheduled poll of every watched branch. */
 async function tickRevalidation() {
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(LINKED_PR_REVALIDATE_MS);
+    await pollWatchedWorktreePrsNow();
   });
 }
 
@@ -172,9 +220,15 @@ describe("PrAssociationBar", () => {
     // Only the interval is faked so Testing Library's polling still runs.
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     listOpen.mockResolvedValue(ok([PR_482]));
+    polledAssociation = (worktreePath, branch) =>
+      useWorktreePrStore.getState().entries[worktreePrKey(worktreePath, branch)]
+        ?.association ?? null;
+    poll.mockImplementation(async (targets) => pollAnswer(targets));
+    publishedHead.mockResolvedValue(ok(null));
   });
 
   afterEach(() => {
+    resetWorktreePrChecksStore();
     resetWorktreePrStore();
     vi.useRealTimers();
   });
@@ -478,32 +532,36 @@ describe("PrAssociationBar", () => {
     expect(getAssociation).toHaveBeenCalledTimes(2);
   });
 
-  it("re-reads a linked PR on the interval and keeps background failures silent", async () => {
+  it("takes a linked PR's state from the poller and keeps it through a failed poll", async () => {
     getAssociation.mockResolvedValueOnce(ok(linked(PR_482)));
     render(<PrAssociationBar worktreePath="/wt/linked" branch={BRANCH} />);
     await screen.findByRole("button", { name: "Open PR #482 on GitHub" });
 
-    getAssociation.mockRejectedValueOnce(new Error("Network offline"));
+    poll.mockResolvedValueOnce({
+      status: "error",
+      error: {
+        kind: "other",
+        message: "Network offline",
+        retryAfterSecs: null,
+      },
+    });
     await tickRevalidation();
-    expect(getAssociation).toHaveBeenLastCalledWith(
-      "/wt/linked",
-      BRANCH,
-      false
+    // Only the checks line reports it; the PR stays as last read.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Couldn’t refresh: Network offline"
     );
-    await waitFor(() => expect(getAssociation).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Open PR #482 on GitHub" })
     ).toBeInTheDocument();
 
-    getAssociation.mockResolvedValueOnce(
-      ok(linked({ ...PR_482, state: "merged" }))
-    );
+    polledAssociation = () => linked({ ...PR_482, state: "merged" });
     await tickRevalidation();
     expect(await screen.findByText("Merged")).toBeInTheDocument();
+    // The poller answers for the PR; discovery is not asked again.
+    expect(getAssociation).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps an explicit refresh error through a later background success", async () => {
+  it("keeps an explicit refresh error through a later poll", async () => {
     getAssociation.mockResolvedValueOnce(ok(linked(PR_482)));
     render(<PrAssociationBar worktreePath="/wt/errors" branch={BRANCH} />);
     await screen.findByRole("button", { name: "Open PR #482 on GitHub" });
@@ -511,38 +569,43 @@ describe("PrAssociationBar", () => {
     getAssociation.mockResolvedValueOnce(commandError("GitHub is down"));
     fireEvent.click(screen.getByTestId("pr-actions-menu"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Refresh PR" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "GitHub is down"
-    );
+    expect(
+      await screen.findByText(/GitHub is down/, { selector: "[role=alert] *" })
+    ).toBeInTheDocument();
 
-    getAssociation.mockResolvedValueOnce(ok(linked(PR_482)));
     await tickRevalidation();
-    await waitFor(() => expect(getAssociation).toHaveBeenCalledTimes(3));
-    expect(screen.getByRole("alert")).toHaveTextContent("GitHub is down");
+    expect(screen.getByText(/GitHub is down/)).toBeInTheDocument();
   });
 
-  it("does not let a background read replace an explicit refresh result", async () => {
+  it("does not let a poll answer replace an explicit refresh result", async () => {
     getAssociation.mockResolvedValueOnce(ok(linked(PR_482)));
     render(<PrAssociationBar worktreePath="/wt/race" branch={BRANCH} />);
     await screen.findByRole("button", { name: "Open PR #482 on GitHub" });
+    await act(async () => {});
 
-    const background = deferred<AssociationResult>();
-    getAssociation.mockReturnValueOnce(background.promise);
-    await tickRevalidation();
+    const background = deferred<ReturnType<typeof pollAnswer>>();
+    poll.mockReturnValueOnce(background.promise);
+    const tick = pollWatchedWorktreePrsNow();
     getAssociation.mockResolvedValueOnce(ok(linked(PR_479)));
     fireEvent.click(screen.getByTestId("pr-actions-menu"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Refresh PR" }));
     expect(
       await screen.findByRole("button", { name: "Open PR #479 on GitHub" })
     ).toBeInTheDocument();
-    await act(async () => background.resolve(ok(linked(PR_482))));
+    // The poll answers with what GitHub said before the refresh.
+    polledAssociation = () => linked(PR_482);
+    await act(async () => {
+      background.resolve(
+        pollAnswer([{ worktreePath: "/wt/race", branch: BRANCH }])
+      );
+      await tick;
+    });
     expect(
       screen.getByRole("button", { name: "Open PR #479 on GitHub" })
     ).toBeInTheDocument();
 
-    getAssociation.mockResolvedValueOnce(ok(none()));
+    polledAssociation = () => none();
     await tickRevalidation();
-    await waitFor(() => expect(getAssociation).toHaveBeenCalledTimes(4));
     expect(
       screen.getByRole("button", { name: "Open PR #479 on GitHub" })
     ).toBeInTheDocument();

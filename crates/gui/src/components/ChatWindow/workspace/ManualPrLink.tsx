@@ -9,6 +9,7 @@ import {
 import type { GithubFailure, GithubPullRequest } from "../../../bindings";
 import { githubFailureOf } from "../../../stores/worktreePrStore";
 import { Button } from "../../atoms/Button";
+import { LinkGlyph, RefreshGlyph } from "../githubActionGlyphs";
 import { Input } from "../../atoms/Input";
 import { Spinner } from "../../Spinner";
 import { PrCandidateList } from "./PrCandidateList";
@@ -49,7 +50,12 @@ function OpenPrList({
             Couldn’t load open PRs:{" "}
             <GithubFailureText failure={openPrs.failure} />
           </span>
-          <Button variant="secondary" size="sm" onClick={onRetry}>
+          <Button
+            variant="secondary"
+            size="sm"
+            iconLeft={<RefreshGlyph />}
+            onClick={onRetry}
+          >
             Retry
           </Button>
         </div>
@@ -187,7 +193,7 @@ export function ManualPrLink({
           className="pr-private-action"
           aria-disabled={busy || undefined}
           aria-busy={linking || undefined}
-          iconLeft={linking ? <Spinner className="h-3 w-3" /> : undefined}
+          iconLeft={linking ? <Spinner className="h-3 w-3" /> : <LinkGlyph />}
         >
           Link locally
         </Button>
