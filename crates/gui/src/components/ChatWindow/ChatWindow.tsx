@@ -54,6 +54,8 @@ import { useChatSession } from "../../hooks/useChatSession";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatAssociation } from "../../hooks/useChatAssociation";
 import { WorktreeChanges } from "./WorktreeChanges";
+import { useWorktreePrAssociation } from "../../hooks/useWorktreePrAssociation";
+import { linkedPullRequest } from "../../stores/worktreePrStore";
 import {
   activate,
   discardDraft,
@@ -600,6 +602,15 @@ export function ChatWindow({
   }, [composerFocusRevision, markComposerFocusHandled, sessionId]);
 
   const showChanges = !!worktreePath && changesOpen;
+  // The chat's GitHub PR follows the worktree and branch pinned on its
+  // association record, never the checkout's HEAD. The creation default (not
+  // yet associated) and an association without a branch have no PR target.
+  const prWorktree = association.record.defaultWorktree
+    ? null
+    : association.record.worktreePath;
+  const prBranch = prWorktree ? association.record.branch : null;
+  const worktreePr = useWorktreePrAssociation(prWorktree, prBranch);
+  const linkedPr = linkedPullRequest(worktreePr.association);
   const shownEvidence =
     !showChanges &&
     evidence?.sessionId === sessionId &&
@@ -718,6 +729,14 @@ export function ChatWindow({
           projectLabel ??
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
+        linkedPr={linkedPr}
+        onOpenPrInChanges={
+          worktreePath
+            ? () => {
+                if (shownSection !== "changes") side.select("changes");
+              }
+            : undefined
+        }
       />
       <div
         ref={panelResize.containerRef}
@@ -740,6 +759,7 @@ export function ChatWindow({
                 <WorktreeChanges
                   key={`${sessionId}:${worktreePath}`}
                   worktreePath={worktreePath}
+                  prBranch={worktreePath === prWorktree ? prBranch : null}
                   sessionId={sessionId}
                   onChangesLoaded={
                     worktreePath === evidenceCheckout

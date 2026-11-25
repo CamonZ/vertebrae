@@ -20,9 +20,11 @@ use vertebrae_sacrum_client::GraphqlClient;
 mod delivery;
 mod entity;
 mod migration;
+mod pr_associations;
 mod review_anchors;
 mod review_threads;
 mod storage;
+pub(crate) use pr_associations::*;
 pub(crate) use review_anchors::*;
 pub(crate) use review_threads::*;
 

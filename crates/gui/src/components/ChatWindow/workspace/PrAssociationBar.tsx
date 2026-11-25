@@ -1,0 +1,502 @@
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
+import type {
+  GithubFailure,
+  GithubPullRequest,
+  WorktreePrAssociation,
+} from "../../../bindings";
+import { useWorktreePrAssociation } from "../../../hooks/useWorktreePrAssociation";
+import type { WorktreePrPhase } from "../../../stores/worktreePrStore";
+import {
+  isAbsoluteHttpUrl,
+  openExternalUrl,
+} from "../../../utils/openExternalUrl";
+import { Button } from "../../atoms/Button";
+import { OverflowMenu } from "../../molecules/OverflowMenu";
+import { Spinner } from "../../Spinner";
+import {
+  ExternalLinkGlyph,
+  GitHubGlyph,
+  PrNumber,
+  PrStateBadge,
+} from "../GithubPr";
+import { ManualPrLink } from "./ManualPrLink";
+import { PrCandidateList } from "./PrCandidateList";
+import { needsGhSetup, staleRefreshNote } from "./githubFailure";
+import { AuthExpiredText, GhMissingText, GithubFailureText } from "./PrFailure";
+import "./prAssociation.css";
+
+const FOCUS_TARGET = "data-pr-focus";
+const focusTarget = { [FOCUS_TARGET]: "" };
+
+function prRepo(pr: GithubPullRequest): string {
+  return `${pr.owner}/${pr.repo}`;
+}
+
+type Linked = Extract<WorktreePrAssociation, { status: "linked" }>;
+type NoPr = Extract<WorktreePrAssociation, { status: "none" }>;
+type Ambiguous = Extract<WorktreePrAssociation, { status: "ambiguous" }>;
+
+interface BarActions {
+  phase: WorktreePrPhase;
+  busy: boolean;
+  refresh: () => void;
+  link: (prNumber: number, repo: string | null) => Promise<boolean>;
+  unlink: () => void;
+}
+
+const TONE_CLASS = {
+  mute: "pr-assoc-mute",
+  error: "pr-assoc-err",
+  plain: undefined,
+} as const;
+
+function PrStatusRow({
+  tone = "mute",
+  icon = <GitHubGlyph />,
+  action,
+  children,
+}: {
+  tone?: keyof typeof TONE_CLASS;
+  icon?: ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="pr-assoc-row" role="status">
+      {icon}
+      <span className={TONE_CLASS[tone]}>{children}</span>
+      {action && <span className="pr-assoc-actions">{action}</span>}
+    </div>
+  );
+}
+
+function CheckAgainButton({ phase, busy, refresh }: BarActions) {
+  const checking = phase === "refreshing";
+  return (
+    <Button
+      variant="secondary"
+      size="sm"
+      {...focusTarget}
+      // aria-disabled keeps focus on the button while it runs.
+      aria-disabled={busy || undefined}
+      aria-busy={checking || undefined}
+      iconLeft={checking ? <Spinner className="h-3 w-3" /> : undefined}
+      onClick={() => {
+        if (!busy) refresh();
+      }}
+    >
+      {checking ? "Checking…" : "Check again"}
+    </Button>
+  );
+}
+
+function LinkedBar({
+  association,
+  actions,
+}: {
+  association: Linked;
+  actions: BarActions;
+}) {
+  const { pr, staleError } = association;
+  const canOpen = isAbsoluteHttpUrl(pr.url);
+  let status: ReactNode = null;
+  if (actions.phase === "refreshing")
+    status = (
+      <span className="pr-assoc-mute pr-assoc-inline" role="status">
+        <Spinner className="h-3 w-3" />
+        Checking GitHub…
+      </span>
+    );
+  else if (staleError)
+    status = (
+      <span className="pr-assoc-mute" role="status" title={staleError.message}>
+        Couldn’t refresh · {staleRefreshNote(staleError)}
+      </span>
+    );
+
+  return (
+    <div className="pr-assoc-row">
+      <GitHubGlyph />
+      {canOpen ? (
+        <button
+          type="button"
+          className="pr-assoc-link"
+          {...focusTarget}
+          aria-label={`Open PR #${pr.number} on GitHub`}
+          onClick={() => openExternalUrl(pr.url)}
+        >
+          <PrNumber number={pr.number} />
+          <ExternalLinkGlyph />
+        </button>
+      ) : (
+        <PrNumber number={pr.number} />
+      )}
+      <PrStateBadge state={pr.state} />
+      <span className="pr-assoc-title" title={pr.title}>
+        {pr.title}
+      </span>
+      {status}
+      <span className="pr-assoc-actions">
+        <OverflowMenu
+          label={`PR #${pr.number} actions`}
+          testId="pr-actions-menu"
+          items={[
+            ...(canOpen
+              ? [
+                  {
+                    key: "open",
+                    label: "Open on GitHub",
+                    onSelect: () => openExternalUrl(pr.url),
+                    icon: <GitHubGlyph />,
+                  },
+                ]
+              : []),
+            {
+              key: "refresh",
+              label:
+                actions.phase === "refreshing" ? "Checking…" : "Refresh PR",
+              onSelect: actions.refresh,
+              disabled: actions.busy,
+            },
+            {
+              key: "unlink",
+              label: "Unlink PR (local only)",
+              onSelect: actions.unlink,
+              disabled: actions.busy,
+              separatorBefore: canOpen,
+              testId: "pr-unlink-action",
+            },
+          ]}
+        />
+      </span>
+    </div>
+  );
+}
+
+function ambiguousSummary({ branch, repo, candidates }: Ambiguous): ReactNode {
+  const branchCode = <code className="pr-assoc-branch">{branch}</code>;
+  if (candidates.length !== 1)
+    return (
+      <>
+        {candidates.length} open PRs in {repo} match {branchCode}
+      </>
+    );
+  const [only] = candidates;
+  const fork =
+    only.headRepo && only.headRepo.toLowerCase() !== repo.toLowerCase()
+      ? only.headRepo
+      : null;
+  return fork ? (
+    <>
+      PR #{only.number} for {branchCode} is from fork {fork}, so it wasn’t
+      linked automatically
+    </>
+  ) : (
+    <>
+      PR #{only.number} matches {branchCode} but wasn’t linked automatically
+    </>
+  );
+}
+
+function AmbiguousBar({
+  association,
+  actions,
+}: {
+  association: Ambiguous;
+  actions: BarActions;
+}) {
+  const [open, setOpen] = useState(true);
+  // Rows take focus only when the user opens the chooser, not on arrival.
+  const [focusRows, setFocusRows] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+
+  const toggle = () => {
+    setFocusRows(!open);
+    setOpen(!open);
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setOpen(false);
+    toggleRef.current?.focus();
+  };
+
+  return (
+    <>
+      <div className="pr-assoc-row">
+        <GitHubGlyph />
+        <span className="pr-assoc-warn">{ambiguousSummary(association)}</span>
+        <span className="pr-assoc-actions">
+          <Button
+            ref={toggleRef}
+            variant="secondary"
+            size="sm"
+            {...focusTarget}
+            aria-expanded={open}
+            onClick={toggle}
+          >
+            {open ? "Hide chooser" : "Choose PR…"}
+          </Button>
+        </span>
+      </div>
+      {open && (
+        <div
+          className="pr-chooser"
+          data-testid="pr-ambiguous-chooser"
+          onKeyDown={onKeyDown}
+        >
+          <PrCandidateList
+            prs={association.candidates}
+            repo={association.repo}
+            busy={actions.busy}
+            label={`Pull requests for ${association.branch}`}
+            focusFirst={focusRows}
+            onLink={(pr) => void actions.link(pr.number, prRepo(pr))}
+          />
+          <div className="pr-chooser-foot">
+            <span className="pr-assoc-mute">
+              ↑↓ move · ↵ link locally · esc close
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-disabled={actions.busy || undefined}
+              onClick={() => {
+                if (!actions.busy) actions.unlink();
+              }}
+            >
+              Keep unlinked
+            </Button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+function NoPrBar({
+  association,
+  actions,
+  listOpenPrs,
+}: {
+  association: NoPr;
+  actions: BarActions;
+  listOpenPrs: () => Promise<GithubPullRequest[]>;
+}) {
+  const { branch, repo, createPrUrl } = association;
+  const [linkOpen, setLinkOpen] = useState(false);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+
+  const closePanel = () => {
+    setLinkOpen(false);
+    toggleRef.current?.focus();
+  };
+
+  return (
+    <>
+      <div className="pr-assoc-row">
+        <GitHubGlyph />
+        <span className="pr-assoc-mute">
+          No PR for <code className="pr-assoc-branch">{branch}</code> in {repo}
+        </span>
+        <span className="pr-assoc-actions">
+          <Button
+            ref={toggleRef}
+            variant="secondary"
+            size="sm"
+            {...focusTarget}
+            aria-expanded={linkOpen}
+            onClick={() => setLinkOpen((value) => !value)}
+          >
+            Link PR…
+          </Button>
+          {isAbsoluteHttpUrl(createPrUrl) && (
+            <Button
+              variant="secondary"
+              size="sm"
+              iconLeft={<GitHubGlyph size="xs" />}
+              iconRight={<ExternalLinkGlyph />}
+              onClick={() => openExternalUrl(createPrUrl)}
+            >
+              Create PR on GitHub
+            </Button>
+          )}
+          <CheckAgainButton {...actions} />
+        </span>
+      </div>
+      {linkOpen && (
+        <ManualPrLink
+          repo={repo}
+          busy={actions.busy}
+          linking={actions.phase === "mutating"}
+          onLink={actions.link}
+          listOpenPrs={listOpenPrs}
+          onClose={closePanel}
+        />
+      )}
+    </>
+  );
+}
+
+function AssociationBody({
+  association,
+  lookupFailure,
+  actions,
+  listOpenPrs,
+}: {
+  association: WorktreePrAssociation | null;
+  lookupFailure: GithubFailure | null;
+  actions: BarActions;
+  listOpenPrs: () => Promise<GithubPullRequest[]>;
+}): ReactNode {
+  if (!association && lookupFailure)
+    return (
+      <PrStatusRow action={<CheckAgainButton {...actions} />}>
+        Couldn’t check GitHub PR: <GithubFailureText failure={lookupFailure} />
+      </PrStatusRow>
+    );
+  if (!association)
+    return (
+      <PrStatusRow tone="plain" icon={<Spinner className="h-3 w-3" />}>
+        Looking for a GitHub pull request…
+      </PrStatusRow>
+    );
+
+  switch (association.status) {
+    case "not_applicable":
+      return null;
+    case "unavailable":
+      return (
+        <PrStatusRow action={<CheckAgainButton {...actions} />}>
+          Couldn’t check GitHub PR:{" "}
+          <GithubFailureText failure={association.error} />
+        </PrStatusRow>
+      );
+    case "gh_missing":
+      return (
+        <PrStatusRow tone="plain" action={<CheckAgainButton {...actions} />}>
+          <GhMissingText />
+        </PrStatusRow>
+      );
+    case "auth_expired":
+      return (
+        <PrStatusRow tone="error" action={<CheckAgainButton {...actions} />}>
+          <AuthExpiredText />
+        </PrStatusRow>
+      );
+    case "linked":
+      return <LinkedBar association={association} actions={actions} />;
+    case "ambiguous":
+      return (
+        <AmbiguousBar
+          key={association.branch}
+          association={association}
+          actions={actions}
+        />
+      );
+    case "none":
+      return (
+        <NoPrBar
+          key={association.branch}
+          association={association}
+          actions={actions}
+          listOpenPrs={listOpenPrs}
+        />
+      );
+    default: {
+      const unreachable: never = association;
+      return unreachable;
+    }
+  }
+}
+
+function offersCheckAgain(association: WorktreePrAssociation | null): boolean {
+  return (
+    association?.status !== "linked" && association?.status !== "ambiguous"
+  );
+}
+
+export function PrAssociationBar({
+  worktreePath,
+  branch,
+}: {
+  worktreePath: string;
+  branch: string;
+}) {
+  const {
+    phase,
+    association,
+    lookupFailure,
+    busy,
+    error,
+    refresh,
+    linkPr,
+    unlinkPr,
+    listOpenPrs,
+  } = useWorktreePrAssociation(worktreePath, branch);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const restoreFocus = useRef(false);
+
+  // When an action swaps the bar's contents, focus would fall to <body>;
+  // hand it to the new state's main control instead.
+  useLayoutEffect(() => {
+    if (!restoreFocus.current) return;
+    restoreFocus.current = false;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    rootRef.current?.querySelector<HTMLElement>(`[${FOCUS_TARGET}]`)?.focus();
+  }, [association]);
+
+  const track = (run: () => Promise<boolean>) => {
+    restoreFocus.current = true;
+    return run().then((ok) => {
+      if (!ok) restoreFocus.current = false;
+      return ok;
+    });
+  };
+
+  const actions: BarActions = {
+    phase,
+    busy,
+    refresh: () => void track(refresh),
+    link: (prNumber, repo) => track(() => linkPr(prNumber, repo)),
+    unlink: () => void track(unlinkPr),
+  };
+
+  if (association?.status === "not_applicable") return null;
+
+  return (
+    <div
+      ref={rootRef}
+      className="pr-assoc-bar"
+      data-testid="pr-association-bar"
+    >
+      <AssociationBody
+        association={association}
+        lookupFailure={lookupFailure}
+        actions={actions}
+        listOpenPrs={listOpenPrs}
+      />
+      {error && (
+        <div className="pr-assoc-row" role="alert">
+          <span className="pr-assoc-err">
+            <GithubFailureText failure={error} />
+          </span>
+          {needsGhSetup(error) && !offersCheckAgain(association) && (
+            <span className="pr-assoc-actions">
+              <CheckAgainButton {...actions} />
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

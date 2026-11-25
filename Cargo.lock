@@ -2570,6 +2570,7 @@ dependencies = [
  "vertebrae-agent-context",
  "vertebrae-core",
  "vertebrae-credentials",
+ "vertebrae-github",
  "vertebrae-harness",
  "vertebrae-harness-core",
  "vertebrae-installer",
@@ -8238,6 +8239,21 @@ dependencies = [
  "vertebrae-harness-core",
  "vertebrae-installer",
  "vertebrae-sacrum-client",
+ "wiremock",
+]
+
+[[package]]
+name = "vertebrae-github"
+version = "0.1.0"
+dependencies = [
+ "percent-encoding",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
  "wiremock",
 ]
 
