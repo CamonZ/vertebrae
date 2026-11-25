@@ -57,6 +57,10 @@ import { WorktreeChanges } from "./WorktreeChanges";
 import { useWorktreePrAssociation } from "../../hooks/useWorktreePrAssociation";
 import { linkedPullRequest } from "../../stores/worktreePrStore";
 import {
+  openThreadCount,
+  useGithubReviewThreads,
+} from "../../stores/githubReviewThreadsStore";
+import {
   activate,
   discardDraft,
   dirtyPaths,
@@ -611,6 +615,15 @@ export function ChatWindow({
   const prBranch = prWorktree ? association.record.branch : null;
   const worktreePr = useWorktreePrAssociation(prWorktree, prBranch);
   const linkedPr = linkedPullRequest(worktreePr.association);
+  const linkedPrThreads = useGithubReviewThreads(
+    prWorktree,
+    prBranch,
+    linkedPr?.number
+  );
+  const linkedPrOpenThreads = linkedPrThreads.threads
+    ? openThreadCount(linkedPrThreads)
+    : null;
+  const saveChangesView = useChatSideColumnStore((state) => state.saveChanges);
   const shownEvidence =
     !showChanges &&
     evidence?.sessionId === sessionId &&
@@ -730,10 +743,14 @@ export function ChatWindow({
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
         linkedPr={linkedPr}
+        linkedPrOpenThreads={linkedPrOpenThreads}
         onOpenPrInChanges={
           worktreePath
             ? () => {
                 if (shownSection !== "changes") side.select("changes");
+                // The PR's review: its threads in the Review rail.
+                if (worktreePath === prWorktree)
+                  saveChangesView(sessionId, worktreePath, { reviewOpen: true });
               }
             : undefined
         }

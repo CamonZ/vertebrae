@@ -159,14 +159,7 @@ fn repository(folder: &str) -> Result<Repository, ReviewAnchorError> {
 
 fn open(worktree: &str) -> Result<(Repository, Oid), ReviewAnchorError> {
     let repo = repository(worktree)?;
-    let head = repo
-        .head()
-        .map_err(|error| match error.code() {
-            ErrorCode::UnbornBranch | ErrorCode::NotFound => ReviewAnchorError::UnbornHead,
-            _ => error.into(),
-        })?
-        .peel_to_commit()?
-        .id();
+    let head = open_head(&repo)?;
     Ok((repo, head))
 }
 
@@ -371,6 +364,98 @@ fn map_range(
             .map_err(|_| ReviewAnchorError::InvalidRange)?,
     };
     Ok((mapped.slice(current).ok() == Some(anchored)).then_some(mapped))
+}
+
+/// Where an anchor published on a remote (GitHub) diff lands in the shown
+/// comparison side, by the same line mapping local threads use.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum PublishedPlacement {
+    /// The anchored lines are unchanged; they now sit at this range.
+    Mapped { start_line: u32, line: u32 },
+    /// Local edits changed the anchored lines.
+    Edited,
+    /// The file is absent from the shown side.
+    Missing,
+}
+
+/// One side of a comparison: a commit, or the working tree (`None`).
+fn side_content(
+    repo: &Repository,
+    commit: Option<Oid>,
+    path: &str,
+    side: ReviewThreadSide,
+) -> Result<Option<Vec<u8>>, ReviewAnchorError> {
+    let location = ReviewAnchorLocation {
+        path: path.to_owned(),
+        side,
+        source: ReviewAnchorSource::Worktree {
+            commit: commit.map(|oid| oid.to_string()),
+        },
+    };
+    let head = match commit {
+        Some(oid) => oid,
+        None => open_head(repo)?,
+    };
+    let bytes = worktree_content(repo, head, &location)?;
+    Ok(bytes.filter(|bytes| std::str::from_utf8(bytes).is_ok() && !bytes.contains(&0)))
+}
+
+fn open_head(repo: &Repository) -> Result<Oid, ReviewAnchorError> {
+    Ok(repo
+        .head()
+        .map_err(|error| match error.code() {
+            ErrorCode::UnbornBranch | ErrorCode::NotFound => ReviewAnchorError::UnbornHead,
+            _ => error.into(),
+        })?
+        .peel_to_commit()?
+        .id())
+}
+
+/// Map lines `start_line..=line` of `path` at the `published` commit onto
+/// the shown side (`shown`, or the working tree when `None`).
+pub(crate) fn place_published_anchor(
+    repo: &Repository,
+    published: Oid,
+    shown: Option<Oid>,
+    path: &str,
+    side: ReviewThreadSide,
+    start_line: u32,
+    line: u32,
+) -> Result<PublishedPlacement, ReviewAnchorError> {
+    let original = side_content(repo, Some(published), path, side)?
+        .ok_or(ReviewAnchorError::ContentUnavailable)?;
+    let Some(current) = side_content(repo, shown, path, side)? else {
+        return Ok(PublishedPlacement::Missing);
+    };
+    Ok(
+        match map_range(&original, &current, ReviewLineRange { start_line, line })? {
+            Some(range) => PublishedPlacement::Mapped {
+                start_line: range.start_line,
+                line: range.line,
+            },
+            None => PublishedPlacement::Edited,
+        },
+    )
+}
+
+/// Lines `from..=to` (1-based, clamped to the file) of `path` at `commit`,
+/// with their line numbers, without line endings.
+pub(crate) fn commit_lines(
+    repo: &Repository,
+    commit: Oid,
+    path: &str,
+    from: u32,
+    to: u32,
+) -> Result<Vec<(u32, String)>, ReviewAnchorError> {
+    let bytes = side_content(repo, Some(commit), path, ReviewThreadSide::Right)?
+        .ok_or(ReviewAnchorError::ContentUnavailable)?;
+    let text = String::from_utf8(bytes).map_err(|_| ReviewAnchorError::ContentUnavailable)?;
+    Ok(text
+        .lines()
+        .zip(1_u32..)
+        .filter(|(_, number)| (from.max(1)..=to).contains(number))
+        .map(|(line, number)| (number, line.strip_suffix('\r').unwrap_or(line).to_owned()))
+        .collect())
 }
 
 #[tauri::command]

@@ -23,6 +23,9 @@ esac
 key=$(printf '%s' "$root" | shasum -a 256 | cut -c1-16)
 app_home="$root/test-output/macos-gui-home"
 export SEED_TOKEN="${SEED_TOKEN:-sac_dev-local-token}"
+# The Vite dev server port; set another to run beside a checkout holding 1420.
+port="${GUI_DEV_PORT:-1420}"
+[[ $port =~ ^[0-9]+$ ]] || { echo "GUI_DEV_PORT must be a port number." >&2; exit 2; }
 compose() {
     docker --context "$context" compose -p "vtb-macos-$key" \
         -f "$root/docker-compose.dev.yml" -f - "$@" <<'YAML'
@@ -37,8 +40,8 @@ YAML
 
 case "$1" in
     start)
-        if lsof -nP -iTCP:1420 -sTCP:LISTEN >/dev/null; then
-            echo "Port 1420 is already in use by a host process." >&2
+        if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null; then
+            echo "Port $port is already in use by a host process; set GUI_DEV_PORT to another." >&2
             exit 1
         fi
         compose up -d --wait postgres sacrum
@@ -96,7 +99,11 @@ PYTHON
         done
         export HOME="$app_home" VTB_URL="http://$address" VTB_TOKEN="$SEED_TOKEN"
         export SIDECAR_PROFILE=debug CARGO_PROFILE_DEV_DEBUG=0 CARGO_INCREMENTAL=0
-        exec npm run tauri:dev
+        if [[ $port == 1420 ]]; then
+            exec npm run tauri:dev
+        fi
+        export VERTEBRAE_BUNDLE_SIDECARS=1
+        exec npx tauri dev --config "{\"build\":{\"devUrl\":\"http://localhost:$port\",\"beforeDevCommand\":\"npm run tauri:prepare-sidecars && npx vite --port $port\"}}"
         ;;
     status) compose ps --all ;;
     logs) compose logs --follow --tail 80 sacrum postgres ;;

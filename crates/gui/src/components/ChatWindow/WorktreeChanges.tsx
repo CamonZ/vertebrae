@@ -69,6 +69,12 @@ import { SideEmptyState } from "./SideEmptyState";
 import { CodeGlyph } from "./commentIcons";
 import { ComparisonControls } from "./workspace/ComparisonControls";
 import { PrAssociationBar } from "./workspace/PrAssociationBar";
+import { ReviewRail } from "./workspace/GithubThreads";
+import { hunksShow, type PlacedThread } from "./workspace/githubReview";
+import {
+  useGithubReview,
+  useGithubThreadViews,
+} from "./workspace/useGithubReview";
 import { OpenDocumentTabs } from "./workspace/OpenDocumentTabs";
 import {
   changesPaletteItems,
@@ -183,7 +189,7 @@ export function WorktreeChanges({
     () => ({ sessionId, worktreePath }),
     [sessionId, worktreePath]
   );
-  const { base, target, activePath } = useChangesView(changesKey);
+  const { base, target, activePath, reviewOpen } = useChangesView(changesKey);
   const saveChanges = useChatSideColumnStore((state) => state.saveChanges);
   const saveView = useCallback(
     (patch: Parameters<typeof saveChanges>[2]) =>
@@ -390,6 +396,77 @@ export function WorktreeChanges({
       ),
     [files]
   );
+  // Rows each changed file's hunks show: a GitHub thread elsewhere is read
+  // from the Review rail rather than drawn.
+  const parsedPatches = state.status === "ready" ? state.parsed : null;
+  const lineShown = useMemo(() => {
+    const hunks = new Map(
+      files.map((file, index) => [
+        file.path,
+        (parsedPatches?.[index]?.files ?? []).flatMap((diff) => diff.hunks),
+      ])
+    );
+    return (path: string, side: "additions" | "deletions", line: number) =>
+      hunksShow(hunks.get(path) ?? [], side, line);
+  }, [files, parsedPatches]);
+  const githubReview = useGithubReview(
+    worktreePath,
+    prBranch,
+    comparison,
+    generation,
+    lineShown
+  );
+  const githubThreads = useGithubThreadViews(githubReview.model);
+  const railRef = useRef<HTMLElement>(null);
+  const railOpener = useRef<HTMLElement | null>(null);
+  const showRail = reviewOpen && !!prBranch;
+  // Opening the rail moves focus into it; a rail restored on mount does not.
+  const railWasOpen = useRef(showRail);
+  useEffect(() => {
+    if (showRail && !railWasOpen.current) {
+      if (!railOpener.current) {
+        const active = document.activeElement;
+        railOpener.current = active instanceof HTMLElement ? active : null;
+      }
+      railRef.current?.focus({ preventScroll: true });
+    }
+    railWasOpen.current = showRail;
+  }, [showRail]);
+  const toggleRail = (opener: HTMLElement) => {
+    if (reviewOpen) {
+      saveView({ reviewOpen: false });
+      return;
+    }
+    railOpener.current = opener;
+    saveView({ reviewOpen: true });
+  };
+  const closeRail = () => {
+    saveView({ reviewOpen: false });
+    const opener = railOpener.current;
+    railOpener.current = null;
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    else sectionRef.current?.focus({ preventScroll: true });
+  };
+  /** A rail entry: show its thread in the diff, if the diff has it. */
+  const showThread = (placed: PlacedThread, opener: HTMLElement): boolean => {
+    const path = placed.thread.path;
+    if (!files.some((file) => file.path === path)) return false;
+    if (placed.kind === "line" && placed.inDiff) {
+      githubThreads.reveal(placed, opener);
+      jumpToFile(path, false, {
+        line: placed.line,
+        side: placed.side === "deletions" ? "old" : "new",
+      });
+      return true;
+    }
+    if (placed.kind === "outdated") {
+      githubThreads.reveal(placed, opener);
+      jumpToFile(path);
+      return true;
+    }
+    return false;
+  };
+
   const { viewedPaths, setViewed } = useViewedPaths(
     JSON.stringify([worktreePath, comparisonRequest]),
     statuses
@@ -405,6 +482,27 @@ export function WorktreeChanges({
   );
 
   const nextLocalJump = useRef(0);
+  /**
+   * A new comparison remounts the diff: bring it back to the line cursor (or
+   * the active file) rather than to the top or an older jump.
+   */
+  const keepPlace = () => {
+    const memory =
+      useChatSideColumnStore.getState().bySession[sessionId]?.changes[
+        worktreePath
+      ];
+    const cursor = memory?.cursor;
+    const path = cursor?.path ?? activePath;
+    if (!path) return;
+    const side = cursor?.range.endSide ?? cursor?.range.side;
+    setJumpTarget({
+      path,
+      nonce: --nextLocalJump.current,
+      ...(cursor
+        ? { line: cursor.range.end, side: side === "deletions" ? "old" : "new" }
+        : {}),
+    });
+  };
   // Navigating by hand drops a reference's revealed lines.
   /** ⇧V: the file most recently marked viewed comes back, under the cursor. */
   const unviewLast = () => {
@@ -601,6 +699,7 @@ export function WorktreeChanges({
             onRelatedJump={(location) =>
               jumpToFile(location.path, false, location)
             }
+            github={githubThreads.views}
           />
         </Suspense>
       </div>
@@ -637,7 +736,19 @@ export function WorktreeChanges({
       }}
     >
       {prBranch && (
-        <PrAssociationBar worktreePath={worktreePath} branch={prBranch} />
+        <PrAssociationBar
+          worktreePath={worktreePath}
+          branch={prBranch}
+          review={
+            githubReview.model
+              ? {
+                  threadCount: githubReview.model.byThread.size,
+                  open: showRail,
+                  onToggle: toggleRail,
+                }
+              : undefined
+          }
+        />
       )}
       <ComparisonControls
         comparison={comparisonChoices}
@@ -648,6 +759,7 @@ export function WorktreeChanges({
         targetButton={targetButton}
         onBaseChange={(endpoint) => {
           setBase(endpoint);
+          keepPlace();
           reload(false);
         }}
         onTargetChange={(endpoint) => {
@@ -655,6 +767,7 @@ export function WorktreeChanges({
           setTarget(endpoint);
           setHistoricalDocument(null);
           setMode("changes");
+          keepPlace();
           reload(false);
         }}
         diffStyle={diffStyle}
@@ -855,6 +968,17 @@ export function WorktreeChanges({
             />
           )}
         </div>
+        {showRail && (
+          <ReviewRail
+            railRef={railRef}
+            prNumber={githubReview.prNumber}
+            model={githubReview.model}
+            loading={githubReview.loading}
+            error={githubReview.error}
+            onClose={closeRail}
+            onSelect={showThread}
+          />
+        )}
       </div>
       {external.error && <p role="alert">{external.error}</p>}
       <UnsavedChangesDialog

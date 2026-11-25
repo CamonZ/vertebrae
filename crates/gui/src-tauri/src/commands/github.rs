@@ -945,5 +945,8 @@ pub async fn unlink_worktree_pr(
     unlink(&store, &ctx).await
 }
 
+mod review_threads;
+pub use review_threads::*;
+
 #[cfg(test)]
 mod tests;

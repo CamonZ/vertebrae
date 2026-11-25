@@ -48,7 +48,12 @@ interface ChatHeaderProps {
   projectLabel?: string;
   showProjectContext?: boolean;
   linkedPr?: GithubPullRequest | null;
-  /** Shows the Changes panel from the PR chip; without it the chip is static. */
+  /** Unresolved GitHub review threads on the linked PR, once read. */
+  linkedPrOpenThreads?: number | null;
+  /**
+   * Shows the PR's review in Changes from the PR chip; without it the chip
+   * is static.
+   */
   onOpenPrInChanges?: () => void;
 }
 
@@ -226,6 +231,7 @@ export function ChatHeader({
   projectLabel = FALLBACK_CHAT_PROJECT_LABEL,
   showProjectContext = false,
   linkedPr = null,
+  linkedPrOpenThreads = null,
   onOpenPrInChanges,
 }: ChatHeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -636,7 +642,11 @@ export function ChatHeader({
             </span>
           )}
           {linkedPr && (
-            <ChatHeaderPrChip pr={linkedPr} onOpenChanges={onOpenPrInChanges} />
+            <ChatHeaderPrChip
+              pr={linkedPr}
+              openThreads={linkedPrOpenThreads}
+              onOpenChanges={onOpenPrInChanges}
+            />
           )}
           <ChatAttentionDot attention={attention} />
           {attention.state !== "idle" &&

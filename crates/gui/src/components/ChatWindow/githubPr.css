@@ -34,3 +34,15 @@
   background: var(--color-bg-hover-raised);
   color: var(--color-fg);
 }
+
+/* Unresolved review threads on the linked PR. */
+.pr-chip-threads {
+  min-inline-size: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-3);
+  color: var(--color-fg);
+  font: 600 var(--text-meta) / 16px var(--font-sans);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}

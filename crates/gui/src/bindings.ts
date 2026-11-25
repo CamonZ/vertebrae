@@ -1439,6 +1439,30 @@ async unlinkWorktreePr(worktreePath: string, branch: string) : Promise<Result<Wo
 }
 },
 /**
+ * Review threads of the PR linked to `branch` of a worktree. Answers from
+ * a short-lived cache unless `refresh`; never writes to GitHub, and never
+ * searches for a PR (`not_linked` until the association links one).
+ */
+async getWorktreePrReviewThreads(worktreePath: string, branch: string, refresh: boolean | null) : Promise<Result<WorktreePrReviewThreads, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_worktree_pr_review_threads", { worktreePath, branch, refresh }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Place published review-thread anchors on the shown comparison. Local only.
+ */
+async mapWorktreePrReviewThreads(worktreePath: string, request: GithubThreadMappingRequest) : Promise<Result<GithubThreadPosition[], GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("map_worktree_pr_review_threads", { worktreePath, request }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Semantic edits and their one-hop call relations for a comparison.
  */
 async compareChangedSymbols(worktreePath: string, comparison: ComparisonSnapshot, paths: ChangedPath[]) : Promise<Result<ChangedSymbols, CodeIntelligenceError>> {
@@ -2443,10 +2467,70 @@ multiple: boolean;
  * The string `format` hint, such as `date` or `email`.
  */
 format: string | null }
+export type GithubDiffSide = "left" | "right"
 export type GithubErrorKind = "gh_missing" | "auth_expired" | "rate_limited" | "not_found" | "other"
 export type GithubFailure = { kind: GithubErrorKind; message: string; retryAfterSecs: number | null }
 export type GithubPrState = "open" | "draft" | "merged" | "closed"
 export type GithubPullRequest = { owner: string; repo: string; number: number; title: string; state: GithubPrState; headRef: string; headRepo: string | null; baseRef: string; url: string; author: string | null; updatedAt: string | null }
+export type GithubReviewAuthor = { login: string; avatarUrl: string | null }
+export type GithubReviewComment = { id: string; author: GithubReviewAuthor | null; 
+/**
+ * GitHub-flavoured Markdown as written; untrusted.
+ */
+body: string; createdAt: string | null; url: string }
+export type GithubReviewThread = { id: string; path: string; side: GithubDiffSide; 
+/**
+ * Published anchor on the PR head; `None` once the thread is outdated.
+ */
+line: number | null; startLine: number | null; originalLine: number | null; originalStartLine: number | null; originalCommitOid: string | null; fileLevel: boolean; outdated: boolean; resolved: boolean; viewerCanResolve: boolean; viewerCanUnresolve: boolean; viewerCanReply: boolean; comments: GithubReviewComment[]; commentsTruncated: boolean }
+export type GithubSnippetLine = { number: number; text: string; 
+/**
+ * One of the commented lines.
+ */
+focus: boolean }
+export type GithubThreadAnchor = { threadId: string; path: string; side: GithubDiffSide; line: number | null; startLine: number | null; originalLine: number | null; originalCommitOid: string | null; fileLevel: boolean; outdated: boolean }
+/**
+ * The published commits and the comparison Changes shows.
+ */
+export type GithubThreadMappingRequest = { headOid: string; baseOid: string; 
+/**
+ * The shown new side: a commit, or the working tree when `None`.
+ */
+shownTarget: string | null; 
+/**
+ * The shown old side; `None` reads HEAD.
+ */
+shownBase: string | null; threads: GithubThreadAnchor[] }
+export type GithubThreadPlacement = 
+/**
+ * The commented lines are unchanged in the shown comparison; local
+ * edits above them may have moved them from `published_line`.
+ */
+{ kind: "anchored"; startLine: number; line: number; publishedLine: number } | 
+/**
+ * Local edits changed the commented lines: the thread stays at its
+ * published line, with the published text.
+ */
+{ kind: "edited"; line: number; published: GithubSnippetLine[] } | 
+/**
+ * GitHub no longer places the thread on the PR's diff; `original` is
+ * the commented code where the original commit is available locally.
+ */
+{ kind: "outdated"; originalLine: number | null; original: GithubSnippetLine[] } | 
+/**
+ * The published commit is not available locally (fetch to verify):
+ * shown at the published line as GitHub reports it.
+ */
+{ kind: "unverified"; line: number } | 
+/**
+ * The thread comments on the whole file.
+ */
+{ kind: "file_level" } | 
+/**
+ * The file is absent from the shown side of the comparison.
+ */
+{ kind: "not_shown" }
+export type GithubThreadPosition = { threadId: string; placement: GithubThreadPlacement }
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
 export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
 export type HistoryFailure = { kind: HistoryFailureKind; message: string; retryable: boolean }
@@ -3974,6 +4058,33 @@ export type WorktreePrAssociation = { status: "linked"; branch: string; repo: st
  * GitHub is not queried and the UI stays quiet.
  */
 { status: "not_applicable"; branch: string | null; reason: string }
+
+/** tauri-specta globals **/
+
+import {
+	invoke as TAURI_INVOKE,
+	Channel as TAURI_CHANNEL,
+} from "@tauri-apps/api/core";
+import * as TAURI_API_EVENT from "@tauri-apps/api/event";
+import { type WebviewWindow as __WebviewWindow__ } from "@tauri-apps/api/webviewWindow";
+
+type __EventObj__<T> = {
+	listen: (
+		cb: TAURI_API_EVENT.EventCallback<T>,
+	) => ReturnType<typeof TAURI_API_EVENT.listen<T>>;
+	once: (
+		cb: TAURI_API_EVENT.EventCallback<T>,
+	) => ReturnType<typeof TAURI_API_EVENT.once<T>>;
+	emit: null extends T
+		? (payload?: T) => ReturnType<typeof TAURI_API_EVENT.emit>
+		: (payload: T) => ReturnType<typeof TAURI_API_EVENT.emit>;
+};
+
+export type WorktreePrReviewThreads = 
+/**
+ * The branch has no linked PR (or no GitHub context): nothing to read.
+ */
+{ status: "not_linked" } | { status: "loaded"; repo: string; prNumber: number; headOid: string; baseOid: string; threads: GithubReviewThread[]; truncated: boolean }
 
 /** tauri-specta globals **/
 

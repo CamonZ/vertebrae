@@ -111,6 +111,8 @@ pub(crate) struct PullRequestConnection {
 pub(crate) struct GraphQlPageInfo {
     #[serde(default)]
     pub has_next_page: bool,
+    #[serde(default)]
+    pub end_cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

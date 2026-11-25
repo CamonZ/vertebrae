@@ -30,6 +30,7 @@ import { PrCandidateList } from "./PrCandidateList";
 import { needsGhSetup, staleRefreshNote } from "./githubFailure";
 import { AuthExpiredText, GhMissingText, GithubFailureText } from "./PrFailure";
 import "./prAssociation.css";
+import "./githubReview.css";
 
 const FOCUS_TARGET = "data-pr-focus";
 const focusTarget = { [FOCUS_TARGET]: "" };
@@ -41,6 +42,13 @@ function prRepo(pr: GithubPullRequest): string {
 type Linked = Extract<WorktreePrAssociation, { status: "linked" }>;
 type NoPr = Extract<WorktreePrAssociation, { status: "none" }>;
 type Ambiguous = Extract<WorktreePrAssociation, { status: "ambiguous" }>;
+
+/** The bar's entry into the Review rail. */
+export interface ReviewEntry {
+  threadCount: number;
+  open: boolean;
+  onToggle(opener: HTMLElement): void;
+}
 
 interface BarActions {
   phase: WorktreePrPhase;
@@ -99,9 +107,11 @@ function CheckAgainButton({ phase, busy, refresh }: BarActions) {
 function LinkedBar({
   association,
   actions,
+  review,
 }: {
   association: Linked;
   actions: BarActions;
+  review?: ReviewEntry;
 }) {
   const { pr, staleError } = association;
   const canOpen = isAbsoluteHttpUrl(pr.url);
@@ -143,6 +153,18 @@ function LinkedBar({
       </span>
       {status}
       <span className="pr-assoc-actions">
+        {review && (
+          <button
+            type="button"
+            className="gh-thread-count"
+            aria-expanded={review.open}
+            title="Open the Review index"
+            onClick={(event) => review.onToggle(event.currentTarget)}
+          >
+            {review.threadCount}{" "}
+            {review.threadCount === 1 ? "thread" : "threads"}
+          </button>
+        )}
         <OverflowMenu
           label={`PR #${pr.number} actions`}
           testId="pr-actions-menu"
@@ -351,11 +373,13 @@ function AssociationBody({
   lookupFailure,
   actions,
   listOpenPrs,
+  review,
 }: {
   association: WorktreePrAssociation | null;
   lookupFailure: GithubFailure | null;
   actions: BarActions;
   listOpenPrs: () => Promise<GithubPullRequest[]>;
+  review?: ReviewEntry;
 }): ReactNode {
   if (!association && lookupFailure)
     return (
@@ -393,7 +417,13 @@ function AssociationBody({
         </PrStatusRow>
       );
     case "linked":
-      return <LinkedBar association={association} actions={actions} />;
+      return (
+        <LinkedBar
+          association={association}
+          actions={actions}
+          review={review}
+        />
+      );
     case "ambiguous":
       return (
         <AmbiguousBar
@@ -427,9 +457,12 @@ function offersCheckAgain(association: WorktreePrAssociation | null): boolean {
 export function PrAssociationBar({
   worktreePath,
   branch,
+  review,
 }: {
   worktreePath: string;
   branch: string;
+  /** Shown once the linked PR's review threads are read. */
+  review?: ReviewEntry;
 }) {
   const {
     phase,
@@ -484,6 +517,7 @@ export function PrAssociationBar({
         lookupFailure={lookupFailure}
         actions={actions}
         listOpenPrs={listOpenPrs}
+        review={review}
       />
       {error && (
         <div className="pr-assoc-row" role="alert">

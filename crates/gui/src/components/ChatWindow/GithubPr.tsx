@@ -50,17 +50,29 @@ export function PrNumber({ number }: { number: number }) {
 
 export function ChatHeaderPrChip({
   pr,
+  openThreads = null,
   onOpenChanges,
 }: {
   pr: GithubPullRequest;
+  /** Unresolved review threads; null until they are read. */
+  openThreads?: number | null;
   onOpenChanges?: () => void;
 }) {
   const summary = `PR #${pr.number} · ${PR_STATE_LABEL[pr.state]} · ${pr.title}`;
+  const threads =
+    openThreads === null
+      ? ""
+      : `, ${openThreads} open ${openThreads === 1 ? "thread" : "threads"}`;
   const content = (
     <>
       <GitHubGlyph size="xs" />
       <PrNumber number={pr.number} />
       <PrStateBadge state={pr.state} />
+      {openThreads !== null && openThreads > 0 && (
+        <span className="pr-chip-threads" aria-hidden="true">
+          {openThreads}
+        </span>
+      )}
     </>
   );
   if (!onOpenChanges) {
@@ -78,7 +90,7 @@ export function ChatHeaderPrChip({
     <button
       type="button"
       className="pr-header-chip is-action"
-      aria-label={`${summary}. Show in Changes`}
+      aria-label={`Review PR #${pr.number} in Changes${threads}`}
       title={summary}
       data-testid="chat-header-pr-chip"
       onClick={onOpenChanges}

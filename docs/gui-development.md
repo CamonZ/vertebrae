@@ -1248,6 +1248,43 @@ and cleared on send. They are in-memory only; the DocumentEditor diff has none.
 - CodeView only republishes an item when its `version` changes, so
   `AllChangesView` bumps the version when annotations or the diff change.
 
+### GitHub review threads in Changes
+
+When the chat's pinned branch has a linked PR, Changes shows the PR's review
+threads read-only. GitHub reads and local placement are kept apart:
+
+- `get_worktree_pr_review_threads` reads the threads through `crates/github`.
+  It reads at most 10 pages of 50 threads and 30 comments per thread, and
+  reports truncation. The backend caches the result for 20 seconds.
+  `stores/githubReviewThreadsStore.ts` shares one copy per worktree, branch
+  and PR, and refreshes it every 30 seconds while something shows it. The
+  first read for a key records its thread IDs; a later read that finds
+  threads not seen before adds one `info` notification to the Activity panel.
+- `map_worktree_pr_review_threads` places each published anchor on the shown
+  comparison through `chat_catalog/review_anchors.rs`, which is the only line
+  mapper. It reruns on every Changes load, so local edits move threads
+  without another GitHub read. A thread is placed in one of these ways:
+  - on its unchanged lines, possibly moved by local edits;
+  - edited, which keeps the published line and published code;
+  - outdated, with the original code;
+  - unverified, when the PR head isn't fetched locally;
+  - at file level, or not shown in this comparison.
+- `workspace/githubMarkers.ts` draws one neutral avatar marker per side and
+  line, injected into Pierre's rows and pinned to their visible right edge.
+  Threads that share a line share one marker. The marker has no text nodes:
+  its initials, count and drift glyph come from CSS. Activating it expands its
+  threads inline in the line's annotation slot, and Esc returns focus to it.
+- Each file header has an **Outdated n** pill that lists that file's outdated
+  threads under the first diff row.
+- The Review rail (`workspace/GithubThreads.tsx`) lists every thread grouped
+  by file. It opens from the PR bar's thread count or from the header PR chip.
+  Choosing an entry shows its thread in the diff. A thread the diff can't
+  show expands in the rail instead.
+- ⌥↑/⌥↓ stop at marker lines. `o` on a line without a Vertebrae discussion
+  toggles its GitHub threads.
+- Open threads and the rail survive comparison switches. A switch scrolls
+  back to the line cursor.
+
 ### Tool activity disclosure
 
 The shared Thread renderer groups consecutive normalized tool calls with

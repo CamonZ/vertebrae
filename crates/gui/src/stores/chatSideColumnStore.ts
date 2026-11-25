@@ -37,6 +37,8 @@ export interface ChangesViewMemory {
   target: ComparisonEndpoint;
   /** The keyboard line cursor (and its selection). */
   cursor: DiffCursor;
+  /** The Review rail (the linked PR's GitHub threads) is open beside the diff. */
+  reviewOpen: boolean;
 }
 
 export interface SideColumnView {
@@ -108,6 +110,7 @@ export const NO_CHANGES_MEMORY: ChangesViewMemory = {
   base: null,
   target: { kind: "working_tree" },
   cursor: null,
+  reviewOpen: false,
 };
 
 function viewOf(
@@ -193,8 +196,8 @@ export function useChangesView(
 ): Omit<ChangesViewMemory, "cursor"> {
   return useChatSideColumnStore(
     useShallow((state) => {
-      const { base, target, activePath } = memoryOf(state, key);
-      return { base, target, activePath };
+      const { base, target, activePath, reviewOpen } = memoryOf(state, key);
+      return { base, target, activePath, reviewOpen };
     })
   );
 }

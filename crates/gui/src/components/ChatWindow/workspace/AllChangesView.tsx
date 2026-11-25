@@ -32,7 +32,10 @@ import {
   type FilePatch,
 } from "../../thread/toolChange/diffLineMapper";
 import { GAP_CURSOR_ATTRIBUTE, useChangeGaps } from "./useChangeGaps";
-import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
+import {
+  hasReviewContent,
+  type ReviewAnnotation,
+} from "../../thread/toolChange/DiffCommentThread";
 import { DiffReviewContext } from "../../thread/toolChange/DiffReviewContext";
 import type { BackgroundOutputs } from "../../../background/types";
 import { MARKER_TEXT } from "../../thread/toolChange/worktreeDelta";
@@ -71,6 +74,14 @@ import {
 
 import { labelChips, type SemanticLabel } from "./semanticHunks";
 import { SEMANTIC_GUTTER_CSS, syncSemanticGutter } from "./semanticGutter";
+import { GITHUB_MARKERS_CSS, syncGithubMarkers } from "./githubMarkers";
+import { markerKey } from "./githubReview";
+import {
+  GithubThreadGroup,
+  OUTDATED_TOGGLE_ATTRIBUTE,
+  OutdatedToggle,
+} from "./GithubThreads";
+import type { GithubDiffThreads } from "./useGithubReview";
 
 type ExpandedLabel = { id: string; label: SemanticLabel };
 
@@ -107,6 +118,8 @@ export interface AllChangesViewProps {
    * read here so a cursor move re-renders only this view.
    */
   chatChanges?: ChangesKey;
+  /** The linked PR's review threads, placed on this comparison. */
+  github?: GithubDiffThreads | null;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
@@ -182,6 +195,7 @@ export default function AllChangesView({
   symbolGraphRequest,
   onRelatedJump,
   chatChanges,
+  github = null,
 }: AllChangesViewProps): ReactNode {
   const onToggleViewed = onViewedChange
     ? (path: string) => onViewedChange(path, !viewedPaths.has(path))
@@ -335,6 +349,23 @@ export default function AllChangesView({
     context: gaps.context,
     onRevealGap: gaps.reveal,
     selectionState: chatChanges ? heldCursor : undefined,
+    marks: github
+      ? (path) =>
+          (github.model.markersByPath.get(path) ?? []).map((marker) => ({
+            side: marker.side,
+            line: marker.line,
+          }))
+      : undefined,
+    onOpenAt: github
+      ? (path, side, line) => {
+          const marker = github.model.markerByKey.get(
+            markerKey(path, side, line)
+          );
+          if (!marker) return false;
+          github.toggleMarker(marker);
+          return true;
+        }
+      : undefined,
     onCursorMove: (path, lineNumber, side) => {
       const now = performance.now();
       const behavior = changesCursorScrollBehavior(
@@ -356,12 +387,15 @@ export default function AllChangesView({
   });
   const { annotationsFor, openComposer, onSelectionChange, selectedLinesFor } =
     review;
+  // A closed GitHub card hands focus back to its marker once it is drawn.
+  const returnMarker = useRef<string | null>(null);
   const gutterState = useRef({
     semantic,
     related,
     itemPaths,
     expanded,
     onRelatedJump,
+    github,
   });
   gutterState.current = {
     semantic,
@@ -369,13 +403,43 @@ export default function AllChangesView({
     itemPaths,
     expanded,
     onRelatedJump,
+    github,
   };
   const paintGutter = useCallback(
-    (item: CodeViewRenderedItem<ReviewAnnotation, undefined>) => {
+    (
+      item: CodeViewRenderedItem<ReviewAnnotation, undefined>,
+      /** Pierre has just drawn this item, so its rows are final. */
+      rendered = false
+    ) => {
       const root = item.element.shadowRoot;
       if (item.type !== "diff" || !root) return;
       const state = gutterState.current;
       const path = state.itemPaths.get(item.id) ?? item.id;
+      const { github } = state;
+      // Markers go on the file's primary patch item, like semantic labels.
+      const markers =
+        github && path === item.id
+          ? (github.model.markersByPath.get(path) ?? [])
+          : [];
+      const focusMarker =
+        returnMarker.current !== null &&
+        github?.model.markerByKey.get(returnMarker.current)?.path === path
+          ? returnMarker.current
+          : undefined;
+      const markerFocused = syncGithubMarkers(
+        root,
+        item.element,
+        item.instance,
+        markers,
+        (key) =>
+          !!github?.model.markerByKey
+            .get(key)
+            ?.threads.some(({ thread }) => github.openThreads.has(thread.id)),
+        (marker) => github?.toggleMarker(marker),
+        focusMarker
+      );
+      // Pierre redraws the item once the card is gone; focus again then.
+      if (markerFocused && rendered) returnMarker.current = null;
       // Only the primary patch item receives a file's semantic coordinates.
       const file = path === item.id ? state.semantic.fileFor(path) : null;
       const links = linksForFile(state.related.links, path, file);
@@ -422,7 +486,7 @@ export default function AllChangesView({
       []) {
       paintGutter(item);
     }
-  }, [semantic, related, expanded, itemPaths, paintGutter]);
+  }, [semantic, related, expanded, itemPaths, paintGutter, github]);
 
   const itemVersions = useRef(
     new Map<
@@ -439,6 +503,54 @@ export default function AllChangesView({
       }
     >()
   );
+  // Expanded GitHub threads join the line's annotation (one slot per line),
+  // and a file's open outdated threads sit under its first diff row.
+  const withGithub = useCallback(
+    (
+      path: string,
+      annotations: ReturnType<typeof annotationsFor>,
+      firstRow: { side: "additions" | "deletions"; lineNumber: number } | null
+    ) => {
+      if (!github) return annotations;
+      const isOpen = (threadId: string) => github.openThreads.has(threadId);
+      const extra: {
+        side: "additions" | "deletions";
+        lineNumber: number;
+        metadata: Partial<ReviewAnnotation>;
+      }[] = [];
+      for (const marker of github.model.markersByPath.get(path) ?? [])
+        if (marker.threads.some(({ thread }) => isOpen(thread.id)))
+          extra.push({
+            side: marker.side,
+            lineNumber: marker.line,
+            metadata: { githubMarker: marker.key },
+          });
+      const outdated = github.model.outdatedByPath.get(path) ?? [];
+      if (firstRow && outdated.some(({ thread }) => isOpen(thread.id)))
+        extra.push({ ...firstRow, metadata: { githubOutdated: true } });
+      if (extra.length === 0) return annotations;
+      const merged = new Map(
+        annotations.map((annotation) => [
+          `${annotation.side}:${annotation.lineNumber}`,
+          annotation,
+        ])
+      );
+      for (const { side, lineNumber, metadata } of extra) {
+        const key = `${side}:${lineNumber}`;
+        const existing = merged.get(key);
+        merged.set(key, {
+          side,
+          lineNumber,
+          metadata: {
+            ...(existing?.metadata ?? { commentIds: [], draft: false }),
+            ...metadata,
+          },
+        });
+      }
+      return [...merged.values()];
+    },
+    [github]
+  );
   // CodeView keeps an item until its `version` changes. Publish annotation,
   // diff, label and folding changes through that same reconciliation contract.
   const reviewItems = useMemo(
@@ -452,7 +564,18 @@ export default function AllChangesView({
               fileDiff: fileDiffFor(patchItem.id, patchItem.fileDiff),
             }
           : patchItem;
-        const review = own ? annotationsFor(item.id) : undefined;
+        const firstHunk = item.fileDiff.hunks[0];
+        const review = own
+          ? withGithub(
+              item.id,
+              annotationsFor(item.id),
+              firstHunk
+                ? firstHunk.additionCount > 0
+                  ? { side: "additions", lineNumber: firstHunk.additionStart }
+                  : { side: "deletions", lineNumber: firstHunk.deletionStart }
+                : null
+            )
+          : undefined;
         const active = expanded?.id === item.id ? expanded.label : undefined;
         const annotations =
           review && semantic.annotate(item.id, review, active);
@@ -491,6 +614,7 @@ export default function AllChangesView({
       semantic,
       related.links,
       expanded,
+      withGithub,
     ]
   );
   const { gapCursor } = review;
@@ -559,6 +683,42 @@ export default function AllChangesView({
     semanticOn
   );
 
+  /**
+   * Close one GitHub card. Focus returns to what opened it, else to the
+   * line's marker; the line stays in view (the viewport does not jump to
+   * where the card's height used to be).
+   */
+  const closeGithubThread = (threadId: string) => {
+    if (!github) return;
+    const placed = github.model.byThread.get(threadId);
+    const handedBack = github.closeThread(threadId);
+    if (placed?.kind === "line") {
+      if (!handedBack)
+        returnMarker.current = markerKey(
+          placed.thread.path,
+          placed.side,
+          placed.line
+        );
+      viewRef.current?.scrollTo({
+        type: "line",
+        id: placed.thread.path,
+        lineNumber: placed.line,
+        side: placed.side,
+        align: "nearest",
+      });
+    } else if (!handedBack) {
+      // The Outdated pill that opened the group was redrawn meanwhile.
+      const toggle = placed
+        ? document.querySelector<HTMLElement>(
+            `[${OUTDATED_TOGGLE_ATTRIBUTE}="${CSS.escape(placed.thread.path)}"]`
+          )
+        : null;
+      (toggle ?? review.keyboardProps.ref.current)?.focus({
+        preventScroll: true,
+      });
+    }
+  };
+
   const codeViewOptions = useMemo(
     () => ({
       ...options,
@@ -567,7 +727,7 @@ export default function AllChangesView({
       // No top padding: the focus halo sits flush on the first file.
       layout: CODE_VIEW_LAYOUT,
       expansionLineCount: GAP_BATCH,
-      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}\n${COMMENTED_LINES_CSS}\n${semanticOn ? SEMANTIC_GUTTER_CSS : ""}`,
+      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}\n${COMMENTED_LINES_CSS}\n${GITHUB_MARKERS_CSS}\n${semanticOn ? SEMANTIC_GUTTER_CSS : ""}`,
       onPostRender: (...args: Parameters<typeof onGapsPostRender>) => {
         onGapsPostRender(...args);
         // Pierre renders an item before adding it to its rendered range, so
@@ -580,7 +740,7 @@ export default function AllChangesView({
             .find((item) => item.instance === instance);
           if (rendered) {
             requestFile(itemPaths.get(rendered.id) ?? rendered.id);
-            paintGutter(rendered);
+            paintGutter(rendered, true);
           }
         });
         scheduleCursorPaint();
@@ -754,7 +914,7 @@ export default function AllChangesView({
               : undefined
           }
           renderAnnotation={
-            review.enabled || semanticOn
+            review.enabled || semanticOn || github
               ? (...args: CodeViewAnnotationArgs<ReviewAnnotation>) => {
                   const [annotation, , item] = args;
                   const path = itemPaths.get(item.id) ?? item.id;
@@ -767,9 +927,21 @@ export default function AllChangesView({
                         )
                       : undefined;
                   const thread =
-                    review.enabled && !annotation.metadata.labelOnly
+                    review.enabled && hasReviewContent(annotation.metadata)
                       ? review.renderAnnotation(annotation)
                       : null;
+                  const { githubMarker, githubOutdated } = annotation.metadata;
+                  const githubThreads = !github
+                    ? []
+                    : githubOutdated
+                      ? (github.model.outdatedByPath.get(path) ?? [])
+                      : githubMarker
+                        ? (github.model.markerByKey.get(githubMarker)
+                            ?.threads ?? [])
+                        : [];
+                  const openGithub = githubThreads.filter(({ thread }) =>
+                    github?.openThreads.has(thread.id)
+                  );
                   return (
                     <>
                       {label && label === expanded?.label && (
@@ -800,6 +972,19 @@ export default function AllChangesView({
                         />
                       )}
                       {thread}
+                      {github && openGithub.length > 0 && (
+                        <GithubThreadGroup
+                          label={
+                            githubOutdated
+                              ? `Outdated GitHub threads in ${path}`
+                              : `GitHub threads on line ${annotation.lineNumber}`
+                          }
+                          threads={openGithub}
+                          focusThreadId={github.focusThreadId}
+                          onFocused={github.focused}
+                          onClose={closeGithubThread}
+                        />
+                      )}
                     </>
                   );
                 }
@@ -849,6 +1034,23 @@ export default function AllChangesView({
                   </span>
                 </button>
                 <FormattingBadge file={semantic.fileFor(path)} />
+                {github &&
+                  path === item.id &&
+                  (github.model.outdatedByPath.get(path)?.length ?? 0) > 0 && (
+                    <OutdatedToggle
+                      path={path}
+                      count={github.model.outdatedByPath.get(path)!.length}
+                      open={github.model.outdatedByPath
+                        .get(path)!
+                        .some(({ thread }) =>
+                          github.openThreads.has(thread.id)
+                        )}
+                      onToggle={(opener) => {
+                        if (collapsedPaths.has(path)) expandPath(path);
+                        github.toggleOutdated(path, opener);
+                      }}
+                    />
+                  )}
                 {semanticView && (
                   <DeclarationCounts summary={semanticView.summary} />
                 )}

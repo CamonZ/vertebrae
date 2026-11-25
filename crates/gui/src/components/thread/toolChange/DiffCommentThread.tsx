@@ -36,6 +36,20 @@ export interface ReviewAnnotation {
   draft: boolean;
   /** No comments or draft: the line only carries a label row. */
   labelOnly?: true;
+  /** GitHub threads expanded under this line: their marker's key. */
+  githubMarker?: string;
+  /** The file's outdated GitHub threads are listed here. */
+  githubOutdated?: true;
+}
+
+/** Whether a line carries Vertebrae comments, discussions or a draft. */
+export function hasReviewContent(annotation: ReviewAnnotation): boolean {
+  return (
+    !annotation.labelOnly &&
+    (annotation.draft ||
+      annotation.commentIds.length > 0 ||
+      (annotation.threadIds?.length ?? 0) > 0)
+  );
 }
 
 /** Grow the textarea with its text; CSS caps it and it scrolls beyond. */

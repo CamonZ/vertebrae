@@ -110,7 +110,7 @@ impl GitHubClient {
         Self::with_base_url(DEFAULT_API_BASE_URL)
     }
 
-    fn with_base_url(base_url: &str) -> Result<Self, GitHubError> {
+    pub(crate) fn with_base_url(base_url: &str) -> Result<Self, GitHubError> {
         let base_url = validate_base_url(base_url)?;
 
         let mut default_headers = HeaderMap::new();
@@ -237,7 +237,7 @@ impl GitHubClient {
         PullRequestSummary::try_from(pr)
     }
 
-    async fn graphql<T: DeserializeOwned>(
+    pub(crate) async fn graphql<T: DeserializeOwned>(
         &self,
         token: &GitHubToken,
         query: &str,

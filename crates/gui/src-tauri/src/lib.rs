@@ -202,6 +202,8 @@ fn create_builder() -> Builder {
             commands::list_worktree_open_prs,
             commands::link_worktree_pr,
             commands::unlink_worktree_pr,
+            commands::get_worktree_pr_review_threads,
+            commands::map_worktree_pr_review_threads,
             commands::compare_changed_symbols,
             commands::list_comparison_choices,
             commands::list_worktree_directory,
