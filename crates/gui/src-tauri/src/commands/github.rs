@@ -29,6 +29,11 @@ use vertebrae_github::{
     PullRequestState, PullRequestSummary, RepoRef,
 };
 
+mod checks;
+pub use checks::{
+    GithubCheckOutcome, GithubCheckRerun, GithubCheckStatus, GithubPrCheck, GithubPrChecks,
+};
+
 // Below the frontend's 30 s revalidation so each tick reaches GitHub.
 const LINKED_STALE_TTL_SECS: i64 = 20;
 const DISPLAY_CACHE_TTL: Duration = Duration::from_secs(60);
@@ -943,6 +948,46 @@ pub async fn unlink_worktree_pr(
     };
     let store = PrAssociationStore::app().await?;
     unlink(&store, &ctx).await
+}
+
+/// Checks for the PR linked to `branch`, read with conditional requests.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_worktree_pr_checks(
+    worktree_path: String,
+    branch: String,
+) -> Result<GithubPrChecks, GithubFailure> {
+    let ctx = require_git_context(worktree_path, branch).await?;
+    let store = PrAssociationStore::app().await?;
+    checks::pr_checks(&store, &ctx, &GitHubLookup::default()).await
+}
+
+/// Re-run one failed GitHub Actions job (`checkId` from
+/// [`get_worktree_pr_checks`]) on the PR linked to `branch`. Posts to GitHub.
+#[tauri::command]
+#[specta::specta]
+pub async fn rerun_worktree_pr_check(
+    worktree_path: String,
+    branch: String,
+    check_id: String,
+) -> Result<(), GithubFailure> {
+    let ctx = require_git_context(worktree_path, branch).await?;
+    let store = PrAssociationStore::app().await?;
+    checks::rerun_check(&store, &ctx, &check_id, &GitHubLookup::default()).await
+}
+
+/// The local remote-tracking commit `branch` is pushed to; never queries GitHub.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_worktree_published_head(
+    worktree_path: String,
+    branch: String,
+) -> Result<Option<String>, GithubFailure> {
+    tokio::task::spawn_blocking(move || {
+        checks::published_head(&PathBuf::from(worktree_path), &branch)
+    })
+    .await
+    .map_err(|err| GithubFailure::other(format!("Git lookup task failed: {err}")))
 }
 
 #[cfg(test)]

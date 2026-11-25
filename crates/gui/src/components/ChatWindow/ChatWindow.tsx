@@ -55,6 +55,7 @@ import { useChatStore } from "../../stores/chatStore";
 import { useChatAssociation } from "../../hooks/useChatAssociation";
 import { WorktreeChanges } from "./WorktreeChanges";
 import { useWorktreePrAssociation } from "../../hooks/useWorktreePrAssociation";
+import { useWorktreePrChecks } from "../../hooks/useWorktreePrChecks";
 import { linkedPullRequest } from "../../stores/worktreePrStore";
 import {
   activate,
@@ -611,6 +612,9 @@ export function ChatWindow({
   const prBranch = prWorktree ? association.record.branch : null;
   const worktreePr = useWorktreePrAssociation(prWorktree, prBranch);
   const linkedPr = linkedPullRequest(worktreePr.association);
+  const prChecks = useWorktreePrChecks(prWorktree, prBranch);
+  const linkedPrChecks =
+    linkedPr && prChecks.entry.snapshot ? prChecks.counts : null;
   const shownEvidence =
     !showChanges &&
     evidence?.sessionId === sessionId &&
@@ -680,8 +684,7 @@ export function ChatWindow({
   // The side column always sits beside the transcript (shown, it expands the
   // chat). Narrow, source evidence replaces the transcript as the chat's view.
   const sidePlacement =
-    shownSection ||
-    panelResize.available >= SIDE_COLUMN_BESIDE_MIN_WIDTH
+    shownSection || panelResize.available >= SIDE_COLUMN_BESIDE_MIN_WIDTH
       ? "beside"
       : "view";
   const panelProps = {
@@ -730,6 +733,7 @@ export function ChatWindow({
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
         linkedPr={linkedPr}
+        linkedPrChecks={linkedPrChecks}
         onOpenPrInChanges={
           worktreePath
             ? () => {

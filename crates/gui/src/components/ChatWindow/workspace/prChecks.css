@@ -1,0 +1,230 @@
+/* PR checks: counts in the review bar, the checks drawer (band 3) and the
+   shared status glyph. Colour reinforces the status words; only running
+   checks glow, and queued is a flat muted ring. */
+
+.pr-check-glyph {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+}
+
+.pr-check-glyph.is-failed {
+  color: var(--color-err);
+}
+
+.pr-check-glyph.is-running {
+  color: var(--color-info);
+  animation: pr-check-running-glow var(--t-pulse) ease-in-out infinite;
+}
+
+.pr-check-glyph.is-queued {
+  color: var(--color-fg-mute);
+}
+
+.pr-check-glyph.is-passed {
+  color: var(--color-ok);
+}
+
+@keyframes pr-check-running-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--color-info-wash);
+  }
+
+  50% {
+    box-shadow: 0 0 6px 2px var(--color-info-wash);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pr-check-glyph.is-running {
+    animation: none;
+
+    /* Still distinct from queued without motion: a steady ring. */
+    box-shadow: 0 0 0 2px var(--color-info-wash);
+  }
+}
+
+.pr-check-counts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.pr-check-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-fg-soft);
+}
+
+.pr-check-count.is-failed {
+  color: var(--color-err);
+}
+
+.pr-check-count-n {
+  font-family: var(--font-mono);
+}
+
+.pr-checks-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-fg-soft);
+  cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease);
+}
+
+.pr-checks-toggle:hover {
+  background: var(--color-bg-hover);
+}
+
+.pr-checks-toggle[aria-expanded="true"] {
+  background: var(--color-bg-2);
+}
+
+.pr-checks-refresh {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pr-checks-sha {
+  font-family: var(--font-mono);
+  color: var(--color-fg);
+}
+
+.pr-checks-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(40vh, 320px);
+  padding: 6px 8px;
+  overflow-y: auto;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-1);
+  font: 400 var(--text-meta) / var(--leading-normal) var(--font-sans);
+  color: var(--color-fg-soft);
+}
+
+.pr-checks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pr-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  min-height: 30px;
+}
+
+.pr-check-toggle {
+  display: flex;
+  flex: 1 1 220px;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 24px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pr-check-toggle:disabled {
+  cursor: default;
+}
+
+.pr-check-toggle:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+}
+
+.pr-check-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pr-check-meta {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-fg-mute);
+}
+
+.pr-check-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.pr-check-open {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-fg-soft);
+  cursor: pointer;
+}
+
+.pr-check-open:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-fg);
+}
+
+.pr-check-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 6px 30px;
+  color: var(--color-fg-soft);
+  overflow-wrap: anywhere;
+}
+
+.pr-check-detail code {
+  font-family: var(--font-mono);
+  color: var(--color-fg);
+}
+
+.pr-check-rerun-error {
+  margin: 0 0 6px 30px;
+}
+
+/* Narrow Changes panes: drop the PR title, the routine "Updated …" time and
+   the count words; every state and action stays reachable. */
+@container pr-review-bar (max-width: 520px) {
+  .pr-assoc-title,
+  .pr-checks-refresh.is-routine,
+  .pr-check-count-word {
+    display: none;
+  }
+
+  .pr-check-counts {
+    gap: 4px 8px;
+  }
+}

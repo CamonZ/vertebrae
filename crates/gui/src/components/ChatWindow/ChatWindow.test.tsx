@@ -34,6 +34,7 @@ import {
   EMPTY_BACKGROUND_WORK,
 } from "../../stores/backgroundWork";
 import { commands, type WorktreePrAssociation } from "../../bindings";
+import { resetWorktreePrChecksStore } from "../../stores/worktreePrChecksStore";
 import { resetWorktreePrStore } from "../../stores/worktreePrStore";
 import { useDocumentStore } from "./workspace/documentStore";
 import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
@@ -109,6 +110,11 @@ vi.mock("../../bindings", async () => {
         },
       }),
       getWorktreePrAssociation: vi.fn(),
+      getWorktreePrChecks: vi.fn(),
+      rerunWorktreePrCheck: vi.fn(),
+      getWorktreePublishedHead: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: null }),
       listWorktreeDirectory: vi.fn().mockResolvedValue({
         status: "ok",
         data: { path: "", entries: [], truncated: false },
@@ -4941,9 +4947,16 @@ describe("ChatWindow PR chip", () => {
     getAssociation().mockImplementation(async (_path, branch) =>
       linked(branch, branch === "feature/pinned" ? 482 : 479)
     );
+    mockedCommands.getWorktreePrChecks.mockResolvedValue({
+      status: "error",
+      error: { kind: "other", message: "offline", retryAfterSecs: null },
+    });
   });
 
-  afterEach(() => resetWorktreePrStore());
+  afterEach(() => {
+    resetWorktreePrChecksStore();
+    resetWorktreePrStore();
+  });
 
   it("shows no chip and runs no PR lookup while the chat holds its creation default", async () => {
     seed({

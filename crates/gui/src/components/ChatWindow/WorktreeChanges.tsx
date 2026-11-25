@@ -636,9 +636,6 @@ export function WorktreeChanges({
         if (path) setActivePath(path);
       }}
     >
-      {prBranch && (
-        <PrAssociationBar worktreePath={worktreePath} branch={prBranch} />
-      )}
       <ComparisonControls
         comparison={comparisonChoices}
         base={base}
@@ -662,6 +659,11 @@ export function WorktreeChanges({
         refreshDisabled={state.status === "loading"}
         onRefresh={refreshAll}
       />
+      {/* Band 2 (review bar) and band 3 (checks drawer) sit under the
+          comparison toolbar. */}
+      {prBranch && (
+        <PrAssociationBar worktreePath={worktreePath} branch={prBranch} />
+      )}
       {jumpTarget &&
         state.status === "ready" &&
         files.length > 0 &&

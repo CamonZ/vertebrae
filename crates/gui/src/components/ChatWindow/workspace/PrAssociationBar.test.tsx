@@ -20,7 +20,10 @@ import {
   LINKED_PR_REVALIDATE_MS,
   linkedPullRequest,
   resetWorktreePrStore,
+  useWorktreePrStore,
+  worktreePrKey,
 } from "../../../stores/worktreePrStore";
+import { resetWorktreePrChecksStore } from "../../../stores/worktreePrChecksStore";
 import { ChatHeader } from "../ChatHeader";
 import { ChatHeaderPrChip } from "../GithubPr";
 import { OPEN_PR_LIST_LIMIT } from "./ManualPrLink";
@@ -37,6 +40,9 @@ vi.mock("../../../bindings", () => ({
     listWorktreeOpenPrs: vi.fn(),
     linkWorktreePr: vi.fn(),
     unlinkWorktreePr: vi.fn(),
+    getWorktreePrChecks: vi.fn(),
+    rerunWorktreePrCheck: vi.fn(),
+    getWorktreePublishedHead: vi.fn(),
   },
 }));
 
@@ -44,6 +50,8 @@ const getAssociation = vi.mocked(commands.getWorktreePrAssociation);
 const listOpen = vi.mocked(commands.listWorktreeOpenPrs);
 const link = vi.mocked(commands.linkWorktreePr);
 const unlink = vi.mocked(commands.unlinkWorktreePr);
+const getChecks = vi.mocked(commands.getWorktreePrChecks);
+const publishedHead = vi.mocked(commands.getWorktreePublishedHead);
 
 const REPO = "example/demo-repo";
 const BRANCH = "feature/retry";
@@ -172,9 +180,26 @@ describe("PrAssociationBar", () => {
     // Only the interval is faked so Testing Library's polling still runs.
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     listOpen.mockResolvedValue(ok([PR_482]));
+    getChecks.mockImplementation(async (worktreePath, branch) =>
+      ok({
+        prNumber:
+          linkedPullRequest(
+            useWorktreePrStore.getState().entries[
+              worktreePrKey(worktreePath, branch)
+            ]?.association ?? null
+          )?.number ?? 0,
+        repo: REPO,
+        headSha: "abc1234",
+        checks: [],
+        truncated: false,
+        pollAfterSecs: null,
+      })
+    );
+    publishedHead.mockResolvedValue(ok(null));
   });
 
   afterEach(() => {
+    resetWorktreePrChecksStore();
     resetWorktreePrStore();
     vi.useRealTimers();
   });

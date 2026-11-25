@@ -19,6 +19,7 @@ import { CHAT_ATTENTION, type ChatAttention } from "../../utils/chatAttention";
 import { ChatAttentionDot } from "./ChatAttentionDot";
 import type { GithubPullRequest } from "../../bindings";
 import { ChatHeaderPrChip } from "./GithubPr";
+import type { PrCheckCounts } from "./workspace/prChecksView";
 
 interface ChatHeaderProps {
   label: string;
@@ -48,6 +49,8 @@ interface ChatHeaderProps {
   projectLabel?: string;
   showProjectContext?: boolean;
   linkedPr?: GithubPullRequest | null;
+  /** Check counts of the linked PR, from the same refresh as Changes. */
+  linkedPrChecks?: PrCheckCounts | null;
   /** Shows the Changes panel from the PR chip; without it the chip is static. */
   onOpenPrInChanges?: () => void;
 }
@@ -226,6 +229,7 @@ export function ChatHeader({
   projectLabel = FALLBACK_CHAT_PROJECT_LABEL,
   showProjectContext = false,
   linkedPr = null,
+  linkedPrChecks = null,
   onOpenPrInChanges,
 }: ChatHeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -636,7 +640,11 @@ export function ChatHeader({
             </span>
           )}
           {linkedPr && (
-            <ChatHeaderPrChip pr={linkedPr} onOpenChanges={onOpenPrInChanges} />
+            <ChatHeaderPrChip
+              pr={linkedPr}
+              checks={linkedPrChecks}
+              onOpenChanges={onOpenPrInChanges}
+            />
           )}
           <ChatAttentionDot attention={attention} />
           {attention.state !== "idle" &&

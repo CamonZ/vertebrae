@@ -1,7 +1,13 @@
-import type { GithubPrState, GithubPullRequest } from "../../bindings";
+import type {
+  GithubCheckStatus,
+  GithubPrState,
+  GithubPullRequest,
+} from "../../bindings";
 import { Badge, type BadgeIntent } from "../atoms/Badge";
 import { Icon, type IconSize } from "../atoms/Icon";
 import { PR_STATE_LABEL } from "./githubPrState";
+import { CheckGlyph } from "./workspace/CheckGlyph";
+import { checkCountsLabel, type PrCheckCounts } from "./workspace/prChecksView";
 import "./githubPr.css";
 
 const PR_STATE_INTENT: Record<GithubPrState, BadgeIntent> = {
@@ -48,19 +54,47 @@ export function PrNumber({ number }: { number: number }) {
   return <span className="pr-number">#{number}</span>;
 }
 
+/** The one bucket the chip has room for: failures first, then work in flight. */
+function chipChecks(
+  counts: PrCheckCounts
+): { status: GithubCheckStatus; count: number } | null {
+  if (counts.failed > 0) return { status: "failed", count: counts.failed };
+  const pending = counts.running + counts.queued;
+  if (pending > 0)
+    return {
+      status: counts.running > 0 ? "running" : "queued",
+      count: pending,
+    };
+  if (counts.total > 0) return { status: "passed", count: counts.passed };
+  return null;
+}
+
 export function ChatHeaderPrChip({
   pr,
+  checks = null,
   onOpenChanges,
 }: {
   pr: GithubPullRequest;
+  checks?: PrCheckCounts | null;
   onOpenChanges?: () => void;
 }) {
-  const summary = `PR #${pr.number} · ${PR_STATE_LABEL[pr.state]} · ${pr.title}`;
+  const shown = checks ? chipChecks(checks) : null;
+  const checksText = checks ? ` · Checks: ${checkCountsLabel(checks)}` : "";
+  const summary = `PR #${pr.number} · ${PR_STATE_LABEL[pr.state]} · ${pr.title}${checksText}`;
   const content = (
     <>
       <GitHubGlyph size="xs" />
       <PrNumber number={pr.number} />
       <PrStateBadge state={pr.state} />
+      {shown && (
+        <span
+          className={`pr-header-checks is-${shown.status}`}
+          data-testid="chat-header-pr-checks"
+        >
+          <CheckGlyph status={shown.status} />
+          {shown.count}
+        </span>
+      )}
     </>
   );
   if (!onOpenChanges) {

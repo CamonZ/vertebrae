@@ -5,6 +5,7 @@ import {
   type GithubPullRequest,
   type WorktreeChanges as Changes,
 } from "../../bindings";
+import { resetWorktreePrChecksStore } from "../../stores/worktreePrChecksStore";
 import { resetWorktreePrStore } from "../../stores/worktreePrStore";
 import { WorktreeChanges } from "./WorktreeChanges";
 import { useWorktreeWatch } from "./workspace/useWorktreeWatch";
@@ -20,6 +21,13 @@ vi.mock("../../bindings", () => ({
     listWorktreeDirectory: vi.fn(),
     worktreeFileExists: vi.fn(),
     getWorktreePrAssociation: vi.fn(),
+    getWorktreePrChecks: vi.fn().mockResolvedValue({
+      status: "error",
+      error: { kind: "not_found", message: "no PR", retryAfterSecs: null },
+    }),
+    getWorktreePublishedHead: vi
+      .fn()
+      .mockResolvedValue({ status: "ok", data: null }),
   },
 }));
 
@@ -89,7 +97,10 @@ describe("WorktreeChanges PR association", () => {
     });
   });
 
-  afterEach(() => resetWorktreePrStore());
+  afterEach(() => {
+    resetWorktreePrChecksStore();
+    resetWorktreePrStore();
+  });
 
   it("looks up the pinned branch once and never re-discovers on reloads or commits", async () => {
     load.mockResolvedValue({ status: "ok", data: changesAt("sha-a") });

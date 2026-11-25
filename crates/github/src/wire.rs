@@ -123,3 +123,115 @@ pub(crate) struct PullRequestByNumberData {
 pub(crate) struct PullRequestByNumberRepoData {
     pub pull_request: Option<GraphQlPullRequestNode>,
 }
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestPullRequest {
+    pub state: String,
+    #[serde(default)]
+    pub draft: Option<bool>,
+    #[serde(default)]
+    pub merged_at: Option<String>,
+    pub head: RestCommitRef,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestCommitRef {
+    pub sha: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestRepository {
+    /// Present only for authenticated requests.
+    #[serde(default)]
+    pub permissions: Option<RestPermissions>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub(crate) struct RestPermissions {
+    #[serde(default)]
+    pub admin: bool,
+    #[serde(default)]
+    pub maintain: bool,
+    #[serde(default)]
+    pub push: bool,
+}
+
+impl RestPermissions {
+    /// Re-running Actions jobs needs write access to the repository.
+    pub fn can_write(self) -> bool {
+        self.admin || self.maintain || self.push
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestCheckRunsPage {
+    pub total_count: u64,
+    pub check_runs: Vec<RestCheckRun>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestCheckRun {
+    pub id: u64,
+    pub name: String,
+    pub status: String,
+    #[serde(default)]
+    pub conclusion: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub completed_at: Option<String>,
+    #[serde(default)]
+    pub html_url: Option<String>,
+    #[serde(default)]
+    pub details_url: Option<String>,
+    #[serde(default)]
+    pub app: Option<RestApp>,
+    #[serde(default)]
+    pub output: Option<RestCheckOutput>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestApp {
+    #[serde(default)]
+    pub slug: Option<String>,
+    pub name: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestCheckOutput {
+    #[serde(default)]
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestCombinedStatus {
+    pub total_count: u64,
+    pub statuses: Vec<RestCommitStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestCommitStatus {
+    pub context: String,
+    pub state: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub target_url: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestJob {
+    #[serde(default)]
+    pub steps: Option<Vec<RestJobStep>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct RestJobStep {
+    pub name: String,
+    #[serde(default)]
+    pub conclusion: Option<String>,
+}
