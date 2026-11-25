@@ -10,7 +10,6 @@ const ROW_SELECTOR = "[data-pr-candidate]";
 interface MetaItem {
   key: string;
   text: string;
-  /** Draws attention: a fork's head branch is not this repository's. */
   warn: boolean;
 }
 
@@ -59,7 +58,6 @@ function CandidateRow({
         className="pr-candidate"
         data-pr-candidate=""
         tabIndex={isTabStop ? 0 : -1}
-        // aria-disabled keeps focus on the row while a link is written.
         aria-disabled={busy || undefined}
         aria-label={`Link locally: ${description}`}
         onFocus={onFocus}

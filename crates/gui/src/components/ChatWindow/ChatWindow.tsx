@@ -759,8 +759,6 @@ export function ChatWindow({
                 <WorktreeChanges
                   key={`${sessionId}:${worktreePath}`}
                   worktreePath={worktreePath}
-                  // Other checkouts (a turn's root, a browsed checkout) have
-                  // no pinned branch, so they show no PR bar.
                   prBranch={worktreePath === prWorktree ? prBranch : null}
                   sessionId={sessionId}
                   onChangesLoaded={

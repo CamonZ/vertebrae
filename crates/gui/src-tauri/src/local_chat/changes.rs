@@ -139,8 +139,6 @@ pub struct WorktreeChange {
     pub(crate) marker: Option<MarkerReason>,
 }
 
-/// Default-branch references in preference order: `origin/HEAD`'s target,
-/// then local `master` and `main`.
 fn default_base_candidates(repo: &git2::Repository) -> Result<Vec<String>, GitError> {
     let remote = match repo.find_reference("refs/remotes/origin/HEAD") {
         Ok(reference) => reference.symbolic_target()?.map(str::to_owned),
@@ -153,9 +151,6 @@ fn default_base_candidates(repo: &git2::Repository) -> Result<Vec<String>, GitEr
         .collect())
 }
 
-/// The repository's default branch name (`main` for `refs/remotes/origin/main`),
-/// from the same candidates as the Changes default base: the first one that
-/// resolves to a commit.
 pub(crate) fn default_branch_name(repo: &git2::Repository) -> Result<Option<String>, GitError> {
     for candidate in default_base_candidates(repo)? {
         match repo

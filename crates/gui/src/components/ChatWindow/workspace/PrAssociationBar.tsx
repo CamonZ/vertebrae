@@ -31,7 +31,6 @@ import { needsGhSetup, staleRefreshNote } from "./githubFailure";
 import { AuthExpiredText, GhMissingText, GithubFailureText } from "./PrFailure";
 import "./prAssociation.css";
 
-/** Marks the control that takes focus after an action replaces the bar's contents. */
 const FOCUS_TARGET = "data-pr-focus";
 const focusTarget = { [FOCUS_TARGET]: "" };
 
@@ -47,7 +46,6 @@ interface BarActions {
   phase: WorktreePrPhase;
   busy: boolean;
   refresh: () => void;
-  /** `repo` is the PR's `owner/name`; null for the base repository. */
   link: (prNumber: number, repo: string | null) => Promise<boolean>;
   unlink: () => void;
 }
@@ -78,7 +76,6 @@ function PrStatusRow({
   );
 }
 
-/** "Check again": an explicit refresh that bypasses the backend's cache. */
 function CheckAgainButton({ phase, busy, refresh }: BarActions) {
   const checking = phase === "refreshing";
   return (
@@ -421,7 +418,6 @@ function AssociationBody({
   }
 }
 
-/** Whether the body already offers Check again (so the error row need not). */
 function offersCheckAgain(association: WorktreePrAssociation | null): boolean {
   return (
     association?.status !== "linked" && association?.status !== "ambiguous"
@@ -447,7 +443,6 @@ export function PrAssociationBar({
     listOpenPrs,
   } = useWorktreePrAssociation(worktreePath, branch);
   const rootRef = useRef<HTMLDivElement>(null);
-  // Set while an explicit action may replace the focused control.
   const restoreFocus = useRef(false);
 
   // When an action swaps the bar's contents, focus would fall to <body>;

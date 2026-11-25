@@ -52,8 +52,6 @@ impl RepoRef {
         self.owner.eq_ignore_ascii_case(owner) && self.repo.eq_ignore_ascii_case(repo)
     }
 
-    /// Web URL to open a pull request into this (base) repository from
-    /// `branch` in `head`, which may be a fork.
     pub fn create_pr_url(&self, head: &RepoRef, branch: &str) -> String {
         let branch = utf8_percent_encode(branch, BRANCH_PATH);
         let head_ref = if self.is_same(&head.owner, &head.repo) {
@@ -89,7 +87,6 @@ pub struct PullRequestSummary {
     pub base_ref: String,
     pub url: String,
     pub author: Option<String>,
-    /// ISO-8601 timestamp from GitHub's `updatedAt` field.
     pub updated_at: Option<String>,
 }
 

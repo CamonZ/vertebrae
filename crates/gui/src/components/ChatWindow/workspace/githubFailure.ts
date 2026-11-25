@@ -24,7 +24,6 @@ export function staleRefreshNote(failure: GithubFailure): string {
   }
 }
 
-/** Failures only the user can fix outside Vertebrae (install or sign in to gh). */
 export function needsGhSetup(failure: GithubFailure): boolean {
   return failure.kind === "gh_missing" || failure.kind === "auth_expired";
 }

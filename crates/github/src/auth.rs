@@ -41,11 +41,6 @@ impl fmt::Debug for GitHubToken {
     }
 }
 
-/// Resolves authentication using documented precedence (`CFG-001`):
-/// 1. `GH_TOKEN` in the supplied environment map
-/// 2. `GITHUB_TOKEN` in the supplied environment map
-/// 3. `gh auth token --hostname github.com`, run from the explicit `gh`
-///    executable when one was supplied, otherwise from the environment's `PATH`
 #[derive(Clone)]
 pub struct GhCliAuth {
     env: BTreeMap<String, String>,

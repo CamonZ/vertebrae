@@ -2,26 +2,20 @@ use thiserror::Error;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum GitHubError {
-    /// Neither `GH_TOKEN`/`GITHUB_TOKEN` is set nor is the `gh` CLI installed.
     #[error("GitHub CLI (gh) is not installed or not on PATH")]
     GhMissing,
 
-    /// Authentication is missing, invalid, or expired (`gh auth token` failed or HTTP 401).
     #[error("GitHub authentication expired or unavailable: {message}")]
     AuthExpired { message: String },
 
-    /// `gh` CLI failed due to a non-authentication OS/process/timeout/decode error.
     #[error("GitHub CLI failed: {message}")]
     GhFailed { message: String },
 
-    /// GitHub denied access to the requested resource (HTTP 403 without rate limit).
     #[error("GitHub access denied: {message}")]
     Forbidden { message: String },
 
-    /// GitHub API rate limit reached (HTTP 403/429 with rate limit headers).
     #[error("GitHub API rate limit reached: {message}")]
     RateLimited {
-        /// From `retry-after`, else derived from `x-ratelimit-reset`.
         retry_after_secs: Option<u64>,
         message: String,
     },
@@ -29,15 +23,12 @@ pub enum GitHubError {
     #[error("GitHub resource not found: {message}")]
     NotFound { message: String },
 
-    /// Network, TLS, timeout, or unexpected HTTP status (including 5xx) error.
     #[error("GitHub request failed: {message}")]
     Network { message: String },
 
-    /// GraphQL returned an application-level `errors` array even on HTTP 200.
     #[error("GitHub GraphQL error: {message}")]
     GraphQl { message: String },
 
-    /// Response exceeded the size limit or failed JSON decoding.
     #[error("GitHub response could not be decoded: {message}")]
     Decode { message: String },
 

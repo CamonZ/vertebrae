@@ -8,7 +8,6 @@ pub fn parse_github_remote_url(raw: &str) -> Option<RepoRef> {
         return None;
     }
 
-    // SCP-like SSH syntax: git@github.com:owner/repo(.git)
     if !trimmed.contains("://") {
         let (host_part, path_part) = trimmed.split_once(':')?;
         let host = host_part

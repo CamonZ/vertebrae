@@ -11,7 +11,6 @@ const PR_STATE_INTENT: Record<GithubPrState, BadgeIntent> = {
   closed: "error",
 };
 
-/** GitHub mark from Octicons. */
 export function GitHubGlyph({
   size = "sm",
   label,

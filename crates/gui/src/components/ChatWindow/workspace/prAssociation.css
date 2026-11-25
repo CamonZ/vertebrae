@@ -62,7 +62,6 @@
   margin-left: auto;
 }
 
-/* Busy controls keep focus (aria-disabled, not disabled) but read as off. */
 .pr-assoc-bar [aria-disabled="true"] {
   opacity: 0.55;
   cursor: not-allowed;
@@ -136,9 +135,6 @@
   list-style: none;
 }
 
-/* Each row links its PR locally, so its private marker (rose edge and
-   "Link locally") shows only on the row under the pointer or focus: one
-   accent in the cluster at a time. */
 .pr-candidate {
   display: flex;
   flex-direction: column;

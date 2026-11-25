@@ -49,7 +49,6 @@ pub(crate) struct PrKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct StoredPrRecord {
-    /// Repository the pull request belongs to (its base repository).
     pub owner: String,
     pub repo: String,
     /// Unix timestamp (seconds) when PR metadata was last fetched from GitHub;
@@ -74,8 +73,6 @@ impl StoredPrRecord {
         }
     }
 
-    /// Stale when `ttl_secs` have passed, the clock is unreadable (`None`), or
-    /// the clock moved backwards past the fetch time.
     pub(crate) fn is_stale(&self, now_secs: Option<i64>, ttl_secs: i64) -> bool {
         match now_secs {
             Some(now) => {
@@ -99,7 +96,6 @@ pub(crate) enum StoredPrAssociation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PrSave {
     Saved,
-    /// A newer commit won; carries the entry now on disk.
     Superseded(Option<StoredPrAssociation>),
 }
 
@@ -136,7 +132,6 @@ struct UserMutations {
 
 static NEXT_USER_TICKET: AtomicU64 = AtomicU64::new(1);
 
-/// Per-key bookkeeping, present only while a user mutation is in flight.
 fn user_mutations() -> &'static StdMutex<BTreeMap<PrKey, UserMutations>> {
     static MUTATIONS: OnceLock<StdMutex<BTreeMap<PrKey, UserMutations>>> = OnceLock::new();
     MUTATIONS.get_or_init(|| StdMutex::new(BTreeMap::new()))
@@ -148,7 +143,6 @@ fn lock_user_mutations() -> std::sync::MutexGuard<'static, BTreeMap<PrKey, UserM
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// A user link/unlink click, ordered by when it was clicked.
 #[derive(Debug)]
 pub(crate) struct UserPrMutation {
     key: PrKey,
@@ -213,7 +207,6 @@ impl PrAssociationStore {
         }
     }
 
-    /// Runs `op` on a blocking thread holding the process and disk locks.
     async fn locked<R: Send + 'static>(
         &self,
         op: impl FnOnce(&Path) -> Result<R, PrStoreError> + Send + 'static,
@@ -235,7 +228,6 @@ impl PrAssociationStore {
             .await
     }
 
-    /// Saves a discovery result only if the entry is still `expected`.
     pub(crate) async fn save_discovered(
         &self,
         key: &PrKey,
@@ -256,7 +248,6 @@ impl PrAssociationStore {
         .await
     }
 
-    /// Saves a user link/unlink unless a later click already committed.
     pub(crate) async fn save_user(
         &self,
         mutation: &UserPrMutation,

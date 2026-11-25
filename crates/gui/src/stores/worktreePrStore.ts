@@ -13,7 +13,7 @@ import { errorMessage } from "../query";
  * answers from its own cache until its linked-PR TTL lapses, so this bounds
  * GitHub traffic to roughly one query per interval per mounted worktree.
  */
-export const LINKED_PR_REVALIDATE_MS = 5 * 60_000;
+export const LINKED_PR_REVALIDATE_MS = 30_000;
 
 export type WorktreePrPhase =
   | "idle"
@@ -26,12 +26,7 @@ export type WorktreePrPhase =
 export interface WorktreePrEntry {
   phase: WorktreePrPhase;
   association: WorktreePrAssociation | null;
-  /**
-   * Why there is no association yet: the first lookup failed and there is
-   * no earlier state to keep showing. Cleared by any later answer.
-   */
   lookupFailure: GithubFailure | null;
-  /** Failure of the user's last explicit action. Background work never sets or clears it. */
   error: GithubFailure | null;
   /**
    * Branch whose state the user confirmed by an explicit refresh or a
@@ -61,7 +56,6 @@ export function linkedPullRequest(
 
 type Outcome<T> = { ok: true; data: T } | { ok: false; failure: GithubFailure };
 
-/** Runs a PR command; a thrown or rejected call becomes an `other` failure. */
 async function settle<T>(
   command: () => Promise<Result<T, GithubFailure>>
 ): Promise<Outcome<T>> {
@@ -126,7 +120,6 @@ export const useWorktreePrStore = create<WorktreePrStoreState>(() => ({
   entries: {},
 }));
 
-// Non-rendering bookkeeping, keyed like the entries and evicted with them.
 let requestCounter = 0;
 const latestRequest = new Map<string, number>();
 const backgroundRead = new Map<string, Promise<void>>();
@@ -182,10 +175,6 @@ function acceptBackground(
   };
 }
 
-/**
- * Non-refresh read for discovery or background revalidation. Concurrent
- * callers for the same worktree branch share one request.
- */
 function readInBackground(
   worktreePath: string,
   branch: string,
@@ -270,11 +259,6 @@ export function refreshWorktreePr(
   );
 }
 
-/**
- * Links a PR to the branch locally; nothing is written to GitHub. `repo`
- * (`owner/name`) names the PR's repository; null means the worktree's base
- * repository.
- */
 export function linkWorktreePr(
   worktreePath: string,
   branch: string,

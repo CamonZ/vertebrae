@@ -1,11 +1,5 @@
-/** Largest PR number the backend accepts (u32). */
 const MAX_PR_NUMBER = 4_294_967_295;
 
-/**
- * A PR the user named. `repo` is the `owner/name` from a pasted URL, or null
- * for a bare number (the worktree's base repository). Whether that repo is
- * one of the worktree's GitHub remotes is the backend's call.
- */
 export type PrReference =
   | { ok: true; number: number; repo: string | null }
   | { ok: false; message: string };
@@ -32,10 +26,6 @@ function fromUrl(text: string): PrReference {
   return fromDigits(digits, `${owner}/${name}`);
 }
 
-/**
- * Reads what a user types or pastes to name a PR: `482`, `0482`, `#482`, or
- * a pull request URL. `baseRepo` (`owner/name`) only shapes the hint.
- */
 export function parsePrReference(input: string, baseRepo: string): PrReference {
   const text = input.trim();
   if (!text)

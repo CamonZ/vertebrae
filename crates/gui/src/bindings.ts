@@ -2444,15 +2444,7 @@ multiple: boolean;
  */
 format: string | null }
 export type GithubErrorKind = "gh_missing" | "auth_expired" | "rate_limited" | "not_found" | "other"
-/**
- * A typed failure: returned as the error of every PR command and carried by
- * associations that kept showing last-known state.
- */
-export type GithubFailure = { kind: GithubErrorKind; message: string;
-/**
- * Seconds GitHub asked us to wait (rate limits only).
- */
-retryAfterSecs: number | null }
+export type GithubFailure = { kind: GithubErrorKind; message: string; retryAfterSecs: number | null }
 export type GithubPrState = "open" | "draft" | "merged" | "closed"
 export type GithubPullRequest = { owner: string; repo: string; number: number; title: string; state: GithubPrState; headRef: string; headRepo: string | null; baseRef: string; url: string; author: string | null; updatedAt: string | null }
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
@@ -3975,11 +3967,7 @@ tasks: Task[] }
 export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; totals: DiffTotals; marker: MarkerReason | null }
 export type WorktreeChangedEvent = { watch_id: string }
 export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[]; comparison: ComparisonSnapshot; totals: DiffTotals }
-export type WorktreePrAssociation = { status: "linked"; branch: string; repo: string; pr: GithubPullRequest; staleError: GithubFailure | null } | { status: "none"; branch: string; repo: string; createPrUrl: string } | { status: "ambiguous"; branch: string; repo: string; candidates: GithubPullRequest[] } | { status: "gh_missing"; branch: string; repo: string } | { status: "auth_expired"; branch: string; repo: string; reason: string } |
-/**
- * GitHub could not be queried right now (network, rate limit, not found…).
- */
-{ status: "unavailable"; branch: string; repo: string; error: GithubFailure } |
+export type WorktreePrAssociation = { status: "linked"; branch: string; repo: string; pr: GithubPullRequest; staleError: GithubFailure | null } | { status: "none"; branch: string; repo: string; createPrUrl: string } | { status: "ambiguous"; branch: string; repo: string; candidates: GithubPullRequest[] } | { status: "gh_missing"; branch: string; repo: string } | { status: "auth_expired"; branch: string; repo: string; reason: string } | { status: "unavailable"; branch: string; repo: string; error: GithubFailure } |
 /**
  * There is no GitHub branch to look up (no Git repository, an invalid
  * branch name, the repository's default branch, or no GitHub remote);

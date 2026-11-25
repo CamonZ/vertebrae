@@ -15,7 +15,6 @@ import { PrCandidateList } from "./PrCandidateList";
 import { GithubFailureText } from "./PrFailure";
 import { parsePrReference } from "./prReference";
 
-/** Open PRs listed under the number field; the rest stay reachable by number. */
 export const OPEN_PR_LIST_LIMIT = 8;
 
 type OpenPrs =
@@ -96,7 +95,6 @@ export function ManualPrLink({
   repo: string;
   busy: boolean;
   linking: boolean;
-  /** `repo` is the PR's `owner/name`; null for the base repository. */
   onLink: (prNumber: number, repo: string | null) => Promise<boolean>;
   listOpenPrs: () => Promise<GithubPullRequest[]>;
   onClose: () => void;

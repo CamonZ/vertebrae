@@ -157,8 +157,6 @@ impl GitHubClient {
         self.query_open_prs(token, repo, Some(branch)).await
     }
 
-    /// Lists the most recently updated open pull requests in `repo`
-    /// (one page; `has_more` reports whether more exist).
     pub async fn list_open_prs(
         &self,
         token: &GitHubToken,
@@ -383,8 +381,6 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name)?.to_str().ok().map(str::trim)
 }
 
-/// Seconds to wait before retrying: `retry-after` when present, otherwise the
-/// distance to the primary rate limit's `x-ratelimit-reset` epoch.
 fn retry_after_secs(headers: &HeaderMap) -> Option<u64> {
     if let Some(secs) = header_str(headers, "retry-after").and_then(|v| v.parse().ok()) {
         return Some(secs);

@@ -29,9 +29,8 @@ use vertebrae_github::{
     PullRequestState, PullRequestSummary, RepoRef,
 };
 
-const LINKED_STALE_TTL_SECS: i64 = 300;
-/// How long a GitHub-derived answer is reused for plain reloads of the same
-/// worktree branch while its stored entry is unchanged.
+// Below the frontend's 30 s revalidation so each tick reaches GitHub.
+const LINKED_STALE_TTL_SECS: i64 = 20;
 const DISPLAY_CACHE_TTL: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
@@ -108,14 +107,11 @@ pub enum GithubErrorKind {
     Other,
 }
 
-/// A typed failure: returned as the error of every PR command and carried by
-/// associations that kept showing last-known state.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubFailure {
     pub kind: GithubErrorKind,
     pub message: String,
-    /// Seconds GitHub asked us to wait (rate limits only).
     pub retry_after_secs: Option<u32>,
 }
 
@@ -171,7 +167,6 @@ pub enum WorktreePrAssociation {
         branch: String,
         repo: String,
         pr: Box<GithubPullRequest>,
-        /// Set when a refresh failed and the last known state is shown instead.
         stale_error: Option<GithubFailure>,
     },
     #[serde(rename_all = "camelCase")]
@@ -194,7 +189,6 @@ pub enum WorktreePrAssociation {
         repo: String,
         reason: String,
     },
-    /// GitHub could not be queried right now (network, rate limit, not found…).
     #[serde(rename_all = "camelCase")]
     Unavailable {
         branch: String,
@@ -235,7 +229,6 @@ struct WorktreeGitContext {
     head_repo: RepoRef,
     /// Repository new PRs should target: the `upstream` parent when configured.
     base_repo: RepoRef,
-    /// Every GitHub remote in search order (head, base, then the rest).
     github_remotes: Vec<RepoRef>,
 }
 
@@ -372,7 +365,6 @@ struct CacheKey {
 
 struct CachedAssociation {
     association: WorktreePrAssociation,
-    /// The stored entry the answer was derived from; any change invalidates it.
     based_on: Option<StoredPrAssociation>,
     /// `None` keeps the answer until the stored entry changes.
     expires_at: Option<Instant>,
@@ -590,8 +582,6 @@ fn shared_client() -> Result<&'static GitHubClient, GitHubError> {
         .map_err(Clone::clone)
 }
 
-/// `gh` auth from the user's login-shell environment, using the GUI's binary
-/// discovery (PATH plus Homebrew and ~/.local/bin fallbacks).
 fn user_gh_auth() -> GhCliAuth {
     let shell = user_shell_environment();
     let gh = find_gh_binary_with_shell_environment(&shell);
@@ -665,7 +655,6 @@ impl DiscoveryOutcome {
     }
 }
 
-/// Answers a plain reload from the store or cache; `None` means ask GitHub.
 fn answer_without_github(
     ctx: &WorktreeGitContext,
     stored: Option<&StoredPrAssociation>,
@@ -715,8 +704,6 @@ async fn refresh_linked<L: PrLookup>(
     }
 }
 
-/// Searches the worktree's GitHub remotes in order until one has open PRs for
-/// the branch (fork setups usually find them in the upstream parent).
 async fn search<L: PrLookup>(
     ctx: &WorktreeGitContext,
     lookup: &L,
