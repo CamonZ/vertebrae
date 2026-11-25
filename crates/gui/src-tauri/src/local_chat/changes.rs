@@ -139,18 +139,58 @@ pub struct WorktreeChange {
     pub(crate) marker: Option<MarkerReason>,
 }
 
-fn branch_base(repo: &git2::Repository) -> Result<Option<(String, String)>, GitError> {
-    let head = repo.head()?.peel_to_commit()?.id();
+/// Default-branch references in preference order: `origin/HEAD`'s target,
+/// then local `master` and `main`.
+fn default_base_candidates(repo: &git2::Repository) -> Result<Vec<String>, GitError> {
     let remote = match repo.find_reference("refs/remotes/origin/HEAD") {
         Ok(reference) => reference.symbolic_target()?.map(str::to_owned),
         Err(error) if error.code() == git2::ErrorCode::NotFound => None,
         Err(error) => return Err(error.into()),
     };
-
-    for candidate in remote
+    Ok(remote
         .into_iter()
         .chain(["refs/heads/master".into(), "refs/heads/main".into()])
-    {
+        .collect())
+}
+
+/// The repository's default branch name (`main` for `refs/remotes/origin/main`),
+/// from the same candidates as the Changes default base: the first one that
+/// resolves to a commit.
+pub(crate) fn default_branch_name(repo: &git2::Repository) -> Result<Option<String>, GitError> {
+    for candidate in default_base_candidates(repo)? {
+        match repo
+            .revparse_single(&candidate)
+            .and_then(|object| object.peel_to_commit())
+        {
+            Ok(_) => {
+                let name = candidate
+                    .strip_prefix("refs/heads/")
+                    .or_else(|| {
+                        candidate
+                            .strip_prefix("refs/remotes/")
+                            .and_then(|rest| rest.split_once('/'))
+                            .map(|(_, branch)| branch)
+                    })
+                    .unwrap_or(&candidate);
+                return Ok(Some(name.to_owned()));
+            }
+            Err(error)
+                if matches!(
+                    error.code(),
+                    git2::ErrorCode::NotFound | git2::ErrorCode::UnbornBranch
+                ) =>
+            {
+                continue
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(None)
+}
+
+fn branch_base(repo: &git2::Repository) -> Result<Option<(String, String)>, GitError> {
+    let head = repo.head()?.peel_to_commit()?.id();
+    for candidate in default_base_candidates(repo)? {
         match repo
             .revparse_single(&candidate)
             .and_then(|object| object.peel_to_commit())

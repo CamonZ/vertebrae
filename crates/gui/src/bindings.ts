@@ -1393,6 +1393,52 @@ async codeIntelligence(worktreePath: string, snapshot: IntelligenceSnapshot, req
 }
 },
 /**
+ * Auto-links when exactly one open PR's head is the branch in the repository
+ * it is pushed to; offers candidates otherwise. Plain calls are answered
+ * locally whenever possible. The default branch is `not_applicable` without
+ * any GitHub call. Never writes to GitHub.
+ */
+async getWorktreePrAssociation(worktreePath: string, branch: string, refresh: boolean | null) : Promise<Result<WorktreePrAssociation, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_worktree_pr_association", { worktreePath, branch, refresh }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List open pull requests in the worktree's base repository for manually
+ * linking `branch`.
+ */
+async listWorktreeOpenPrs(worktreePath: string, branch: string) : Promise<Result<GithubPullRequest[], GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_worktree_open_prs", { worktreePath, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Locally associate `branch` of a worktree with PR `pr_number` in `repo`
+ * (`owner/name` of one of its GitHub remotes; defaults to the base repository).
+ */
+async linkWorktreePr(worktreePath: string, branch: string, prNumber: number, repo: string | null) : Promise<Result<WorktreePrAssociation, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("link_worktree_pr", { worktreePath, branch, prNumber, repo }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async unlinkWorktreePr(worktreePath: string, branch: string) : Promise<Result<WorktreePrAssociation, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("unlink_worktree_pr", { worktreePath, branch }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
  * Semantic edits and their one-hop call relations for a comparison.
  */
 async compareChangedSymbols(worktreePath: string, comparison: ComparisonSnapshot, paths: ChangedPath[]) : Promise<Result<ChangedSymbols, CodeIntelligenceError>> {
@@ -2397,6 +2443,18 @@ multiple: boolean;
  * The string `format` hint, such as `date` or `email`.
  */
 format: string | null }
+export type GithubErrorKind = "gh_missing" | "auth_expired" | "rate_limited" | "not_found" | "other"
+/**
+ * A typed failure: returned as the error of every PR command and carried by
+ * associations that kept showing last-known state.
+ */
+export type GithubFailure = { kind: GithubErrorKind; message: string;
+/**
+ * Seconds GitHub asked us to wait (rate limits only).
+ */
+retryAfterSecs: number | null }
+export type GithubPrState = "open" | "draft" | "merged" | "closed"
+export type GithubPullRequest = { owner: string; repo: string; number: number; title: string; state: GithubPrState; headRef: string; headRepo: string | null; baseRef: string; url: string; author: string | null; updatedAt: string | null }
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
 export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
 export type HistoryFailure = { kind: HistoryFailureKind; message: string; retryable: boolean }
@@ -3917,6 +3975,17 @@ tasks: Task[] }
 export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; totals: DiffTotals; marker: MarkerReason | null }
 export type WorktreeChangedEvent = { watch_id: string }
 export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[]; comparison: ComparisonSnapshot; totals: DiffTotals }
+export type WorktreePrAssociation = { status: "linked"; branch: string; repo: string; pr: GithubPullRequest; staleError: GithubFailure | null } | { status: "none"; branch: string; repo: string; createPrUrl: string } | { status: "ambiguous"; branch: string; repo: string; candidates: GithubPullRequest[] } | { status: "gh_missing"; branch: string; repo: string } | { status: "auth_expired"; branch: string; repo: string; reason: string } |
+/**
+ * GitHub could not be queried right now (network, rate limit, not found…).
+ */
+{ status: "unavailable"; branch: string; repo: string; error: GithubFailure } |
+/**
+ * There is no GitHub branch to look up (no Git repository, an invalid
+ * branch name, the repository's default branch, or no GitHub remote);
+ * GitHub is not queried and the UI stays quiet.
+ */
+{ status: "not_applicable"; branch: string | null; reason: string }
 
 /** tauri-specta globals **/
 

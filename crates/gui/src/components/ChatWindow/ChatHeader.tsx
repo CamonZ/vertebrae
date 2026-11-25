@@ -17,6 +17,8 @@ import { OverflowMenu } from "../molecules/OverflowMenu";
 import { FALLBACK_CHAT_PROJECT_LABEL } from "../../utils/localChatSessionGroups";
 import { CHAT_ATTENTION, type ChatAttention } from "../../utils/chatAttention";
 import { ChatAttentionDot } from "./ChatAttentionDot";
+import type { GithubPullRequest } from "../../bindings";
+import { ChatHeaderPrChip } from "./GithubPr";
 
 interface ChatHeaderProps {
   label: string;
@@ -45,6 +47,9 @@ interface ChatHeaderProps {
   titleError?: string | null;
   projectLabel?: string;
   showProjectContext?: boolean;
+  linkedPr?: GithubPullRequest | null;
+  /** Shows the Changes panel from the PR chip; without it the chip is static. */
+  onOpenPrInChanges?: () => void;
 }
 
 export interface HeaderAction {
@@ -220,6 +225,8 @@ export function ChatHeader({
   titleError,
   projectLabel = FALLBACK_CHAT_PROJECT_LABEL,
   showProjectContext = false,
+  linkedPr = null,
+  onOpenPrInChanges,
 }: ChatHeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState(label);
@@ -627,6 +634,9 @@ export function ChatHeader({
             >
               {projectLabel}
             </span>
+          )}
+          {linkedPr && (
+            <ChatHeaderPrChip pr={linkedPr} onOpenChanges={onOpenPrInChanges} />
           )}
           <ChatAttentionDot attention={attention} />
           {attention.state !== "idle" &&

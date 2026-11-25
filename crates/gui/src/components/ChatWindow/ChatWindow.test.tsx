@@ -13,7 +13,7 @@ import {
 import { useProviderSettingsStore } from "../../stores/providerSettingsStore";
 import { useLocalChatDefaultsStore } from "../../utils/localChatDefaults";
 import { withBuiltinProviders } from "../../test/localChatCatalog";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
   act,
   fireEvent,
@@ -33,7 +33,8 @@ import {
   applyBackgroundUpdate,
   EMPTY_BACKGROUND_WORK,
 } from "../../stores/backgroundWork";
-import { commands } from "../../bindings";
+import { commands, type WorktreePrAssociation } from "../../bindings";
+import { resetWorktreePrStore } from "../../stores/worktreePrStore";
 import { useDocumentStore } from "./workspace/documentStore";
 import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
 import {
@@ -107,6 +108,7 @@ vi.mock("../../bindings", async () => {
           totals: { additions: 0, deletions: 0, binary_files: 0 },
         },
       }),
+      getWorktreePrAssociation: vi.fn(),
       listWorktreeDirectory: vi.fn().mockResolvedValue({
         status: "ok",
         data: { path: "", entries: [], truncated: false },
@@ -4885,5 +4887,115 @@ describe("ChatWindow composer focus", () => {
         { testCases: 25 }
       );
     }, 120_000);
+  });
+});
+
+describe("ChatWindow PR chip", () => {
+  const base = {
+    ticketId: null,
+    ticketTitle: null,
+    worktreePath: "/worktree",
+    branch: "feature/pinned",
+    lastProcessedAt: null,
+    processedAtCount: 0,
+    awaitingWorktree: null,
+    recentWorktrees: [],
+  };
+  const linked = (branch: string, number: number) => ({
+    status: "ok" as const,
+    data: {
+      status: "linked",
+      branch,
+      repo: "example/demo-repo",
+      pr: {
+        owner: "example",
+        repo: "demo-repo",
+        number,
+        title: `PR ${number}`,
+        state: "open",
+        headRef: branch,
+        headRepo: "example/demo-repo",
+        baseRef: "main",
+        url: `https://github.com/example/demo-repo/pull/${number}`,
+        author: null,
+        updatedAt: null,
+      },
+      staleError: null,
+    } satisfies WorktreePrAssociation,
+  });
+  const getAssociation = () => mockedCommands.getWorktreePrAssociation;
+
+  function seed(association: object) {
+    useChatStore.setState({
+      sessions: { "test-session": createSession({ association }) },
+      activeSessionId: "test-session",
+      paneLayout: { ...EMPTY_WORKSPACE, order: [], activeId: null },
+      panelOpen: true,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    // Every branch has an open PR; only the pinned one may be asked about.
+    getAssociation().mockImplementation(async (_path, branch) =>
+      linked(branch, branch === "feature/pinned" ? 482 : 479)
+    );
+  });
+
+  afterEach(() => resetWorktreePrStore());
+
+  it("shows no chip and runs no PR lookup while the chat holds its creation default", async () => {
+    seed({
+      ...base,
+      worktreePath: "/test/project",
+      branch: "feature/open-pr",
+      defaultWorktree: true,
+    });
+    render(<ChatWindow sessionId="test-session" />);
+    await act(async () => {});
+
+    expect(screen.queryByTestId("chat-header-pr-chip")).toBeNull();
+    expect(getAssociation()).not.toHaveBeenCalled();
+  });
+
+  it("shows no chip and runs no PR lookup for an association without a branch", async () => {
+    seed({ ...base, branch: null });
+    render(<ChatWindow sessionId="test-session" />);
+    await act(async () => {});
+
+    expect(screen.queryByTestId("chat-header-pr-chip")).toBeNull();
+    expect(getAssociation()).not.toHaveBeenCalled();
+  });
+
+  it("follows the branch pinned on the association record", async () => {
+    seed(base);
+    render(<ChatWindow sessionId="test-session" />);
+
+    expect(await screen.findByTestId("chat-header-pr-chip")).toHaveTextContent(
+      "#482"
+    );
+    expect(getAssociation()).toHaveBeenCalledExactlyOnceWith(
+      "/worktree",
+      "feature/pinned",
+      false
+    );
+
+    act(() =>
+      useChatStore.getState().setSessionAssociation("test-session", {
+        ...base,
+        branch: "feature/other",
+      })
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-header-pr-chip")).toHaveTextContent(
+        "#479"
+      )
+    );
+    expect(getAssociation()).toHaveBeenLastCalledWith(
+      "/worktree",
+      "feature/other",
+      false
+    );
   });
 });

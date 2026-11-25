@@ -26,6 +26,14 @@ const CODEX_SPEC: BinarySpec = BinarySpec {
     home_relative: ".local/bin/codex",
 };
 
+const GH_SPEC: BinarySpec = BinarySpec {
+    display_name: "GitHub CLI",
+    binary_name: "gh",
+    env_override: "GH_CLI_PATH",
+    well_known: &["/opt/homebrew/bin/gh", "/usr/local/bin/gh"],
+    home_relative: ".local/bin/gh",
+};
+
 /// Find the Claude Code CLI binary
 pub fn find_claude_binary() -> Result<PathBuf, String> {
     let shell_environment = user_shell_environment();
@@ -61,6 +69,16 @@ pub(crate) fn find_codex_binary_with_shell_environment(
 ) -> Result<PathBuf, String> {
     find_binary(
         &CODEX_SPEC,
+        &shell_environment.path,
+        Some(&shell_environment.variables),
+    )
+}
+
+pub(crate) fn find_gh_binary_with_shell_environment(
+    shell_environment: &ShellEnvironment,
+) -> Result<PathBuf, String> {
+    find_binary(
+        &GH_SPEC,
         &shell_environment.path,
         Some(&shell_environment.variables),
     )

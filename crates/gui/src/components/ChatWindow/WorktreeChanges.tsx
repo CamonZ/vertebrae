@@ -68,6 +68,7 @@ import { ChangesSummary } from "./workspace/ChangesSummary";
 import { SideEmptyState } from "./SideEmptyState";
 import { CodeGlyph } from "./commentIcons";
 import { ComparisonControls } from "./workspace/ComparisonControls";
+import { PrAssociationBar } from "./workspace/PrAssociationBar";
 import { OpenDocumentTabs } from "./workspace/OpenDocumentTabs";
 import {
   changesPaletteItems,
@@ -122,6 +123,7 @@ export function WorktreeChanges({
   onTurnVersionChange,
   onExit,
   sessionId,
+  prBranch = null,
 }: {
   ref?: Ref<HTMLElement>;
   /**
@@ -132,6 +134,12 @@ export function WorktreeChanges({
   /** Hand focus back to the chat input (Esc from the line cursor). */
   onExit?(): void;
   worktreePath: string;
+  /**
+   * Branch whose GitHub PR the bar shows: the chat's pinned branch when this
+   * is the chat's own worktree. Null shows no PR bar (the checkout's HEAD is
+   * never used).
+   */
+  prBranch?: string | null;
   sourceJump?: JumpTarget | null;
   turnDocument?: {
     nonce: number;
@@ -628,6 +636,9 @@ export function WorktreeChanges({
         if (path) setActivePath(path);
       }}
     >
+      {prBranch && (
+        <PrAssociationBar worktreePath={worktreePath} branch={prBranch} />
+      )}
       <ComparisonControls
         comparison={comparisonChoices}
         base={base}

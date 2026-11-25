@@ -1,0 +1,203 @@
+/* Rose identifies local link and unlink actions. GitHub-facing controls stay neutral. */
+
+.pr-assoc-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-1);
+  font: 400 var(--text-meta) / var(--leading-normal) var(--font-sans);
+  color: var(--color-fg-soft);
+}
+
+.pr-assoc-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pr-assoc-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.pr-assoc-branch {
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-2);
+  font: 400 var(--text-meta) / var(--leading-tight) var(--font-mono);
+  color: var(--color-fg);
+}
+
+.pr-assoc-title {
+  min-width: 0;
+  flex: 1 1 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-fg);
+}
+
+.pr-assoc-mute {
+  color: var(--color-fg-mute);
+}
+
+.pr-assoc-warn {
+  color: var(--color-warn);
+}
+
+.pr-assoc-err {
+  color: var(--color-err);
+}
+
+.pr-assoc-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* Busy controls keep focus (aria-disabled, not disabled) but read as off. */
+.pr-assoc-bar [aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pr-assoc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-fg);
+  cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease);
+}
+
+.pr-assoc-link:hover {
+  background: var(--color-bg-hover-raised);
+}
+
+/* Private accent for the one committing local action in a cluster. Applied
+   to the Button atom; unlayered, so it wins over the atom's utilities. */
+.pr-private-action {
+  border-color: var(--color-accent-mute);
+  background: var(--color-accent-wash);
+  color: var(--color-accent-deep);
+}
+
+.pr-private-action:hover:not([aria-disabled="true"]) {
+  border-color: var(--color-accent);
+  color: var(--color-fg);
+}
+
+.pr-chooser,
+.pr-manual-link {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--color-line);
+}
+
+.pr-chooser-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pr-manual-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.pr-manual-input {
+  width: 14rem;
+  height: 26px;
+}
+
+.pr-candidate-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Each row links its PR locally, so its private marker (rose edge and
+   "Link locally") shows only on the row under the pointer or focus: one
+   accent in the cluster at a time. */
+.pr-candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-2);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--t-fast) var(--ease),
+    border-color var(--t-fast) var(--ease);
+}
+
+/* Focus keeps the shared halo as its edge (styles/focus-halo.css); only the
+   pointer draws the rose border. */
+.pr-candidate:hover:not([aria-disabled="true"]) {
+  border-color: var(--color-accent-mute);
+}
+
+.pr-candidate:is(:hover, :focus-visible):not([aria-disabled="true"]) {
+  background: var(--color-bg-hover-raised);
+}
+
+.pr-candidate-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-fg);
+}
+
+.pr-candidate-commit {
+  flex-shrink: 0;
+  visibility: hidden;
+  color: var(--color-accent);
+}
+
+.pr-candidate:is(:hover, :focus-visible):not([aria-disabled="true"])
+  .pr-candidate-commit {
+  visibility: visible;
+}
+
+.pr-candidate-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  font: 400 var(--text-meta) / var(--leading-tight) var(--font-sans);
+  color: var(--color-fg-mute);
+}
+
+.pr-candidate-meta > * + *::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--color-fg-mute);
+}
+
+.pr-candidate-meta > .is-warn {
+  color: var(--color-warn);
+}
