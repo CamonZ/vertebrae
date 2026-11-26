@@ -7,7 +7,7 @@ use crate::{
     },
     GitHubError, OpenPrSearchResult, PullRequestSummary, RepoRef,
 };
-use crate::{checks::FailedStepCache, rest::RateLimitStatus};
+use crate::{rate_limit::RateLimitStatus, step_cache::FailedStepCache};
 use reqwest::{
     header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT},
     StatusCode,
@@ -30,15 +30,16 @@ const USER_AGENT_VALUE: &str = concat!("vertebrae-github/", env!("CARGO_PKG_VERS
 const OPEN_PR_PAGE_SIZE: u32 = 50;
 
 const LIST_OPEN_PRS_QUERY: &str = r#"
-query ListOpenPullRequests($owner: String!, $repo: String!, $headRefName: String, $first: Int!) {
+query ListOpenPullRequests($owner: String!, $repo: String!, $headRefName: String, $first: Int!, $after: String) {
   repository(owner: $owner, name: $repo) {
     pullRequests(
       states: [OPEN]
       headRefName: $headRefName
       first: $first
+      after: $after
       orderBy: { field: UPDATED_AT, direction: DESC }
     ) {
-      pageInfo { hasNextPage }
+      pageInfo { hasNextPage endCursor }
       nodes {
         number
         title
@@ -80,7 +81,7 @@ query GetPullRequest($owner: String!, $repo: String!, $number: Int!) {
 pub struct GitHubClient {
     pub(crate) http: reqwest::Client,
     pub(crate) base_url: url::Url,
-    /// Steps of failed check runs, which never change once a run completes.
+    /// Steps of failed check runs, read once per run.
     pub(crate) failed_steps: Arc<FailedStepCache>,
 }
 
@@ -148,8 +149,8 @@ impl GitHubClient {
     }
 
     /// Uses GitHub's GraphQL `headRefName` filter so GitHub filters server-side
-    /// across both same-repo and fork PRs in a single request (matching `gh`),
-    /// and reports `has_more` when additional pages exist so callers never
+    /// across both same-repo and fork PRs (matching `gh`). Reads one page and
+    /// reports `has_more` when additional pages exist, so callers never
     /// auto-link from an incomplete result.
     pub async fn list_open_prs_for_branch(
         &self,
@@ -164,15 +165,18 @@ impl GitHubClient {
             });
         }
 
-        self.query_open_prs(token, repo, Some(branch)).await
+        self.query_open_prs(token, repo, Some(branch), 1).await
     }
 
+    /// The repository's open pull requests, most recently updated first,
+    /// following up to `max_pages` pages of 50.
     pub async fn list_open_prs(
         &self,
         token: &GitHubToken,
         repo: &RepoRef,
+        max_pages: usize,
     ) -> Result<OpenPrSearchResult, GitHubError> {
-        self.query_open_prs(token, repo, None).await
+        self.query_open_prs(token, repo, None, max_pages).await
     }
 
     async fn query_open_prs(
@@ -180,37 +184,45 @@ impl GitHubClient {
         token: &GitHubToken,
         repo: &RepoRef,
         head_ref_name: Option<&str>,
+        max_pages: usize,
     ) -> Result<OpenPrSearchResult, GitHubError> {
-        let data: PullRequestsQueryData = self
-            .graphql(
-                token,
-                LIST_OPEN_PRS_QUERY,
-                json!({
-                    "owner": repo.owner,
-                    "repo": repo.repo,
-                    "headRefName": head_ref_name,
-                    "first": OPEN_PR_PAGE_SIZE,
-                }),
-            )
-            .await?;
-
-        let repo_data = data.repository.ok_or_else(|| GitHubError::NotFound {
-            message: format!("Repository {} not found", repo.full_name()),
-        })?;
-
-        let has_more = repo_data
-            .pull_requests
-            .page_info
-            .is_some_and(|info| info.has_next_page);
-        let prs = repo_data
-            .pull_requests
-            .nodes
-            .into_iter()
-            .flatten()
-            .map(PullRequestSummary::try_from)
-            .collect::<Result<_, _>>()?;
-
-        Ok(OpenPrSearchResult { prs, has_more })
+        let mut result = OpenPrSearchResult {
+            prs: Vec::new(),
+            has_more: false,
+            rate_limit: None,
+        };
+        let mut after: Option<String> = None;
+        for _ in 0..max_pages.max(1) {
+            let (envelope, rate_limit) = self
+                .graphql_envelope::<PullRequestsQueryData>(
+                    token,
+                    LIST_OPEN_PRS_QUERY,
+                    json!({
+                        "owner": repo.owner,
+                        "repo": repo.repo,
+                        "headRefName": head_ref_name,
+                        "first": OPEN_PR_PAGE_SIZE,
+                        "after": after,
+                    }),
+                )
+                .await?;
+            result.rate_limit = RateLimitStatus::tightest(result.rate_limit, rate_limit);
+            let data = data_of(envelope)?;
+            let repo_data = data.repository.ok_or_else(|| GitHubError::NotFound {
+                message: format!("Repository {} not found", repo.full_name()),
+            })?;
+            let connection = repo_data.pull_requests;
+            for node in connection.nodes.into_iter().flatten() {
+                result.prs.push(PullRequestSummary::try_from(node)?);
+            }
+            let page = connection.page_info.filter(|info| info.has_next_page);
+            result.has_more = page.is_some();
+            match page.and_then(|info| info.end_cursor) {
+                Some(cursor) => after = Some(cursor),
+                None => break,
+            }
+        }
+        Ok(result)
     }
 
     pub async fn get_pull_request(
@@ -254,12 +266,7 @@ impl GitHubClient {
         variables: serde_json::Value,
     ) -> Result<T, GitHubError> {
         let (envelope, _) = self.graphql_envelope(token, query, variables).await?;
-        if !envelope.errors.is_empty() {
-            return Err(map_graphql_errors(envelope.errors));
-        }
-        envelope.data.ok_or_else(|| GitHubError::Decode {
-            message: "GraphQL response contained neither data nor errors".into(),
-        })
+        data_of(envelope)
     }
 
     /// The raw envelope, for queries whose aliases can fail independently,
@@ -299,6 +306,15 @@ impl GitHubClient {
         })?;
         Ok((envelope, rate_limit))
     }
+}
+
+fn data_of<T>(envelope: GraphQlResponse<T>) -> Result<T, GitHubError> {
+    if !envelope.errors.is_empty() {
+        return Err(map_graphql_errors(envelope.errors));
+    }
+    envelope.data.ok_or_else(|| GitHubError::Decode {
+        message: "GraphQL response contained neither data nor errors".into(),
+    })
 }
 
 pub(crate) fn map_graphql_errors(errors: Vec<GraphQlError>) -> GitHubError {
@@ -535,30 +551,62 @@ mod tests {
         assert_eq!(matches[1].head_repo.as_deref(), Some("bob/demo-repo"));
     }
 
-    #[tokio::test]
-    async fn list_queries_report_has_more_when_next_page_exists() {
-        let (_server, client) =
-            server_responding(ResponseTemplate::new(200).set_body_json(json!({
-                "data": {
-                    "repository": {
-                        "pullRequests": {
-                            "pageInfo": { "hasNextPage": true },
-                            "nodes": [open_pr(101)]
-                        }
+    fn page(cursor: Option<&str>, nodes: serde_json::Value) -> serde_json::Value {
+        json!({
+            "data": {
+                "repository": {
+                    "pullRequests": {
+                        "pageInfo": { "hasNextPage": cursor.is_some(), "endCursor": cursor },
+                        "nodes": nodes
                     }
                 }
-            })))
-            .await;
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn open_prs_follow_cursors_up_to_the_page_cap() {
+        let server = MockServer::start().await;
+        for (after, next, number) in [
+            (None, Some("c1"), 1),
+            (Some("c1"), Some("c2"), 2),
+            (Some("c2"), Some("c3"), 3),
+            (Some("c3"), None, 4),
+        ] {
+            Mock::given(method("POST"))
+                .and(path("/graphql"))
+                .and(body_partial_json(
+                    json!({ "variables": { "after": after } }),
+                ))
+                .respond_with(
+                    ResponseTemplate::new(200).set_body_json(page(next, json!([open_pr(number)]))),
+                )
+                .mount(&server)
+                .await;
+        }
+        let client = GitHubClient::with_base_url(&server.uri()).unwrap();
+
+        let capped = client
+            .list_open_prs(&token(), &demo_repo(), 3)
+            .await
+            .unwrap();
+        let numbers: Vec<u64> = capped.prs.iter().map(|pr| pr.number).collect();
+        assert_eq!(numbers, [1, 2, 3]);
+        assert!(capped.has_more);
+
+        let all = client
+            .list_open_prs(&token(), &demo_repo(), 4)
+            .await
+            .unwrap();
+        assert_eq!(all.prs.len(), 4);
+        assert!(!all.has_more);
 
         let for_branch = client
             .list_open_prs_for_branch(&token(), &demo_repo(), "feature/retry")
             .await
             .unwrap();
-        assert!(for_branch.has_more);
         assert_eq!(for_branch.prs.len(), 1);
-
-        let all = client.list_open_prs(&token(), &demo_repo()).await.unwrap();
-        assert!(all.has_more);
+        assert!(for_branch.has_more);
     }
 
     #[tokio::test]
@@ -581,7 +629,10 @@ mod tests {
             ]))))
             .await;
 
-        let result = client.list_open_prs(&token(), &demo_repo()).await.unwrap();
+        let result = client
+            .list_open_prs(&token(), &demo_repo(), 3)
+            .await
+            .unwrap();
         assert_eq!(result.prs.len(), 1);
         assert_eq!(result.prs[0].number, 5);
         assert_eq!(result.prs[0].head_repo, None);
@@ -605,7 +656,7 @@ mod tests {
                 ]))))
                 .await;
             client
-                .list_open_prs(&token(), &demo_repo())
+                .list_open_prs(&token(), &demo_repo(), 3)
                 .await
                 .unwrap_err()
         };
@@ -672,7 +723,7 @@ mod tests {
         )
         .await;
         assert!(matches!(
-            client.list_open_prs(&token(), &demo_repo()).await,
+            client.list_open_prs(&token(), &demo_repo(), 3).await,
             Err(GitHubError::NotFound { .. })
         ));
     }

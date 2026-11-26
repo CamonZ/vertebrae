@@ -33,9 +33,14 @@ import {
   applyBackgroundUpdate,
   EMPTY_BACKGROUND_WORK,
 } from "../../stores/backgroundWork";
-import { commands, type WorktreePrAssociation } from "../../bindings";
-import { resetWorktreePrChecksStore } from "../../stores/worktreePrChecksStore";
-import { resetWorktreePrStore } from "../../stores/worktreePrStore";
+import { commands } from "../../bindings";
+import { resetPrSync } from "../../stores/prSync";
+import {
+  addPr,
+  fakeGithub,
+  installFakeGithub,
+  pullRequest,
+} from "../../test/fakeGithub";
 import { useDocumentStore } from "./workspace/documentStore";
 import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
 import {
@@ -109,10 +114,12 @@ vi.mock("../../bindings", async () => {
           totals: { additions: 0, deletions: 0, binary_files: 0 },
         },
       }),
-      getWorktreePrAssociation: vi.fn(),
-      pollWorktreePrs: vi.fn(),
-      rerunWorktreePrCheck: vi.fn(),
-      cancelWorktreePrCheck: vi.fn(),
+      resolveWorktreeGithub: vi.fn(),
+      pollGithubPrs: vi.fn(),
+      listGithubOpenPrs: vi.fn(),
+      getGithubPr: vi.fn(),
+      rerunGithubPrCheck: vi.fn(),
+      cancelGithubPrCheck: vi.fn(),
       getWorktreePublishedHead: vi
         .fn()
         .mockResolvedValue({ status: "ok", data: null }),
@@ -4929,29 +4936,7 @@ describe("ChatWindow PR chip", () => {
     awaitingWorktree: null,
     recentWorktrees: [],
   };
-  const linked = (branch: string, number: number) => ({
-    status: "ok" as const,
-    data: {
-      status: "linked",
-      branch,
-      repo: "example/demo-repo",
-      pr: {
-        owner: "example",
-        repo: "demo-repo",
-        number,
-        title: `PR ${number}`,
-        state: "open",
-        headRef: branch,
-        headRepo: "example/demo-repo",
-        baseRef: "main",
-        url: `https://github.com/example/demo-repo/pull/${number}`,
-        author: null,
-        updatedAt: null,
-      },
-      staleError: null,
-    } satisfies WorktreePrAssociation,
-  });
-  const getAssociation = () => mockedCommands.getWorktreePrAssociation;
+  const getAssociation = () => mockedCommands.resolveWorktreeGithub;
 
   function seed(association: object) {
     useChatStore.setState({
@@ -4966,18 +4951,14 @@ describe("ChatWindow PR chip", () => {
     vi.clearAllMocks();
     localStorage.clear();
     // Every branch has an open PR; only the pinned one may be asked about.
-    getAssociation().mockImplementation(async (_path, branch) =>
-      linked(branch, branch === "feature/pinned" ? 482 : 479)
-    );
-    mockedCommands.pollWorktreePrs.mockResolvedValue({
-      status: "error",
-      error: { kind: "other", message: "offline", retryAfterSecs: null },
-    });
+    const world = fakeGithub();
+    addPr(world, pullRequest(482, { headRef: "feature/pinned" }));
+    addPr(world, pullRequest(479, { headRef: "feature/other" }));
+    installFakeGithub(mockedCommands, world);
   });
 
   afterEach(() => {
-    resetWorktreePrChecksStore();
-    resetWorktreePrStore();
+    resetPrSync();
   });
 
   it("shows no chip and runs no PR lookup while the chat holds its creation default", async () => {
@@ -5036,8 +5017,7 @@ describe("ChatWindow PR chip", () => {
     );
     expect(getAssociation()).toHaveBeenCalledExactlyOnceWith(
       "/worktree",
-      "feature/pinned",
-      false
+      "feature/pinned"
     );
 
     act(() =>
@@ -5053,8 +5033,7 @@ describe("ChatWindow PR chip", () => {
     );
     expect(getAssociation()).toHaveBeenLastCalledWith(
       "/worktree",
-      "feature/other",
-      false
+      "feature/other"
     );
   });
 });

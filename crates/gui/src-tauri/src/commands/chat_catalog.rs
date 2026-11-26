@@ -20,11 +20,9 @@ use vertebrae_sacrum_client::GraphqlClient;
 mod delivery;
 mod entity;
 mod migration;
-mod pr_associations;
 mod review_anchors;
 mod review_threads;
 mod storage;
-pub(crate) use pr_associations::*;
 pub(crate) use review_anchors::*;
 pub(crate) use review_threads::*;
 
@@ -220,6 +218,86 @@ fn installation(root: &Path) -> Result<String, CommandError> {
     vertebrae_installer::installation_id_in(root).map_err(|_| error())
 }
 
+/// The fields of a chat's linked PR that Sacrum keeps, as `pr_<field>`.
+const PR_KEYS: [&str; 4] = ["host", "owner", "repo", "number"];
+
+/// The PR linked to the association's current worktree branch. A link saved
+/// for another worktree or branch, or an explicit unlink, links nothing.
+fn linked_pr(association: &Value) -> Option<&Value> {
+    let link = association.get("pullRequest")?;
+    let current = |field: &str| {
+        let value = association.get(field).filter(|value| value.is_string());
+        value.is_some() && link.get(field) == value
+    };
+    let pr = link.get("pr").filter(|pr| pr.is_object())?;
+    (current("worktreePath") && current("branch")).then_some(pr)
+}
+
+/// The PR Sacrum holds for a chat, if every field is well-formed.
+fn remote_pr(metadata: &Value) -> Option<(String, String, String, u64)> {
+    let text = |key: &str| {
+        metadata
+            .get(format!("pr_{key}"))?
+            .as_str()
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+    };
+    let number = metadata.get("pr_number")?.as_u64().filter(|n| *n > 0)?;
+    Some((text("host")?, text("owner")?, text("repo")?, number))
+}
+
+/// Sacrum's PR for the chat on the association's worktree branch. The local
+/// link stands while it names the same PR (it carries what was last read
+/// from GitHub); otherwise Sacrum's replaces it. Without one, a local link is
+/// dropped but a local unlink stays, since Sacrum does not keep unlinks.
+fn hydrate_pr_link(association: &mut Value, metadata: &Value) {
+    let local = linked_pr(association).cloned();
+    match remote_pr(metadata) {
+        Some((host, owner, repo, number)) => {
+            let same = local.as_ref().is_some_and(|pr| {
+                pr["host"].as_str() == Some(host.as_str())
+                    && pr["owner"]
+                        .as_str()
+                        .is_some_and(|o| o.eq_ignore_ascii_case(&owner))
+                    && pr["repo"]
+                        .as_str()
+                        .is_some_and(|r| r.eq_ignore_ascii_case(&repo))
+                    && pr["number"].as_u64() == Some(number)
+            });
+            let (Some(worktree), Some(branch)) = (
+                association.get("worktreePath").and_then(Value::as_str),
+                association.get("branch").and_then(Value::as_str),
+            ) else {
+                return;
+            };
+            if same {
+                return;
+            }
+            let url = format!("https://{host}/{owner}/{repo}/pull/{number}");
+            association["pullRequest"] = json!({
+                "worktreePath": worktree,
+                "branch": branch,
+                "pr": {
+                    "host": host,
+                    "owner": owner,
+                    "repo": repo,
+                    "number": number,
+                    "title": "",
+                    "state": null,
+                    "url": url,
+                },
+                "changedAt": null,
+            });
+        }
+        None if local.is_some() => {
+            if let Some(fields) = association.as_object_mut() {
+                fields.remove("pullRequest");
+            }
+        }
+        None => {}
+    }
+}
+
 /// Keep this allowlist independent of the session struct's future fields.
 fn projection(session: &LocalChatSessionIndexEntry) -> Value {
     let value = serde_json::to_value(session).expect("session serialization");
@@ -262,6 +340,11 @@ fn projection(session: &LocalChatSessionIndexEntry) -> Value {
         .unwrap_or(&Value::Null);
     if let Some(level) = association.get("entityLevel") {
         metadata.insert("entityLevel".into(), level.clone());
+    }
+    if let Some(pr) = linked_pr(association) {
+        for key in PR_KEYS {
+            metadata.insert(format!("pr_{key}"), pr[key].clone());
+        }
     }
 
     if discussion.is_some() {
@@ -969,6 +1052,7 @@ fn hydrate_record(
             .cloned()
             .filter(|v| v.is_string())
             .unwrap_or_else(|| json!("ticket"));
+        hydrate_pr_link(&mut association, &payload["metadata"]);
         value["association"] = association;
     }
 
@@ -1663,6 +1747,87 @@ mod tests {
             LocalChatActivityStatus::Working
         );
         assert_eq!(reloaded[1].activity_status, LocalChatActivityStatus::Idle);
+    }
+
+    fn pr(owner: &str, number: u64) -> Value {
+        json!({
+            "host": "github.com",
+            "owner": owner,
+            "repo": "demo-repo",
+            "number": number,
+            "title": "Fix retry budget",
+            "state": "open",
+            "url": format!("https://github.com/{owner}/demo-repo/pull/{number}"),
+        })
+    }
+
+    /// No link, an unlink, a link on the current branch, or one saved for
+    /// another branch of the worktree.
+    fn pr_association(kind: u8, local: &Value) -> Value {
+        let mut association = json!({
+            "ticketId": null,
+            "worktreePath": "/work/demo",
+            "branch": "feature/retry",
+        });
+        let on = |branch: &str, pr: Value| json!({"worktreePath": "/work/demo", "branch": branch, "pr": pr, "changedAt": null});
+        match kind {
+            1 => association["pullRequest"] = on("feature/retry", Value::Null),
+            2 => association["pullRequest"] = on("feature/retry", local.clone()),
+            3 => association["pullRequest"] = on("feature/old", local.clone()),
+            _ => {}
+        }
+        association
+    }
+
+    /// Sacrum keeps exactly the PR linked to the current worktree branch, and
+    /// hydrating its keys back keeps a local link naming the same PR (with
+    /// what was last read from GitHub), takes Sacrum's otherwise, and keeps
+    /// an unlink, which Sacrum does not hold.
+    #[hegel::test]
+    fn the_linked_pr_round_trips_through_sacrum_metadata(tc: TestCase) {
+        let kind = tc.draw(gs::integers::<u8>().max_value(3));
+        let local = pr(tc.draw(gs::sampled_from(&["example", "Example"][..])), 7);
+        let association = pr_association(kind, &local);
+        let mut metadata = serde_json::Map::new();
+        if let Some(pr) = linked_pr(&association) {
+            for key in PR_KEYS {
+                metadata.insert(format!("pr_{key}"), pr[key].clone());
+            }
+        }
+        assert_eq!(metadata.is_empty(), kind != 2, "{association}");
+        if kind == 2 {
+            assert_eq!(metadata["pr_owner"], local["owner"]);
+            assert_eq!(metadata["pr_number"], 7);
+        }
+
+        // Sacrum: nothing, what was projected, or another PR.
+        let remote = match tc.draw(gs::integers::<u8>().max_value(2)) {
+            0 => json!({}),
+            1 => Value::Object(metadata),
+            _ => {
+                json!({"pr_host": "github.com", "pr_owner": "EXAMPLE", "pr_repo": "demo-repo", "pr_number": 9})
+            }
+        };
+        tc.note(&format!("local {association}, remote {remote}"));
+        let mut hydrated = association.clone();
+        hydrate_pr_link(&mut hydrated, &remote);
+
+        let expected = match remote_pr(&remote) {
+            Some(_) if kind == 2 && remote["pr_number"] == 7 => association["pullRequest"].clone(),
+            Some((host, owner, repo, number)) => json!({
+                "worktreePath": "/work/demo",
+                "branch": "feature/retry",
+                "pr": {
+                    "host": host, "owner": owner, "repo": repo, "number": number,
+                    "title": "", "state": null,
+                    "url": format!("https://{host}/{owner}/{repo}/pull/{number}"),
+                },
+                "changedAt": null,
+            }),
+            None if kind == 2 => Value::Null,
+            None => association["pullRequest"].clone(),
+        };
+        assert_eq!(hydrated["pullRequest"], expected);
     }
 
     #[hegel::test]

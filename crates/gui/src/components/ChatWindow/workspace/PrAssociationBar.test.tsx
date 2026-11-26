@@ -11,22 +11,28 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   commands,
   type GithubErrorKind,
-  type GithubFailure,
   type GithubPullRequest,
-  type WorktreePrAssociation,
-  type WorktreePrPollBatch,
 } from "../../../bindings";
 import { useWorktreePrAssociation } from "../../../hooks/useWorktreePrAssociation";
+import { pollWatchedPrsNow } from "../../../stores/prSync";
+import { linkedPullRequest } from "../../../stores/worktreePrStore";
 import {
-  linkedPullRequest,
-  resetWorktreePrStore,
-  useWorktreePrStore,
-  worktreePrKey,
-} from "../../../stores/worktreePrStore";
-import {
-  pollWatchedWorktreePrsNow,
-  resetWorktreePrChecksStore,
-} from "../../../stores/worktreePrChecksStore";
+  REPO,
+  addPr,
+  chatLink,
+  chatSession,
+  failure,
+  fakeGithub,
+  github,
+  installFakeGithub,
+  linkedPr,
+  prLink,
+  pullRequest,
+  resetFakeGithub,
+  seedChats,
+  settle,
+  type FakeGithub,
+} from "../../../test/fakeGithub";
 import { ChatHeader } from "../ChatHeader";
 import { ChatHeaderPrChip } from "../GithubPr";
 import { OPEN_PR_LIST_LIMIT } from "./ManualPrLink";
@@ -39,46 +45,22 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 
 vi.mock("../../../bindings", () => ({
   commands: {
-    getWorktreePrAssociation: vi.fn(),
-    listWorktreeOpenPrs: vi.fn(),
-    linkWorktreePr: vi.fn(),
-    unlinkWorktreePr: vi.fn(),
-    pollWorktreePrs: vi.fn(),
-    rerunWorktreePrCheck: vi.fn(),
-    cancelWorktreePrCheck: vi.fn(),
+    resolveWorktreeGithub: vi.fn(),
+    pollGithubPrs: vi.fn(),
+    listGithubOpenPrs: vi.fn(),
+    getGithubPr: vi.fn(),
+    rerunGithubPrCheck: vi.fn(),
+    cancelGithubPrCheck: vi.fn(),
     getWorktreePublishedHead: vi.fn(),
   },
 }));
 
-const getAssociation = vi.mocked(commands.getWorktreePrAssociation);
-const listOpen = vi.mocked(commands.listWorktreeOpenPrs);
-const link = vi.mocked(commands.linkWorktreePr);
-const unlink = vi.mocked(commands.unlinkWorktreePr);
-const poll = vi.mocked(commands.pollWorktreePrs);
-const publishedHead = vi.mocked(commands.getWorktreePublishedHead);
+const resolve = vi.mocked(commands.resolveWorktreeGithub);
+const poll = vi.mocked(commands.pollGithubPrs);
+const listOpen = vi.mocked(commands.listGithubOpenPrs);
+const getPr = vi.mocked(commands.getGithubPr);
 
-const REPO = "example/demo-repo";
 const BRANCH = "feature/retry";
-
-function pullRequest(
-  number: number,
-  overrides: Partial<GithubPullRequest> = {}
-): GithubPullRequest {
-  return {
-    owner: "example",
-    repo: "demo-repo",
-    number,
-    title: `PR title ${number}`,
-    state: "open",
-    headRef: BRANCH,
-    headRepo: REPO,
-    baseRef: "main",
-    url: `https://github.com/${REPO}/pull/${number}`,
-    author: "alice",
-    updatedAt: "2026-11-24T12:00:00Z",
-    ...overrides,
-  };
-}
 
 const PR_482 = pullRequest(482, { title: "Reset retry budget after success" });
 const PR_479 = pullRequest(479, {
@@ -88,38 +70,7 @@ const PR_479 = pullRequest(479, {
   author: "bob",
 });
 
-const linked = (
-  pr: GithubPullRequest,
-  staleError: GithubFailure | null = null
-): WorktreePrAssociation => ({
-  status: "linked",
-  branch: BRANCH,
-  repo: REPO,
-  pr,
-  staleError,
-});
-const none = (branch = BRANCH): WorktreePrAssociation => ({
-  status: "none",
-  branch,
-  repo: REPO,
-  createPrUrl: `https://github.com/${REPO}/compare/${encodeURIComponent(branch)}?expand=1`,
-});
-const ambiguous = (
-  candidates: GithubPullRequest[] = [PR_482, PR_479]
-): WorktreePrAssociation => ({
-  status: "ambiguous",
-  branch: BRANCH,
-  repo: REPO,
-  candidates,
-});
-
 const ok = <T,>(data: T) => ({ status: "ok" as const, data });
-type AssociationResult = ReturnType<typeof ok<WorktreePrAssociation>>;
-const failure = (
-  kind: GithubErrorKind,
-  message = `${kind} failure`,
-  retryAfterSecs: number | null = null
-): GithubFailure => ({ kind, message, retryAfterSecs });
 const commandError = (
   message: string,
   kind: GithubErrorKind = "other",
@@ -167,46 +118,22 @@ function HeaderConsumer({
   return pr ? <ChatHeaderPrChip pr={pr} /> : null;
 }
 
-/** What GitHub says on the next poll; the stored association by default. */
-let polledAssociation: (
-  worktreePath: string,
-  branch: string
-) => WorktreePrAssociation | null = (worktreePath, branch) =>
-  useWorktreePrStore.getState().entries[worktreePrKey(worktreePath, branch)]
-    ?.association ?? null;
+let world: FakeGithub;
 
-function pollAnswer(targets: { worktreePath: string; branch: string }[]) {
-  return ok<WorktreePrPollBatch>({
-    results: targets.map((target) => {
-      const association = polledAssociation(target.worktreePath, target.branch);
-      const pr = linkedPullRequest(association);
-      return {
-        ...target,
-        result:
-          association && pr
-            ? {
-                status: "linked" as const,
-                association,
-                checks: {
-                  prNumber: pr.number,
-                  repo: REPO,
-                  headSha: "abc1234",
-                  checks: [],
-                  truncated: false,
-                },
-              }
-            : { status: "not_linked" as const },
-      };
-    }),
-    holdOffSecs: null,
-  });
+/** One chat on the branch, then its bar. */
+function renderBar(worktreePath: string, branch = BRANCH) {
+  seedChats(chatSession("chat", worktreePath, branch));
+  return render(
+    <PrAssociationBar worktreePath={worktreePath} branch={branch} />
+  );
 }
 
 /** One scheduled poll of every watched branch. */
-async function tickRevalidation() {
+async function tick() {
   await act(async () => {
-    await pollWatchedWorktreePrsNow();
+    await pollWatchedPrsNow();
   });
+  await settle();
 }
 
 async function openManualLink() {
@@ -214,34 +141,28 @@ async function openManualLink() {
   return screen.getByRole("textbox", { name: "Pull request number or URL" });
 }
 
+const openButton = (number: number) =>
+  screen.findByRole("button", { name: `Open PR #${number} on GitHub` });
+
 describe("PrAssociationBar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Only the interval is faked so Testing Library's polling still runs.
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    listOpen.mockResolvedValue(ok([PR_482]));
-    polledAssociation = (worktreePath, branch) =>
-      useWorktreePrStore.getState().entries[worktreePrKey(worktreePath, branch)]
-        ?.association ?? null;
-    poll.mockImplementation(async (targets) => pollAnswer(targets));
-    publishedHead.mockResolvedValue(ok(null));
+    world = fakeGithub();
+    installFakeGithub(commands, world);
   });
 
   afterEach(() => {
-    resetWorktreePrChecksStore();
-    resetWorktreePrStore();
+    resetFakeGithub();
     vi.useRealTimers();
   });
 
   it("shows the linked PR and unlinks locally, handing focus to Link PR…", async () => {
-    getAssociation.mockResolvedValue(ok(linked(PR_482)));
-    unlink.mockResolvedValue(ok(none()));
+    addPr(world, PR_482);
+    renderBar("/wt/a");
 
-    render(<PrAssociationBar worktreePath="/wt/a" branch={BRANCH} />);
-
-    const open = await screen.findByRole("button", {
-      name: "Open PR #482 on GitHub",
-    });
+    const open = await openButton(482);
     expect(screen.getByText("Open")).toBeInTheDocument();
     expect(screen.getByText(PR_482.title)).toBeInTheDocument();
     fireEvent.click(open);
@@ -251,15 +172,14 @@ describe("PrAssociationBar", () => {
     fireEvent.click(screen.getByTestId("pr-unlink-action"));
 
     expect(await screen.findByText(/No PR for/)).toBeInTheDocument();
-    expect(unlink).toHaveBeenCalledExactlyOnceWith("/wt/a", BRANCH);
+    expect(chatLink("chat")?.pr).toBeNull();
     expect(screen.getByRole("button", { name: "Link PR…" })).toHaveFocus();
   });
 
   it("links the chosen candidate and focuses the linked PR", async () => {
-    getAssociation.mockResolvedValue(ok(ambiguous()));
-    link.mockResolvedValue(ok(linked(PR_479)));
-
-    render(<PrAssociationBar worktreePath="/wt/ambiguous" branch={BRANCH} />);
+    addPr(world, PR_482);
+    addPr(world, PR_479);
+    renderBar("/wt/ambiguous");
 
     expect(
       await screen.findByTestId("pr-ambiguous-chooser")
@@ -274,23 +194,21 @@ describe("PrAssociationBar", () => {
     row.focus();
     fireEvent.click(row);
 
-    expect(
-      await screen.findByRole("button", { name: "Open PR #479 on GitHub" })
-    ).toHaveFocus();
-    expect(link).toHaveBeenCalledExactlyOnceWith(
+    expect(await openButton(479)).toHaveFocus();
+    expect(getPr).toHaveBeenCalledExactlyOnceWith(
       "/wt/ambiguous",
       BRANCH,
-      479,
-      "example/demo-repo"
+      "example/demo-repo",
+      479
     );
+    expect(chatLink("chat")?.pr?.number).toBe(479);
     expect(screen.getByText("Draft")).toBeInTheDocument();
   });
 
   it("marks the fork by identity even when the author is unknown", async () => {
-    getAssociation.mockResolvedValue(
-      ok(ambiguous([PR_482, { ...PR_479, author: null }]))
-    );
-    render(<PrAssociationBar worktreePath="/wt/fork" branch={BRANCH} />);
+    addPr(world, PR_482);
+    addPr(world, { ...PR_479, author: null });
+    renderBar("/wt/fork");
 
     const row = await screen.findByRole("button", {
       name: /Link locally: #479/,
@@ -301,21 +219,21 @@ describe("PrAssociationBar", () => {
     );
   });
 
-  it("explains a single candidate that was not linked automatically", async () => {
-    getAssociation.mockResolvedValue(ok(ambiguous([PR_479])));
-    render(<PrAssociationBar worktreePath="/wt/single" branch={BRANCH} />);
+  it("explains a single fork PR, which is never linked automatically", async () => {
+    addPr(world, PR_479);
+    renderBar("/wt/single");
 
     const bar = await screen.findByTestId("pr-ambiguous-chooser");
     expect(bar.parentElement).toHaveTextContent(
       "PR #479 for feature/retry is from fork bob/demo-repo, so it wasn’t linked automatically"
     );
     expect(bar.parentElement).not.toHaveTextContent(/PRs match/);
+    expect(chatLink("chat")).toBeUndefined();
   });
 
   it("moves through the chooser with arrows, Home and End, and focuses the first row on explicit open", async () => {
-    const PR_470 = pullRequest(470);
-    getAssociation.mockResolvedValue(ok(ambiguous([PR_482, PR_479, PR_470])));
-    render(<PrAssociationBar worktreePath="/wt/keys" branch={BRANCH} />);
+    for (const pr of [PR_482, PR_479, pullRequest(470)]) addPr(world, pr);
+    renderBar("/wt/keys");
 
     const toggle = await screen.findByRole("button", { name: "Hide chooser" });
     fireEvent.click(toggle);
@@ -342,15 +260,16 @@ describe("PrAssociationBar", () => {
       screen.queryByTestId("pr-ambiguous-chooser")
     ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose PR…" })).toHaveFocus();
-    expect(unlink).not.toHaveBeenCalled();
+    expect(chatLink("chat")).toBeUndefined();
   });
 
   it("ignores a second mutation while the first link is pending", async () => {
-    getAssociation.mockResolvedValue(ok(ambiguous()));
-    const pending = deferred<AssociationResult>();
-    link.mockReturnValue(pending.promise);
+    addPr(world, PR_482);
+    addPr(world, PR_479);
+    const pending = deferred<ReturnType<typeof ok<GithubPullRequest>>>();
+    getPr.mockReturnValueOnce(pending.promise);
+    renderBar("/wt/serial");
 
-    render(<PrAssociationBar worktreePath="/wt/serial" branch={BRANCH} />);
     const first = await screen.findByRole("button", {
       name: /Link locally: #482/,
     });
@@ -363,38 +282,35 @@ describe("PrAssociationBar", () => {
     expect(other).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(keep);
     fireEvent.click(other);
-    expect(unlink).not.toHaveBeenCalled();
-    expect(link).toHaveBeenCalledTimes(1);
+    expect(chatLink("chat")).toBeUndefined();
+    expect(getPr).toHaveBeenCalledTimes(1);
     expect(first).toHaveFocus();
 
-    await act(async () => pending.resolve(ok(linked(PR_482))));
-    expect(
-      await screen.findByRole("button", { name: "Open PR #482 on GitHub" })
-    ).toBeInTheDocument();
+    await act(async () => pending.resolve(ok(PR_482)));
+    expect(await openButton(482)).toBeInTheDocument();
   });
 
   it("records Keep unlinked locally and focuses Link PR…", async () => {
-    getAssociation.mockResolvedValue(ok(ambiguous()));
-    unlink.mockResolvedValue(ok(none()));
-    render(
-      <PrAssociationBar worktreePath="/wt/keep-unlinked" branch={BRANCH} />
-    );
+    addPr(world, PR_482);
+    addPr(world, PR_479);
+    renderBar("/wt/keep-unlinked");
 
     const keep = await screen.findByRole("button", { name: "Keep unlinked" });
     keep.focus();
     fireEvent.click(keep);
 
     expect(await screen.findByText(/No PR for/)).toBeInTheDocument();
-    expect(unlink).toHaveBeenCalledExactlyOnceWith("/wt/keep-unlinked", BRANCH);
+    expect(chatLink("chat")).toMatchObject({
+      worktreePath: "/wt/keep-unlinked",
+      branch: BRANCH,
+      pr: null,
+    });
     expect(screen.getByRole("button", { name: "Link PR…" })).toHaveFocus();
   });
 
   it("offers Create PR on GitHub and shows progress while Check again runs", async () => {
-    getAssociation.mockResolvedValueOnce(ok(none("feature/new")));
-    const pending = deferred<AssociationResult>();
-    getAssociation.mockReturnValueOnce(pending.promise);
-
-    render(<PrAssociationBar worktreePath="/wt/none" branch={BRANCH} />);
+    world.worktrees.set("/wt/none", github("feature/new"));
+    renderBar("/wt/none");
 
     fireEvent.click(
       await screen.findByRole("button", { name: "Create PR on GitHub" })
@@ -403,24 +319,25 @@ describe("PrAssociationBar", () => {
       `https://github.com/${REPO}/compare/feature%2Fnew?expand=1`
     );
 
+    const pending =
+      deferred<ReturnType<typeof ok<ReturnType<typeof github>>>>();
+    resolve.mockReturnValueOnce(pending.promise);
     const check = screen.getByRole("button", { name: "Check again" });
     check.focus();
     fireEvent.click(check);
-    expect(getAssociation).toHaveBeenLastCalledWith("/wt/none", BRANCH, true);
-    expect(check).toHaveTextContent("Checking…");
+    expect(resolve).toHaveBeenLastCalledWith("/wt/none", BRANCH);
+    await waitFor(() => expect(check).toHaveTextContent("Checking…"));
     expect(check).toHaveAttribute("aria-busy", "true");
     expect(check).toHaveFocus();
 
-    await act(async () => pending.resolve(ok(linked(PR_482))));
-    expect(
-      await screen.findByRole("button", { name: "Open PR #482 on GitHub" })
-    ).toHaveFocus();
+    addPr(world, PR_482);
+    await act(async () => pending.resolve(ok(github("feature/new"))));
+    expect(await openButton(482)).toHaveFocus();
   });
 
-  it("does not poll gh_missing or auth_expired on remount, reload, or interval", async () => {
-    getAssociation.mockResolvedValueOnce(
-      ok({ status: "gh_missing", branch: BRANCH, repo: REPO })
-    );
+  it("waits for the user after gh_missing or auth_expired: no reads on remount or tick", async () => {
+    world.failRemote.set(REPO, failure("gh_missing"));
+    seedChats(chatSession("chat", "/wt/missing", BRANCH));
     const view = render(
       <>
         <HeaderConsumer worktreePath="/wt/missing" />
@@ -428,6 +345,7 @@ describe("PrAssociationBar", () => {
       </>
     );
     expect(await screen.findByText(/GitHub CLI \(/)).toBeInTheDocument();
+    const reads = poll.mock.calls.length;
 
     view.rerender(<HeaderConsumer worktreePath="/wt/missing" />);
     view.rerender(
@@ -436,33 +354,30 @@ describe("PrAssociationBar", () => {
         <PrAssociationBar worktreePath="/wt/missing" branch={BRANCH} />
       </>
     );
-    await tickRevalidation();
+    await tick();
     expect(screen.getByText(/GitHub CLI \(/)).toBeInTheDocument();
-    expect(getAssociation).toHaveBeenCalledTimes(1);
+    expect(poll).toHaveBeenCalledTimes(reads);
     view.unmount();
+    resetFakeGithub();
 
-    getAssociation.mockResolvedValueOnce(
-      ok({
-        status: "auth_expired",
-        branch: BRANCH,
-        repo: REPO,
-        reason: "Bad credentials",
-      })
-    );
-    render(<PrAssociationBar worktreePath="/wt/expired" branch={BRANCH} />);
+    world.failRemote.set(REPO, failure("auth_expired", "Bad credentials"));
+    renderBar("/wt/expired");
     await screen.findByText(/GitHub authentication expired/);
     expect(screen.getByRole("status")).toHaveTextContent(
       /GitHub authentication expired/
     );
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    await tickRevalidation();
-    expect(getAssociation).toHaveBeenCalledTimes(2);
+    const after = poll.mock.calls.length;
+    await tick();
+    expect(poll).toHaveBeenCalledTimes(after);
   });
 
-  it("shares one discovery between two consumers of the same worktree", async () => {
-    const pending = deferred<AssociationResult>();
-    getAssociation.mockReturnValue(pending.promise);
-
+  it("shares one lookup between two consumers of the same worktree", async () => {
+    addPr(world, PR_482);
+    const pending =
+      deferred<ReturnType<typeof ok<ReturnType<typeof github>>>>();
+    resolve.mockReturnValueOnce(pending.promise);
+    seedChats(chatSession("chat", "/wt/shared", BRANCH));
     render(
       <>
         <HeaderConsumer worktreePath="/wt/shared" />
@@ -472,28 +387,21 @@ describe("PrAssociationBar", () => {
     expect(
       screen.getByText("Looking for a GitHub pull request…")
     ).toBeInTheDocument();
-    expect(getAssociation).toHaveBeenCalledExactlyOnceWith(
-      "/wt/shared",
-      BRANCH,
-      false
-    );
 
-    await act(async () => pending.resolve(ok(linked(PR_482))));
+    await act(async () => pending.resolve(ok(github(BRANCH))));
     expect(await screen.findByTestId("chat-header-pr-chip")).toHaveTextContent(
       "#482"
     );
-    expect(
-      screen.getByRole("button", { name: "Open PR #482 on GitHub" })
-    ).toBeInTheDocument();
-    expect(getAssociation).toHaveBeenCalledTimes(1);
+    expect(await openButton(482)).toBeInTheDocument();
+    expect(resolve).toHaveBeenCalledExactlyOnceWith("/wt/shared", BRANCH);
   });
 
-  it("keys associations per worktree and branch, never sharing across branches", async () => {
-    getAssociation.mockImplementation(async (_path, branch) =>
-      ok({
-        ...linked(branch === BRANCH ? PR_482 : PR_479),
-        branch,
-      })
+  it("keys links per worktree and branch, never sharing across branches", async () => {
+    addPr(world, PR_482);
+    addPr(world, pullRequest(479, { headRef: "feature/other" }));
+    seedChats(
+      chatSession("main", "/wt/keyed", BRANCH),
+      chatSession("other", "/wt/keyed", "feature/other")
     );
     const view = render(
       <>
@@ -505,117 +413,85 @@ describe("PrAssociationBar", () => {
     expect(await screen.findByTestId("chat-header-pr-chip")).toHaveTextContent(
       "#482"
     );
-    expect(
-      await screen.findByRole("button", { name: "Open PR #479 on GitHub" })
-    ).toBeInTheDocument();
-    expect(getAssociation).toHaveBeenCalledTimes(2);
-    expect(getAssociation).toHaveBeenCalledWith("/wt/keyed", BRANCH, false);
-    expect(getAssociation).toHaveBeenCalledWith(
-      "/wt/keyed",
-      "feature/other",
-      false
-    );
+    expect(await openButton(479)).toBeInTheDocument();
+    expect(resolve).toHaveBeenCalledTimes(2);
 
-    unlink.mockResolvedValue(ok(none("feature/other")));
     fireEvent.click(screen.getByTestId("pr-actions-menu"));
     fireEvent.click(screen.getByTestId("pr-unlink-action"));
     expect(await screen.findByText(/No PR for/)).toBeInTheDocument();
-    expect(unlink).toHaveBeenCalledExactlyOnceWith(
-      "/wt/keyed",
-      "feature/other"
-    );
+    expect(chatLink("other")?.pr).toBeNull();
+    expect(chatLink("main")?.pr?.number).toBe(482);
     expect(screen.getByTestId("chat-header-pr-chip")).toHaveTextContent("#482");
     view.unmount();
 
     render(<HeaderConsumer worktreePath="/wt/keyed" branch={null} />);
-    await act(async () => {});
-    expect(getAssociation).toHaveBeenCalledTimes(2);
+    await settle();
+    expect(resolve).toHaveBeenCalledTimes(2);
   });
 
-  it("takes a linked PR's state from the poller and keeps it through a failed poll", async () => {
-    getAssociation.mockResolvedValueOnce(ok(linked(PR_482)));
-    render(<PrAssociationBar worktreePath="/wt/linked" branch={BRANCH} />);
-    await screen.findByRole("button", { name: "Open PR #482 on GitHub" });
+  it("takes a linked PR's state from the poll and keeps it through a failed poll", async () => {
+    addPr(world, PR_482);
+    renderBar("/wt/linked");
+    await openButton(482);
+    await settle();
 
-    poll.mockResolvedValueOnce({
-      status: "error",
-      error: {
-        kind: "other",
-        message: "Network offline",
-        retryAfterSecs: null,
-      },
-    });
-    await tickRevalidation();
+    world.failPoll = failure("other", "Network offline");
+    await tick();
     // Only the checks line reports it; the PR stays as last read.
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Couldn’t refresh: Network offline"
     );
-    expect(
-      screen.getByRole("button", { name: "Open PR #482 on GitHub" })
-    ).toBeInTheDocument();
+    expect(await openButton(482)).toBeInTheDocument();
 
-    polledAssociation = () => linked({ ...PR_482, state: "merged" });
-    await tickRevalidation();
+    // Background ticks wait out the backoff; Retry now reads at once.
+    world.failPoll = null;
+    addPr(world, { ...PR_482, state: "merged" });
+    await tick();
+    expect(screen.queryByText("Merged")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
     expect(await screen.findByText("Merged")).toBeInTheDocument();
-    // The poller answers for the PR; discovery is not asked again.
-    expect(getAssociation).toHaveBeenCalledTimes(1);
+    expect(chatLink("chat")?.pr?.state).toBe("merged");
   });
 
-  it("keeps an explicit refresh error through a later poll", async () => {
-    getAssociation.mockResolvedValueOnce(ok(linked(PR_482)));
-    render(<PrAssociationBar worktreePath="/wt/errors" branch={BRANCH} />);
-    await screen.findByRole("button", { name: "Open PR #482 on GitHub" });
+  it("refreshes the PR and its checks with one poll", async () => {
+    addPr(world, PR_482);
+    renderBar("/wt/errors");
+    await openButton(482);
+    await settle();
+    const polls = poll.mock.calls.length;
 
-    getAssociation.mockResolvedValueOnce(commandError("GitHub is down"));
+    world.failPoll = failure("other", "GitHub is down");
     fireEvent.click(screen.getByTestId("pr-actions-menu"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Refresh PR" }));
-    expect(
-      await screen.findByText(/GitHub is down/, { selector: "[role=alert] *" })
-    ).toBeInTheDocument();
-
-    await tickRevalidation();
-    expect(screen.getByText(/GitHub is down/)).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn’t refresh: GitHub is down"
+    );
+    expect(poll).toHaveBeenCalledTimes(polls + 1);
   });
 
-  it("does not let a poll answer replace an explicit refresh result", async () => {
-    getAssociation.mockResolvedValueOnce(ok(linked(PR_482)));
-    render(<PrAssociationBar worktreePath="/wt/race" branch={BRANCH} />);
-    await screen.findByRole("button", { name: "Open PR #482 on GitHub" });
-    await act(async () => {});
+  it("reads again after a background poll when Refresh PR lands during it", async () => {
+    addPr(world, PR_482);
+    renderBar("/wt/race");
+    await openButton(482);
+    await settle();
 
-    const background = deferred<ReturnType<typeof pollAnswer>>();
+    // The background poll answers with what GitHub said before the refresh.
+    const before = await commands.pollGithubPrs(poll.mock.calls.at(-1)![0]);
+    const background = deferred<typeof before>();
     poll.mockReturnValueOnce(background.promise);
-    const tick = pollWatchedWorktreePrsNow();
-    getAssociation.mockResolvedValueOnce(ok(linked(PR_479)));
+    const background_tick = pollWatchedPrsNow();
     fireEvent.click(screen.getByTestId("pr-actions-menu"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Refresh PR" }));
-    expect(
-      await screen.findByRole("button", { name: "Open PR #479 on GitHub" })
-    ).toBeInTheDocument();
-    // The poll answers with what GitHub said before the refresh.
-    polledAssociation = () => linked(PR_482);
+    addPr(world, { ...PR_482, state: "merged" });
     await act(async () => {
-      background.resolve(
-        pollAnswer([{ worktreePath: "/wt/race", branch: BRANCH }])
-      );
-      await tick;
+      background.resolve(before);
+      await background_tick;
     });
-    expect(
-      screen.getByRole("button", { name: "Open PR #479 on GitHub" })
-    ).toBeInTheDocument();
-
-    polledAssociation = () => none();
-    await tickRevalidation();
-    expect(
-      screen.getByRole("button", { name: "Open PR #479 on GitHub" })
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/No PR for/)).not.toBeInTheDocument();
+    expect(await screen.findByText("Merged")).toBeInTheDocument();
   });
 
   it("keeps the typed number and focus when a link fails", async () => {
-    getAssociation.mockResolvedValue(ok(none()));
-    link.mockResolvedValue(commandError("PR #482 was not found"));
-    render(<PrAssociationBar worktreePath="/wt/link-fail" branch={BRANCH} />);
+    renderBar("/wt/link-fail");
 
     const input = await openManualLink();
     expect(input).toHaveFocus();
@@ -625,11 +501,11 @@ describe("PrAssociationBar", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "PR #482 was not found"
     );
-    expect(link).toHaveBeenCalledExactlyOnceWith(
+    expect(getPr).toHaveBeenCalledExactlyOnceWith(
       "/wt/link-fail",
       BRANCH,
-      482,
-      null
+      null,
+      482
     );
     expect(input).toHaveValue("482");
     expect(input).toHaveFocus();
@@ -637,9 +513,8 @@ describe("PrAssociationBar", () => {
   });
 
   it("validates the manual entry and passes a URL's repo for the backend to check", async () => {
-    getAssociation.mockResolvedValue(ok(none()));
-    link.mockResolvedValue(commandError("stop here"));
-    render(<PrAssociationBar worktreePath="/wt/validate" branch={BRANCH} />);
+    getPr.mockResolvedValue(commandError("stop here"));
+    renderBar("/wt/validate");
     const input = await openManualLink();
     const submit = () =>
       fireEvent.submit(input.closest("form") as HTMLFormElement);
@@ -649,7 +524,7 @@ describe("PrAssociationBar", () => {
     const error = await screen.findByText(/Enter a PR number like 482/);
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(input).toHaveAttribute("aria-describedby", error.id);
-    expect(link).not.toHaveBeenCalled();
+    expect(getPr).not.toHaveBeenCalled();
 
     for (const [value, number, repo] of [
       ["0482", 482, null],
@@ -660,11 +535,11 @@ describe("PrAssociationBar", () => {
       fireEvent.change(input, { target: { value } });
       submit();
       await waitFor(() =>
-        expect(link).toHaveBeenLastCalledWith(
+        expect(getPr).toHaveBeenLastCalledWith(
           "/wt/validate",
           BRANCH,
-          number,
-          repo
+          repo,
+          number
         )
       );
       await waitFor(() => expect(input).not.toHaveAttribute("readonly"));
@@ -673,8 +548,7 @@ describe("PrAssociationBar", () => {
   });
 
   it("closes the manual panel with Escape and returns focus to Link PR…", async () => {
-    getAssociation.mockResolvedValue(ok(none()));
-    render(<PrAssociationBar worktreePath="/wt/escape" branch={BRANCH} />);
+    renderBar("/wt/escape");
     const input = await openManualLink();
 
     fireEvent.keyDown(input, { key: "Escape" });
@@ -685,13 +559,8 @@ describe("PrAssociationBar", () => {
   });
 
   it("retries a failed open-PR lookup while the number field stays usable", async () => {
-    getAssociation.mockResolvedValue(ok(none()));
-    listOpen
-      .mockRejectedValueOnce(new Error("Network offline"))
-      .mockResolvedValueOnce(ok([PR_482]));
-    render(
-      <PrAssociationBar worktreePath="/wt/manual-retry" branch={BRANCH} />
-    );
+    listOpen.mockRejectedValueOnce(new Error("Network offline"));
+    renderBar("/wt/manual-retry");
     const input = await openManualLink();
 
     expect(
@@ -699,17 +568,18 @@ describe("PrAssociationBar", () => {
     ).toBeInTheDocument();
     expect(input).not.toHaveAttribute("readonly");
 
+    // Another branch's PR, so this branch stays unlinked.
+    addPr(world, pullRequest(482, { headRef: "feature/elsewhere" }));
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByText(PR_482.title)).toBeInTheDocument();
+    expect(await screen.findByText("PR title 482")).toBeInTheDocument();
   });
 
   it("says when the open-PR list is cut short or empty", async () => {
-    getAssociation.mockResolvedValue(ok(none()));
     const many = Array.from({ length: OPEN_PR_LIST_LIMIT + 2 }, (_, index) =>
       pullRequest(500 + index)
     );
     listOpen.mockResolvedValueOnce(ok(many)).mockResolvedValueOnce(ok([]));
-    render(<PrAssociationBar worktreePath="/wt/list" branch={BRANCH} />);
+    renderBar("/wt/list");
 
     await openManualLink();
     expect(
@@ -731,78 +601,67 @@ describe("PrAssociationBar", () => {
   });
 
   it("renders unavailable with Check again and hides not-applicable worktrees", async () => {
-    getAssociation.mockResolvedValueOnce(
-      ok({
-        status: "unavailable",
-        branch: BRANCH,
-        repo: REPO,
-        error: failure("other", "GitHub API timed out"),
-      })
-    );
-    const view = render(
-      <PrAssociationBar worktreePath="/wt/unavailable" branch={BRANCH} />
-    );
+    world.failRemote.set(REPO, failure("other", "GitHub API timed out"));
+    const view = renderBar("/wt/unavailable");
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Couldn’t check GitHub PR: GitHub API timed out"
     );
-    getAssociation.mockResolvedValueOnce(ok(linked(PR_482)));
+    world.failRemote.clear();
+    addPr(world, PR_482);
     fireEvent.click(screen.getByRole("button", { name: "Check again" }));
-    expect(
-      await screen.findByRole("button", { name: "Open PR #482 on GitHub" })
-    ).toBeInTheDocument();
+    expect(await openButton(482)).toBeInTheDocument();
     view.unmount();
 
-    getAssociation.mockResolvedValueOnce(
-      ok({
-        status: "not_applicable",
-        branch: null,
-        reason: "No GitHub remote configured for this repository",
-      })
-    );
-    render(<PrAssociationBar worktreePath="/wt/no-remote" branch={BRANCH} />);
+    world.worktrees.set("/wt/no-remote", {
+      status: "not_applicable",
+      branch: null,
+      reason: "No GitHub remote configured for this repository",
+    });
+    renderBar("/wt/no-remote");
     await waitFor(() =>
       expect(screen.queryByTestId("pr-association-bar")).not.toBeInTheDocument()
     );
   });
 
-  it.each([
-    [failure("gh_missing"), "gh not found"],
-    [failure("auth_expired"), "gh sign-in expired"],
-    [
-      failure("rate_limited", "slow down", 45),
-      "rate limited · try again in 45s",
-    ],
-    [failure("not_found"), "PR not found on GitHub"],
-    [failure("other", "gh exited with 1"), "gh exited with 1"],
-  ])(
-    "keeps a linked PR visible with a quiet %j refresh note",
-    async (staleError, note) => {
-      getAssociation.mockResolvedValueOnce(ok(linked(PR_482, staleError)));
-      render(<PrAssociationBar worktreePath="/wt/stale" branch={BRANCH} />);
-      const status = await screen.findByText(`Couldn’t refresh · ${note}`);
-      expect(status).toHaveAttribute("role", "status");
-      expect(status).toHaveClass("pr-assoc-mute");
-      expect(
-        screen.getByRole("button", { name: "Open PR #482 on GitHub" })
-      ).toBeInTheDocument();
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    }
-  );
+  it("shows a chat's PR read-only when its worktree is not on this machine", async () => {
+    world.worktrees.set("/elsewhere/wt", {
+      status: "not_applicable",
+      branch: null,
+      reason: "Not a git repository",
+    });
+    seedChats(
+      chatSession("synced", "/elsewhere/wt", BRANCH, {
+        link: prLink(
+          "/elsewhere/wt",
+          BRANCH,
+          linkedPr(PR_482, { title: "", state: null }),
+          null
+        ),
+      })
+    );
+    render(<PrAssociationBar worktreePath="/elsewhere/wt" branch={BRANCH} />);
+
+    expect(await openButton(482)).toBeInTheDocument();
+    expect(
+      await screen.findByText("Worktree not on this machine")
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("pr-actions-menu"));
+    expect(screen.queryByTestId("pr-unlink-action")).not.toBeInTheDocument();
+    await tick();
+    expect(poll).not.toHaveBeenCalled();
+  });
 
   it.each(FAILURE_TEXT)(
     "shows a %s link failure once, with recovery copy and no retry",
     async (kind, retryAfterSecs, text) => {
-      getAssociation.mockResolvedValue(ok(none()));
-      link.mockResolvedValue(
+      getPr.mockResolvedValue(
         commandError(
           kind === "not_found" || kind === "other" ? text : `${kind} raw`,
           kind,
           retryAfterSecs
         )
       );
-      render(
-        <PrAssociationBar worktreePath={`/wt/link-${kind}`} branch={BRANCH} />
-      );
+      renderBar(`/wt/link-${kind}`);
       const input = await openManualLink();
       fireEvent.change(input, { target: { value: "482" } });
       fireEvent.click(screen.getByRole("button", { name: "Link locally" }));
@@ -811,16 +670,15 @@ describe("PrAssociationBar", () => {
       expect(
         screen.getAllByRole("button", { name: "Check again" })
       ).toHaveLength(1);
-      await tickRevalidation();
-      expect(link).toHaveBeenCalledTimes(1);
-      expect(getAssociation).toHaveBeenCalledTimes(1);
+      await tick();
+      expect(getPr).toHaveBeenCalledTimes(1);
+      expect(resolve).toHaveBeenCalledTimes(1);
     }
   );
 
   it.each(FAILURE_TEXT)(
     "shows a %s open-PR list failure with a manual Retry",
     async (kind, retryAfterSecs, text) => {
-      getAssociation.mockResolvedValue(ok(none()));
       listOpen.mockResolvedValueOnce(
         commandError(
           kind === "not_found" || kind === "other" ? text : `${kind} raw`,
@@ -828,27 +686,25 @@ describe("PrAssociationBar", () => {
           retryAfterSecs
         )
       );
-      render(
-        <PrAssociationBar worktreePath={`/wt/list-${kind}`} branch={BRANCH} />
-      );
+      renderBar(`/wt/list-${kind}`);
       await openManualLink();
 
       expect(await screen.findByRole("alert")).toHaveTextContent(
         `Couldn’t load open PRs: ${text}`
       );
       expect(listOpen).toHaveBeenCalledTimes(1);
+      addPr(world, pullRequest(482, { headRef: "feature/elsewhere" }));
       fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-      expect(await screen.findByText(PR_482.title)).toBeInTheDocument();
+      expect(await screen.findByText("PR title 482")).toBeInTheDocument();
       expect(listOpen).toHaveBeenCalledTimes(2);
     }
   );
 
   it("offers Check again beside a gh setup failure when the bar has none", async () => {
-    getAssociation.mockResolvedValueOnce(ok(ambiguous()));
-    link.mockResolvedValueOnce(commandError("raw", "auth_expired"));
-    render(
-      <PrAssociationBar worktreePath="/wt/ambiguous-auth" branch={BRANCH} />
-    );
+    addPr(world, PR_482);
+    addPr(world, PR_479);
+    getPr.mockResolvedValueOnce(commandError("raw", "auth_expired"));
+    renderBar("/wt/ambiguous-auth");
     fireEvent.click(
       await screen.findByRole("button", { name: /Link locally: #482/ })
     );
@@ -856,77 +712,67 @@ describe("PrAssociationBar", () => {
       "GitHub authentication expired · run gh auth login in your terminal"
     );
 
-    getAssociation.mockResolvedValueOnce(ok(linked(PR_482)));
+    world.prs.delete("example/demo-repo#479");
     fireEvent.click(screen.getByRole("button", { name: "Check again" }));
-    expect(getAssociation).toHaveBeenLastCalledWith(
-      "/wt/ambiguous-auth",
-      BRANCH,
-      true
-    );
-    expect(
-      await screen.findByRole("button", { name: "Open PR #482 on GitHub" })
-    ).toBeInTheDocument();
+    expect(resolve).toHaveBeenLastCalledWith("/wt/ambiguous-auth", BRANCH);
+    expect(await openButton(482)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("shows a failed first lookup with Check again instead of a spinner", async () => {
-    getAssociation.mockResolvedValueOnce(
-      commandError("raw", "rate_limited", 30)
-    );
-    render(<PrAssociationBar worktreePath="/wt/first-fail" branch={BRANCH} />);
+    world.worktrees.set("/wt/first-fail", failure("rate_limited", "raw", 30));
+    renderBar("/wt/first-fail");
     expect(await screen.findByRole("status")).toHaveTextContent(
       "Couldn’t check GitHub PR: GitHub rate limit reached · try again in 30s"
     );
     expect(
       screen.queryByText("Looking for a GitHub pull request…")
     ).not.toBeInTheDocument();
-    await tickRevalidation();
-    expect(getAssociation).toHaveBeenCalledTimes(1);
+    await tick();
+    expect(resolve).toHaveBeenCalledTimes(1);
   });
 
-  it("links a candidate from another repo with that repo, a typed number with null", async () => {
-    const MIRROR = pullRequest(91, {
-      owner: "upstream",
-      repo: "demo",
-      headRepo: REPO,
-      url: "https://github.com/upstream/demo/pull/91",
+  it("links a candidate upstream with that repo, a typed number with null", async () => {
+    const UPSTREAM = "upstream/demo";
+    const fork = github(BRANCH, {
+      baseRepo: UPSTREAM,
+      searchRepos: [UPSTREAM, REPO],
     });
-    getAssociation.mockResolvedValueOnce(ok(ambiguous([PR_482, MIRROR])));
-    link.mockResolvedValue(commandError("stop here"));
-    const view = render(
-      <PrAssociationBar worktreePath="/wt/repos" branch={BRANCH} />
-    );
+    const upstream = (number: number) =>
+      pullRequest(number, {
+        owner: "upstream",
+        repo: "demo",
+        url: `https://github.com/${UPSTREAM}/pull/${number}`,
+      });
+    addPr(world, upstream(91));
+    addPr(world, upstream(92));
+    world.worktrees.set("/wt/repos", fork);
+    getPr.mockResolvedValue(commandError("stop here"));
+    const view = renderBar("/wt/repos");
 
     fireEvent.click(
       await screen.findByRole("button", { name: /Link locally: #91/ })
     );
     await waitFor(() =>
-      expect(link).toHaveBeenLastCalledWith(
-        "/wt/repos",
-        BRANCH,
-        91,
-        "upstream/demo"
-      )
+      expect(getPr).toHaveBeenLastCalledWith("/wt/repos", BRANCH, UPSTREAM, 91)
     );
     view.unmount();
 
-    getAssociation.mockResolvedValueOnce(ok(none()));
-    render(<PrAssociationBar worktreePath="/wt/typed" branch={BRANCH} />);
+    renderBar("/wt/typed");
     const input = await openManualLink();
     fireEvent.change(input, { target: { value: "#91" } });
     fireEvent.click(screen.getByRole("button", { name: "Link locally" }));
     await waitFor(() =>
-      expect(link).toHaveBeenLastCalledWith("/wt/typed", BRANCH, 91, null)
+      expect(getPr).toHaveBeenLastCalledWith("/wt/typed", BRANCH, null, 91)
     );
-    expect(link).toHaveBeenCalledTimes(2);
+    expect(getPr).toHaveBeenCalledTimes(2);
   });
 
   it("shows the backend's rejection of a URL from a repo that isn't a remote", async () => {
-    getAssociation.mockResolvedValue(ok(none()));
-    link.mockResolvedValue(
+    getPr.mockResolvedValue(
       commandError("other/repo is not a GitHub remote of this worktree")
     );
-    render(<PrAssociationBar worktreePath="/wt/foreign" branch={BRANCH} />);
+    renderBar("/wt/foreign");
     const input = await openManualLink();
     fireEvent.change(input, {
       target: { value: "https://github.com/other/repo/pull/12" },
@@ -936,11 +782,11 @@ describe("PrAssociationBar", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "other/repo is not a GitHub remote of this worktree"
     );
-    expect(link).toHaveBeenCalledExactlyOnceWith(
+    expect(getPr).toHaveBeenCalledExactlyOnceWith(
       "/wt/foreign",
       BRANCH,
-      12,
-      "other/repo"
+      "other/repo",
+      12
     );
     expect(input).toHaveValue("https://github.com/other/repo/pull/12");
   });
@@ -949,16 +795,60 @@ describe("PrAssociationBar", () => {
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});
-    getAssociation.mockResolvedValueOnce(
-      ok(linked({ ...PR_482, url: "file:///etc/passwd" }))
-    );
-    render(<PrAssociationBar worktreePath="/wt/bad-url" branch={BRANCH} />);
+    addPr(world, { ...PR_482, url: "file:///etc/passwd" });
+    renderBar("/wt/bad-url");
     expect(await screen.findByText("#482")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Open PR #482 on GitHub" })
     ).not.toBeInTheDocument();
     expect(openUrl).not.toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it("asks before linking a newer PR after the linked one merged", async () => {
+    seedChats(
+      chatSession("chat", "/wt/merged", BRANCH, {
+        link: prLink(
+          "/wt/merged",
+          BRANCH,
+          linkedPr({ ...PR_482, state: "merged" })
+        ),
+      })
+    );
+    addPr(world, { ...PR_482, state: "merged" });
+    addPr(world, pullRequest(490, { title: "Follow-up" }));
+    render(<PrAssociationBar worktreePath="/wt/merged" branch={BRANCH} />);
+
+    const prompt = await screen.findByTestId("pr-newer-prompt");
+    expect(prompt).toHaveTextContent(
+      "PR #482 was merged. Link the newer #490?"
+    );
+    expect(chatLink("chat")?.pr?.number).toBe(482);
+
+    fireEvent.click(within(prompt).getByRole("button", { name: "Link #490" }));
+    expect(await openButton(490)).toBeInTheDocument();
+    expect(chatLink("chat")?.pr?.number).toBe(490);
+    expect(screen.queryByTestId("pr-newer-prompt")).not.toBeInTheDocument();
+  });
+
+  it("keeps the merged PR when the newer one is declined", async () => {
+    seedChats(
+      chatSession("chat", "/wt/keep-merged", BRANCH, {
+        link: prLink(
+          "/wt/keep-merged",
+          BRANCH,
+          linkedPr({ ...PR_482, state: "merged" })
+        ),
+      })
+    );
+    addPr(world, pullRequest(490));
+    render(<PrAssociationBar worktreePath="/wt/keep-merged" branch={BRANCH} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Keep #482" }));
+    expect(screen.queryByTestId("pr-newer-prompt")).not.toBeInTheDocument();
+    await tick();
+    expect(screen.queryByTestId("pr-newer-prompt")).not.toBeInTheDocument();
+    expect(chatLink("chat")?.pr?.number).toBe(482);
   });
 });
 
@@ -974,10 +864,11 @@ describe("ChatHeader PR chip", () => {
 
   it("routes to Changes when a handler is given and is static otherwise", () => {
     const onOpenPrInChanges = vi.fn();
+    const pr = linkedPr(PR_482);
     const view = render(
       <ChatHeader
         {...header}
-        linkedPr={PR_482}
+        linkedPr={pr}
         onOpenPrInChanges={onOpenPrInChanges}
       />
     );
@@ -987,11 +878,24 @@ describe("ChatHeader PR chip", () => {
     fireEvent.click(chip);
     expect(onOpenPrInChanges).toHaveBeenCalledTimes(1);
 
-    view.rerender(<ChatHeader {...header} linkedPr={PR_482} />);
+    view.rerender(<ChatHeader {...header} linkedPr={pr} />);
     expect(screen.getByTestId("chat-header-pr-chip").tagName).toBe("SPAN");
 
     view.rerender(<ChatHeader {...header} linkedPr={null} />);
     expect(screen.queryByTestId("chat-header-pr-chip")).not.toBeInTheDocument();
+  });
+
+  it("names only the number of a link not yet read from GitHub", () => {
+    render(
+      <ChatHeader
+        {...header}
+        linkedPr={linkedPr(PR_482, { title: "", state: null })}
+      />
+    );
+    expect(screen.getByTestId("chat-header-pr-chip")).toHaveAttribute(
+      "title",
+      "PR #482"
+    );
   });
 });
 

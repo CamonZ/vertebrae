@@ -17,7 +17,8 @@ import { OverflowMenu } from "../molecules/OverflowMenu";
 import { FALLBACK_CHAT_PROJECT_LABEL } from "../../utils/localChatSessionGroups";
 import { CHAT_ATTENTION, type ChatAttention } from "../../utils/chatAttention";
 import { ChatAttentionDot } from "./ChatAttentionDot";
-import type { GithubPullRequest, TaskLevel } from "../../bindings";
+import type { TaskLevel } from "../../bindings";
+import type { LinkedPr } from "../../stores/prLinks";
 import { IdChip } from "../shared/HearthPrimitives";
 import { ChatHeaderPrChip } from "./GithubPr";
 import type { PrCheckCounts } from "./workspace/prChecksView";
@@ -51,7 +52,7 @@ interface ChatHeaderProps {
   showProjectContext?: boolean;
   /** The Vertebrae entity this chat is associated with. */
   entity?: { id: string; level: TaskLevel } | null;
-  linkedPr?: GithubPullRequest | null;
+  linkedPr?: LinkedPr | null;
   /** Check counts of the linked PR, from the same refresh as Changes. */
   linkedPrChecks?: PrCheckCounts | null;
   /** Shows the Changes panel from the PR chip; without it the chip is static. */

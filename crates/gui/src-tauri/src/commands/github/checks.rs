@@ -1,26 +1,22 @@
-//! Pull request state and checks for worktree branches, polled for many
-//! worktrees at once (one GitHub request per repository), plus re-running a
-//! failed Actions job and cancelling a running workflow run. The PR comes from
-//! the stored association, never from the caller, so the frontend cannot point
-//! a write at an arbitrary repository.
+//! One round of PR polling per remote: the open PRs of watched branches and
+//! the linked PRs with their checks. Plus re-running a failed Actions job and
+//! cancelling a running workflow run, each re-checked against GitHub first.
 
-use super::{
-    push_remote_candidates, GitHubLookup, GithubErrorKind, GithubFailure, WorktreeGitContext,
-    WorktreePrAssociation,
-};
-use crate::{
-    commands::chat_catalog::{PrAssociationStore, PrSave, StoredPrAssociation, StoredPrRecord},
-    local_chat::worktree_delta::git,
-};
+use super::{push_remote_candidates, GitHubLookup, GithubFailure, GithubPullRequest};
+use crate::local_chat::worktree_delta::git;
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, future::Future, path::Path};
+use std::{future::Future, path::Path};
 use vertebrae_github::{
-    CheckCancel, CheckOutcome, CheckRerun, CheckStatus, GitHubError, PullRequestCheck,
-    PullRequestChecks, PullRequestChecksBatch, RateLimitStatus, RepoRef,
+    CheckCancel, CheckOutcome, CheckRerun, CheckStatus, GitHubError, OpenPrSearchResult,
+    PullRequestCheck, PullRequestChecks, PullRequestChecksBatch, PullRequestSummary,
+    RateLimitStatus, RepoRef,
 };
 
 /// Below this many remaining points, polling waits for the window to reset.
-const LOW_RATE_LIMIT_REMAINING: u32 = 50;
+pub(super) const LOW_RATE_LIMIT_REMAINING: u32 = 50;
+/// Pages of 50 open PRs read per remote and round. A longer list is not
+/// complete, so its branches are looked up one by one instead.
+pub(super) const OPEN_PR_PAGES: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "snake_case")]
@@ -80,6 +76,7 @@ pub enum GithubCheckRerun {
     Allowed,
     NoPermission,
     PullRequestClosed,
+    RunInProgress,
     Provider,
     NotApplicable,
 }
@@ -90,6 +87,7 @@ impl From<CheckRerun> for GithubCheckRerun {
             CheckRerun::Allowed => Self::Allowed,
             CheckRerun::NoPermission => Self::NoPermission,
             CheckRerun::PullRequestClosed => Self::PullRequestClosed,
+            CheckRerun::RunInProgress => Self::RunInProgress,
             CheckRerun::Provider => Self::Provider,
             CheckRerun::NotApplicable => Self::NotApplicable,
         }
@@ -170,7 +168,7 @@ pub struct GithubPrChecks {
 }
 
 impl GithubPrChecks {
-    fn new(record: &StoredPrRecord, checks: PullRequestChecks) -> Result<Self, GithubFailure> {
+    pub(super) fn new(repo: &RepoRef, checks: PullRequestChecks) -> Result<Self, GithubFailure> {
         let number = checks.pull_request.number;
         let pr_number = u32::try_from(number).map_err(|_| {
             GithubFailure::other(format!(
@@ -179,7 +177,7 @@ impl GithubPrChecks {
         })?;
         Ok(Self {
             pr_number,
-            repo: format!("{}/{}", record.owner, record.repo),
+            repo: repo.full_name(),
             head_sha: checks.head_sha,
             checks: checks.checks.into_iter().map(Into::into).collect(),
             truncated: checks.truncated,
@@ -187,24 +185,44 @@ impl GithubPrChecks {
     }
 }
 
-/// A worktree branch to poll.
+/// What to read from one remote.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct WorktreeBranch {
-    pub worktree_path: String,
-    pub branch: String,
+pub struct GithubPrPollRequest {
+    pub host: String,
+    /// `owner/name`.
+    pub repo: String,
+    /// Branches whose open PRs to list.
+    pub branches: Vec<String>,
+    /// Linked PRs to read with their checks.
+    pub numbers: Vec<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubPrPollBatch {
+    pub remotes: Vec<GithubRemotePoll>,
+    /// Seconds to hold off polling: GitHub's hourly budget is nearly spent.
+    pub hold_off_secs: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubRemotePoll {
+    pub host: String,
+    pub repo: String,
+    pub open_prs: GithubOpenPrsPoll,
+    pub pull_requests: Vec<GithubPolledPr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(tag = "status", rename_all = "snake_case")]
-pub enum WorktreePrPollResult {
-    /// The linked PR, refreshed, with its checks.
-    Linked {
-        association: WorktreePrAssociation,
-        checks: GithubPrChecks,
+pub enum GithubOpenPrsPoll {
+    /// No branch was asked about.
+    NotRequested,
+    Read {
+        branches: Vec<GithubBranchPrs>,
     },
-    /// No PR is linked; polling has nothing to read for this branch.
-    NotLinked,
     Failed {
         failure: GithubFailure,
     },
@@ -212,18 +230,31 @@ pub enum WorktreePrPollResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct WorktreePrPoll {
-    pub worktree_path: String,
+pub struct GithubBranchPrs {
     pub branch: String,
-    pub result: WorktreePrPollResult,
+    /// Open PRs whose head is the branch, from any repository.
+    pub prs: Vec<GithubPullRequest>,
+    /// Every open PR of the branch is listed; never auto-link otherwise.
+    pub complete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
-pub struct WorktreePrPollBatch {
-    pub results: Vec<WorktreePrPoll>,
-    /// Seconds to hold off polling: GitHub's hourly budget is nearly spent.
-    pub hold_off_secs: Option<u32>,
+pub struct GithubPolledPr {
+    pub number: u32,
+    pub result: GithubPolledPrResult,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum GithubPolledPrResult {
+    Read {
+        pr: Box<GithubPullRequest>,
+        checks: Box<GithubPrChecks>,
+    },
+    Failed {
+        failure: GithubFailure,
+    },
 }
 
 pub(super) fn hold_off_secs(rate_limit: Option<RateLimitStatus>) -> Option<u32> {
@@ -232,7 +263,25 @@ pub(super) fn hold_off_secs(rate_limit: Option<RateLimitStatus>) -> Option<u32> 
         .map(|limit| u32::try_from(limit.reset_in_secs).unwrap_or(u32::MAX))
 }
 
-pub(super) trait ChecksLookup: Sync {
+pub(super) trait PrLookup: Sync {
+    fn open_prs(
+        &self,
+        repo: &RepoRef,
+        max_pages: usize,
+    ) -> impl Future<Output = Result<OpenPrSearchResult, GitHubError>> + Send;
+
+    fn open_prs_for_branch(
+        &self,
+        repo: &RepoRef,
+        branch: &str,
+    ) -> impl Future<Output = Result<OpenPrSearchResult, GitHubError>> + Send;
+
+    fn pull_request(
+        &self,
+        repo: &RepoRef,
+        number: u64,
+    ) -> impl Future<Output = Result<PullRequestSummary, GitHubError>> + Send;
+
     fn checks(
         &self,
         repo: &RepoRef,
@@ -252,7 +301,34 @@ pub(super) trait ChecksLookup: Sync {
     ) -> impl Future<Output = Result<(), GitHubError>> + Send;
 }
 
-impl ChecksLookup for GitHubLookup {
+impl PrLookup for GitHubLookup {
+    async fn open_prs(
+        &self,
+        repo: &RepoRef,
+        max_pages: usize,
+    ) -> Result<OpenPrSearchResult, GitHubError> {
+        let (client, token) = self.session().await?;
+        client.list_open_prs(&token, repo, max_pages).await
+    }
+
+    async fn open_prs_for_branch(
+        &self,
+        repo: &RepoRef,
+        branch: &str,
+    ) -> Result<OpenPrSearchResult, GitHubError> {
+        let (client, token) = self.session().await?;
+        client.list_open_prs_for_branch(&token, repo, branch).await
+    }
+
+    async fn pull_request(
+        &self,
+        repo: &RepoRef,
+        number: u64,
+    ) -> Result<PullRequestSummary, GitHubError> {
+        let (client, token) = self.session().await?;
+        client.get_pull_request(&token, repo, number).await
+    }
+
     async fn checks(
         &self,
         repo: &RepoRef,
@@ -273,171 +349,236 @@ impl ChecksLookup for GitHubLookup {
     }
 }
 
-fn not_linked(ctx: &WorktreeGitContext) -> GithubFailure {
-    GithubFailure {
-        kind: GithubErrorKind::NotFound,
-        message: format!("No pull request is linked to {}", ctx.branch),
-        retry_after_secs: None,
-    }
+fn repo_ref(request: &GithubPrPollRequest) -> Result<RepoRef, GithubFailure> {
+    request
+        .repo
+        .split_once('/')
+        .filter(|(owner, name)| !owner.is_empty() && !name.is_empty() && !name.contains('/'))
+        .map(|(owner, name)| RepoRef::new(request.host.clone(), owner, name))
+        .ok_or_else(|| GithubFailure::other(format!("{:?} is not owner/name", request.repo)))
 }
 
-async fn linked_record(
-    store: &PrAssociationStore,
-    ctx: &WorktreeGitContext,
-) -> Result<StoredPrRecord, GithubFailure> {
-    match ctx.applicable(store.load(&ctx.key()).await?.as_ref()) {
-        Some(StoredPrAssociation::Linked(record)) => Ok((**record).clone()),
-        _ => Err(not_linked(ctx)),
-    }
+fn summaries(
+    repo: &RepoRef,
+    prs: &[PullRequestSummary],
+) -> Result<Vec<GithubPullRequest>, GithubFailure> {
+    prs.iter()
+        .map(|pr| GithubPullRequest::from_summary(&repo.owner, &repo.repo, pr))
+        .collect()
 }
 
-fn pr_repo(ctx: &WorktreeGitContext, record: &StoredPrRecord) -> RepoRef {
-    RepoRef::new(ctx.head_repo.host.clone(), &record.owner, &record.repo)
-}
-
-/// One linked branch waiting for its PR's checks.
-struct Linked<'a> {
-    index: usize,
-    ctx: &'a WorktreeGitContext,
-    stored: StoredPrRecord,
-}
-
-/// Refreshes the linked PR and checks of every target: one GitHub request per
-/// repository however many worktrees point at it. Each refreshed PR is written
-/// back to the stored link so association reads stay current without asking
-/// GitHub again.
-pub(super) async fn poll_prs<L: ChecksLookup>(
-    store: &PrAssociationStore,
-    targets: Vec<(WorktreeBranch, Result<WorktreeGitContext, GithubFailure>)>,
+/// The open PRs of each branch. One listing of the whole repository answers
+/// every branch when it is complete; a longer list falls back to asking per
+/// branch, which GitHub filters server-side.
+async fn open_prs_of_branches<L: PrLookup>(
+    repo: &RepoRef,
+    branches: &[String],
     lookup: &L,
-    now: Option<i64>,
-) -> WorktreePrPollBatch {
-    let mut results: Vec<WorktreePrPollResult> = Vec::with_capacity(targets.len());
-    let mut by_repo: BTreeMap<(String, String, String), Vec<Linked<'_>>> = BTreeMap::new();
-    for (index, (_, ctx)) in targets.iter().enumerate() {
-        results.push(WorktreePrPollResult::NotLinked);
-        let ctx = match ctx {
-            Ok(ctx) => ctx,
-            Err(failure) => {
-                results[index] = WorktreePrPollResult::Failed {
-                    failure: failure.clone(),
-                };
-                continue;
-            }
-        };
-        match linked_record(store, ctx).await {
-            Ok(stored) => by_repo
-                .entry((
-                    ctx.head_repo.host.to_ascii_lowercase(),
-                    stored.owner.to_ascii_lowercase(),
-                    stored.repo.to_ascii_lowercase(),
-                ))
-                .or_default()
-                .push(Linked { index, ctx, stored }),
-            Err(failure) if failure.kind == GithubErrorKind::NotFound => {}
-            Err(failure) => results[index] = WorktreePrPollResult::Failed { failure },
-        }
+) -> (GithubOpenPrsPoll, Option<RateLimitStatus>) {
+    if branches.is_empty() {
+        return (GithubOpenPrsPoll::NotRequested, None);
     }
-
-    let mut rate_limit = None;
-    for linked in by_repo.into_values() {
-        let repo = pr_repo(linked[0].ctx, &linked[0].stored);
-        let numbers: Vec<u64> = linked.iter().map(|entry| entry.stored.pr.number).collect();
-        let mut batch = match lookup.checks(&repo, &numbers).await {
-            Ok(batch) => batch,
-            Err(err) => {
-                let failure = GithubFailure::from(err);
-                for entry in linked {
-                    results[entry.index] = WorktreePrPollResult::Failed {
-                        failure: failure.clone(),
-                    };
-                }
-                continue;
-            }
-        };
-        rate_limit = RateLimitStatus::tightest(rate_limit, batch.rate_limit);
-        for entry in linked {
-            let number = entry.stored.pr.number;
-            let result = match batch.pull_requests.remove(&number) {
-                Some(Ok(checks)) => refreshed(store, &entry, checks, now).await,
-                Some(Err(err)) => Err(err.into()),
-                None => Err(GithubFailure::other(format!(
-                    "GitHub returned nothing for PR #{number}"
-                ))),
-            };
-            results[entry.index] =
-                result.unwrap_or_else(|failure| WorktreePrPollResult::Failed { failure });
-        }
-    }
-
-    WorktreePrPollBatch {
-        results: targets
-            .into_iter()
-            .zip(results)
-            .map(|((target, _), result)| WorktreePrPoll {
-                worktree_path: target.worktree_path,
-                branch: target.branch,
-                result,
+    let listed = match lookup.open_prs(repo, OPEN_PR_PAGES).await {
+        Ok(listed) => listed,
+        Err(err) => return (failed_open_prs(err.into()), None),
+    };
+    let per_branch: Vec<Result<OpenPrSearchResult, GitHubError>> = if listed.has_more {
+        futures::future::join_all(
+            branches
+                .iter()
+                .map(|branch| lookup.open_prs_for_branch(repo, branch)),
+        )
+        .await
+    } else {
+        branches
+            .iter()
+            .map(|branch| {
+                Ok(OpenPrSearchResult {
+                    prs: listed
+                        .prs
+                        .iter()
+                        .filter(|pr| pr.head_ref == *branch)
+                        .cloned()
+                        .collect(),
+                    has_more: false,
+                    rate_limit: None,
+                })
             })
-            .collect(),
+            .collect()
+    };
+    let rate_limit = per_branch
+        .iter()
+        .filter_map(|result| result.as_ref().ok()?.rate_limit)
+        .fold(listed.rate_limit, |tightest, limit| {
+            RateLimitStatus::tightest(tightest, Some(limit))
+        });
+    let mut read = Vec::with_capacity(branches.len());
+    for (branch, result) in branches.iter().zip(per_branch) {
+        let converted = result
+            .map_err(GithubFailure::from)
+            .and_then(|result| Ok((summaries(repo, &result.prs)?, !result.has_more)));
+        match converted {
+            Ok((prs, complete)) => read.push(GithubBranchPrs {
+                branch: branch.clone(),
+                prs,
+                complete,
+            }),
+            Err(failure) => return (failed_open_prs(failure), rate_limit),
+        }
+    }
+    (GithubOpenPrsPoll::Read { branches: read }, rate_limit)
+}
+
+fn failed_open_prs(failure: GithubFailure) -> GithubOpenPrsPoll {
+    GithubOpenPrsPoll::Failed { failure }
+}
+
+fn polled_pr(repo: &RepoRef, checks: PullRequestChecks) -> GithubPolledPrResult {
+    let read = GithubPullRequest::from_summary(&repo.owner, &repo.repo, &checks.pull_request)
+        .and_then(|pr| Ok((pr, GithubPrChecks::new(repo, checks)?)));
+    match read {
+        Ok((pr, checks)) => GithubPolledPrResult::Read {
+            pr: Box::new(pr),
+            checks: Box::new(checks),
+        },
+        Err(failure) => GithubPolledPrResult::Failed { failure },
+    }
+}
+
+/// The given PRs with their checks, in one batched read.
+async fn pull_requests<L: PrLookup>(
+    repo: &RepoRef,
+    numbers: &[u32],
+    lookup: &L,
+) -> (Vec<GithubPolledPr>, Option<RateLimitStatus>) {
+    if numbers.is_empty() {
+        return (Vec::new(), None);
+    }
+    let wanted: Vec<u64> = numbers.iter().copied().map(u64::from).collect();
+    let mut batch = match lookup.checks(repo, &wanted).await {
+        Ok(batch) => batch,
+        Err(err) => {
+            let failure = GithubFailure::from(err);
+            let failed = numbers
+                .iter()
+                .map(|&number| GithubPolledPr {
+                    number,
+                    result: GithubPolledPrResult::Failed {
+                        failure: failure.clone(),
+                    },
+                })
+                .collect();
+            return (failed, None);
+        }
+    };
+    let polled = numbers
+        .iter()
+        .map(|&number| GithubPolledPr {
+            number,
+            result: match batch.pull_requests.remove(&u64::from(number)) {
+                Some(Ok(checks)) => polled_pr(repo, checks),
+                Some(Err(err)) => GithubPolledPrResult::Failed {
+                    failure: err.into(),
+                },
+                None => GithubPolledPrResult::Failed {
+                    failure: GithubFailure::other(format!(
+                        "GitHub returned nothing for PR #{number}"
+                    )),
+                },
+            },
+        })
+        .collect();
+    (polled, batch.rate_limit)
+}
+
+async fn poll_remote<L: PrLookup>(
+    mut request: GithubPrPollRequest,
+    lookup: &L,
+) -> (GithubRemotePoll, Option<RateLimitStatus>) {
+    request.branches.sort();
+    request.branches.dedup();
+    request.numbers.sort_unstable();
+    request.numbers.dedup();
+    let repo = match repo_ref(&request) {
+        Ok(repo) => repo,
+        Err(failure) => {
+            let pull_requests = request
+                .numbers
+                .iter()
+                .map(|&number| GithubPolledPr {
+                    number,
+                    result: GithubPolledPrResult::Failed {
+                        failure: failure.clone(),
+                    },
+                })
+                .collect();
+            let open_prs = if request.branches.is_empty() {
+                GithubOpenPrsPoll::NotRequested
+            } else {
+                failed_open_prs(failure)
+            };
+            return (
+                GithubRemotePoll {
+                    host: request.host,
+                    repo: request.repo,
+                    open_prs,
+                    pull_requests,
+                },
+                None,
+            );
+        }
+    };
+    let ((open_prs, listed), (pull_requests, read)) = futures::future::join(
+        open_prs_of_branches(&repo, &request.branches, lookup),
+        pull_requests(&repo, &request.numbers, lookup),
+    )
+    .await;
+    (
+        GithubRemotePoll {
+            host: request.host,
+            repo: request.repo,
+            open_prs,
+            pull_requests,
+        },
+        RateLimitStatus::tightest(listed, read),
+    )
+}
+
+/// Reads every remote concurrently. A failure is reported where it happened
+/// (a remote's listing, one PR, or the whole checks read) and never hides
+/// the other answers.
+pub(super) async fn poll<L: PrLookup>(
+    requests: Vec<GithubPrPollRequest>,
+    lookup: &L,
+) -> GithubPrPollBatch {
+    let polled = futures::future::join_all(
+        requests
+            .into_iter()
+            .map(|request| poll_remote(request, lookup)),
+    )
+    .await;
+    let mut rate_limit = None;
+    let mut remotes = Vec::with_capacity(polled.len());
+    for (remote, limit) in polled {
+        rate_limit = RateLimitStatus::tightest(rate_limit, limit);
+        remotes.push(remote);
+    }
+    GithubPrPollBatch {
+        remotes,
         hold_off_secs: hold_off_secs(rate_limit),
     }
 }
 
-async fn refreshed(
-    store: &PrAssociationStore,
-    entry: &Linked<'_>,
-    checks: PullRequestChecks,
-    now: Option<i64>,
-) -> Result<WorktreePrPollResult, GithubFailure> {
-    let fresh = StoredPrRecord::new(
-        &entry.stored.owner,
-        &entry.stored.repo,
-        now,
-        checks.pull_request.clone(),
-    );
-    let association = entry.ctx.linked(&fresh, None)?;
-    let checks = GithubPrChecks::new(&fresh, checks)?;
-    let expected = Some(StoredPrAssociation::Linked(Box::new(entry.stored.clone())));
-    let saved = store
-        .save_discovered(
-            &entry.ctx.key(),
-            expected,
-            StoredPrAssociation::Linked(Box::new(fresh)),
-        )
-        .await;
-    match saved {
-        Ok(PrSave::Saved) => Ok(WorktreePrPollResult::Linked {
-            association,
-            checks,
-        }),
-        // The user linked or unlinked meanwhile: this read is for a PR the
-        // branch no longer points at.
-        Ok(PrSave::Superseded(_)) => Err(GithubFailure::other(
-            "The linked pull request changed while refreshing; refresh again",
-        )),
-        Err(err) => {
-            tracing::warn!(error = %err, "Could not persist refreshed PR");
-            Ok(WorktreePrPollResult::Linked {
-                association,
-                checks,
-            })
-        }
-    }
-}
-
 /// The current state of one check, re-read from GitHub before any write.
-async fn current_check<L: ChecksLookup>(
-    store: &PrAssociationStore,
-    ctx: &WorktreeGitContext,
+async fn current_check<L: PrLookup>(
+    repo: &RepoRef,
+    pr_number: u32,
     check_id: &str,
     lookup: &L,
-) -> Result<(RepoRef, PullRequestCheck), GithubFailure> {
-    let record = linked_record(store, ctx).await?;
-    let repo = pr_repo(ctx, &record);
-    let number = record.pr.number;
+) -> Result<PullRequestCheck, GithubFailure> {
+    let number = u64::from(pr_number);
     let checks = lookup
-        .checks(&repo, &[number])
+        .checks(repo, &[number])
         .await?
         .pull_requests
         .remove(&number)
@@ -446,7 +587,7 @@ async fn current_check<L: ChecksLookup>(
                 message: format!("Pull request #{number} not found"),
             })
         })?;
-    let check = checks
+    checks
         .checks
         .into_iter()
         .find(|check| check.id == check_id)
@@ -454,30 +595,32 @@ async fn current_check<L: ChecksLookup>(
             GithubFailure::other(format!(
                 "That check is no longer on PR #{number}; refresh to see the latest"
             ))
-        })?;
-    Ok((repo, check))
+        })
 }
 
 /// Re-runs a check only after re-reading the PR's checks and confirming the
 /// check is a failed Actions job the viewer may re-run. The request is sent
 /// once; a lost response is reported, never retried here.
-pub(super) async fn rerun_check<L: ChecksLookup>(
-    store: &PrAssociationStore,
-    ctx: &WorktreeGitContext,
+pub(super) async fn rerun_check<L: PrLookup>(
+    repo: &RepoRef,
+    pr_number: u32,
     check_id: &str,
     lookup: &L,
 ) -> Result<(), GithubFailure> {
-    let (repo, check) = current_check(store, ctx, check_id, lookup).await?;
+    let check = current_check(repo, pr_number, check_id, lookup).await?;
     let refusal = match (check.rerun, check.actions_job_id) {
         (CheckRerun::Allowed, Some(job_id)) => {
             return lookup
-                .rerun_job(&repo, job_id)
+                .rerun_job(repo, job_id)
                 .await
                 .map_err(GithubFailure::from)
         }
         (CheckRerun::Allowed, None) => "GitHub did not report a job for this check",
         (CheckRerun::NoPermission, _) => "Re-running jobs needs write access to the repository",
         (CheckRerun::PullRequestClosed, _) => "Jobs can only be re-run on an open pull request",
+        (CheckRerun::RunInProgress, _) => {
+            "Jobs can be re-run once the rest of their workflow run has finished"
+        }
         (CheckRerun::Provider, _) => "This check re-runs from its provider, not GitHub Actions",
         (CheckRerun::NotApplicable, _) => "Only failed jobs can be re-run",
     };
@@ -486,17 +629,17 @@ pub(super) async fn rerun_check<L: ChecksLookup>(
 
 /// Cancels the workflow run of a queued or running Actions job, after the
 /// same re-read as [`rerun_check`]. Sent once.
-pub(super) async fn cancel_check<L: ChecksLookup>(
-    store: &PrAssociationStore,
-    ctx: &WorktreeGitContext,
+pub(super) async fn cancel_check<L: PrLookup>(
+    repo: &RepoRef,
+    pr_number: u32,
     check_id: &str,
     lookup: &L,
 ) -> Result<(), GithubFailure> {
-    let (repo, check) = current_check(store, ctx, check_id, lookup).await?;
+    let check = current_check(repo, pr_number, check_id, lookup).await?;
     let refusal = match (check.cancel, check.actions_run_id) {
         (CheckCancel::Allowed, Some(run_id)) => {
             return lookup
-                .cancel_run(&repo, run_id)
+                .cancel_run(repo, run_id)
                 .await
                 .map_err(GithubFailure::from)
         }

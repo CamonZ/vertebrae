@@ -1,3 +1,4 @@
+import type { ChatPrLink } from "./prLinks";
 import { recoverAcpHistory, resetAcpHistoryRecovery } from "../utils/acpTranscriptPersistence";
 import { isOpenLocalChatConversation } from "../utils/localChatDiscussion";
 import { replaySpeedTier } from "../utils/localChatSpeedTier";
@@ -866,8 +867,13 @@ interface ChatStoreActions {
     sessionId: string,
     providerResumeId: string | null
   ) => void;
-  /** Persist the derived conversation association without changing activity time. */
+  /**
+   * Persist the derived conversation association without changing activity
+   * time. The linked PR on it is kept: only `setSessionPrLink` changes that.
+   */
   setSessionAssociation: (sessionId: string, association: JsonValue) => void;
+  /** Persist the chat's linked PR on its association (see `prLinks`). */
+  setSessionPrLink: (sessionId: string, link: ChatPrLink) => void;
   /** Record the association driver's latest diagnostic; never persisted. */
   setSessionAssociationDiagnostic: (
     sessionId: string,
@@ -4262,10 +4268,39 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     setSessionAssociation: (sessionId, association) => {
-      updateSession(sessionId, (session) =>
-        session.discussion ? session : { ...session, association }
-      ).catch((error) => {
+      updateSession(sessionId, (session) => {
+        if (session.discussion) return session;
+        const link = (session.association as { pullRequest?: JsonValue } | null)
+          ?.pullRequest;
+        const next =
+          link !== undefined && association && typeof association === "object"
+            ? { ...association, pullRequest: link }
+            : association;
+        return { ...session, association: next };
+      }).catch((error) => {
         console.warn("Failed to persist chat association", error);
+      });
+    },
+
+    setSessionPrLink: (sessionId, link) => {
+      updateSession(sessionId, (session) => {
+        const association = session.association;
+        if (
+          session.discussion ||
+          !association ||
+          typeof association !== "object" ||
+          Array.isArray(association)
+        )
+          return session;
+        return {
+          ...session,
+          association: {
+            ...association,
+            pullRequest: link as unknown as JsonValue,
+          },
+        };
+      }).catch((error) => {
+        console.warn("Failed to persist the chat's linked PR", error);
       });
     },
 

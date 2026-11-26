@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { GithubFailure, GithubPrCheck } from "../../../bindings";
 import {
   isAbsoluteHttpUrl,
@@ -124,9 +124,12 @@ export function ChecksRefreshLine({
       );
     case "failed":
       return (
-        <span className="pr-checks-refresh pr-assoc-err" role="alert">
+        <span className="pr-checks-refresh pr-assoc-err">
+          {/* Only the reason is announced; the ages below tick every second. */}
           <span title={freshness.failure.message}>
-            Couldn’t refresh: {failureReason(freshness.failure)}.
+            <span role="alert">
+              Couldn’t refresh: {failureReason(freshness.failure)}.
+            </span>
             {freshness.fetchedAt !== null &&
               ` Showing last known state from ${formatAge(freshness.fetchedAt, now)}.`}
           </span>
@@ -209,6 +212,15 @@ function RerunControl({
           title="Re-running jobs needs write access to the repository"
         >
           No re-run access
+        </span>
+      );
+    case "run_in_progress":
+      return (
+        <span
+          className="pr-assoc-mute"
+          title="GitHub re-runs a job only once the rest of its workflow run has finished"
+        >
+          Re-run after the run finishes
         </span>
       );
     case "pull_request_closed":
@@ -324,6 +336,51 @@ function CheckDetail({ check }: { check: GithubPrCheck }) {
   );
 }
 
+/**
+ * Re-run and cancel swap or remove the focused control (Keep running, the
+ * confirm step, a finished request). When that drops focus to the page, put
+ * it back on the row's first action, or the row itself, so keyboard users
+ * keep their place.
+ */
+function useKeepFocusInRow() {
+  const rowRef = useRef<HTMLLIElement>(null);
+  const holdsFocus = useRef(false);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row) return;
+    const onFocusIn = () => {
+      holdsFocus.current = true;
+    };
+    const onFocusOut = (event: FocusEvent) => {
+      const from = event.target as Element;
+      const to = event.relatedTarget as Node | null;
+      if (to && row.contains(to)) return;
+      // A removed control blurs while leaving the DOM; anything else is
+      // the user moving away.
+      queueMicrotask(() => {
+        if (from.isConnected) holdsFocus.current = false;
+      });
+    };
+    row.addEventListener("focusin", onFocusIn);
+    row.addEventListener("focusout", onFocusOut);
+    return () => {
+      row.removeEventListener("focusin", onFocusIn);
+      row.removeEventListener("focusout", onFocusOut);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!row || !holdsFocus.current) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) {
+      if (!row.contains(active)) holdsFocus.current = false;
+      return;
+    }
+    (row.querySelector<HTMLElement>(".pr-check-actions button") ?? row).focus();
+  });
+  return rowRef;
+}
+
 function CheckRow({
   view,
   expanded,
@@ -344,11 +401,17 @@ function CheckRow({
   const { check, status, rerun, cancel } = view;
   const [confirming, setConfirming] = useState(false);
   const expandable = Boolean(check.failedStep || check.summary);
-  const detailId = `pr-check-detail-${check.id}`;
+  const detailId = useId();
   const canOpen = isAbsoluteHttpUrl(check.url);
   const host = check.actionsJob ? "GitHub" : check.provider;
+  const rowRef = useKeepFocusInRow();
   return (
-    <li className={`pr-check is-${status}`} data-testid="pr-check-row">
+    <li
+      ref={rowRef}
+      className={`pr-check is-${status}`}
+      data-testid="pr-check-row"
+      tabIndex={-1}
+    >
       <div className="pr-check-row">
         <button
           type="button"

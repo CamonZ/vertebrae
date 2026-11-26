@@ -1,20 +1,23 @@
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import {
-  commands,
-  type GithubPrCheck,
-  type GithubPrChecks,
-  type GithubPullRequest,
-  type WorktreePrPollBatch,
-} from "../../../bindings";
+import { commands, type GithubPrCheck } from "../../../bindings";
 import { useWorktreePrAssociation } from "../../../hooks/useWorktreePrAssociation";
 import { useWorktreePrChecks } from "../../../hooks/useWorktreePrChecks";
+import { linkedPullRequest } from "../../../stores/worktreePrStore";
 import {
-  linkedPullRequest,
-  resetWorktreePrStore,
-} from "../../../stores/worktreePrStore";
-import { resetWorktreePrChecksStore } from "../../../stores/worktreePrChecksStore";
+  REPO,
+  addPr,
+  chatSession,
+  fakeGithub,
+  installFakeGithub,
+  linkedPr,
+  prLink,
+  pullRequest,
+  resetFakeGithub,
+  seedChats,
+  type FakeGithub,
+} from "../../../test/fakeGithub";
 import { ChatHeaderPrChip } from "../GithubPr";
 import { PrAssociationBar } from "./PrAssociationBar";
 
@@ -24,41 +27,28 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 
 vi.mock("../../../bindings", () => ({
   commands: {
-    getWorktreePrAssociation: vi.fn(),
-    listWorktreeOpenPrs: vi.fn(),
-    linkWorktreePr: vi.fn(),
-    unlinkWorktreePr: vi.fn(),
-    pollWorktreePrs: vi.fn(),
-    rerunWorktreePrCheck: vi.fn(),
-    cancelWorktreePrCheck: vi.fn(),
+    resolveWorktreeGithub: vi.fn(),
+    pollGithubPrs: vi.fn(),
+    listGithubOpenPrs: vi.fn(),
+    getGithubPr: vi.fn(),
+    rerunGithubPrCheck: vi.fn(),
+    cancelGithubPrCheck: vi.fn(),
     getWorktreePublishedHead: vi.fn(),
   },
 }));
 
-const getAssociation = vi.mocked(commands.getWorktreePrAssociation);
-const getChecks = vi.mocked(commands.pollWorktreePrs);
-const rerun = vi.mocked(commands.rerunWorktreePrCheck);
-const cancel = vi.mocked(commands.cancelWorktreePrCheck);
-const publishedHead = vi.mocked(commands.getWorktreePublishedHead);
+const poll = vi.mocked(commands.pollGithubPrs);
+const rerun = vi.mocked(commands.rerunGithubPrCheck);
+const cancel = vi.mocked(commands.cancelGithubPrCheck);
 
 const WORKTREE = "/wt/a";
-const REPO = "example/demo-repo";
 const BRANCH = "feature/retry";
 const ok = <T,>(data: T) => ({ status: "ok" as const, data });
 
-const PR: GithubPullRequest = {
-  owner: "example",
-  repo: "demo-repo",
-  number: 482,
+const PR = pullRequest(482, {
   title: "Reset retry budget after success",
-  state: "open",
-  headRef: BRANCH,
-  headRepo: REPO,
-  baseRef: "main",
-  url: `https://github.com/${REPO}/pull/482`,
-  author: "alice",
   updatedAt: null,
-};
+});
 
 function check(
   id: string,
@@ -106,39 +96,6 @@ const CHECKS: GithubPrCheck[] = [
   check("run:15", "fmt", "passed"),
 ];
 
-function snapshot(checks: GithubPrCheck[]): GithubPrChecks {
-  return {
-    prNumber: 482,
-    repo: REPO,
-    headSha: "abc1234",
-    checks,
-    truncated: false,
-  };
-}
-
-function polled(checks: GithubPrCheck[]) {
-  return ok<WorktreePrPollBatch>({
-    results: [
-      {
-        worktreePath: WORKTREE,
-        branch: BRANCH,
-        result: {
-          status: "linked",
-          association: {
-            status: "linked",
-            branch: BRANCH,
-            repo: REPO,
-            pr: PR,
-            staleError: null,
-          },
-          checks: snapshot(checks),
-        },
-      },
-    ],
-    holdOffSecs: null,
-  });
-}
-
 /** The chat header's consumer of the same branch, as ChatWindow wires it. */
 function HeaderChip() {
   const pr = linkedPullRequest(
@@ -150,7 +107,16 @@ function HeaderChip() {
   ) : null;
 }
 
-function renderSurfaces() {
+let world: FakeGithub;
+
+/** The bar and header chip of a chat linked to `PR`, whose checks are `checks`. */
+function renderSurfaces(checks: GithubPrCheck[] = CHECKS) {
+  addPr(world, PR, checks);
+  seedChats(
+    chatSession("chat", WORKTREE, BRANCH, {
+      link: prLink(WORKTREE, BRANCH, linkedPr(PR)),
+    })
+  );
   return render(
     <>
       <HeaderChip />
@@ -177,22 +143,12 @@ describe("PR checks in the review bar, drawer and chip", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    getAssociation.mockResolvedValue(
-      ok({
-        status: "linked",
-        branch: BRANCH,
-        repo: REPO,
-        pr: PR,
-        staleError: null,
-      })
-    );
-    getChecks.mockResolvedValue(polled(CHECKS));
-    publishedHead.mockResolvedValue(ok(null));
+    world = fakeGithub();
+    installFakeGithub(commands, world);
   });
 
   afterEach(() => {
-    resetWorktreePrChecksStore();
-    resetWorktreePrStore();
+    resetFakeGithub();
     vi.useRealTimers();
   });
 
@@ -223,7 +179,7 @@ describe("PR checks in the review bar, drawer and chip", () => {
       "title",
       expect.stringContaining("Checks: 3 failed, 1 running, 1 queued, 1 passed")
     );
-    expect(getChecks).toHaveBeenCalledTimes(1);
+    expect(poll).toHaveBeenCalledTimes(1);
   });
 
   it("offers Re-run only for permitted Actions jobs and links other providers out", async () => {
@@ -263,6 +219,20 @@ describe("PR checks in the review bar, drawer and chip", () => {
     }
   });
 
+  it("holds Re-run while the rest of the job's workflow run is still going", async () => {
+    renderSurfaces([
+      check("run:11", "test (ubuntu)", "failed", {
+        rerun: "run_in_progress",
+      }),
+      check("run:13", "build", "running"),
+    ]);
+    const row = rowNamed(await openDrawer(), "test (ubuntu)");
+    expect(within(row).queryByRole("button", { name: /^Re-run/ })).toBeNull();
+    expect(
+      within(row).getByText("Re-run after the run finishes")
+    ).toBeInTheDocument();
+  });
+
   it("keeps an in-progress re-run when the drawer closes and reopens", async () => {
     let accept: (value: { status: "ok"; data: null }) => void = () => {};
     rerun.mockReturnValue(new Promise((resolve) => (accept = resolve)));
@@ -273,7 +243,13 @@ describe("PR checks in the review bar, drawer and chip", () => {
         name: "Re-run test (ubuntu) on GitHub Actions",
       })
     );
-    expect(rerun).toHaveBeenCalledExactlyOnceWith(WORKTREE, BRANCH, "run:11");
+    expect(rerun).toHaveBeenCalledExactlyOnceWith(
+      WORKTREE,
+      BRANCH,
+      REPO,
+      482,
+      "run:11"
+    );
 
     fireEvent.keyDown(drawer, { key: "Escape" });
     expect(screen.queryByTestId("pr-checks-drawer")).toBeNull();
@@ -307,7 +283,7 @@ describe("PR checks in the review bar, drawer and chip", () => {
   it("keeps the last checks after a failed refresh and offers Retry now", async () => {
     renderSurfaces();
     await screen.findByTestId("pr-checks-toggle");
-    getChecks.mockResolvedValueOnce({
+    poll.mockResolvedValueOnce({
       status: "error",
       error: {
         kind: "rate_limited",
@@ -320,10 +296,13 @@ describe("PR checks in the review bar, drawer and chip", () => {
       await screen.findByRole("menuitem", { name: /Refresh PR/ })
     );
 
-    const alert = await screen.findByText(
-      /Couldn’t refresh: GitHub rate limit reached/
+    // Only the reason is announced, not the ticking ages around it.
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /^Couldn’t refresh: GitHub rate limit reached\.$/
     );
-    expect(alert).toHaveTextContent("Showing last known state from");
+    expect(
+      screen.getByText(/Showing last known state from/)
+    ).toBeInTheDocument();
     expect(screen.getByText(/auto in 40s/)).toBeInTheDocument();
     expect(screen.getByTestId("pr-checks-toggle")).toHaveAccessibleName(
       /^Checks: 3 failed/
@@ -339,7 +318,7 @@ describe("PR checks in the review bar, drawer and chip", () => {
     const updated = await screen.findByText(/^Updated/);
     expect(updated).toHaveClass("is-routine");
 
-    getChecks.mockResolvedValueOnce({
+    poll.mockResolvedValueOnce({
       status: "error",
       error: { kind: "other", message: "offline", retryAfterSecs: null },
     });
@@ -371,9 +350,8 @@ describe("PR checks in the review bar, drawer and chip", () => {
         cancel: "no_permission",
       }),
     ];
-    getChecks.mockResolvedValue(polled(twoJobs));
     cancel.mockResolvedValue(ok(null));
-    renderSurfaces();
+    renderSurfaces(twoJobs);
     const drawer = await openDrawer();
 
     const build = rowNamed(drawer, "build");
@@ -386,24 +364,33 @@ describe("PR checks in the review bar, drawer and chip", () => {
     expect(
       within(build).getByText("Stops all 2 jobs in the run")
     ).toBeVisible();
-    fireEvent.click(
-      within(build).getByRole("button", { name: "Keep running" })
-    );
+    const keep = within(build).getByRole("button", { name: "Keep running" });
+    keep.focus();
+    fireEvent.click(keep);
     expect(within(build).queryByText(/Stops all/)).toBeNull();
-
-    fireEvent.click(
-      within(build).getByRole("button", {
-        name: "Cancel the workflow run of build",
-      })
-    );
-    await act(async () => {
-      fireEvent.click(
-        within(build).getByRole("button", {
-          name: "Confirm: cancel the workflow run of build on GitHub Actions",
-        })
-      );
+    // Focus returns to the control the question came from.
+    const ask = within(build).getByRole("button", {
+      name: "Cancel the workflow run of build",
     });
-    expect(cancel).toHaveBeenCalledExactlyOnceWith(WORKTREE, BRANCH, "run:13");
+    expect(ask).toHaveFocus();
+
+    fireEvent.click(ask);
+    const confirm = within(build).getByRole("button", {
+      name: "Confirm: cancel the workflow run of build on GitHub Actions",
+    });
+    expect(confirm).toHaveFocus();
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(
+      WORKTREE,
+      BRANCH,
+      REPO,
+      482,
+      "run:13"
+    );
+    // The confirm step is gone; focus stays in the row.
+    expect(build.contains(document.activeElement)).toBe(true);
     // Every job of the run reads as cancelling until GitHub reports it.
     const after = screen.getByTestId("pr-checks-drawer");
     expect(rowNamed(after, "build")).toHaveTextContent("cancelling");

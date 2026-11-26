@@ -1,8 +1,5 @@
-import type {
-  GithubCheckStatus,
-  GithubPrState,
-  GithubPullRequest,
-} from "../../bindings";
+import type { GithubCheckStatus, GithubPrState } from "../../bindings";
+import type { LinkedPr } from "../../stores/prLinks";
 import { Badge, type BadgeIntent } from "../atoms/Badge";
 import { Icon, type IconSize } from "../atoms/Icon";
 import { PR_STATE_LABEL } from "./githubPrState";
@@ -46,7 +43,9 @@ export function ExternalLinkGlyph() {
   );
 }
 
-export function PrStateBadge({ state }: { state: GithubPrState }) {
+/** Nothing until GitHub has been read. */
+export function PrStateBadge({ state }: { state: GithubPrState | null }) {
+  if (state === null) return null;
   return <Badge intent={PR_STATE_INTENT[state]}>{PR_STATE_LABEL[state]}</Badge>;
 }
 
@@ -74,13 +73,20 @@ export function ChatHeaderPrChip({
   checks = null,
   onOpenChanges,
 }: {
-  pr: GithubPullRequest;
+  pr: LinkedPr;
   checks?: PrCheckCounts | null;
   onOpenChanges?: () => void;
 }) {
   const shown = checks ? chipChecks(checks) : null;
   const checksText = checks ? ` · Checks: ${checkCountsLabel(checks)}` : "";
-  const summary = `PR #${pr.number} · ${PR_STATE_LABEL[pr.state]} · ${pr.title}${checksText}`;
+  const summary = [
+    `PR #${pr.number}`,
+    pr.state && PR_STATE_LABEL[pr.state],
+    pr.title,
+  ]
+    .filter(Boolean)
+    .join(" · ")
+    .concat(checksText);
   const content = (
     <>
       <GitHubGlyph size="xs" />

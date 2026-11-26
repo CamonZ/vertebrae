@@ -1,5 +1,5 @@
 import { ChatAttentionDrivers } from "./ChatAttentionDrivers";
-import { PrPollTargets } from "./PrPollTargets";
+import { PrSync } from "./PrSync";
 import {
   useTaskChangeListener,
   useArtifactChangeListener,
@@ -53,7 +53,7 @@ export function GlobalListeners() {
     <>
       <ChatAssociationDrivers />
       <ChatAttentionDrivers />
-      <PrPollTargets />
+      <PrSync />
     </>
   );
 }

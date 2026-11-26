@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  IDLE_CHECKS_ENTRY,
-  acquireWorktreePrChecks,
+  acquireWorktreePr,
   cancelWorktreePrCheck,
-  refreshWorktreePrChecks,
+  refreshWorktreePr,
   rerunWorktreePrCheck,
-  useWorktreePrChecksStore,
-} from "../stores/worktreePrChecksStore";
-import { worktreePrKey } from "../stores/worktreePrStore";
+} from "../stores/prSync";
+import {
+  IDLE_PR_ENTRY,
+  useWorktreePrStore,
+  worktreePrKey,
+} from "../stores/worktreePrStore";
 import {
   checksFreshness,
   countChecks,
@@ -36,14 +38,14 @@ export function useWorktreePrChecks(
 ) {
   const key =
     worktreePath && branch ? worktreePrKey(worktreePath, branch) : null;
-  const entry = useWorktreePrChecksStore((state) =>
-    key ? (state.entries[key] ?? IDLE_CHECKS_ENTRY) : IDLE_CHECKS_ENTRY
+  const entry = useWorktreePrStore((state) =>
+    key ? (state.entries[key] ?? IDLE_PR_ENTRY) : IDLE_PR_ENTRY
   );
 
   useEffect(
     () =>
       worktreePath && branch
-        ? acquireWorktreePrChecks(worktreePath, branch)
+        ? acquireWorktreePr(worktreePath, branch)
         : undefined,
     [worktreePath, branch]
   );
@@ -54,7 +56,7 @@ export function useWorktreePrChecks(
   const refresh = useCallback(
     () =>
       worktreePath && branch
-        ? refreshWorktreePrChecks(worktreePath, branch)
+        ? refreshWorktreePr(worktreePath, branch).then(() => undefined)
         : Promise.resolve(),
     [worktreePath, branch]
   );
@@ -77,12 +79,17 @@ export function useWorktreePrChecks(
   return { entry, checks, counts, refresh, rerun, cancel };
 }
 
-/** Freshness on a clock that ticks fast only while a countdown is shown. */
+/**
+ * Freshness on a clock that ticks fast only while a countdown is shown, and
+ * not at all while nothing on screen is relative to now.
+ */
 export function useChecksFreshness(
   entry: ReturnType<typeof useWorktreePrChecks>["entry"]
 ) {
   const counting =
     entry.refresh.status === "failed" && entry.refresh.retryAt !== null;
-  const now = useNow(counting ? 1_000 : 15_000);
+  const now = useNow(
+    counting ? 1_000 : entry.fetchedAt === null ? null : 15_000
+  );
   return { now, freshness: checksFreshness(entry, now) };
 }

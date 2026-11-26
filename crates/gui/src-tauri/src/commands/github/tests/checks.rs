@@ -1,12 +1,12 @@
 use super::*;
 use crate::commands::github::checks::{
-    cancel_check, hold_off_secs, poll_prs, published_head, rerun_check, ChecksLookup,
-    WorktreeBranch, WorktreePrPollResult,
+    cancel_check, hold_off_secs, poll, published_head, rerun_check, LOW_RATE_LIMIT_REMAINING,
+    OPEN_PR_PAGES,
 };
 use std::{collections::HashMap, sync::Mutex as TestMutex};
 use vertebrae_github::{
-    CheckCancel, CheckOutcome, CheckRerun, CheckStatus, PullRequestCheck, PullRequestChecks,
-    PullRequestChecksBatch, RateLimitStatus,
+    CheckCancel, CheckOutcome, CheckRerun, CheckStatus, OpenPrSearchResult, PullRequestCheck,
+    PullRequestChecks, PullRequestChecksBatch, RateLimitStatus, RepoRef,
 };
 
 fn check(id: &str, status: CheckStatus, job: Option<u64>) -> PullRequestCheck {
@@ -39,10 +39,8 @@ fn check(id: &str, status: CheckStatus, job: Option<u64>) -> PullRequestCheck {
 }
 
 fn snapshot(number: u64, checks: Vec<PullRequestCheck>) -> PullRequestChecks {
-    let mut pull_request = summary(number, "feature/retry", Some("example/demo-repo"));
-    pull_request.title = format!("Fresh title {number}");
     PullRequestChecks {
-        pull_request,
+        pull_request: summary(number, "feature/retry", Some("example/demo-repo")),
         head_sha: "abc123".into(),
         viewer_can_write: true,
         checks,
@@ -50,36 +48,101 @@ fn snapshot(number: u64, checks: Vec<PullRequestCheck>) -> PullRequestChecks {
     }
 }
 
-fn batch(entries: Vec<(u64, Result<PullRequestChecks, GitHubError>)>) -> PullRequestChecksBatch {
+fn batch(
+    entries: Vec<(u64, Result<PullRequestChecks, GitHubError>)>,
+    rate_limit: Option<RateLimitStatus>,
+) -> PullRequestChecksBatch {
     PullRequestChecksBatch {
         pull_requests: entries.into_iter().collect::<HashMap<_, _>>(),
-        rate_limit: Some(RateLimitStatus {
-            remaining: 4000,
-            reset_in_secs: 600,
-        }),
+        rate_limit,
     }
 }
 
+fn demo() -> RepoRef {
+    RepoRef::new("github.com", "example", "demo-repo")
+}
+
+fn listing(prs: Vec<PullRequestSummary>, has_more: bool) -> OpenPrSearchResult {
+    OpenPrSearchResult {
+        prs,
+        has_more,
+        rate_limit: None,
+    }
+}
+
+/// Answers keyed by `owner/name`; every call is recorded.
 #[derive(Default)]
-struct FakeChecks {
-    answer: Option<Result<PullRequestChecksBatch, GitHubError>>,
+struct FakeLookup {
+    open: HashMap<String, Result<OpenPrSearchResult, GitHubError>>,
+    for_branch: HashMap<(String, String), Result<OpenPrSearchResult, GitHubError>>,
+    checks: HashMap<String, Result<PullRequestChecksBatch, GitHubError>>,
     write_result: Option<Result<(), GitHubError>>,
-    lookups: TestMutex<Vec<(String, Vec<u64>)>>,
+    calls: TestMutex<Vec<String>>,
     reruns: TestMutex<Vec<u64>>,
     cancels: TestMutex<Vec<u64>>,
 }
 
-impl ChecksLookup for FakeChecks {
+impl FakeLookup {
+    fn record(&self, call: String) {
+        self.calls.lock().unwrap().push(call);
+    }
+
+    fn calls(&self) -> Vec<String> {
+        let mut calls = self.calls.lock().unwrap().clone();
+        calls.sort();
+        calls
+    }
+}
+
+fn missing(what: String) -> GitHubError {
+    GitHubError::NotFound { message: what }
+}
+
+impl PrLookup for FakeLookup {
+    async fn open_prs(
+        &self,
+        repo: &RepoRef,
+        max_pages: usize,
+    ) -> Result<OpenPrSearchResult, GitHubError> {
+        assert_eq!(max_pages, OPEN_PR_PAGES);
+        self.record(format!("open {}", repo.full_name()));
+        self.open
+            .get(&repo.full_name())
+            .cloned()
+            .unwrap_or_else(|| Err(missing(repo.full_name())))
+    }
+
+    async fn open_prs_for_branch(
+        &self,
+        repo: &RepoRef,
+        branch: &str,
+    ) -> Result<OpenPrSearchResult, GitHubError> {
+        self.record(format!("branch {} {branch}", repo.full_name()));
+        self.for_branch
+            .get(&(repo.full_name(), branch.to_owned()))
+            .cloned()
+            .unwrap_or_else(|| Err(missing(branch.to_owned())))
+    }
+
+    async fn pull_request(
+        &self,
+        repo: &RepoRef,
+        number: u64,
+    ) -> Result<PullRequestSummary, GitHubError> {
+        self.record(format!("pr {} {number}", repo.full_name()));
+        Err(missing(number.to_string()))
+    }
+
     async fn checks(
         &self,
         repo: &RepoRef,
         numbers: &[u64],
     ) -> Result<PullRequestChecksBatch, GitHubError> {
-        self.lookups
-            .lock()
-            .unwrap()
-            .push((repo.full_name(), numbers.to_vec()));
-        self.answer.clone().expect("no answer configured")
+        self.record(format!("checks {} {numbers:?}", repo.full_name()));
+        self.checks
+            .get(&repo.full_name())
+            .cloned()
+            .unwrap_or_else(|| Err(missing(repo.full_name())))
     }
 
     async fn rerun_job(&self, _repo: &RepoRef, job_id: u64) -> Result<(), GitHubError> {
@@ -93,210 +156,84 @@ impl ChecksLookup for FakeChecks {
     }
 }
 
-fn target(ctx: &WorktreeGitContext) -> WorktreeBranch {
-    WorktreeBranch {
-        worktree_path: ctx.worktree_key.clone(),
-        branch: ctx.branch.clone(),
-    }
-}
+/// Polling holds off exactly while fewer than the threshold requests are
+/// left, for as long as the window has to reset, saturating at `u32::MAX`
+/// rather than wrapping.
+#[hegel::test]
+fn polling_holds_off_exactly_while_the_budget_is_nearly_spent(tc: hegel::TestCase) {
+    use hegel::generators as gs;
 
-#[tokio::test]
-async fn one_request_per_repository_refreshes_every_linked_worktree() {
-    let fx = fixture("feature/retry", &[ORIGIN]);
-    seed(&fx, stored_link("feature/retry", 7, NOW)).await;
-    // A second worktree of the same repository, linked to another PR.
-    let other_dir = tempfile::tempdir().unwrap();
-    init_repo(other_dir.path(), "feature/other", &[ORIGIN]);
-    let other = resolve_worktree_git_context(other_dir.path(), "feature/other").unwrap();
-    fx.store
-        .save_discovered(&other.key(), None, stored_link("feature/other", 8, NOW))
-        .await
-        .unwrap();
-    // A third with no link: nothing to read.
-    let unlinked_dir = tempfile::tempdir().unwrap();
-    init_repo(unlinked_dir.path(), "feature/none", &[ORIGIN]);
-    let unlinked = resolve_worktree_git_context(unlinked_dir.path(), "feature/none").unwrap();
-
-    let lookup = FakeChecks {
-        answer: Some(Ok(batch(vec![
-            (
-                7,
-                Ok(snapshot(
-                    7,
-                    vec![
-                        check("run:1", CheckStatus::Failed, Some(1)),
-                        check("run:2", CheckStatus::Running, Some(2)),
-                    ],
-                )),
-            ),
-            (
-                8,
-                Err(GitHubError::NotFound {
-                    message: "Pull request #8 not found".into(),
-                }),
-            ),
-        ]))),
-        ..FakeChecks::default()
-    };
-    let result = poll_prs(
-        &fx.store,
-        vec![
-            (target(&fx.ctx), Ok(fx.ctx.clone())),
-            (target(&other), Ok(other.clone())),
-            (target(&unlinked), Ok(unlinked.clone())),
-            (
-                WorktreeBranch {
-                    worktree_path: "/gone".into(),
-                    branch: "x".into(),
-                },
-                Err(GithubFailure::other("Not a git repository")),
-            ),
-        ],
-        &lookup,
-        Some(1_700_000_100),
-    )
-    .await;
-
-    assert_eq!(
-        *lookup.lookups.lock().unwrap(),
-        vec![("example/demo-repo".to_string(), vec![7, 8])]
-    );
-    assert_eq!(result.hold_off_secs, None);
-    assert_eq!(result.results.len(), 4);
-    match &result.results[0].result {
-        WorktreePrPollResult::Linked {
-            association,
-            checks,
-        } => {
-            assert_eq!(linked_number(association), 7);
-            assert_eq!(checks.pr_number, 7);
-            assert_eq!(checks.repo, "example/demo-repo");
-            assert_eq!(checks.checks[0].rerun, GithubCheckRerun::Allowed);
-            assert_eq!(checks.checks[1].cancel, GithubCheckCancel::Allowed);
-            assert_eq!(checks.checks[1].actions_run.as_deref(), Some("900"));
+    let limit = tc
+        .draw(gs::weighted_booleans(0.9))
+        .then(|| RateLimitStatus {
+            remaining: if tc.draw(gs::booleans()) {
+                // Around the threshold.
+                tc.draw(gs::integers::<u32>().max_value(LOW_RATE_LIMIT_REMAINING + 2))
+            } else {
+                tc.draw(gs::integers::<u32>())
+            },
+            reset_in_secs: if tc.draw(gs::booleans()) {
+                u64::from(u32::MAX) - 2 + tc.draw(gs::integers::<u64>().max_value(4))
+            } else {
+                tc.draw(gs::integers::<u64>())
+            },
+        });
+    tc.note(&format!("{limit:?}"));
+    let expected = match limit {
+        Some(limit) if limit.remaining < LOW_RATE_LIMIT_REMAINING => {
+            Some(u32::try_from(limit.reset_in_secs.min(u64::from(u32::MAX))).unwrap())
         }
-        other => panic!("expected linked, got {other:?}"),
-    }
-    assert!(matches!(
-        &result.results[1].result,
-        WorktreePrPollResult::Failed { failure } if failure.kind == GithubErrorKind::NotFound
-    ));
-    assert_eq!(result.results[2].result, WorktreePrPollResult::NotLinked);
-    assert!(matches!(
-        &result.results[3].result,
-        WorktreePrPollResult::Failed { failure } if failure.message == "Not a git repository"
-    ));
-
-    // The refreshed PR is written back, so association reads see it.
-    match fx.store.load(&fx.ctx.key()).await.unwrap() {
-        Some(StoredPrAssociation::Linked(record)) => {
-            assert_eq!(record.pr.title, "Fresh title 7");
-            assert_eq!(record.fetched_at, 1_700_000_100);
-        }
-        other => panic!("expected stored link, got {other:?}"),
-    }
-}
-
-#[tokio::test]
-async fn a_failed_request_fails_every_worktree_of_that_repository() {
-    let fx = fixture("feature/retry", &[ORIGIN]);
-    seed(&fx, stored_link("feature/retry", 7, NOW)).await;
-    let lookup = FakeChecks {
-        answer: Some(Err(GitHubError::RateLimited {
-            retry_after_secs: Some(40),
-            message: "API rate limit exceeded".into(),
-        })),
-        ..FakeChecks::default()
+        _ => None,
     };
-    let result = poll_prs(
-        &fx.store,
-        vec![(target(&fx.ctx), Ok(fx.ctx.clone()))],
-        &lookup,
-        NOW,
-    )
-    .await;
-    match &result.results[0].result {
-        WorktreePrPollResult::Failed { failure } => {
-            assert_eq!(failure.kind, GithubErrorKind::RateLimited);
-            assert_eq!(failure.retry_after_secs, Some(40));
-        }
-        other => panic!("expected failure, got {other:?}"),
-    }
-}
-
-#[tokio::test]
-async fn unlinked_branches_never_query_github() {
-    let fx = fixture("feature/retry", &[ORIGIN]);
-    seed(&fx, StoredPrAssociation::Unlinked).await;
-    let lookup = FakeChecks::default();
-    let result = poll_prs(
-        &fx.store,
-        vec![(target(&fx.ctx), Ok(fx.ctx.clone()))],
-        &lookup,
-        NOW,
-    )
-    .await;
-    assert_eq!(result.results[0].result, WorktreePrPollResult::NotLinked);
-    assert!(lookup.lookups.lock().unwrap().is_empty());
-}
-
-#[test]
-fn polling_holds_off_only_when_the_budget_is_nearly_spent() {
-    assert_eq!(hold_off_secs(None), None);
-    let limit = |remaining, reset_in_secs| {
-        Some(RateLimitStatus {
-            remaining,
-            reset_in_secs,
-        })
-    };
-    assert_eq!(hold_off_secs(limit(4000, 600)), None);
-    assert_eq!(hold_off_secs(limit(10, 600)), Some(600));
+    assert_eq!(hold_off_secs(limit), expected);
 }
 
 #[tokio::test]
 async fn rerun_and_cancel_post_only_for_currently_allowed_actions_jobs() {
-    let fx = fixture("feature/retry", &[ORIGIN]);
-    seed(&fx, stored_link("feature/retry", 7, NOW)).await;
     let mut no_permission = check("run:12", CheckStatus::Failed, Some(12));
     no_permission.rerun = CheckRerun::NoPermission;
     let mut closed = check("run:13", CheckStatus::Failed, Some(13));
     closed.rerun = CheckRerun::PullRequestClosed;
     let mut provider = check("status:ci", CheckStatus::Failed, None);
     provider.rerun = CheckRerun::Provider;
+    let mut run_going = check("run:17", CheckStatus::Failed, Some(17));
+    run_going.rerun = CheckRerun::RunInProgress;
     let mut cannot_cancel = check("run:16", CheckStatus::Running, Some(16));
     cannot_cancel.cancel = CheckCancel::NoPermission;
-    let lookup = FakeChecks {
-        answer: Some(Ok(batch(vec![(
-            7,
-            Ok(snapshot(
+    let mut lookup = FakeLookup::default();
+    lookup.checks.insert(
+        "example/demo-repo".into(),
+        Ok(batch(
+            vec![(
                 7,
-                vec![
-                    check("run:11", CheckStatus::Failed, Some(11)),
-                    no_permission,
-                    closed,
-                    provider,
-                    check("run:14", CheckStatus::Passed, Some(14)),
-                    check("run:15", CheckStatus::Queued, Some(15)),
-                    cannot_cancel,
-                ],
-            )),
-        )]))),
-        ..FakeChecks::default()
-    };
+                Ok(snapshot(
+                    7,
+                    vec![
+                        check("run:11", CheckStatus::Failed, Some(11)),
+                        no_permission,
+                        closed,
+                        provider,
+                        run_going,
+                        check("run:14", CheckStatus::Passed, Some(14)),
+                        check("run:15", CheckStatus::Queued, Some(15)),
+                        cannot_cancel,
+                    ],
+                )),
+            )],
+            None,
+        )),
+    );
 
-    rerun_check(&fx.store, &fx.ctx, "run:11", &lookup)
-        .await
-        .unwrap();
+    rerun_check(&demo(), 7, "run:11", &lookup).await.unwrap();
     for (id, reason) in [
         ("run:12", "write access"),
         ("run:13", "open pull request"),
         ("status:ci", "provider"),
+        ("run:17", "rest of their workflow run has finished"),
         ("run:14", "Only failed jobs"),
         ("run:999", "no longer on PR #7"),
     ] {
-        let failure = rerun_check(&fx.store, &fx.ctx, id, &lookup)
-            .await
-            .unwrap_err();
+        let failure = rerun_check(&demo(), 7, id, &lookup).await.unwrap_err();
         assert!(
             failure.message.contains(reason),
             "{id}: {}",
@@ -304,18 +241,19 @@ async fn rerun_and_cancel_post_only_for_currently_allowed_actions_jobs() {
         );
     }
     assert_eq!(*lookup.reruns.lock().unwrap(), vec![11]);
-
-    cancel_check(&fx.store, &fx.ctx, "run:15", &lookup)
+    assert!(rerun_check(&demo(), 8, "run:11", &lookup)
         .await
-        .unwrap();
+        .unwrap_err()
+        .message
+        .contains("#8 not found"));
+
+    cancel_check(&demo(), 7, "run:15", &lookup).await.unwrap();
     for (id, reason) in [
         ("run:16", "write access"),
         ("run:14", "already finished"),
         ("run:999", "no longer on PR #7"),
     ] {
-        let failure = cancel_check(&fx.store, &fx.ctx, id, &lookup)
-            .await
-            .unwrap_err();
+        let failure = cancel_check(&demo(), 7, id, &lookup).await.unwrap_err();
         assert!(
             failure.message.contains(reason),
             "{id}: {}",
@@ -327,29 +265,33 @@ async fn rerun_and_cancel_post_only_for_currently_allowed_actions_jobs() {
 
 #[tokio::test]
 async fn a_refused_write_is_reported_once() {
-    let fx = fixture("feature/retry", &[ORIGIN]);
-    seed(&fx, stored_link("feature/retry", 7, NOW)).await;
-    let lookup = FakeChecks {
-        answer: Some(Ok(batch(vec![(
-            7,
-            Ok(snapshot(
-                7,
-                vec![
-                    check("run:11", CheckStatus::Failed, Some(11)),
-                    check("run:12", CheckStatus::Running, Some(12)),
-                ],
-            )),
-        )]))),
+    let mut lookup = FakeLookup {
         write_result: Some(Err(GitHubError::Network {
             message: "GitHub request timed out".into(),
         })),
-        ..FakeChecks::default()
+        ..FakeLookup::default()
     };
-    let failure = rerun_check(&fx.store, &fx.ctx, "run:11", &lookup)
+    lookup.checks.insert(
+        "example/demo-repo".into(),
+        Ok(batch(
+            vec![(
+                7,
+                Ok(snapshot(
+                    7,
+                    vec![
+                        check("run:11", CheckStatus::Failed, Some(11)),
+                        check("run:12", CheckStatus::Running, Some(12)),
+                    ],
+                )),
+            )],
+            None,
+        )),
+    );
+    let failure = rerun_check(&demo(), 7, "run:11", &lookup)
         .await
         .unwrap_err();
     assert!(failure.message.contains("timed out"));
-    let failure = cancel_check(&fx.store, &fx.ctx, "run:12", &lookup)
+    let failure = cancel_check(&demo(), 7, "run:12", &lookup)
         .await
         .unwrap_err();
     assert!(failure.message.contains("timed out"));
@@ -379,3 +321,23 @@ fn published_head_reads_the_push_remote_tracking_ref() {
     let plain = tempfile::tempdir().unwrap();
     assert_eq!(published_head(plain.path(), "feature/retry"), None);
 }
+
+fn request(repo: &str, branches: &[&str], numbers: &[u32]) -> GithubPrPollRequest {
+    GithubPrPollRequest {
+        host: "github.com".into(),
+        repo: repo.into(),
+        branches: branches.iter().map(|branch| branch.to_string()).collect(),
+        numbers: numbers.to_vec(),
+    }
+}
+
+#[tokio::test]
+async fn a_remote_without_branches_or_numbers_never_queries_github() {
+    let lookup = FakeLookup::default();
+    let polled = poll(vec![request("example/demo-repo", &[], &[])], &lookup).await;
+    assert_eq!(lookup.calls(), Vec::<String>::new());
+    assert_eq!(polled.remotes[0].open_prs, GithubOpenPrsPoll::NotRequested);
+    assert!(polled.remotes[0].pull_requests.is_empty());
+}
+
+mod poll_oracle;

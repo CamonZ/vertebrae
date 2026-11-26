@@ -6,7 +6,7 @@
 use crate::{
     client::map_graphql_errors,
     error::bounded_message,
-    rest::RateLimitStatus,
+    rate_limit::RateLimitStatus,
     wire::{
         CheckContext, CheckRunSteps, CheckStepsQueryData, ChecksPullRequestNode, ChecksQueryData,
         GraphQlCheckRun, GraphQlError, GraphQlStatusContext,
@@ -14,10 +14,7 @@ use crate::{
     GitHubClient, GitHubError, GitHubToken, PullRequestState, PullRequestSummary, RepoRef,
 };
 use serde_json::json;
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::Mutex,
-};
+use std::collections::HashMap;
 
 /// Contexts read per pull request; more are reported as `truncated`.
 const CONTEXTS_PER_PR: u32 = 100;
@@ -25,7 +22,6 @@ const CONTEXTS_PER_PR: u32 = 100;
 pub const PULL_REQUESTS_PER_QUERY: usize = 10;
 /// Step lookups per refresh; later refreshes pick up the rest from the cache.
 const MAX_FAILED_STEP_LOOKUPS: usize = 20;
-const FAILED_STEP_CACHE_SIZE: usize = 512;
 const GITHUB_ACTIONS_SLUG: &str = "github-actions";
 
 const CHECK_STEPS_QUERY: &str = r#"
@@ -172,6 +168,9 @@ pub enum CheckRerun {
     NoPermission,
     /// A failed Actions job on a merged or closed pull request.
     PullRequestClosed,
+    /// A failed Actions job whose workflow run still has jobs queued or
+    /// running; GitHub accepts a job re-run only once the run has finished.
+    RunInProgress,
     /// A failed check from another provider; it re-runs there.
     Provider,
     /// The check has not failed.
@@ -248,44 +247,6 @@ impl PullRequestChecks {
 pub struct PullRequestChecksBatch {
     pub pull_requests: HashMap<u64, Result<PullRequestChecks, GitHubError>>,
     pub rate_limit: Option<RateLimitStatus>,
-}
-
-/// Failing step names by check run id. Completed runs never change, so an
-/// entry stays valid until it is evicted (oldest first).
-#[derive(Debug, Default)]
-pub(crate) struct FailedStepCache {
-    entries: Mutex<StepEntries>,
-}
-
-#[derive(Debug, Default)]
-struct StepEntries {
-    steps: HashMap<u64, Option<String>>,
-    order: VecDeque<u64>,
-}
-
-impl FailedStepCache {
-    fn lock(&self) -> std::sync::MutexGuard<'_, StepEntries> {
-        self.entries
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    fn get(&self, run_id: u64) -> Option<Option<String>> {
-        self.lock().steps.get(&run_id).cloned()
-    }
-
-    fn insert(&self, run_id: u64, step: Option<String>) {
-        let mut guard = self.lock();
-        let StepEntries { steps: map, order } = &mut *guard;
-        if map.insert(run_id, step).is_none() {
-            order.push_back(run_id);
-        }
-        while order.len() > FAILED_STEP_CACHE_SIZE {
-            if let Some(oldest) = order.pop_front() {
-                map.remove(&oldest);
-            }
-        }
-    }
 }
 
 fn non_empty(text: Option<String>) -> Option<String> {
@@ -471,6 +432,7 @@ fn checks_from_node(
         };
         checks.push(check);
     }
+    hold_reruns_until_runs_finish(&mut checks);
     checks.sort_by(|a, b| a.status.cmp(&b.status).then_with(|| a.name.cmp(&b.name)));
     Ok((
         PullRequestChecks {
@@ -482,6 +444,22 @@ fn checks_from_node(
         },
         failed_runs,
     ))
+}
+
+fn hold_reruns_until_runs_finish(checks: &mut [PullRequestCheck]) {
+    let pending_runs: Vec<u64> = checks
+        .iter()
+        .filter(|check| matches!(check.status, CheckStatus::Running | CheckStatus::Queued))
+        .filter_map(|check| check.actions_run_id)
+        .collect();
+    for check in checks {
+        let run_pending = check
+            .actions_run_id
+            .is_some_and(|run| pending_runs.contains(&run));
+        if check.rerun == CheckRerun::Allowed && run_pending {
+            check.rerun = CheckRerun::RunInProgress;
+        }
+    }
 }
 
 fn first_failed_step(run: CheckRunSteps) -> Option<String> {
@@ -567,6 +545,8 @@ impl GitHubClient {
                     .cloned()
                     .collect();
                 let result = match nodes.remove(&alias).flatten() {
+                    // A partly resolved PR could show missing checks as none.
+                    Some(_) if !errors.is_empty() => Err(map_graphql_errors(errors)),
                     Some(node) => checks_from_node(node, viewer_can_write).map(|(checks, runs)| {
                         failed_runs.extend(runs.into_iter().map(|run| (number, run)));
                         checks
@@ -610,35 +590,51 @@ impl GitHubClient {
         batch: &mut PullRequestChecksBatch,
         failed_runs: Vec<(u64, (u64, String))>,
     ) {
-        let missing: Vec<String> = failed_runs
+        let cache = &self.failed_steps;
+        let missing: Vec<(u64, String)> = failed_runs
             .iter()
-            .filter(|(_, (job_id, _))| self.failed_steps.get(*job_id).is_none())
-            .map(|(_, (_, node_id))| node_id.clone())
+            .map(|(_, run)| run)
+            .filter(|(job_id, _)| cache.get(*job_id).is_none())
             .take(MAX_FAILED_STEP_LOOKUPS)
+            .cloned()
             .collect();
         if !missing.is_empty() {
+            let ids: Vec<&str> = missing
+                .iter()
+                .map(|(_, node_id)| node_id.as_str())
+                .collect();
             if let Ok((envelope, rate_limit)) = self
                 .graphql_envelope::<CheckStepsQueryData>(
                     token,
                     CHECK_STEPS_QUERY,
-                    json!({ "ids": missing }),
+                    json!({ "ids": ids }),
                 )
                 .await
             {
                 batch.rate_limit = RateLimitStatus::tightest(batch.rate_limit, rate_limit);
-                for run in envelope
+                let mut answered: HashMap<u64, Option<String>> = envelope
                     .data
                     .into_iter()
                     .flat_map(|data| data.nodes)
                     .flatten()
-                {
-                    let job_id = run.database_id;
-                    self.failed_steps.insert(job_id, first_failed_step(run));
+                    .map(|run| (run.database_id, first_failed_step(run)))
+                    .collect();
+                // A run GitHub answered without steps is remembered as having
+                // none, so later refreshes look up the runs after it. When the
+                // answer carries errors a missing run may be transient, so only
+                // the runs actually returned are remembered.
+                let complete = envelope.errors.is_empty();
+                for (job_id, _) in missing {
+                    match answered.remove(&job_id) {
+                        Some(step) => cache.insert(job_id, step),
+                        None if complete => cache.insert(job_id, None),
+                        None => {}
+                    }
                 }
             }
         }
         for (number, (job_id, _)) in failed_runs {
-            let Some(step) = self.failed_steps.get(job_id).flatten() else {
+            let Some(step) = cache.get(job_id).flatten() else {
                 continue;
             };
             if let Some(Ok(checks)) = batch.pull_requests.get_mut(&number) {
