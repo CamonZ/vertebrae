@@ -110,6 +110,7 @@ impl SessionState {
                         stream,
                         correlation,
                         HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+                            summary: None,
                             tool_call_id: ToolCallId::new(tool_id),
                             name,
                             input,

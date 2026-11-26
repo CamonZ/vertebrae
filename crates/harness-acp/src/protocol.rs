@@ -97,6 +97,16 @@ impl Process {
         method: &str,
         params: Value,
     ) -> Result<Value, HarnessError> {
+        self.request_observing(id, method, params, |_| Ok(())).await
+    }
+
+    pub(crate) async fn request_observing(
+        &mut self,
+        id: u64,
+        method: &str,
+        params: Value,
+        mut observe: impl FnMut(&Value) -> Result<(), HarnessError>,
+    ) -> Result<Value, HarnessError> {
         self.write(json!({"jsonrpc":"2.0", "id":id, "method":method, "params":params}))
             .await?;
         loop {
@@ -108,6 +118,8 @@ impl Process {
                 && let Some(id) = message.get("id")
             {
                 self.reject(id).await?;
+            } else if message.get("method").is_some() {
+                observe(&message)?;
             }
         }
     }
@@ -144,6 +156,11 @@ pub(crate) fn response(mut message: Value, method: &str) -> Result<Value, Harnes
                 "ACP agent requires authentication. Sign in using the agent, then retry.",
             ));
         }
+        if code == -32002 && matches!(method, "session/load" | "session/resume") {
+            return Err(operation(
+                "The ACP adapter no longer has this saved session. Start a new chat to continue.",
+            ));
+        }
         // Provider error text can contain credentials or private request data.
         return Err(operation(format!("ACP {method} failed (code {code})")));
     }
@@ -160,6 +177,20 @@ pub(crate) fn operation(message: impl Into<String>) -> HarnessError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_saved_session_has_a_redacted_actionable_error() {
+        for method in ["session/load", "session/resume"] {
+            let error = response(
+                json!({"error": {"code": -32002, "message": "private data"}}),
+                method,
+            )
+            .unwrap_err()
+            .to_string();
+            assert!(error.contains("Start a new chat"));
+            assert!(!error.contains("private data"));
+        }
+    }
 
     #[test]
     fn distinguishes_malformed_codes_from_zero_without_exposing_agent_text() {

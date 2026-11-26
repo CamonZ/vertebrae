@@ -334,11 +334,23 @@ export function routeLocalChatSessionUsageEvent(
     !payload.turn_id &&
     (session?.lifecycle === "compacting" ||
       session?.compactionSummary?.trigger === "manual");
+  const acpSessionSnapshot =
+    payload.harness === "acp" && payload.is_root === true && !payload.turn_id;
   if (
     !manualCompactionUsage &&
+    !acpSessionSnapshot &&
     !shouldRouteContentEvent(payload.backend_session_id, sessionId, payload)
   ) {
     return false;
+  }
+  if (payload.harness === "acp") {
+    if (payload.context_window > 0) {
+      useChatStore.getState().setSessionTokenUsage(sessionId, {
+        used: payload.context_tokens,
+        max: payload.context_window,
+      });
+    }
+    return true;
   }
   handleUsageEvent(
     payload,

@@ -174,6 +174,7 @@ fn every_v1_payload_round_trips_through_type_and_data_wire_shape() {
             }],
         }),
         HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+            summary: None,
             tool_call_id: ToolCallId::from("tool"),
             name: "shell".into(),
             input: json!({"cmd": "true"}),

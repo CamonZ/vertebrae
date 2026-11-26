@@ -102,29 +102,7 @@ fn key(project: &str, chat: &str) -> String {
 /// The GUI serializes catalog writers with SERIAL and index writers with INDEX_SERIAL.
 /// The application data directory is trusted and owned by this user.
 pub(super) fn durable_write(path: &Path, bytes: &[u8]) -> Result<(), CommandError> {
-    use std::io::Write;
-
-    let root = path.parent().ok_or_else(error)?;
-    let temporary = root.join(format!(".chat-catalog-{}.tmp", uuid::Uuid::new_v4()));
-    let result = (|| {
-        let mut options = fs::OpenOptions::new();
-        options.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        let mut file = options.open(&temporary).map_err(|_| error())?;
-        file.write_all(bytes)
-            .and_then(|()| file.sync_all())
-            .map_err(|_| error())?;
-        fs::rename(&temporary, path).map_err(|_| error())?;
-        fs::File::open(root)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|_| error())
-    })();
-    let _ = fs::remove_file(temporary);
-    result
+    crate::private_file::replace(path, bytes).map_err(|_| error())
 }
 
 async fn lock_file(root: &Path, name: &str) -> Result<fs::File, CommandError> {

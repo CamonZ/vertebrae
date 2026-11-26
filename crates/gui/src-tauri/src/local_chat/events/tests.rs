@@ -31,6 +31,7 @@ fn local_chat_event_names_match_public_contract() {
             is_root: true,
         }),
         LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+            summary: None,
             backend_session_id: "session-1".to_string(),
             harness: LocalChatHarnessKind::Claude,
             turn_id: Some("turn-1".to_string()),

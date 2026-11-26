@@ -1,3 +1,4 @@
+import { pendingAcpHistory } from "../utils/acpTranscriptPersistence";
 import { localChatCapabilities } from "../components/ChatWindow/chatHelpers";
 import { loadMainChatWorktree } from "../utils/chatAssociation/defaultWorktree";
 import { getProjectScopeGeneration } from "../stores/projectScopedStores";
@@ -473,6 +474,7 @@ export function handleToolCallEvent(
   addMessage(sessionId, {
     kind: "tool_call",
     toolName: payload.tool_name,
+    ...(payload.summary ? { summary: payload.summary } : {}),
     toolId: payload.tool_id,
     input: payload.input,
     timestamp: new Date().toISOString(),
@@ -766,6 +768,24 @@ export async function doStartSession(
   userMessage?: string,
   options: { addUserMessage?: boolean } = {}
 ) {
+  const recovery = session.harness === "acp" && pendingAcpHistory(sessionId);
+  if (recovery) {
+    const generation = getProjectScopeGeneration();
+    await recovery;
+    const current = useChatStore.getState().sessions[sessionId];
+    if (getProjectScopeGeneration() !== generation || !current || current.backendSessionId) return false;
+    session = current;
+  }
+  if (
+    session.harness === "acp" &&
+    !session.providerResumeId &&
+    (session.messages.some((message) => message.kind === "assistant") ||
+      (session.messageCount ?? 0) > session.messages.length)
+  ) {
+    const message = "This ACP conversation has no saved adapter session. Start a new chat to continue.";
+    deps.addMessage(sessionId, { kind: "error", message, timestamp: new Date().toISOString() });
+    return false;
+  }
   const resumeId = session.providerResumeId;
   deps.setSessionLifecycle(sessionId, resumeId ? "resuming" : "starting");
   const activeTurnLocalId = userMessage

@@ -338,6 +338,7 @@ impl EventSink for LocalChatHarnessEventSink {
                     return Ok(());
                 }
                 self.emit_local(LocalChatEvent::ToolCall(LocalChatToolCallEvent {
+                    summary: value.summary,
                     backend_session_id,
                     harness,
                     turn_id,
@@ -1170,6 +1171,7 @@ mod tests {
                 "local-chat:backend-bridge",
                 root.clone(),
                 HarnessEventPayloadV1::ToolCall(vertebrae_harness_core::ToolCallEvent {
+                    summary: None,
                     tool_call_id: ToolCallId::new("spawn-1"),
                     name: "Agent".into(),
                     input: serde_json::json!({ "prompt": "inspect" }),

@@ -33,6 +33,12 @@ struct ChatSession {
     active_turn: Mutex<Option<Arc<dyn TurnHandle>>>,
 }
 
+#[derive(serde::Serialize, specta::Type)]
+pub(crate) struct RecoveredAcpMessage {
+    user: bool,
+    text: String,
+}
+
 impl AcpLocalChatHarness {
     pub(crate) fn new(config_path: Option<PathBuf>) -> Self {
         Self {
@@ -43,7 +49,7 @@ impl AcpLocalChatHarness {
     }
 
     async fn with_agents<T: Send + 'static>(
-        &self,
+        path: Option<PathBuf>,
         read: impl FnOnce(
                 &vertebrae_sacrum_client::VertebraeConfigFile,
                 &HarnessRuntimeFactory,
@@ -51,7 +57,6 @@ impl AcpLocalChatHarness {
             + Send
             + 'static,
     ) -> Result<T, LocalChatSessionError> {
-        let path = self.config_path.clone();
         tokio::task::spawn_blocking(move || {
             let shell = crate::shell_environment::user_shell_environment();
             let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
@@ -75,6 +80,47 @@ impl AcpLocalChatHarness {
         .map_err(|_| {
             LocalChatSessionError::StartFailed("Could not load ACP agent settings.".into())
         })?
+    }
+
+    async fn configured_adapter(
+        path: Option<PathBuf>,
+        provider_id: Option<String>,
+    ) -> Result<Arc<AcpRuntime>, LocalChatSessionError> {
+        Self::with_agents(path, move |config, factory| {
+            let id = provider_id
+                .as_deref()
+                .and_then(|id| id.strip_prefix("local:acp:"));
+            let (_, agent) = config
+                .acp_agents()
+                .find(|(key, _)| Some(*key) == id)
+                .ok_or_else(|| {
+                    LocalChatSessionError::StartFailed("Select a configured ACP connection.".into())
+                })?;
+            factory
+                .create_acp_chat(&agent.executable, agent.args.clone())
+                .map_err(|error| LocalChatSessionError::StartFailed(error.to_string()))
+        })
+        .await
+    }
+
+    pub(crate) async fn recover_history(
+        config_path: Option<PathBuf>,
+        provider_id: String,
+        provider_resume_id: String,
+        working_dir: PathBuf,
+    ) -> Result<Vec<RecoveredAcpMessage>, LocalChatSessionError> {
+        let adapter = Self::configured_adapter(config_path, Some(provider_id)).await?;
+        let messages = adapter
+            .load_history(Some(working_dir), &provider_resume_id)
+            .await
+            .map_err(|error| LocalChatSessionError::StartFailed(error.to_string()))?;
+        Ok(messages
+            .into_iter()
+            .map(|message| RecoveredAcpMessage {
+                user: message.user,
+                text: message.text,
+            })
+            .collect())
     }
 
     async fn session(&self, id: &str) -> Result<Arc<ChatSession>, LocalChatSessionError> {
@@ -166,30 +212,28 @@ impl LocalChatHarness for AcpLocalChatHarness {
     async fn catalog_entries(
         &self,
     ) -> Result<(LocalChatHarnessInfo, Vec<LocalChatProviderInfo>), LocalChatSessionError> {
-        let entries = self
-            .with_agents(|config, factory| {
-                Ok(config
-                    .acp_agents()
-                    .map(|(id, agent)| {
-                        let adapter =
-                            factory.create_acp_chat(&agent.executable, agent.args.clone());
-                        let provider = LocalChatProviderInfo {
-                            id: format!("local:acp:{id}"),
-                            label: agent.display_name(id).into(),
-                            harness: LocalChatHarnessKind::Acp,
-                            custom: true,
-                            available: adapter.is_ok(),
-                            unavailable_reason: adapter.as_ref().err().map(ToString::to_string),
-                            models: None,
-                            default_model_id: None,
-                            discovered: None,
-                            supports_steering: None,
-                        };
-                        (provider, adapter.ok())
-                    })
-                    .collect::<Vec<_>>())
-            })
-            .await?;
+        let entries = Self::with_agents(self.config_path.clone(), |config, factory| {
+            Ok(config
+                .acp_agents()
+                .map(|(id, agent)| {
+                    let adapter = factory.create_acp_chat(&agent.executable, agent.args.clone());
+                    let provider = LocalChatProviderInfo {
+                        id: format!("local:acp:{id}"),
+                        label: agent.display_name(id).into(),
+                        harness: LocalChatHarnessKind::Acp,
+                        custom: true,
+                        available: adapter.is_ok(),
+                        unavailable_reason: adapter.as_ref().err().map(ToString::to_string),
+                        models: None,
+                        default_model_id: None,
+                        discovered: None,
+                        supports_steering: None,
+                    };
+                    (provider, adapter.ok())
+                })
+                .collect::<Vec<_>>())
+        })
+        .await?;
         let base = self.info().await;
         let mut cache = self.discovery_cache.lock().await;
         let mut previous = std::mem::take(&mut *cache);
@@ -248,25 +292,7 @@ impl LocalChatHarness for AcpLocalChatHarness {
         if input.read_only || input.gate.is_some() {
             return Err(LocalChatSessionError::UnsupportedHarness(self.kind()));
         }
-        let provider_id = input.provider_id;
-        let adapter = self
-            .with_agents(move |config, factory| {
-                let id = provider_id
-                    .as_deref()
-                    .and_then(|id| id.strip_prefix("local:acp:"));
-                let (_, agent) = config
-                    .acp_agents()
-                    .find(|(key, _)| Some(*key) == id)
-                    .ok_or_else(|| {
-                        LocalChatSessionError::StartFailed(
-                            "Select a configured ACP connection.".into(),
-                        )
-                    })?;
-                factory
-                    .create_acp_chat(&agent.executable, agent.args.clone())
-                    .map_err(|error| LocalChatSessionError::StartFailed(error.to_string()))
-            })
-            .await?;
+        let adapter = Self::configured_adapter(self.config_path.clone(), input.provider_id).await?;
         let id = input.backend_session_id;
         let events = Arc::new(
             LocalChatHarnessEventSink::new(

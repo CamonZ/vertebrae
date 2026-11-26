@@ -94,6 +94,22 @@ impl LocalChatSessionManager {
         self
     }
 
+    pub(crate) async fn recover_acp_history(
+        &self,
+        provider_id: String,
+        provider_resume_id: String,
+        working_dir: std::path::PathBuf,
+    ) -> Result<Vec<crate::local_chat::harnesses::acp::RecoveredAcpMessage>, LocalChatSessionError>
+    {
+        AcpLocalChatHarness::recover_history(
+            self.provider_config_path.clone(),
+            provider_id,
+            provider_resume_id,
+            working_dir,
+        )
+        .await
+    }
+
     /// Run a per-request operation against one locked file snapshot. Active
     /// harness sessions retain their existing owned provider configuration.
     pub(crate) async fn with_provider_profiles<T: Send + 'static>(

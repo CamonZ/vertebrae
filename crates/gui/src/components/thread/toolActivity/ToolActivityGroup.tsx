@@ -9,6 +9,18 @@ import { useActivities } from "./useActivities";
 import { TurnLiveContext } from "./TurnLiveContext";
 import type { ActivityAnalysis } from "./types";
 
+function commandDetail(call?: ToolMessage): string | undefined {
+  const activity = call?.activityInput;
+  if (!activity) return;
+  const { name, input } = activity;
+  if (typeof input.CommandLine === "string" && input.CommandLine.trim()) {
+    return `CommandLine: ${input.CommandLine}`;
+  }
+  if (name === "Bash" && typeof input.command === "string" && input.command.trim()) {
+    return `Bash: ${input.command}`;
+  }
+}
+
 function Chevron({ open }: { open: boolean }) {
   return (
     <svg
@@ -98,7 +110,7 @@ function CallDisclosure({
       )
     ),
   ];
-  const label =
+  const label = call.reportedSummary || (
     analysis.analysisState === "loading"
       ? "Analyzing…"
       : analysis.analysisState === "unavailable"
@@ -106,7 +118,11 @@ function CallDisclosure({
         : labels.length
           ? labels.slice(0, 2).join(" · ") +
             (labels.length > 2 ? ` · +${labels.length - 2} more` : "")
-          : "Unclassified";
+          : "Unclassified"
+  );
+  const toolName = call.activityInput?.name ?? call.name;
+  const detail = commandDetail(call) ?? toolName;
+  const showDetail = !!call.reportedSummary && !!detail && detail !== label;
   const targets = [...new Set(operations.flatMap((op) => op.targets ?? []))];
   const relationships = [
     ...new Set(operations.flatMap((op) => op.relationships)),
@@ -120,7 +136,7 @@ function CallDisclosure({
       <button
         type="button"
         className="tool-activity-call-toggle"
-        aria-label={`${label} — Raw arguments and recorded result`}
+        aria-label={`${label}${showDetail ? ` (${detail})` : ""} — Raw arguments and recorded result`}
         aria-expanded={open}
         aria-controls={open ? rawId : undefined}
         onClick={() => {
@@ -130,6 +146,7 @@ function CallDisclosure({
       >
         <Chevron open={open} />
         <span className="tool-activity-call-label">{label}</span>
+        {showDetail && <code className="tool-activity-call-name">{detail}</code>}
         {operations.some((op) => op.inferredActivities?.length) ? (
           <span
             className="tool-activity-inferred"
@@ -155,7 +172,7 @@ function CallDisclosure({
           </div>
           <div className="tool-activity-provider">
             Tool:{" "}
-            <span>{call.name ?? call.activityInput?.name ?? "Shell call"}</span>
+            <span>{toolName ?? "Shell call"}</span>
           </div>
           {targets.length ? (
             <div className="tool-activity-detail-targets">
@@ -231,6 +248,9 @@ function ActivityGroup({
   const syntax = useActivities(calls, retryToken);
   const rows = useDecisionActivities(syntax, sessionId, open);
   const summary = activitySummary(rows);
+  const singleCall = calls.length === 1 ? calls[0] : undefined;
+  const singleSummary = singleCall?.reportedSummary;
+  const singleCommand = singleSummary ? commandDetail(singleCall) : undefined;
   const turnLive = useContext(TurnLiveContext);
   const pending = turnLive
     ? calls.filter((call) => call.status === "pending").length
@@ -254,9 +274,12 @@ function ActivityGroup({
           </span>
           {" for "}
           <span className="tool-activity-label">
-            {summary.labels.join(", ") || "tool activity"}
+            {singleSummary || summary.labels.join(", ") || "tool activity"}
           </span>
-          {summary.overflow ? (
+          {singleCommand && (
+            <code className="tool-activity-call-name">{singleCommand}</code>
+          )}
+          {!singleSummary && summary.overflow ? (
             <span className="tool-activity-overflow">
               {" "}
               +{summary.overflow} more

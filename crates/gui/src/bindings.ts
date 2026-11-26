@@ -1248,6 +1248,36 @@ async loadLocalChatQueues() : Promise<Result<LocalChatSessionIndexEntry[], Comma
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * ACP transcript bodies are machine-local and stay outside the shared catalog.
+ */
+async loadAcpTranscript(sessionId: string) : Promise<Result<JsonValue[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_acp_transcript", { sessionId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Recover text for catalog entries created before local ACP transcripts existed.
+ */
+async recoverAcpTranscript(providerId: string, providerResumeId: string, workingDir: string) : Promise<Result<RecoveredAcpMessage[], CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("recover_acp_transcript", { providerId, providerResumeId, workingDir }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveAcpTranscript(sessionId: string, messages: JsonValue[]) : Promise<Result<null, CommandError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_acp_transcript", { sessionId, messages }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async checkReviewAnchorWorktree(worktree: string) : Promise<Result<null, ReviewAnchorError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("check_review_anchor_worktree", { worktree }) };
@@ -2769,7 +2799,9 @@ export type LocalChatSpeedTierOption = { id: string; label: string; is_default?:
 export type LocalChatSpeedTierStatus = { requested: string | null; active: string | null; eligible: boolean; available: boolean; diagnostic: string | null }
 export type LocalChatSteeringInputEvent = { backend_session_id: string; turn_id: string; input_id: string; content: string; observed_at: string }
 export type LocalChatTextEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; text: string; is_partial: boolean; completion_status?: string | null; parent_tool_use_id: string | null; item_id?: string | null }
-export type LocalChatToolCallEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; tool_name: string; input: string; parent_tool_use_id: string | null }
+export type RecoveredAcpMessage = { user: boolean; text: string }
+
+export type LocalChatToolCallEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; tool_name: string; summary?: string | null; input: string; parent_tool_use_id: string | null }
 export type LocalChatToolResultEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; result: string; is_error: boolean; parent_tool_use_id: string | null }
 /**
  * The composer's settings for one turn of a live session. Each harness

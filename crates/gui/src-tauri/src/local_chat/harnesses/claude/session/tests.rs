@@ -903,6 +903,7 @@ async fn harness_events_preserve_init_text_tool_usage_terminal_and_diagnostic_se
         4,
         UpdateSemantics::Snapshot,
         HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+            summary: None,
             tool_call_id: ToolCallId::new("tool-1"),
             name: "Bash".into(),
             input: serde_json::json!({"command": "pwd"}),
@@ -915,6 +916,7 @@ async fn harness_events_preserve_init_text_tool_usage_terminal_and_diagnostic_se
         41,
         UpdateSemantics::Snapshot,
         HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+            summary: None,
             tool_call_id: ToolCallId::new("question-tool"),
             name: crate::local_chat::permissions::ASK_USER_QUESTION_TOOL.into(),
             input: serde_json::json!({"questions": []}),

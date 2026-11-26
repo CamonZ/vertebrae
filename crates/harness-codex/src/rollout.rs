@@ -817,6 +817,7 @@ fn completed_item_drafts(
         events.push(HarnessEventPayloadV1::FileChange(change));
     } else if let Some((tool_id, name, input, _)) = tool_call(&item) {
         events.push(HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+            summary: None,
             tool_call_id: ToolCallId::new(tool_id),
             name,
             input,
@@ -901,6 +902,7 @@ fn parse_exec_item(
                     timestamp,
                     provider_sequence,
                     HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+                        summary: None,
                         tool_call_id: ToolCallId::new(tool_id.clone()),
                         name: "Bash".into(),
                         input: json!({"command": command}),
@@ -967,6 +969,7 @@ fn tool_call_draft(
         timestamp,
         provider_sequence,
         HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+            summary: None,
             tool_call_id: ToolCallId::new(tool_id),
             name: if name == "exec_command" {
                 "Bash".into()

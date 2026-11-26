@@ -1,3 +1,4 @@
+import { persistAcpTranscript, readAcpTranscript, resetAcpTranscriptRetries, writeAcpTranscript } from "./acpTranscriptPersistence";
 import { writeLocalChatQueue } from "./localChatQueueStorage";
 import { invoke } from "@tauri-apps/api/core";
 import { isOpenLocalChatConversation, normalizeDiscussionBinding } from "./localChatDiscussion";
@@ -483,9 +484,15 @@ function serializeSession(
   session: ChatSession,
   previous?: ChatSession | null
 ): ChatSession {
-  const messages: ChatMessage[] = [];
+  const durable = durableMessages(session.messages);
+  const messages =
+    session.harness === "acp"
+      ? durable.length
+        ? durable
+        : previous?.messages ?? []
+      : [];
   const messageCount = Math.max(
-    durableMessages(session.messages).length,
+    durable.length,
     session.messageCount ?? 0,
     previous?.messageCount ?? 0
   );
@@ -534,6 +541,14 @@ function serializeSession(
     association: session.association ?? null,
     gate: session.gate ?? null,
   };
+}
+
+async function hydrateAcpTranscript(session: ChatSession): Promise<ChatSession> {
+  if (session.harness !== "acp" || !session.messageCount) return session;
+  const messages = await readAcpTranscript(session.id);
+  if (!messages) return session;
+  const restored = normalizeLocalChatSession({ ...session, messages });
+  return { ...session, messages: restored?.messages ?? session.messages };
 }
 
 export function allPersistedLocalChatSessions(): Record<string, ChatSession> {
@@ -608,12 +623,17 @@ export function applyRemoteLocalChatSession(
   if (raw === null) {
     if (!sessionIndexCache[sessionId]) return undefined;
     if (sessionIndexCache[sessionId].queuedMessages?.length) void writeQueue(sessionId, null);
+    if (sessionIndexCache[sessionId].harness === "acp") void writeAcpTranscript(sessionId, []);
     delete sessionIndexCache[sessionId];
     return null;
   }
   const session = normalizeLocalChatSession(raw);
   if (!session || session.id !== sessionId) return undefined;
-  const localQueue = sessionIndexCache[sessionId]?.queuedMessages;
+  const local = sessionIndexCache[sessionId];
+  if (session.harness === "acp" && local?.harness === "acp") {
+    session.messages = local.messages;
+  }
+  const localQueue = local?.queuedMessages;
   if (localQueue?.length) {
     session.queuedMessages = localQueue;
     session.queuePaused = true;
@@ -740,12 +760,14 @@ async function loadSessionIndexFromCommand(
     const result = await load();
     if (result.status === "ok") {
       const entries = Array.isArray(result.data) ? result.data : [];
-      return Object.fromEntries(
-        entries
-          .map((entry) => normalizeLocalChatSession(entry))
-          .filter((session): session is ChatSession => session !== null)
-          .map((session) => [session.id, session])
-      );
+      const sessions = entries
+        .map((entry) => normalizeLocalChatSession(entry))
+        .filter((session): session is ChatSession => session !== null);
+      const hydrated: ChatSession[] = [];
+      for (let index = 0; index < sessions.length; index += 8) {
+        hydrated.push(...await Promise.all(sessions.slice(index, index + 8).map(hydrateAcpTranscript)));
+      }
+      return Object.fromEntries(hydrated.map((session) => [session.id, session]));
     }
     await logCatalogDiagnostic("index_load_failed", {
       kind: "command_error",
@@ -1050,10 +1072,16 @@ export function persistLocalChatSession(
       : Promise.resolve(true);
     delete sessions[session.id];
     pendingDeletedIds.add(session.id);
-    return Promise.all([writeSessions(sessions), queueSave]).then(
-      ([index, queue]) => index && queue
+    const transcriptRemoval = session.harness === "acp"
+      ? writeAcpTranscript(session.id, [])
+      : Promise.resolve(true);
+    return Promise.all([writeSessions(sessions), queueSave, transcriptRemoval]).then(
+      ([index, queue, transcript]) => index && queue && transcript
     );
   }
+  const transcriptSave = session.harness === "acp"
+    ? persistAcpTranscript(session.id, previous?.messages, serialized.messages)
+    : Promise.resolve(true);
   const queueSave =
     previous?.queuedMessages !== serialized.queuedMessages
       ? writeQueue(
@@ -1066,15 +1094,16 @@ export function persistLocalChatSession(
     return Promise.all([
       indexSavePromise ?? Promise.resolve(true),
       queueSave,
-    ]).then(([index, queue]) => index && queue);
+      transcriptSave,
+    ]).then(([index, queue, transcript]) => index && queue && transcript);
   }
   pendingChangedIds.set(session.id, ++nextChangeGeneration);
   const persistence = writeSessions(
     deduplicateDefaultEmptyLocalChatSessions(sessions).sessions
   );
   clearLocalChatSessionCleared(session.id);
-  return Promise.all([persistence, queueSave]).then(
-    ([index, queue]) => index && queue
+  return Promise.all([persistence, queueSave, transcriptSave]).then(
+    ([index, queue, transcript]) => index && queue && transcript
   );
 }
 
@@ -1082,13 +1111,20 @@ export function removePersistedLocalChatSession(sessionId: string): void {
   const sessions = readSessions();
   if (sessions[sessionId]?.queuedMessages?.length)
     void writeQueue(sessionId, null);
+  if (sessions[sessionId]?.harness === "acp") {
+    void writeAcpTranscript(sessionId, []);
+  }
   delete sessions[sessionId];
   pendingDeletedIds.add(sessionId);
   writeSessions(sessions);
 }
 
 export function clearPersistedLocalChatSessions(): void {
-  for (const id of Object.keys(sessionIndexCache)) pendingDeletedIds.add(id);
+  resetAcpTranscriptRetries();
+  for (const session of Object.values(sessionIndexCache)) {
+    pendingDeletedIds.add(session.id);
+    if (session.harness === "acp") void writeAcpTranscript(session.id, []);
+  }
   sessionIndexCache = {};
   sessionIndexHydrated = true;
   sessionIndexHydratePromise = null;

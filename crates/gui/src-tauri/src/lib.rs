@@ -7,6 +7,7 @@ pub mod install;
 #[allow(dead_code)]
 pub(crate) mod local_backend;
 pub(crate) mod local_chat;
+mod private_file;
 pub mod project_config;
 pub(crate) mod shell_environment;
 pub(crate) mod telemetry;
@@ -183,6 +184,9 @@ fn create_builder() -> Builder {
             commands::save_local_chat_session_index,
             commands::save_local_chat_queue,
             commands::load_local_chat_queues,
+            commands::acp_transcript::load_acp_transcript,
+            commands::acp_transcript::recover_acp_transcript,
+            commands::acp_transcript::save_acp_transcript,
             commands::chat_catalog::check_review_anchor_worktree,
             commands::chat_catalog::capture_review_anchor,
             commands::chat_catalog::map_review_threads,

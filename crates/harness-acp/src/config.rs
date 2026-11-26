@@ -6,6 +6,7 @@ use crate::protocol::{Process, operation};
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct Choice {
+    #[serde(alias = "id")]
     pub value: String,
     pub name: String,
 }
@@ -36,7 +37,17 @@ impl Select {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct SessionConfig(Vec<Select>);
+pub struct SessionConfig {
+    options: Vec<Select>,
+    legacy_modes: Option<LegacyModes>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyModes {
+    current_mode_id: String,
+    available_modes: Vec<Choice>,
+}
 
 pub struct Discovery {
     pub config: SessionConfig,
@@ -48,16 +59,27 @@ pub struct Discovery {
 impl SessionConfig {
     pub(crate) fn replace(&mut self, payload: &Value) {
         if let Some(options) = payload["configOptions"].as_array() {
-            self.0 = options
+            self.options = options
                 .iter()
                 .filter(|option| option["type"] == "select")
                 .filter_map(|option| serde_json::from_value(option.clone()).ok())
                 .collect();
         }
+        if let Ok(modes) = LegacyModes::deserialize(&payload["modes"]) {
+            self.legacy_modes = Some(modes);
+        }
+    }
+
+    pub(crate) fn update_mode(&mut self, update: &Value) {
+        if let Some(modes) = &mut self.legacy_modes
+            && let Some(value) = update["currentModeId"].as_str()
+        {
+            modes.current_mode_id = value.to_owned();
+        }
     }
 
     fn select(&self, category: &str) -> Option<&Select> {
-        self.0.iter().find(|option| {
+        self.options.iter().find(|option| {
             option.category.as_deref() == Some(category)
                 || option.id == category
                 || (category == "speed" && option.id == "speed_tier")
@@ -71,21 +93,40 @@ impl SessionConfig {
     pub fn current(&self, category: &str) -> Option<&str> {
         self.select(category)
             .map(|option| option.current_value.as_str())
+            .or_else(|| {
+                self.legacy_modes
+                    .as_ref()
+                    .filter(|_| category == "mode")
+                    .map(|modes| modes.current_mode_id.as_str())
+            })
     }
 
     pub fn permission_modes(&self) -> impl Iterator<Item = (PermissionMode, &Choice)> {
-        self.choices("mode").filter_map(|choice| {
-            let mode = match choice.value.as_str() {
-                "default" => PermissionMode::Default,
-                "accept-edits" | "acceptEdits" | "auto_edit" => PermissionMode::AcceptEdits,
-                "auto" => PermissionMode::Auto,
-                "plan" => PermissionMode::Plan,
-                "yolo" | "bypassPermissions" => PermissionMode::BypassPermissions,
-                "dontAsk" => PermissionMode::DontAsk,
-                _ => return None,
-            };
-            Some((mode, choice))
-        })
+        let legacy = self
+            .legacy_modes
+            .iter()
+            .flat_map(|modes| &modes.available_modes);
+        let has_config_mode = self.select("mode").is_some();
+        let mut seen = std::collections::HashSet::new();
+        self.choices("mode")
+            .chain(legacy.filter(move |_| !has_config_mode))
+            .filter_map(move |choice| {
+                let mode = match choice.value.as_str() {
+                    "default" | "ask" => PermissionMode::Default,
+                    "accept-edits" | "acceptEdits" | "auto_edit" => PermissionMode::AcceptEdits,
+                    "auto" | "smart-approve" => PermissionMode::Auto,
+                    "plan" => PermissionMode::Plan,
+                    "yolo"
+                    | "auto-approve"
+                    | "bypassPermissions"
+                    | "bypass-permissions"
+                    | "dangerously-skip-permissions"
+                    | "dangerously-skip-persmissions" => PermissionMode::BypassPermissions,
+                    "dontAsk" => PermissionMode::DontAsk,
+                    _ => return None,
+                };
+                seen.insert(mode.as_str()).then_some((mode, choice))
+            })
     }
 
     pub(crate) async fn set(
@@ -158,7 +199,20 @@ impl SessionConfig {
                 .map(|(_, choice)| choice.value.clone());
             if let Some(value) = value {
                 *id += 1;
-                self.set(process, *id, session, "mode", &value).await?;
+                if self.select("mode").is_some() {
+                    self.set(process, *id, session, "mode", &value).await?;
+                } else if let Some(modes) = &mut self.legacy_modes
+                    && modes.current_mode_id != value
+                {
+                    process
+                        .request(
+                            *id,
+                            "session/set_mode",
+                            json!({"sessionId":session, "modeId":value}),
+                        )
+                        .await?;
+                    modes.current_mode_id = value;
+                }
             } else if *mode != PermissionMode::Default {
                 return Err(HarnessError::InvalidRequest(
                     "ACP agent did not offer the selected permission mode".into(),
@@ -183,4 +237,37 @@ pub(crate) fn supports_steering(initialized: &Value) -> bool {
                 ))
             })
             .is_some_and(|version| version >= (1, 5))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_legacy_updates_preserve_unique_permissions() {
+        let mut config = SessionConfig::default();
+        config.replace(&json!({"modes": {
+            "currentModeId": "ask",
+            "availableModes": [
+                {"id": "ask", "name": "Ask"},
+                {"id": "default", "name": "Default"},
+                {"id": "yolo", "name": "YOLO"},
+                {"id": "bypassPermissions", "name": "Bypass"}
+            ]
+        }}));
+        config.replace(&json!({"modes": null}));
+        config.replace(&json!({"modes": {"availableModes": false}}));
+
+        assert_eq!(config.current("mode"), Some("ask"));
+        assert_eq!(
+            config
+                .permission_modes()
+                .map(|(mode, choice)| (mode, choice.value.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (PermissionMode::Default, "ask"),
+                (PermissionMode::BypassPermissions, "yolo")
+            ]
+        );
+    }
 }
