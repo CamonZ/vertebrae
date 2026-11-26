@@ -94,6 +94,9 @@ pub struct LocalChatToolCallEvent {
     pub is_root: bool,
     pub tool_id: String,
     pub tool_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[specta(optional)]
+    pub summary: Option<String>,
     pub input: String,
     pub parent_tool_use_id: Option<String>,
 }

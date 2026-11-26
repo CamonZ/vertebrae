@@ -17,7 +17,7 @@ use vertebrae_harness_core::{
 use crate::{
     AgentSession, SessionConfig,
     protocol::{Process, operation, response},
-    updates::{cancel_permission, permission, permission_response, update},
+    updates::{ToolCalls, cancel_permission, permission, permission_response, update},
 };
 
 struct Session {
@@ -239,6 +239,14 @@ pub(crate) async fn start(
         actor.process.reap().await;
         return Err(error);
     }
+    if let Some(usage) = session.initial_usage
+        && let Err(error) = actor
+            .emit(usage, UpdateSemantics::Snapshot, &actor.correlation)
+            .await
+    {
+        actor.process.reap().await;
+        return Err(error);
+    }
     tokio::spawn(actor.run(receiver, close_receiver, closed_sender));
     Ok(Arc::new(Session {
         id: request.session_id,
@@ -295,8 +303,15 @@ impl Actor {
                 message = self.process.read() => {
                     let result = match message {
                         Ok(message) if message["method"] == "session/update" => {
-                            self.update_config(&message["params"]);
-                            Ok(())
+                            let params = &message["params"];
+                            self.update_config(params);
+                            if params["sessionId"] == self.agent_session
+                                && let Some((event @ Event::Usage(_), semantics)) = update(&params["update"])
+                            {
+                                self.emit(event, semantics, &self.correlation).await
+                            } else {
+                                Ok(())
+                            }
                         }
                         Ok(message) if message.get("method").is_some() && message.get("id").is_some() => {
                             self.process.reject(&message["id"]).await
@@ -450,10 +465,14 @@ impl Actor {
     }
 
     fn update_config(&mut self, params: &Value) {
-        if params["sessionId"] == self.agent_session
-            && params["update"]["sessionUpdate"] == "config_option_update"
-        {
-            self.config.replace(&params["update"]);
+        if params["sessionId"] != self.agent_session {
+            return;
+        }
+        let update = &params["update"];
+        match update["sessionUpdate"].as_str() {
+            Some("config_option_update") => self.config.replace(update),
+            Some("current_mode_update") => self.config.update_mode(update),
+            _ => {}
         }
     }
 
@@ -472,6 +491,7 @@ impl Actor {
         closing: &mut watch::Receiver<bool>,
         correlation: &EventCorrelation,
     ) -> Result<CompletionStatus, HarnessError> {
+        let mut tool_calls = ToolCalls::default();
         let mut latest = self.write_prompt(&turn.request.content).await?;
         let mut pending = HashSet::from([latest]);
         let mut status = CompletionStatus::Completed;
@@ -542,7 +562,10 @@ impl Actor {
                     match (message["method"].as_str(), message.get("id")) {
                         (Some("session/update"), None) if params["sessionId"] == self.agent_session => {
                             self.update_config(params);
-                            if let Some((event, semantics)) = update(&params["update"]) {
+                            let payload = &params["update"];
+                            let events = tool_calls.update(payload)
+                                .unwrap_or_else(|| update(payload).into_iter().collect());
+                            for (event, semantics) in events {
                                 let mut item = correlation.clone();
                                 match &event {
                                     Event::Text(_) => {

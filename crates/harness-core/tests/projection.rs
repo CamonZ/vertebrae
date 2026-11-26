@@ -269,6 +269,7 @@ fn tool_deltas_and_terminal_snapshots_reduce_deterministically() {
             1,
             UpdateSemantics::Snapshot,
             HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+                summary: None,
                 tool_call_id: ToolCallId::from("tool"),
                 name: "shell".into(),
                 input: json!({"cmd": "echo"}),
@@ -331,6 +332,7 @@ fn every_terminal_tool_status_converges_for_live_and_replay() {
                 1,
                 UpdateSemantics::Snapshot,
                 HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+                    summary: None,
                     tool_call_id: ToolCallId::from("tool"),
                     name: "test".into(),
                     input: json!({}),

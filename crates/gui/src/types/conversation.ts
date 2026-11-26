@@ -198,6 +198,21 @@ export function getToolIcon(toolName: string): string {
   return "wrench";
 }
 
+/** Recover descriptions from tool inputs saved before summaries were normalized. */
+export function reportedToolSummary(
+  name: string,
+  input: Record<string, unknown>,
+  summary?: string
+): string | undefined {
+  for (const candidate of [
+    input.toolSummary,
+    summary,
+    name === "Bash" ? input.description : undefined,
+  ]) {
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+}
+
 /** Tool call event projected from a normalized harness tool_call payload. */
 export interface ToolCallEvent extends BaseEvent {
   kind: "tool_call";
@@ -207,6 +222,7 @@ export interface ToolCallEvent extends BaseEvent {
   displayName: string;
   icon: string;
   summary: string;
+  reportedSummary?: string;
   input: Record<string, unknown>;
 }
 
@@ -718,6 +734,11 @@ function parseHarnessEvent(
       const toolName = readString(data.name);
       if (toolId && toolName) {
         const input = readRecord(data.input) ?? { raw: data.input };
+        const reportedSummary = reportedToolSummary(
+          toolName,
+          input,
+          readString(data.summary) ?? undefined
+        );
         events.push({
           kind: "tool_call",
           timestamp,
@@ -726,7 +747,8 @@ function parseHarnessEvent(
           rawInput: typeof data.input === "string" ? data.input : undefined,
           displayName: getToolDisplayName(toolName),
           icon: getToolIcon(toolName),
-          summary: getToolSummary(toolName, input),
+          summary: reportedSummary ?? getToolSummary(toolName, input),
+          reportedSummary,
           input,
         });
       }

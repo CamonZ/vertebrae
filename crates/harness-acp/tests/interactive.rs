@@ -510,3 +510,115 @@ async fn config_transport_failure_retires_the_session_before_prompting() {
         );
     }
 }
+
+#[cfg(unix)]
+#[tokio::test]
+async fn load_only_agent_restores_id_exposes_legacy_modes_and_reports_context() {
+    let fixture = format!(
+        "{}/tests/fixtures/load_agent.py",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let runtime = AcpRuntime::new(
+        "/usr/bin/env".into(),
+        vec!["python3".into(), fixture],
+        Default::default(),
+    );
+    let discovery = runtime.discover().await.unwrap();
+    assert!(discovery.supports_resume);
+    assert_eq!(
+        discovery
+            .config
+            .permission_modes()
+            .map(|(mode, _)| mode)
+            .collect::<Vec<_>>(),
+        [
+            PermissionMode::Default,
+            PermissionMode::BypassPermissions,
+            PermissionMode::Auto
+        ]
+    );
+    let cwd = tempfile::tempdir().unwrap();
+    let controls = Arc::new(Controls::default());
+    let events = Arc::new(Events::default());
+    let original = start(
+        &runtime,
+        cwd.path().into(),
+        events.clone(),
+        controls.clone(),
+    )
+    .await
+    .unwrap();
+    let id = original.provider_resume_id().unwrap().clone();
+    original.close().await.unwrap();
+
+    let history = runtime
+        .load_history(Some(cwd.path().into()), id.as_str())
+        .await
+        .unwrap();
+    assert_eq!(history.len(), 1);
+    assert!(!history[0].user);
+    assert_eq!(history[0].text, "history");
+
+    let events = Arc::new(Events::default());
+    let session = runtime
+        .start_session(
+            StartSessionRequest {
+                session_id: "restored".into(),
+                stream_id: "restored".into(),
+                mode: SessionMode::Resume(id.clone()),
+                config: RequestConfig {
+                    working_directory: Some(cwd.path().into()),
+                    ..Default::default()
+                },
+            },
+            events.clone(),
+            controls,
+        )
+        .await
+        .unwrap();
+    assert_eq!(session.provider_resume_id(), Some(&id));
+
+    for (id, permission, wire_mode) in [
+        ("auto", PermissionMode::Auto, "auto"),
+        (
+            "bypass",
+            PermissionMode::BypassPermissions,
+            "dangerously-skip-permissions",
+        ),
+        ("default", PermissionMode::Default, "ask"),
+    ] {
+        let mut request = turn(id, wire_mode);
+        request.settings.permission_mode = Some(permission);
+        let outcome = session
+            .send(request)
+            .await
+            .unwrap()
+            .await_outcome()
+            .await
+            .unwrap();
+        assert_eq!(outcome.status, CompletionStatus::Completed);
+    }
+    session.close().await.unwrap();
+    let events = events.0.lock().await;
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.payload, Event::Text(_)))
+    );
+    let usage: Vec<_> = events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            Event::Usage(usage) => usage.session_snapshot.as_ref(),
+            _ => None,
+        })
+        .map(|usage| (usage.context_tokens, usage.context_window))
+        .collect();
+    assert_eq!(
+        usage,
+        [
+            vec![(Some(31), Some(200))],
+            [(Some(79), Some(200)), (Some(41), Some(200))].repeat(3),
+        ]
+        .concat()
+    );
+}

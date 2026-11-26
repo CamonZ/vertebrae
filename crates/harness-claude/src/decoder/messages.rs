@@ -272,6 +272,7 @@ impl ClaudeStreamDecoder {
             parent.clone(),
             UpdateSemantics::Snapshot,
             HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+                summary: None,
                 tool_call_id: tool_call_id.clone(),
                 name: name.into(),
                 input: input.clone(),

@@ -131,6 +131,7 @@ fn event(
 
 fn tool_call(id: &str, name: &str) -> HarnessEventPayloadV1 {
     HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+        summary: None,
         tool_call_id: ToolCallId::new(id),
         name: name.into(),
         input: json!({}),

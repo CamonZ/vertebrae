@@ -162,6 +162,9 @@ describe("shared configuration forms", () => {
 
     mount("providers");
     await user.click(await screen.findByRole("button", { name: "Add ACP connection" }));
+    expect(screen.getByRole("region", { name: "API providers" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "ACP connections" })).toBeVisible();
+    expect(screen.getByRole("region", { name: "Connection details" })).toHaveFocus();
     await user.type(screen.getByLabelText("Connection name"), connection.name);
     await user.type(
       screen.getByLabelText("Agent executable"),

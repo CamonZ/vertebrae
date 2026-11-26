@@ -45,6 +45,7 @@ import {
 } from "../../utils/gateChat";
 import {
   getToolIcon,
+  reportedToolSummary,
   type ConversationEvent,
   type FileEditEvent,
   type ToolCallEvent,
@@ -257,7 +258,7 @@ export function chatMessagesToThread(
         if (isNonSpawnAgentControlMessage(m)) continue;
         const ev = toToolCallEvent(m);
         if (seenToolCallIds.has(m.toolId)) {
-          mergeToolCallEvent(toolCallById.get(m.toolId), ev);
+          mergeToolCallEvent(toolCallById.get(m.toolId), ev, ev.reportedSummary);
           continue;
         }
         seenToolCallIds.add(m.toolId);
@@ -276,7 +277,7 @@ export function chatMessagesToThread(
         const ev = toToolResultEvent(m);
         draft.events.push(ev);
         draft.endsWithPartialAssistant = false;
-        if (!resultById.has(ev.toolUseId)) resultById.set(ev.toolUseId, ev);
+        resultById.set(ev.toolUseId, ev);
         continue;
       }
 
@@ -432,6 +433,7 @@ function toToolCallEvent(
   m: Extract<ChatMessage, { kind: "tool_call" }>
 ): ToolCallEvent {
   const input = parseToolInput(m.input);
+  const reportedSummary = reportedToolSummary(m.toolName, input, m.summary);
   return {
     kind: "tool_call",
     rawInput: m.input,
@@ -439,7 +441,8 @@ function toToolCallEvent(
     toolName: m.toolName,
     displayName: m.toolName,
     icon: getToolIcon(m.toolName),
-    summary: toolCallSummary(input),
+    summary: reportedSummary ?? toolCallSummary(input),
+    reportedSummary,
     input,
     timestamp: m.timestamp,
     parentToolUseId: m.parentToolUseId,
@@ -448,13 +451,18 @@ function toToolCallEvent(
 
 function mergeToolCallEvent(
   target: ToolCallEvent | undefined,
-  incoming: ToolCallEvent
+  incoming: ToolCallEvent,
+  summary?: string
 ): void {
   if (!target) return;
   target.input = mergeToolCallInput(target.input, incoming.input);
   target.rawInput = incoming.rawInput ?? target.rawInput;
+  target.toolName = incoming.toolName;
+  target.displayName = incoming.displayName;
+  target.icon = incoming.icon;
   target.summary =
-    toolCallSummary(target.input) || incoming.summary || target.summary;
+    summary ?? target.reportedSummary ?? (toolCallSummary(target.input) || incoming.summary || target.summary);
+  target.reportedSummary = summary ?? target.reportedSummary;
 }
 
 function mergeToolCallInput(

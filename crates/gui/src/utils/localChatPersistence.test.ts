@@ -108,6 +108,51 @@ describe("localChatPersistence", () => {
     });
   });
 
+  it("restores ACP messages after restart without storing them in the shared catalog", async () => {
+    vi.resetModules();
+    const { commands } = await import("../bindings");
+    vi.spyOn(commands, "loadLocalChatSessionIndex").mockResolvedValue({ status: "ok", data: [] });
+    vi.spyOn(commands, "loadLocalChatQueues").mockResolvedValue({ status: "ok", data: [] });
+    const saveIndex = vi.spyOn(commands, "saveLocalChatSessionIndex").mockResolvedValue({
+      status: "ok", data: null,
+    });
+    const saveTranscript = vi.spyOn(commands, "saveAcpTranscript").mockResolvedValue({
+      status: "ok", data: null,
+    });
+    const persistence = await import("./localChatPersistence");
+    const timestamp = "2026-01-01T00:00:00Z";
+    const messages: ChatSession["messages"] = [
+      { kind: "user", text: "hello", timestamp },
+      { kind: "assistant", text: "reply", timestamp, isPartial: false },
+    ];
+    expect(await persistence.persistLocalChatSession(makeSession({
+      harness: "acp",
+      messages: [...messages, { kind: "assistant", text: "partial", timestamp, isPartial: true }],
+    }))).toBe(true);
+
+    const catalog = saveIndex.mock.lastCall?.[0].sessions ?? [];
+    expect(catalog[0]).not.toHaveProperty("messages");
+    const transcript = saveTranscript.mock.lastCall?.[1];
+    expect(transcript).toEqual(messages);
+
+    vi.resetModules();
+    const { commands: restartedCommands } = await import("../bindings");
+    vi.spyOn(restartedCommands, "loadLocalChatSessionIndex").mockResolvedValue({
+      status: "ok", data: catalog,
+    });
+    vi.spyOn(restartedCommands, "loadLocalChatQueues").mockResolvedValue({ status: "ok", data: [] });
+    vi.spyOn(restartedCommands, "loadAcpTranscript").mockResolvedValue({
+      status: "ok", data: transcript ?? [],
+    });
+    const restarted = await import("./localChatPersistence");
+    const recovered = await restarted.hydrateLocalChatSessionIndex();
+    expect(recovered.sessions["s-1"]).toMatchObject({
+      providerResumeId: "conv-1",
+      backendSessionId: null,
+      messages,
+    });
+  });
+
   it("retains activity without replaying a busy runtime from persisted metadata", async () => {
     await persistLocalChatSession(makeSession({ lifecycle: "streaming" }));
     const persisted = loadPersistedLocalChatSession("s-1");

@@ -73,6 +73,43 @@ describe("activity disclosure", () => {
     };
     expect(activityLabel([row, row])).toBe("edits, checks, Git, docs +1 more");
   });
+  it("uses the reported tool summary as the call label", async () => {
+    render(
+      <ToolActivityGroup calls={[{ ...call("pwd", "done"), activityInput: { name: "CommandLine", input: {} }, reportedSummary: "Print working directory" }]} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /1 call for/ }));
+    const row = await screen.findByRole("button", { name: /Print working directory.*CommandLine.*Raw arguments/ });
+    expect(row).toHaveTextContent("Print working directory");
+    expect(row).toHaveTextContent("CommandLine");
+    expect(screen.queryByText("Unclassified")).toBeNull();
+  });
+
+  it("shows the description and command in a collapsed single-call group", () => {
+    render(<ToolActivityGroup calls={[{
+      ...call("pwd", "done"),
+      reportedSummary: "Print working directory",
+      activityInput: { name: "run_command", input: { CommandLine: "pwd" } },
+    }]} />);
+    const group = screen.getByRole("button", { name: /Print working directory.*CommandLine: pwd/ });
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(group);
+    expect(screen.getByRole("button", { name: /Print working directory.*CommandLine: pwd.*Raw arguments/ })).toBeVisible();
+  });
+
+  it("shows Claude's Bash description and command in both disclosures", () => {
+    render(
+      <ToolActivityGroup calls={[{
+        ...call("claude", "done"),
+        reportedSummary: "Print working directory",
+        activityInput: { name: "Bash", input: { command: "pwd" } },
+      }]} />
+    );
+    const group = screen.getByRole("button", { name: /Print working directory.*Bash: pwd/ });
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(group);
+    expect(screen.getByRole("button", { name: /Print working directory.*Bash: pwd.*Raw arguments/ })).toBeVisible();
+  });
+
   it("supports keyboard disclosure and lazily mounts raw content", async () => {
     const user = userEvent.setup();
     const Raw = vi.fn(() => <div>expensive content</div>);

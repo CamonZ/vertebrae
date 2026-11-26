@@ -272,6 +272,7 @@ function toolMessage(
     toolId: call.toolId || undefined,
     type: "tool",
     activityInput: { name: call.toolName, input: call.input },
+    reportedSummary: call.reportedSummary,
     recordedResult: result?.result,
     rawInput: call.rawInput,
     at: clock(call.timestamp),
@@ -287,8 +288,8 @@ function toolMessage(
   } else {
     m.kind = "fn";
     m.name = call.displayName;
-    m.em = call.summary || undefined;
   }
+  m.em = call.summary || undefined;
   // A result body upgrades the row to a bordered, collapsible card.
   const agentPrompt = isAgentSpawnCall(call) ? agentSpawnPromptBody(call) : "";
   if (

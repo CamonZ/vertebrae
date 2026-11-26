@@ -1540,6 +1540,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tool-activity-call-name {
+  color: var(--color-fg-mute);
+  overflow-wrap: anywhere;
+}
 .tool-activity-call-toggle .tool-activity-inferred {
   flex-shrink: 0;
   font-size: var(--text-meta);

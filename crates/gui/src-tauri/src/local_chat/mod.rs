@@ -1,3 +1,4 @@
+pub(crate) mod acp_transcript;
 pub(crate) mod annotations;
 pub(crate) mod change_sides;
 pub(crate) mod changes;

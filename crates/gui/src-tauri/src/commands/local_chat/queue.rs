@@ -35,13 +35,7 @@ fn write_queue(
     crate::local_chat::annotations::validate_session_id(id).map_err(|_| queue_error())?;
     let file = directory.join(format!("{id}.json"));
     let Some(session) = session else {
-        return match fs::remove_file(file) {
-            Ok(()) => fs::File::open(directory)
-                .and_then(|directory| directory.sync_all())
-                .map_err(|_| queue_error()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(_) => Err(queue_error()),
-        };
+        return crate::private_file::remove(&file).map_err(|_| queue_error());
     };
     if session.id != id
         || session.harness != LocalChatHarnessKind::Acp
@@ -51,7 +45,7 @@ fn write_queue(
     }
     fs::create_dir_all(directory).map_err(|_| queue_error())?;
     let bytes = serde_json::to_vec(&session).map_err(|_| queue_error())?;
-    super::super::chat_catalog::durable_write(&file, &bytes).map_err(|_| queue_error())
+    crate::private_file::replace(&file, &bytes).map_err(|_| queue_error())
 }
 
 /// Return only outstanding queues. These snapshots can restore a paused

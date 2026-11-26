@@ -7,21 +7,32 @@ mod updates;
 use std::{collections::BTreeMap, path::PathBuf, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::time::timeout;
 use vertebrae_harness_core::{
-    ControlSink, EventSink, HarnessCapabilities, HarnessError, HarnessRuntime, RequestConfig,
-    RunHandle, RunRequest, SessionHandle, SessionMode, StartSessionRequest,
+    ControlSink, EventSink, HarnessCapabilities, HarnessError, HarnessEventPayloadV1,
+    HarnessRuntime, RequestConfig, RunHandle, RunRequest, SessionHandle, SessionMode,
+    StartSessionRequest,
 };
 
 pub use config::{Discovery, SessionConfig};
+
+/// A text message recovered from an adapter's session history.
+#[derive(Debug, PartialEq, Eq)]
+pub struct HistoryMessage {
+    pub user: bool,
+    pub text: String,
+}
 use protocol::{Process, operation};
+
+type HistoryObserver<'a> = dyn FnMut(&Value) -> Result<(), HarnessError> + Send + 'a;
 
 struct AgentSession {
     id: String,
     config: SessionConfig,
     supports_steering: bool,
     supports_resume: bool,
+    initial_usage: Option<HarnessEventPayloadV1>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -54,12 +65,13 @@ impl AcpRuntime {
                 ))
             })?;
 
-        let (mut process, session) = self.open(Some(directory.path().into()), None).await?;
+        let (mut process, session) = self.open(Some(directory.path().into()), None, None).await?;
         let AgentSession {
             id,
             config,
             supports_steering,
             supports_resume,
+            ..
         } = session;
         let mut current = config.clone();
         let mut model_options = Vec::new();
@@ -95,10 +107,68 @@ impl AcpRuntime {
         })
     }
 
+    /// Recover text for a previously cataloged chat that has no local transcript.
+    pub async fn load_history(
+        &self,
+        directory: Option<PathBuf>,
+        id: &str,
+    ) -> Result<Vec<HistoryMessage>, HarnessError> {
+        let mut messages: Vec<HistoryMessage> = Vec::new();
+        let mut previous_id = None;
+        let mut size = 0;
+        let mut can_append = false;
+        let mut record = |message: &Value| {
+            let params = &message["params"];
+            if message["method"] != "session/update" || params["sessionId"] != id {
+                return Ok(());
+            }
+            let update = &params["update"];
+            let user = match update["sessionUpdate"].as_str() {
+                Some("user_message_chunk") => true,
+                Some("agent_message_chunk") => false,
+                Some("tool_call" | "tool_call_update") => {
+                    can_append = false;
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            };
+            if update["content"]["type"] != "text" {
+                return Ok(());
+            }
+            let Some(text) = update["content"]["text"].as_str() else {
+                return Ok(());
+            };
+            size += text.len();
+            if size > 16 * 1024 * 1024 || messages.len() >= 10_000 {
+                return Err(operation("ACP history exceeds the replay limit"));
+            }
+            let message_id = update["messageId"].as_str();
+            if let Some(previous) = messages.last_mut()
+                && previous.user == user
+                && previous_id.as_deref() == message_id
+                && (can_append || message_id.is_some())
+            {
+                previous.text.push_str(text);
+            } else {
+                messages.push(HistoryMessage {
+                    user,
+                    text: text.to_owned(),
+                });
+            }
+            previous_id = message_id.map(str::to_owned);
+            can_append = true;
+            Ok(())
+        };
+        let (mut process, _) = self.open(directory, Some(id), Some(&mut record)).await?;
+        process.reap().await;
+        Ok(messages)
+    }
+
     async fn open(
         &self,
         directory: Option<PathBuf>,
         resume: Option<&str>,
+        history: Option<&mut HistoryObserver<'_>>,
     ) -> Result<(Process, AgentSession), HarnessError> {
         let cwd = tokio::task::spawn_blocking(move || {
             directory
@@ -120,14 +190,40 @@ impl AcpRuntime {
             if initialized["protocolVersion"] != 1 {
                 return Err(HarnessError::Unsupported("ACP agent did not negotiate protocol version 1".into()));
             }
+            let supports_load = initialized.pointer("/agentCapabilities/loadSession")
+                .and_then(serde_json::Value::as_bool) == Some(true);
             let supports_resume = initialized.pointer("/agentCapabilities/sessionCapabilities/resume")
                 .is_some_and(serde_json::Value::is_object);
-            let session = match resume {
-                Some(id) if supports_resume => process.request(2, "session/resume",
-                    json!({"cwd":cwd, "sessionId":id, "mcpServers":[]})).await?,
-                Some(_) => return Err(HarnessError::Unsupported("ACP session restoration".into())),
-                None => process.request(2, "session/new", json!({"cwd":cwd, "mcpServers":[]})).await?,
+            let method = match (resume, history.is_some()) {
+                (Some(_), true) if supports_load => "session/load",
+                (_, true) => return Err(HarnessError::Unsupported("ACP adapter history replay".into())),
+                (Some(_), false) if supports_resume => "session/resume",
+                (Some(_), false) if supports_load => "session/load",
+                (Some(_), false) => return Err(HarnessError::Unsupported(
+                    "This ACP adapter cannot continue the saved conversation. Start a new chat to continue.".into(),
+                )),
+                (None, false) => "session/new",
             };
+            let params = match resume {
+                Some(id) => json!({"cwd":cwd, "sessionId":id, "mcpServers":[]}),
+                None => json!({"cwd":cwd, "mcpServers":[]}),
+            };
+            let mut history = history;
+            let mut initial_usage = None;
+            let session = process.request_observing(2, method, params, |message| {
+                if let Some(record) = &mut history {
+                    record(message)?;
+                }
+                let params = &message["params"];
+                if message["method"] == "session/update"
+                    && let Some(session_id) = params["sessionId"].as_str()
+                    && resume.is_none_or(|id| id == session_id)
+                    && let Some((usage @ HarnessEventPayloadV1::Usage(_), _)) = updates::update(&params["update"])
+                {
+                    initial_usage = Some((session_id.to_owned(), usage));
+                }
+                Ok(())
+            }).await?;
             let id = session["sessionId"].as_str().or(resume).filter(|id| !id.is_empty()).map(str::to_owned)
                 .ok_or_else(|| operation("ACP agent returned no session ID"))?;
             if resume.is_some_and(|resume| resume != id) {
@@ -135,11 +231,15 @@ impl AcpRuntime {
             }
             let mut config = SessionConfig::default();
             config.replace(&session);
+            let initial_usage = initial_usage
+                .filter(|(session_id, _)| session_id == &id)
+                .map(|(_, usage)| usage);
             Ok(AgentSession {
                 id,
                 config,
                 supports_steering: config::supports_steering(&initialized),
-                supports_resume,
+                supports_resume: supports_resume || supports_load,
+                initial_usage,
             })
         }).await.unwrap_or_else(|_| Err(operation("ACP agent startup timed out")));
         match result {
@@ -191,7 +291,7 @@ impl HarnessRuntime for AcpRuntime {
                 "ACP uses the agent's configured session settings".into(),
             ));
         }
-        let (process, session) = self.open(directory, resume).await?;
+        let (process, session) = self.open(directory, resume, None).await?;
         session::start(process, request, session, events, controls).await
     }
 

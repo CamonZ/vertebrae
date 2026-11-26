@@ -35,14 +35,13 @@ export function ProviderForm({
       <h2 className="font-serif text-2xl">
         {draft.create ? "New provider" : draft.id}
       </h2>
-      <TextField
-        label="Provider ID"
-        disabled={!draft.create}
-        value={draft.id}
-        change={(id) => change({ ...draft, id })}
-      />
       <Choice
         label="Harness"
+        hint={
+          draft.create
+            ? "Choose the runtime that connects to this provider."
+            : "Changing the harness clears incompatible overrides when saved."
+        }
         value={draft.harness}
         values={[
           ["codex", "Codex"],
@@ -64,10 +63,12 @@ export function ProviderForm({
           })
         }
       />
-      <Notice>
-        Changing the harness clears incompatible wire API and environment
-        overrides when saved.
-      </Notice>
+      <TextField
+        label="Provider ID"
+        disabled={!draft.create}
+        value={draft.id}
+        change={(id) => change({ ...draft, id })}
+      />
       <TextField
         label={
           draft.harness === "typesafe" ? "System One endpoint" : "API base URL"
@@ -75,119 +76,121 @@ export function ProviderForm({
         value={draft.endpoint}
         change={(endpoint) => change({ ...draft, endpoint })}
       />
-      <Field label="Model IDs" hint="Enter one exact model ID per line.">
-        {(id) => (
-          <Textarea
-            id={id}
-            rows={4}
-            value={draft.models.join("\n")}
-            onChange={(e) =>
-              change({ ...draft, models: e.target.value.split("\n") })
-            }
-          />
-        )}
-      </Field>
-      <Choice
-        label="Default model"
-        value={draft.default_model}
-        values={[
-          ["", "First configured model"],
-          ...draft.models
-            .filter(Boolean)
-            .map((v) => [v, v] as [string, string]),
-        ]}
-        change={(default_model) => change({ ...draft, default_model })}
-      />
-      <TextField
-        label="API key environment variable"
-        hint="A nonblank value in the executing process overrides the stored key."
-        value={draft.api_key_env}
-        change={(api_key_env) => change({ ...draft, api_key_env })}
-      />
-      <SecretField
-        label="Provider API key"
-        storage={stored?.key_storage ?? "none"}
-        configured={stored?.has_api_key ?? false}
-        value={draft.key}
-        change={(key) => change({ ...draft, key })}
-      />
-      {stored?.credential_override && (
-        <Notice>
-          The configured environment variable supplies this GUI process’s
-          credential. The daemon may have a different environment.
-        </Notice>
-      )}
-      <details>
-        <summary className="cursor-pointer text-content font-medium">
-          Advanced options
-        </summary>
-        <div className="mt-4 space-y-4">
-          {draft.harness === "codex" && (
-            <Choice
-              label="Wire API"
-              value={draft.wire_api}
-              values={[
-                ["", "Harness default"],
-                ["responses", "Responses"],
-                ["chat", "Chat"],
-              ]}
-              change={(wire_api) => change({ ...draft, wire_api })}
+      <fieldset className="space-y-4 border-t border-[var(--color-line)] pt-3">
+        <legend className="text-content font-medium">Models</legend>
+        <Field label="Model IDs" hint="Enter one exact model ID per line.">
+          {(id) => (
+            <Textarea
+              id={id}
+              rows={4}
+              value={draft.models.join("\n")}
+              onChange={(e) =>
+                change({ ...draft, models: e.target.value.split("\n") })
+              }
             />
           )}
-          {draft.harness !== "typesafe" && (
-            <>
-              <p className="text-secondary text-[var(--color-fg-mute)]">
-                Environment values remain hidden. Keep, replace or clear each
-                value explicitly.
-              </p>
-              {Array.from(environment.values()).map((entry) => (
-                <SecretField
-                  key={entry.name}
-                  label={`Environment: ${entry.name}`}
-                  configured={
-                    stored?.environment_names.includes(entry.name) ?? false
-                  }
-                  value={entry.secret}
-                  change={(secret) =>
-                    change({
-                      ...draft,
-                      environment: [
-                        ...draft.environment.filter(
-                          (e) => e.name !== entry.name
-                        ),
-                        { name: entry.name, secret },
-                      ],
-                    })
-                  }
-                />
-              ))}
-              <TextField
-                label="New environment variable name"
-                value={newName}
-                change={setNewName}
+        </Field>
+        <Choice
+          label="Default model"
+          value={draft.default_model}
+          values={[
+            ["", "First configured model"],
+            ...draft.models
+              .filter(Boolean)
+              .map((v) => [v, v] as [string, string]),
+          ]}
+          change={(default_model) => change({ ...draft, default_model })}
+        />
+      </fieldset>
+      <fieldset className="space-y-4 border-t border-[var(--color-line)] pt-3">
+        <legend className="text-content font-medium">Authentication</legend>
+        <TextField
+          label="API key environment variable"
+          hint="A nonblank value in the executing process overrides the stored key."
+          value={draft.api_key_env}
+          change={(api_key_env) => change({ ...draft, api_key_env })}
+        />
+        <SecretField
+          label="Provider API key"
+          storage={stored?.key_storage ?? "none"}
+          configured={stored?.has_api_key ?? false}
+          value={draft.key}
+          change={(key) => change({ ...draft, key })}
+        />
+        {stored?.credential_override && (
+          <Notice>
+            The configured environment variable supplies this GUI process’s
+            credential. The daemon may have a different environment.
+          </Notice>
+        )}
+      </fieldset>
+      {draft.harness !== "typesafe" && (
+        <details>
+          <summary className="cursor-pointer text-content font-medium">
+            Advanced options
+          </summary>
+          <div className="mt-4 space-y-4">
+            {draft.harness === "codex" && (
+              <Choice
+                label="Wire API"
+                value={draft.wire_api}
+                values={[
+                  ["", "Harness default"],
+                  ["responses", "Responses"],
+                  ["chat", "Chat"],
+                ]}
+                change={(wire_api) => change({ ...draft, wire_api })}
               />
-              <Button
-                disabled={!newName.trim() || environment.has(newName.trim())}
-                onClick={() => {
+            )}
+            <p className="text-secondary text-[var(--color-fg-mute)]">
+              Environment values remain hidden. Keep, replace or clear each
+              value explicitly.
+            </p>
+            {Array.from(environment.values()).map((entry) => (
+              <SecretField
+                key={entry.name}
+                label={`Environment: ${entry.name}`}
+                configured={
+                  stored?.environment_names.includes(entry.name) ?? false
+                }
+                value={entry.secret}
+                change={(secret) =>
                   change({
                     ...draft,
                     environment: [
-                      ...draft.environment,
-                      {
-                        name: newName.trim(),
-                        secret: { action: "replace", value: "" },
-                      },
+                      ...draft.environment.filter((e) => e.name !== entry.name),
+                      { name: entry.name, secret },
                     ],
-                  });
-                  setNewName("");
-                }}
-              >
-                Add environment variable
-              </Button>
-            </>
-          )}
-        </div>
-      </details>
+                  })
+                }
+              />
+            ))}
+            <TextField
+              label="New environment variable name"
+              value={newName}
+              change={setNewName}
+            />
+            <Button
+              disabled={!newName.trim() || environment.has(newName.trim())}
+              onClick={() => {
+                change({
+                  ...draft,
+                  environment: [
+                    ...draft.environment,
+                    {
+                      name: newName.trim(),
+                      secret: { action: "replace", value: "" },
+                    },
+                  ],
+                });
+                setNewName("");
+              }}
+            >
+              Add environment variable
+            </Button>
+          </div>
+        </details>
+      )}
     </div>
   );
 }

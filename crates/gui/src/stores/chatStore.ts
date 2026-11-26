@@ -1,3 +1,4 @@
+import { recoverAcpHistory, resetAcpHistoryRecovery } from "../utils/acpTranscriptPersistence";
 import { isOpenLocalChatConversation } from "../utils/localChatDiscussion";
 import { replaySpeedTier } from "../utils/localChatSpeedTier";
 import { localChatActivityStatus } from "../utils/localChatActivity";
@@ -163,6 +164,7 @@ export type ChatMessage =
   | {
       kind: "tool_call";
       toolName: string;
+      summary?: string;
       toolId: string;
       input: string;
       timestamp: string;
@@ -1888,6 +1890,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
     refresh = false
   ) => {
     if (!refresh) loadToolAnnotations(sessionId);
+    if (session.harness === "acp") {
+      recoverAcpHistory(session, (messages) => {
+        void updateSession(session.id, (current) =>
+          current.messages === session.messages &&
+          current.providerResumeId === session.providerResumeId &&
+          current.providerId === session.providerId &&
+          current.projectPath === session.projectPath
+            ? { ...current, messages }
+            : current
+        );
+      });
+      return;
+    }
     if (!session.providerResumeId) return;
 
     const currentReplay = get().sessions[sessionId]?.providerReplay;
@@ -4167,7 +4182,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
         (session) =>
           session.backendSessionId === backendSessionId
             ? session
-            : { ...withStaleBackgroundWork(session), backendSessionId },
+            : {
+                ...withStaleBackgroundWork(session),
+                backendSessionId,
+                tokenUsage:
+                  session.harness === "acp" && backendSessionId
+                    ? undefined
+                    : session.tokenUsage,
+              },
         {
           persist: false,
         }
@@ -4342,7 +4364,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
       updateSession(sessionId, (session) =>
         session.selectedModelId === normalized
           ? session
-          : { ...session, selectedModelId: normalized }
+          : {
+              ...session,
+              selectedModelId: normalized,
+              tokenUsage: session.harness === "acp" ? undefined : session.tokenUsage,
+            }
       );
       if (normalized) {
         persistLastUsedLocalChatModelId(normalized);
@@ -4535,6 +4561,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     reset: () => {
+      resetAcpHistoryRecovery();
       flushPendingLocalChatText();
       forgetChatView();
 

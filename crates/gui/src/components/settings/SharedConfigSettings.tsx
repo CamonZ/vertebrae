@@ -2,10 +2,7 @@ import { useProviderSettingsStore } from "../../stores/providerSettingsStore";
 import { card } from "./settingsStyles";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useBlocker } from "react-router-dom";
-import {
-  commands,
-  type SharedSettings,
-} from "../../bindings";
+import { commands, type SharedSettings } from "../../bindings";
 import { Button } from "../atoms/Button";
 import { Modal } from "../molecules/Modal";
 
@@ -26,6 +23,8 @@ import { AcpAgentForm } from "./AcpAgentForm";
 import { ProviderForm } from "./ProviderForm";
 export type { ConfigSection } from "./settingsDraft";
 
+const selectedProfileClass = "h-auto min-h-8 max-w-full whitespace-normal break-all text-left aria-pressed:border-[var(--color-accent)] aria-pressed:text-[var(--color-fg)]";
+
 export function SharedConfigSettings({
   section,
   onDirty,
@@ -36,6 +35,8 @@ export function SharedConfigSettings({
   onBusy: (busy: boolean) => void;
 }) {
   const request = useRef(0);
+  const editor = useRef<HTMLDivElement>(null);
+  const focusEditor = useRef(false);
   const [settings, setSettings] = useState<SharedSettings | null>(null);
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
   const [baseline, setBaseline] = useState<SettingsDraft | null>(null);
@@ -43,8 +44,11 @@ export function SharedConfigSettings({
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [pending, setPending] = useState<SettingsDraft | "reload" | null>(null);
-  const dirty = draft !== null && baseline !== null &&
-    JSON.stringify(settingsEdit(draft)) !== JSON.stringify(settingsEdit(baseline));
+  const dirty =
+    draft !== null &&
+    baseline !== null &&
+    JSON.stringify(settingsEdit(draft)) !==
+      JSON.stringify(settingsEdit(baseline));
   const blocker = useBlocker(dirty || busy);
   const install = useCallback((data: SharedSettings, next: SettingsDraft) => {
     setSettings(data);
@@ -93,11 +97,19 @@ export function SharedConfigSettings({
     window.addEventListener("beforeunload", prevent);
     return () => window.removeEventListener("beforeunload", prevent);
   }, [dirty, busy]);
+  useEffect(() => {
+    if (focusEditor.current) {
+      focusEditor.current = false;
+      editor.current?.focus();
+    }
+  }, [baseline]);
+
   const select = (next: SettingsDraft) => {
     if (dirty) {
       setPending(next);
       return;
     }
+    focusEditor.current = true;
     setDraft(next);
     setBaseline(next);
     setSaved(false);
@@ -132,7 +144,13 @@ export function SharedConfigSettings({
           }
         : null))
     : null;
-  const focusUndoRemoval = useCallback((button: HTMLButtonElement | null) => button?.focus(), []);
+  const existingAcpAgent =
+    draft?.section === "acp_agent" &&
+    (settings?.local_chat_acp_agents?.some((agent) => agent.id === draft.settings.id) ?? false);
+  const focusUndoRemoval = useCallback(
+    (button: HTMLButtonElement | null) => button?.focus(),
+    []
+  );
   async function save() {
     if (!settings || !draft || busy || validation) return;
     setBusy(true);
@@ -150,7 +168,11 @@ export function SharedConfigSettings({
                 result.data.providers.find((p) => p.id === draft.id)
               )
             : draft.section === "acp_agent"
-              ? acpAgentDraft(result.data.local_chat_acp_agents?.find((agent) => agent.id === draft.settings.id))
+              ? acpAgentDraft(
+                  result.data.local_chat_acp_agents?.find(
+                    (agent) => agent.id === draft.settings.id
+                  )
+                )
               : draftFor(section, result.data);
         install(result.data, next);
         setSaved(true);
@@ -216,70 +238,99 @@ export function SharedConfigSettings({
             )}
             <fieldset disabled={busy} className="space-y-5">
               {section === "providers" && (
-                <>
-                  <Notice>
-                    Built-in providers: Anthropic (Claude), OpenAI (Codex),
-                    TypeSafe, and Mistral Vibe. Custom profiles select an
-                    existing harness; availability depends on its installed
-                    runtime. Chat defaults remain in Chat settings.
-                  </Notice>
-                  <div className="flex flex-wrap gap-2">
-                    <Button aria-pressed={draft.section === "typesafe"} onClick={() => select(draftFor(section, settings))}>
-                      TypeSafe
-                    </Button>
-                    {settings.providers.map((p) => (
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <section aria-labelledby="custom-providers" className={card}>
+                    <h2
+                      id="custom-providers"
+                      className="text-content font-semibold"
+                      data-settings-anchor
+                    >
+                      API providers
+                    </h2>
+                    <p className="mt-1 text-secondary text-[var(--color-fg-mute)]">
+                      Connect an API endpoint using an existing harness.
+                    </p>
+                    <div
+                      role="group"
+                      aria-label="Provider profiles"
+                      className="mt-4 flex flex-col items-start gap-2"
+                    >
                       <Button
-                        key={p.id}
+                        aria-pressed={draft.section === "typesafe"}
+                        className={selectedProfileClass}
+                        onClick={() => select(draftFor(section, settings))}
+                      >
+                        TypeSafe
+                      </Button>
+                      {settings.providers.map((provider) => (
+                        <Button
+                          key={provider.id}
+                          className={selectedProfileClass}
+                          aria-pressed={
+                            draft.section === "provider" &&
+                            draft.id === provider.id &&
+                            !draft.create
+                          }
+                          onClick={() => select(providerDraft(provider))}
+                        >
+                          {provider.id}
+                        </Button>
+                      ))}
+                      <Button
+                        variant="ghost"
                         aria-pressed={
-                          draft.section === "provider" && draft.id === p.id
+                          draft.section === "provider" && draft.create
                         }
-                        onClick={() => select(providerDraft(p))}
+                        onClick={() => select(providerDraft())}
                       >
-                        {p.id}
+                        Add provider
                       </Button>
-                    ))}
-                    <Button onClick={() => select(providerDraft())}>
-                      Add provider
-                    </Button>
-                  </div>
-                  <div role="group" aria-label="ACP connections" className="flex flex-wrap gap-2">
-                    {(settings.local_chat_acp_agents ?? []).map((agent) => (
+                    </div>
+                  </section>
+                  <section aria-labelledby="acp-connections" className={card}>
+                    <h2
+                      id="acp-connections"
+                      className="text-content font-semibold"
+                      data-settings-anchor
+                    >
+                      ACP connections
+                    </h2>
+                    <p className="mt-1 text-secondary text-[var(--color-fg-mute)]">
+                      Launch an installed ACP agent for chat.
+                    </p>
+                    <div
+                      role="group"
+                      aria-label="ACP agents"
+                      className="mt-4 flex flex-col items-start gap-2"
+                    >
+                      {(settings.local_chat_acp_agents ?? []).map((agent) => (
+                        <Button
+                          key={agent.id}
+                          className={selectedProfileClass}
+                          aria-pressed={
+                            draft.section === "acp_agent" &&
+                            draft.settings.id === agent.id
+                          }
+                          onClick={() => select(acpAgentDraft(agent))}
+                        >
+                          {agent.name}
+                        </Button>
+                      ))}
                       <Button
-                        key={agent.id}
-                        aria-pressed={draft.section === "acp_agent" && draft.settings.id === agent.id}
-                        onClick={() => select(acpAgentDraft(agent))}
+                        variant="ghost"
+                        aria-pressed={
+                          draft.section === "acp_agent" &&
+                          !existingAcpAgent
+                        }
+                        onClick={() => select(acpAgentDraft())}
                       >
-                        {agent.name}
+                        Add ACP connection
                       </Button>
-                    ))}
-                    <Button aria-pressed={draft.section === "acp_agent" && !settings.local_chat_acp_agents?.some((agent) => agent.id === draft.settings.id)} onClick={() => select(acpAgentDraft())}>
-                      Add ACP connection
-                    </Button>
-                  </div>
-                  <Notice>
-                    Saved provider changes apply to new sessions and requests.
-                    Existing sessions keep their configuration.
-                  </Notice>
-                </>
+                    </div>
+                  </section>
+                </div>
               )}
-              {draft.section === "acp_agent" && (
-                draft.remove ? (
-                  <div className="space-y-3">
-                    <Notice>Save changes to remove {draft.settings.name}.</Notice>
-                    <Button ref={focusUndoRemoval} onClick={() => change({ ...draft, remove: false })}>
-                      Undo removal
-                    </Button>
-                  </div>
-                ) : (
-                  <AcpAgentForm
-                    settings={draft.settings}
-                    onChange={(settings) => change({ ...draft, settings })}
-                    onRemove={settings.local_chat_acp_agents?.some((agent) => agent.id === draft.settings.id)
-                      ? () => change({ ...draft, remove: true })
-                      : undefined}
-                  />
-                )
-              )}
+
               {draft.section === "decision_model" && (
                 <DecisionModelForm
                   draft={draft}
@@ -328,43 +379,80 @@ export function SharedConfigSettings({
                   </Notice>
                 </div>
               )}
-              {draft.section === "typesafe" && (
-                <div className={`${card} space-y-5`}>
-                  <h2 className="font-serif text-2xl" data-settings-anchor>
-                    TypeSafe
-                  </h2>
-                  <TextField
-                    label="System One endpoint"
-                    hint="Leave blank to use the built-in endpoint."
-                    value={draft.url}
-                    change={(url) => change({ ...draft, url })}
-                  />
-                  <SecretField
-                    label="TypeSafe API key"
-                    storage={settings.typesafe_key_storage}
-                    configured={settings.has_typesafe_key}
-                    value={draft.key}
-                    change={(key) => change({ ...draft, key })}
-                  />
-                  {(settings.typesafe_key_override ||
-                    settings.typesafe_url_override) && (
-                    <Notice>
-                      {settings.typesafe_key_override &&
-                        "TYPESAFE_API_KEY overrides the saved credential. "}
-                      {settings.typesafe_url_override &&
-                        "TYPESAFE_BASE_URL overrides the saved endpoint. "}
-                      Overrides refer to this GUI process; the daemon may have a
-                      different environment.
-                    </Notice>
+              {section === "providers" && (
+                <div
+                  ref={editor}
+                  role="region"
+                  aria-label="Connection details"
+                  tabIndex={-1}
+                >
+                  {draft.section === "acp_agent" &&
+                    (draft.remove ? (
+                      <div className="space-y-3">
+                        <Notice>
+                          Save changes to remove {draft.settings.name}.
+                        </Notice>
+                        <Button
+                          ref={focusUndoRemoval}
+                          onClick={() => change({ ...draft, remove: false })}
+                        >
+                          Undo removal
+                        </Button>
+                      </div>
+                    ) : (
+                      <AcpAgentForm
+                        settings={draft.settings}
+                        existing={
+                          existingAcpAgent
+                        }
+                        onChange={(settings) => change({ ...draft, settings })}
+                        onRemove={
+                          existingAcpAgent
+                            ? () => change({ ...draft, remove: true })
+                            : undefined
+                        }
+                      />
+                    ))}
+                  {draft.section === "typesafe" && (
+                    <div className={`${card} space-y-5`}>
+                      <h2 className="font-serif text-2xl" data-settings-anchor>
+                        TypeSafe
+                      </h2>
+                      <TextField
+                        label="System One endpoint"
+                        hint="Leave blank to use the built-in endpoint."
+                        value={draft.url}
+                        change={(url) => change({ ...draft, url })}
+                      />
+                      <SecretField
+                        label="TypeSafe API key"
+                        storage={settings.typesafe_key_storage}
+                        configured={settings.has_typesafe_key}
+                        value={draft.key}
+                        change={(key) => change({ ...draft, key })}
+                      />
+                      {(settings.typesafe_key_override ||
+                        settings.typesafe_url_override) && (
+                        <Notice>
+                          {settings.typesafe_key_override &&
+                            "TYPESAFE_API_KEY overrides the saved credential. "}
+                          {settings.typesafe_url_override &&
+                            "TYPESAFE_BASE_URL overrides the saved endpoint. "}
+                          Overrides refer to this GUI process; the daemon may
+                          have a different environment.
+                        </Notice>
+                      )}
+                    </div>
+                  )}
+                  {draft.section === "provider" && (
+                    <ProviderForm
+                      key={draft.create ? "new-provider" : draft.id}
+                      draft={draft}
+                      stored={settings.providers.find((p) => p.id === draft.id)}
+                      change={change}
+                    />
                   )}
                 </div>
-              )}
-              {draft.section === "provider" && (
-                <ProviderForm
-                  draft={draft}
-                  stored={settings.providers.find((p) => p.id === draft.id)}
-                  change={change}
-                />
               )}
               {draft.section === "observability" && (
                 <div className={`${card} space-y-5`}>
@@ -452,7 +540,10 @@ export function SharedConfigSettings({
                     onChange={(capture_message_content) =>
                       change({
                         ...draft,
-                        settings: { ...draft.settings, capture_message_content },
+                        settings: {
+                          ...draft.settings,
+                          capture_message_content,
+                        },
                       })
                     }
                   />
@@ -493,7 +584,10 @@ export function SharedConfigSettings({
             >
               Discard
             </Button>
-            <span role="status" className="text-content text-[var(--color-fg-mute)]">
+            <span
+              role="status"
+              className="text-content text-[var(--color-fg-mute)]"
+            >
               {saved
                 ? draft.section === "provider" ||
                   draft.section === "typesafe" ||
@@ -513,7 +607,9 @@ export function SharedConfigSettings({
         onClose={() => setPending(null)}
         title="Unsaved settings"
       >
-        <p className="mb-5 text-content">Discard your unsaved settings changes?</p>
+        <p className="mb-5 text-content">
+          Discard your unsaved settings changes?
+        </p>
         <div className="flex gap-3">
           <Button onClick={() => setPending(null)}>Keep editing</Button>
           <Button
@@ -521,6 +617,7 @@ export function SharedConfigSettings({
             onClick={() => {
               if (pending === "reload") void load();
               else if (pending) {
+                focusEditor.current = true;
                 setDraft(pending);
                 setBaseline(pending);
                 setError(null);

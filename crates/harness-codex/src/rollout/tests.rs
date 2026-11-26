@@ -48,6 +48,7 @@ fn real_core_items_match_app_server_projection_and_ids() {
         } else {
             let (id, name, input, _) = tool_call(item).expect("live tool call");
             expected.push(HarnessEventPayloadV1::ToolCall(ToolCallEvent {
+                summary: None,
                 tool_call_id: ToolCallId::new(id),
                 name,
                 input,

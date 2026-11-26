@@ -392,6 +392,45 @@ describe("chatMessagesToThread", () => {
     expect(tool.kind).toBe("fn");
   });
 
+  it("renders the latest ACP tool title on the existing row", () => {
+    const call = {
+      kind: "tool_call" as const,
+      toolName: "read_file",
+      toolId: "acp-1",
+      input: '{"path":"/x.ts"}',
+      timestamp: TS,
+    };
+    const thread = build([
+      { ...call, summary: "Reading source" },
+      { ...call, summary: "Read the configuration" },
+      { kind: "tool_result", toolId: call.toolId, result: "file body", isError: false, timestamp: TS },
+    ]);
+    const messages = thread.turns[0].messages;
+    expect(messages.filter((message) => message.type === "tool")).toHaveLength(1);
+    expect(firstTool(messages)).toMatchObject({
+      name: "read_file", em: "Read the configuration", reportedSummary: "Read the configuration", body: "file body", status: "done",
+    });
+  });
+
+  it("recovers the human description from a previously saved command", () => {
+    const thread = build([{
+      kind: "tool_call", toolName: "run_command", toolId: "pwd", timestamp: TS,
+      summary: "pwd", input: '{"CommandLine":"pwd","toolSummary":"Print working directory"}',
+    }]);
+    expect(firstTool(thread.turns[0].messages).reportedSummary).toBe("Print working directory");
+  });
+
+  it("uses the description from a Claude Bash input", () => {
+    const thread = build([{
+      kind: "tool_call", toolName: "Bash", toolId: "claude-pwd", timestamp: TS,
+      input: '{"command":"pwd","description":"Print working directory"}',
+    }]);
+    expect(firstTool(thread.turns[0].messages)).toMatchObject({
+      cmd: "pwd",
+      reportedSummary: "Print working directory",
+    });
+  });
+
   it("marks an errored tool_result as err", () => {
     const thread = build([
       { kind: "assistant", text: "", timestamp: TS, isPartial: false },

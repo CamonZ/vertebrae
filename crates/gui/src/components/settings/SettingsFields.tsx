@@ -83,17 +83,19 @@ export function TextField({
 }
 export function Choice({
   label,
+  hint,
   value,
   values,
   change,
 }: {
   label: string;
+  hint?: string;
   value: string;
   values: [string, string][];
   change: (v: string) => void;
 }) {
   return (
-    <Field label={label}>
+    <Field label={label} hint={hint}>
       {(id) => (
         <Select
           id={id}

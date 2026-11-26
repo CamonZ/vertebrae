@@ -230,6 +230,8 @@ pub struct PlanEvent {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolCallEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
     pub tool_call_id: ToolCallId,
     pub name: String,
     pub input: Value,

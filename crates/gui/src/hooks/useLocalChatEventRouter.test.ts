@@ -1953,6 +1953,34 @@ it("routes manual compaction usage without a chat turn, including delayed comple
   ).toBe(false);
 });
 
+it("uses the ACP adapter capacity for session snapshots and clears it on model changes", () => {
+  resetLocalChatTurnRoutingForTests();
+  resetChatStore({
+    session: makeSession({
+      harness: "acp",
+      backendSessionId: "backend",
+      lifecycle: "idle",
+    }),
+  });
+  const usage = {
+    backend_session_id: "backend",
+    harness: "acp" as const,
+    is_root: true,
+    model: "claude-opus-4-7",
+    context_tokens: 12,
+    context_window: 321,
+    thread_total_tokens: 0,
+  };
+  expect(routeLocalChatSessionUsageEvent(usage)).toBe(true);
+  expect(useChatStore.getState().sessions.session.tokenUsage).toEqual({
+    used: 12,
+    max: 321,
+  });
+  expect(routeLocalChatSessionUsageEvent({ ...usage, is_root: false })).toBe(false);
+  useChatStore.getState().setSessionSelectedModel("session", "another");
+  expect(useChatStore.getState().sessions.session.tokenUsage).toBeUndefined();
+});
+
 describe("conversation speed tier recovery", () => {
   it.each(["claude", "codex"] as const)(
     "recovers %s intent only for its own session without a local choice",

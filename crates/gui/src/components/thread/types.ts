@@ -209,6 +209,7 @@ export interface SystemMessage extends BaseMessage {
  * `kind: "shell"` (or `cmd` without `name`) renders the `$` prompt form.
  */
 export interface ToolMessage extends BaseMessage {
+  reportedSummary?: string;
   type: "tool";
   activityInput?: { name: string; input: Record<string, unknown> };
   recordedResult?: string;

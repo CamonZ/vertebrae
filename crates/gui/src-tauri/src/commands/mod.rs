@@ -68,6 +68,7 @@ impl CommandError {
     }
 }
 
+pub(crate) mod acp_transcript;
 mod artifact;
 mod backend;
 mod chat_association;
