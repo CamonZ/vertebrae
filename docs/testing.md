@@ -12,9 +12,11 @@ scripts/validate.sh       # full completion profile
 
 CI runs `scripts/validate.sh rust-checks` and `scripts/validate.sh rust-coverage`
 in parallel. The checks job uses a digest-pinned Linux GUI runner for its Tauri
-system dependencies. The coverage job uses a separate instrumented build cache
-and keeps the workspace-wide 75% line threshold. Both jobs must pass
-`Check & Test`. The local `rust` profile still runs both parts.
+system dependencies and restores a dependency build cache; pull requests that
+change `Cargo.lock` fall back to the newest cache for the same toolchain. The
+coverage job builds uncached, because restoring instrumented artifacts cost more
+than rebuilding them, and keeps the workspace-wide 75% line threshold. Both jobs
+must pass `Check & Test`. The local `rust` profile still runs both parts.
 
 The script resolves paths from the repository root, fails on the first failed
 profile command, and does not run acceptance tests or mutate the local Sacrum
@@ -55,7 +57,7 @@ cargo test --quiet -p vertebrae-cli
 
 ### Property tests
 
-Invariant-style tests use [Hegel](https://hegel.dev) (`hegeltest`, a dev-dependency of the GUI crate), for example `recorder/properties.rs` in the worktree-delta recorder. They need Rust 1.86+ and build the Hegel engine through a nested `cargo` run, so the first build needs network access to crates.io. Hegel writes its failure database to `.hegel/` next to the crate (gitignored). `scripts/validate.sh rust` runs them with `cargo test -p gui --lib local_chat::worktree_delta`; the GUI crate is excluded from workspace coverage.
+Invariant-style tests use [Hegel](https://hegel.dev) (`hegeltest`, a dev-dependency of the GUI crate), for example `recorder/properties.rs` in the worktree-delta recorder. They need Rust 1.86+ and build the Hegel engine through a nested `cargo` run, so the first build needs network access to crates.io. Hegel writes its failure database to `.hegel/` next to the crate (gitignored). `scripts/validate.sh rust` runs them with the rest of the GUI lib tests in one `cargo test -p gui --lib` call; the GUI crate is excluded from workspace coverage.
 
 ### Code Coverage
 
@@ -643,7 +645,9 @@ python3 scripts/acceptance.py gui --prebuilt "$PWD/test-output/gui-runtime/runti
 CI restores job-private Cargo, target and npm build caches in producer jobs and
 saves them on pushes to `master`. `VTB_ACCEPTANCE_BUILD_CACHE_DIR` enables bind mounts
 for those caches. Cache keys include runner platform, suite, dependency/toolchain/
-image inputs and commit, with a compatible restore prefix. Separate jobs never
+image inputs and commit, with a compatible restore prefix; pull requests that
+change `Cargo.lock` fall back to the newest cache for the same toolchain and
+runner image. Separate jobs never
 write a shared target directory. Ordinary local runs retain named-volume caches
 and the original build-and-test path. Explicit cache directories are locked, as
 are the checkout and named-volume cache identity. Runtime databases and GUI

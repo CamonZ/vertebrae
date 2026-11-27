@@ -54,9 +54,13 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ${{ runner.temp }}/acceptance-build-cache
-          key: acceptance-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.suite }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'docker/*test-runner.Dockerfile') }}-${{ github.sha }}
+          key: acceptance-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.suite }}-${{ hashFiles('rust-toolchain.toml', 'docker/*test-runner.Dockerfile') }}-${{ hashFiles('Cargo.lock') }}-${{ github.sha }}
+          # Pull requests that change Cargo.lock fall back to the newest cache
+          # for the same toolchain and runner image. Master only reuses an exact
+          # lockfile match, so saved caches never accumulate stale artifacts.
           restore-keys: |
-            acceptance-build-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.suite }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'docker/*test-runner.Dockerfile') }}-
+            acceptance-build-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.suite }}-${{ hashFiles('rust-toolchain.toml', 'docker/*test-runner.Dockerfile') }}-${{ hashFiles('Cargo.lock') }}-
+            ${{ github.event_name == 'pull_request' && format('acceptance-build-v2-{0}-{1}-{2}-{3}-', runner.os, runner.arch, inputs.suite, hashFiles('rust-toolchain.toml', 'docker/*test-runner.Dockerfile')) || '' }}
 
       - name: Build suite runtime once
         env:

@@ -21,18 +21,10 @@ run_rust_checks() {
   echo "==> Clippy"
   time cargo clippy --locked --workspace --exclude acceptance --exclude gui-acceptance --exclude daemon-acceptance -- -D warnings
   python3 scripts/check-rust-guidelines.py
-  # The GUI crate is outside coverage; its Hegel property tests run here.
+  # The GUI crate is outside coverage; its lib tests, including the Hegel
+  # property tests, run here in one invocation so the crate builds once.
   echo "==> GUI Rust tests"
-  time run_gui_rust_tests
-}
-
-run_gui_rust_tests() {
-  cargo test --locked -p gui --lib local_chat::worktree_delta
-  cargo test --locked -p gui --lib local_chat::file_history
-  cargo test --locked -p gui --lib local_chat::annotations
-  cargo test --locked -p gui --lib local_chat::code_intelligence
-  # Background-work bridge mapping (harness event -> local chat event).
-  cargo test --locked -p gui --lib local_chat::harnesses::shared::tests::background_work_bridge
+  time cargo test --locked -p gui --lib
 }
 
 run_rust_coverage() {
