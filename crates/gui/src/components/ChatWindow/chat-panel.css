@@ -648,6 +648,10 @@
     flex-basis: 27%;
   }
 }
+/* The associated entity's short id, the shared copyable chip. */
+.hc-panel .hc-entity-id {
+  flex-shrink: 0;
+}
 .hc-panel .hc-title-error {
   position: absolute;
   top: calc(100% + var(--s-1));

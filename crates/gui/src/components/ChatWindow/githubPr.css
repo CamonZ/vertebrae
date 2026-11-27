@@ -34,3 +34,15 @@
   background: var(--color-bg-hover-raised);
   color: var(--color-fg);
 }
+
+.pr-header-checks {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.pr-header-checks.is-failed {
+  color: var(--color-err);
+}

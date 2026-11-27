@@ -1,5 +1,9 @@
 import type { GithubFailure } from "../../../bindings";
-import { retryWaitText } from "./githubFailure";
+
+function retryWaitText(seconds: number | null): string {
+  if (seconds === null || seconds <= 0) return "later";
+  return seconds < 90 ? `in ${seconds}s` : `in ${Math.ceil(seconds / 60)} min`;
+}
 
 export function GhMissingText() {
   return (

@@ -310,6 +310,12 @@ export const CHANGES_COMMANDS = {
   unified: "Unified diff",
   split: "Split diff",
   refresh: "Refresh changes",
+  showChecks: "Show PR checks",
+  hideChecks: "Hide PR checks",
+  refreshPr: "Refresh PR",
+  openPr: "Open PR on GitHub",
+  linkPr: "Link PR…",
+  unlinkPr: "Unlink PR (local only)",
 } as const;
 
 /** Toggle a file's viewed mark (folds it; the cursor skips it). */

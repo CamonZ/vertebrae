@@ -1423,46 +1423,86 @@ async codeIntelligence(worktreePath: string, snapshot: IntelligenceSnapshot, req
 }
 },
 /**
- * Auto-links when exactly one open PR's head is the branch in the repository
- * it is pushed to; offers candidates otherwise. Plain calls are answered
- * locally whenever possible. The default branch is `not_applicable` without
- * any GitHub call. Never writes to GitHub.
+ * Where the branch's PRs live on GitHub, from git config alone. The
+ * repository's default branch and non-GitHub worktrees are `not_applicable`.
  */
-async getWorktreePrAssociation(worktreePath: string, branch: string, refresh: boolean | null) : Promise<Result<WorktreePrAssociation, GithubFailure>> {
+async resolveWorktreeGithub(worktreePath: string, branch: string) : Promise<Result<WorktreeGithub, GithubFailure>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_worktree_pr_association", { worktreePath, branch, refresh }) };
+    return { status: "ok", data: await TAURI_INVOKE("resolve_worktree_github", { worktreePath, branch }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
 /**
- * List open pull requests in the worktree's base repository for manually
- * linking `branch`.
+ * One round of PR polling: per remote, the open PRs of the given branches
+ * and the given PRs with their checks. Remotes are read concurrently.
  */
-async listWorktreeOpenPrs(worktreePath: string, branch: string) : Promise<Result<GithubPullRequest[], GithubFailure>> {
+async pollGithubPrs(requests: GithubPrPollRequest[]) : Promise<Result<GithubPrPollBatch, GithubFailure>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("list_worktree_open_prs", { worktreePath, branch }) };
+    return { status: "ok", data: await TAURI_INVOKE("poll_github_prs", { requests }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
 /**
- * Locally associate `branch` of a worktree with PR `pr_number` in `repo`
- * (`owner/name` of one of its GitHub remotes; defaults to the base repository).
+ * Open pull requests in `repo` (one of the worktree's GitHub remotes;
+ * defaults to the base repository), most recently updated first, for
+ * linking `branch` by hand.
  */
-async linkWorktreePr(worktreePath: string, branch: string, prNumber: number, repo: string | null) : Promise<Result<WorktreePrAssociation, GithubFailure>> {
+async listGithubOpenPrs(worktreePath: string, branch: string, repo: string | null) : Promise<Result<GithubPullRequest[], GithubFailure>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("link_worktree_pr", { worktreePath, branch, prNumber, repo }) };
+    return { status: "ok", data: await TAURI_INVOKE("list_github_open_prs", { worktreePath, branch, repo }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async unlinkWorktreePr(worktreePath: string, branch: string) : Promise<Result<WorktreePrAssociation, GithubFailure>> {
+/**
+ * PR `pr_number` in `repo` (one of the worktree's GitHub remotes; defaults
+ * to the base repository), read before the frontend links it.
+ */
+async getGithubPr(worktreePath: string, branch: string, repo: string | null, prNumber: number) : Promise<Result<GithubPullRequest, GithubFailure>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("unlink_worktree_pr", { worktreePath, branch }) };
+    return { status: "ok", data: await TAURI_INVOKE("get_github_pr", { worktreePath, branch, repo, prNumber }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Re-run one failed GitHub Actions job (`checkId` from [`poll_github_prs`])
+ * of PR `pr_number` in `repo`, which must be a GitHub remote of the
+ * worktree. Posts to GitHub.
+ */
+async rerunGithubPrCheck(worktreePath: string, branch: string, repo: string, prNumber: number, checkId: string) : Promise<Result<null, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("rerun_github_pr_check", { worktreePath, branch, repo, prNumber, checkId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Cancel the GitHub Actions workflow run of a queued or running job
+ * (`checkId` from [`poll_github_prs`]); every job in that run stops.
+ * Posts to GitHub.
+ */
+async cancelGithubPrCheck(worktreePath: string, branch: string, repo: string, prNumber: number, checkId: string) : Promise<Result<null, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("cancel_github_pr_check", { worktreePath, branch, repo, prNumber, checkId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The local remote-tracking commit `branch` is pushed to; never queries GitHub.
+ */
+async getWorktreePublishedHead(worktreePath: string, branch: string) : Promise<Result<string | null, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_worktree_published_head", { worktreePath, branch }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2473,10 +2513,63 @@ multiple: boolean;
  * The string `format` hint, such as `date` or `email`.
  */
 format: string | null }
+export type GithubBranchPrs = { branch: string;
+/**
+ * Open PRs whose head is the branch, from any repository.
+ */
+prs: GithubPullRequest[];
+/**
+ * Every open PR of the branch is listed; never auto-link otherwise.
+ */
+complete: boolean }
+export type GithubCheckCancel = "allowed" | "no_permission" | "provider" | "not_applicable"
+export type GithubCheckOutcome = "success" | "neutral" | "skipped" | "failure" | "cancelled" | "timed_out" | "action_required" | "startup_failure" | "stale" | "error"
+export type GithubCheckRerun = "allowed" | "no_permission" | "pull_request_closed" | "run_in_progress" | "provider" | "not_applicable"
+export type GithubCheckStatus = "failed" | "running" | "queued" | "passed"
 export type GithubErrorKind = "gh_missing" | "auth_expired" | "rate_limited" | "not_found" | "other"
 export type GithubFailure = { kind: GithubErrorKind; message: string; retryAfterSecs: number | null }
+export type GithubOpenPrsPoll =
+/**
+ * No branch was asked about.
+ */
+{ status: "not_requested" } | { status: "read"; branches: GithubBranchPrs[] } | { status: "failed"; failure: GithubFailure }
+export type GithubPolledPr = { number: number; result: GithubPolledPrResult }
+export type GithubPolledPrResult = { status: "read"; pr: GithubPullRequest; checks: GithubPrChecks } | { status: "failed"; failure: GithubFailure }
+export type GithubPrCheck = { id: string; name: string; provider: string; status: GithubCheckStatus; outcome: GithubCheckOutcome | null; startedAt: string | null; completedAt: string | null; url: string | null; summary: string | null; failedStep: string | null;
+/**
+ * A GitHub Actions job: its page and logs live on GitHub.
+ */
+actionsJob: boolean;
+/**
+ * The Actions workflow run the job belongs to; cancelling cancels every
+ * job sharing it.
+ */
+actionsRun: string | null; rerun: GithubCheckRerun; cancel: GithubCheckCancel }
+export type GithubPrChecks = { prNumber: number; repo: string; headSha: string; checks: GithubPrCheck[]; truncated: boolean }
+export type GithubPrPollBatch = { remotes: GithubRemotePoll[];
+/**
+ * Seconds to hold off polling: GitHub's hourly budget is nearly spent.
+ */
+holdOffSecs: number | null }
+/**
+ * What to read from one remote.
+ */
+export type GithubPrPollRequest = { host: string;
+/**
+ * `owner/name`.
+ */
+repo: string;
+/**
+ * Branches whose open PRs to list.
+ */
+branches: string[];
+/**
+ * Linked PRs to read with their checks.
+ */
+numbers: number[] }
 export type GithubPrState = "open" | "draft" | "merged" | "closed"
 export type GithubPullRequest = { owner: string; repo: string; number: number; title: string; state: GithubPrState; headRef: string; headRepo: string | null; baseRef: string; url: string; author: string | null; updatedAt: string | null }
+export type GithubRemotePoll = { host: string; repo: string; openPrs: GithubOpenPrsPoll; pullRequests: GithubPolledPr[] }
 export type GuiUpdateChannelRelease = { currentVersion: string; version: string; date: string | null; body: string | null; rawJson: JsonValue; isUpdate: boolean }
 export type GuiUpdateChannelStatus = { channel: string; endpoint: string; available: boolean; release: GuiUpdateChannelRelease | null; error: string | null }
 export type HistoryFailure = { kind: HistoryFailureKind; message: string; retryable: boolean }
@@ -2799,8 +2892,6 @@ export type LocalChatSpeedTierOption = { id: string; label: string; is_default?:
 export type LocalChatSpeedTierStatus = { requested: string | null; active: string | null; eligible: boolean; available: boolean; diagnostic: string | null }
 export type LocalChatSteeringInputEvent = { backend_session_id: string; turn_id: string; input_id: string; content: string; observed_at: string }
 export type LocalChatTextEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; text: string; is_partial: boolean; completion_status?: string | null; parent_tool_use_id: string | null; item_id?: string | null }
-export type RecoveredAcpMessage = { user: boolean; text: string }
-
 export type LocalChatToolCallEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; tool_name: string; summary?: string | null; input: string; parent_tool_use_id: string | null }
 export type LocalChatToolResultEvent = { backend_session_id: string; harness: LocalChatHarnessKind; turn_id?: string | null; thread_id?: string | null; is_root?: boolean; tool_id: string; result: string; is_error: boolean; parent_tool_use_id: string | null }
 /**
@@ -2927,6 +3018,7 @@ export type PipelineWorkflowTransition = { id: string; from_workflow_id: string;
 export type ProviderId = string
 export type ProviderSettings = { id: string; harness: string; endpoint: string; endpoint_hidden: boolean; models: string[]; default_model: string; api_key_env: string; has_api_key: boolean; key_storage: string; credential_override: boolean; environment_names: string[]; wire_api: string }
 export type QuestionPresentation = "approval" | "fixed_choice"
+export type RecoveredAcpMessage = { user: boolean; text: string }
 /**
  * One use of a symbol's name that may refer to it.
  */
@@ -3999,11 +4091,14 @@ tasks: Task[] }
 export type WorktreeChange = { path: string; old_path: string | null; status: FileStatus; patch: string; totals: DiffTotals; marker: MarkerReason | null }
 export type WorktreeChangedEvent = { watch_id: string }
 export type WorktreeChanges = { base_branch: string | null; base_unavailable: string | null; files: WorktreeChange[]; comparison: ComparisonSnapshot; totals: DiffTotals }
-export type WorktreePrAssociation = { status: "linked"; branch: string; repo: string; pr: GithubPullRequest; staleError: GithubFailure | null } | { status: "none"; branch: string; repo: string; createPrUrl: string } | { status: "ambiguous"; branch: string; repo: string; candidates: GithubPullRequest[] } | { status: "gh_missing"; branch: string; repo: string } | { status: "auth_expired"; branch: string; repo: string; reason: string } | { status: "unavailable"; branch: string; repo: string; error: GithubFailure } |
+/**
+ * Where a worktree branch's pull requests live. Read from git config only;
+ * GitHub is never asked.
+ */
+export type WorktreeGithub = { status: "github"; branch: string; host: string; headRepo: string; baseRepo: string; searchRepos: string[]; createPrUrl: string } |
 /**
  * There is no GitHub branch to look up (no Git repository, an invalid
- * branch name, the repository's default branch, or no GitHub remote);
- * GitHub is not queried and the UI stays quiet.
+ * branch name, the repository's default branch, or no GitHub remote).
  */
 { status: "not_applicable"; branch: string | null; reason: string }
 

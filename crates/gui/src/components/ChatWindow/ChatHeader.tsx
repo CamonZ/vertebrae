@@ -17,8 +17,11 @@ import { OverflowMenu } from "../molecules/OverflowMenu";
 import { FALLBACK_CHAT_PROJECT_LABEL } from "../../utils/localChatSessionGroups";
 import { CHAT_ATTENTION, type ChatAttention } from "../../utils/chatAttention";
 import { ChatAttentionDot } from "./ChatAttentionDot";
-import type { GithubPullRequest } from "../../bindings";
+import type { TaskLevel } from "../../bindings";
+import type { LinkedPr } from "../../stores/prLinks";
+import { IdChip } from "../shared/HearthPrimitives";
 import { ChatHeaderPrChip } from "./GithubPr";
+import type { PrCheckCounts } from "./workspace/prChecksView";
 
 interface ChatHeaderProps {
   label: string;
@@ -47,7 +50,11 @@ interface ChatHeaderProps {
   titleError?: string | null;
   projectLabel?: string;
   showProjectContext?: boolean;
-  linkedPr?: GithubPullRequest | null;
+  /** The Vertebrae entity this chat is associated with. */
+  entity?: { id: string; level: TaskLevel } | null;
+  linkedPr?: LinkedPr | null;
+  /** Check counts of the linked PR, from the same refresh as Changes. */
+  linkedPrChecks?: PrCheckCounts | null;
   /** Shows the Changes panel from the PR chip; without it the chip is static. */
   onOpenPrInChanges?: () => void;
 }
@@ -225,7 +232,9 @@ export function ChatHeader({
   titleError,
   projectLabel = FALLBACK_CHAT_PROJECT_LABEL,
   showProjectContext = false,
+  entity = null,
   linkedPr = null,
+  linkedPrChecks = null,
   onOpenPrInChanges,
 }: ChatHeaderProps) {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -635,8 +644,20 @@ export function ChatHeader({
               {projectLabel}
             </span>
           )}
+          {entity && (
+            <IdChip
+              id={entity.id}
+              level={entity.level}
+              className="hc-entity-id"
+              testId="chat-header-entity-id"
+            />
+          )}
           {linkedPr && (
-            <ChatHeaderPrChip pr={linkedPr} onOpenChanges={onOpenPrInChanges} />
+            <ChatHeaderPrChip
+              pr={linkedPr}
+              checks={linkedPrChecks}
+              onOpenChanges={onOpenPrInChanges}
+            />
           )}
           <ChatAttentionDot attention={attention} />
           {attention.state !== "idle" &&

@@ -1,0 +1,430 @@
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { commands, type GithubPrCheck } from "../../../bindings";
+import { useWorktreePr } from "../../../hooks/useWorktreePr";
+import { linkedPullRequest } from "../../../stores/worktreePrStore";
+import {
+  REPO,
+  addPr,
+  chatSession,
+  fakeGithub,
+  installFakeGithub,
+  linkedPr,
+  prLink,
+  pullRequest,
+  resetFakeGithub,
+  seedChats,
+  type FakeGithub,
+} from "../../../test/fakeGithub";
+import { ChatHeaderPrChip } from "../GithubPr";
+import { Bar } from "../../../test/prBar";
+
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../../../bindings", () => ({
+  commands: {
+    resolveWorktreeGithub: vi.fn(),
+    pollGithubPrs: vi.fn(),
+    listGithubOpenPrs: vi.fn(),
+    getGithubPr: vi.fn(),
+    rerunGithubPrCheck: vi.fn(),
+    cancelGithubPrCheck: vi.fn(),
+    getWorktreePublishedHead: vi.fn(),
+  },
+}));
+
+const poll = vi.mocked(commands.pollGithubPrs);
+const rerun = vi.mocked(commands.rerunGithubPrCheck);
+const cancel = vi.mocked(commands.cancelGithubPrCheck);
+
+const WORKTREE = "/wt/a";
+const BRANCH = "feature/retry";
+const ok = <T,>(data: T) => ({ status: "ok" as const, data });
+
+const PR = pullRequest(482, {
+  title: "Reset retry budget after success",
+  updatedAt: null,
+});
+
+function check(
+  id: string,
+  name: string,
+  status: GithubPrCheck["status"],
+  overrides: Partial<GithubPrCheck> = {}
+): GithubPrCheck {
+  return {
+    id,
+    name,
+    provider: "GitHub Actions",
+    status,
+    outcome:
+      status === "failed" ? "failure" : status === "passed" ? "success" : null,
+    startedAt: null,
+    completedAt: null,
+    url: `https://github.com/${REPO}/actions/runs/1/job/${id.slice(4)}`,
+    summary: null,
+    failedStep: null,
+    actionsJob: true,
+    actionsRun: "4100",
+    rerun: status === "failed" ? "allowed" : "not_applicable",
+    cancel:
+      status === "running" || status === "queued"
+        ? "allowed"
+        : "not_applicable",
+    ...overrides,
+  };
+}
+
+const CHECKS: GithubPrCheck[] = [
+  check("run:11", "test (ubuntu)", "failed", {
+    failedStep: "Run cargo test",
+  }),
+  check("run:12", "lint", "failed", { rerun: "no_permission" }),
+  check("status:ci/external", "external-ci", "failed", {
+    provider: "External CI",
+    actionsJob: false,
+    actionsRun: null,
+    rerun: "provider",
+    url: "https://ci.example.test/build/7",
+  }),
+  check("run:13", "build", "running"),
+  check("run:14", "docs", "queued", { actionsRun: "4200" }),
+  check("run:15", "fmt", "passed"),
+];
+
+/** The chat header's consumer of the same branch, as ChatWindow wires it. */
+function HeaderChip() {
+  const { association, entry, counts } = useWorktreePr(WORKTREE, BRANCH);
+  const pr = linkedPullRequest(association);
+  return pr ? (
+    <ChatHeaderPrChip pr={pr} checks={entry.snapshot ? counts : null} />
+  ) : null;
+}
+
+let world: FakeGithub;
+
+/** The bar and header chip of a chat linked to `PR`, whose checks are `checks`. */
+function renderSurfaces(checks: GithubPrCheck[] = CHECKS) {
+  addPr(world, PR, checks);
+  seedChats(
+    chatSession("chat", WORKTREE, BRANCH, {
+      link: prLink(WORKTREE, BRANCH, linkedPr(PR)),
+    })
+  );
+  return render(
+    <>
+      <HeaderChip />
+      <Bar worktreePath={WORKTREE} branch={BRANCH} />
+    </>
+  );
+}
+
+async function openDrawer() {
+  const toggle = await screen.findByTestId("pr-checks-toggle");
+  fireEvent.click(toggle);
+  return screen.getByTestId("pr-checks-drawer");
+}
+
+function rowNamed(drawer: HTMLElement, name: string) {
+  const row = within(drawer)
+    .getAllByTestId("pr-check-row")
+    .find((item) => within(item).queryByText(name));
+  if (!row) throw new Error(`no check row ${name}`);
+  return row;
+}
+
+describe("PR checks in the review bar, drawer and chip", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    world = fakeGithub();
+    installFakeGithub(commands, world);
+  });
+
+  afterEach(() => {
+    resetFakeGithub();
+    vi.useRealTimers();
+  });
+
+  it("shows the same counts in the bar, the drawer and the header chip", async () => {
+    renderSurfaces();
+    const toggle = await screen.findByTestId("pr-checks-toggle");
+    expect(toggle).toHaveAccessibleName(
+      "Checks: 3 failed, 1 running, 1 queued, 1 passed. Show details"
+    );
+    expect(toggle).toHaveTextContent("3failed1running1queued1passed");
+
+    const drawer = await openDrawer();
+    const rows = within(drawer).getAllByTestId("pr-check-row");
+    const statuses = rows.map((row) =>
+      row.className.replace("pr-check is-", "")
+    );
+    expect(statuses).toEqual([
+      "failed",
+      "failed",
+      "failed",
+      "running",
+      "queued",
+      "passed",
+    ]);
+
+    expect(screen.getByTestId("chat-header-pr-checks")).toHaveTextContent("3");
+    expect(screen.getByTestId("chat-header-pr-chip")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Checks: 3 failed, 1 running, 1 queued, 1 passed")
+    );
+    expect(poll).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers Re-run only for permitted Actions jobs and links other providers out", async () => {
+    renderSurfaces();
+    const drawer = await openDrawer();
+
+    const allowed = rowNamed(drawer, "test (ubuntu)");
+    expect(
+      within(allowed).getByRole("button", {
+        name: "Re-run test (ubuntu) on GitHub Actions",
+      })
+    ).toBeInTheDocument();
+    // The first failure starts expanded with its failed step.
+    expect(within(allowed).getByText("Run cargo test")).toBeInTheDocument();
+
+    const denied = rowNamed(drawer, "lint");
+    expect(
+      within(denied).queryByRole("button", { name: /^Re-run/ })
+    ).toBeNull();
+    expect(within(denied).getByText("No re-run access")).toBeInTheDocument();
+
+    // Another provider's job re-runs there, through the row's one link.
+    const external = rowNamed(drawer, "external-ci");
+    expect(within(external).getByText("Re-runs on External CI")).toBeVisible();
+    const links = within(external).getAllByRole("button", { name: /^Open / });
+    expect(links).toHaveLength(1);
+    fireEvent.click(links[0]);
+    expect(openUrl).toHaveBeenCalledWith("https://ci.example.test/build/7");
+    expect(rerun).not.toHaveBeenCalled();
+
+    for (const name of ["build", "docs", "fmt"]) {
+      expect(
+        within(rowNamed(drawer, name)).queryByRole("button", {
+          name: /^Re-run/,
+        })
+      ).toBeNull();
+    }
+  });
+
+  it("holds Re-run while the rest of the job's workflow run is still going", async () => {
+    renderSurfaces([
+      check("run:11", "test (ubuntu)", "failed", {
+        rerun: "run_in_progress",
+      }),
+      check("run:13", "build", "running"),
+    ]);
+    const row = rowNamed(await openDrawer(), "test (ubuntu)");
+    expect(within(row).queryByRole("button", { name: /^Re-run/ })).toBeNull();
+    expect(
+      within(row).getByText("Re-run after the run finishes")
+    ).toBeInTheDocument();
+  });
+
+  it("keeps an in-progress re-run when the drawer closes and reopens", async () => {
+    let accept: (value: { status: "ok"; data: null }) => void = () => {};
+    rerun.mockReturnValue(new Promise((resolve) => (accept = resolve)));
+    renderSurfaces();
+    let drawer = await openDrawer();
+    fireEvent.click(
+      within(rowNamed(drawer, "test (ubuntu)")).getByRole("button", {
+        name: "Re-run test (ubuntu) on GitHub Actions",
+      })
+    );
+    expect(rerun).toHaveBeenCalledExactlyOnceWith(
+      WORKTREE,
+      BRANCH,
+      REPO,
+      482,
+      "run:11"
+    );
+
+    fireEvent.keyDown(drawer, { key: "Escape" });
+    expect(screen.queryByTestId("pr-checks-drawer")).toBeNull();
+    expect(screen.getByTestId("pr-checks-toggle")).toHaveFocus();
+
+    drawer = await openDrawer();
+    const pending = within(rowNamed(drawer, "test (ubuntu)")).getByRole(
+      "button",
+      {
+        name: "Re-run test (ubuntu) on GitHub Actions",
+      }
+    );
+    expect(pending).toHaveAttribute("title", "Requesting re-run…");
+    expect(pending).toHaveAttribute("aria-busy", "true");
+    expect(pending).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(pending);
+    expect(rerun).toHaveBeenCalledTimes(1);
+
+    await act(async () => accept(ok(null)));
+    const row = rowNamed(
+      screen.getByTestId("pr-checks-drawer"),
+      "test (ubuntu)"
+    );
+    expect(row).toHaveClass("is-queued");
+    expect(row).toHaveTextContent("re-run queued");
+    expect(screen.getByTestId("pr-checks-toggle")).toHaveAccessibleName(
+      "Checks: 2 failed, 1 running, 2 queued, 1 passed. Hide details"
+    );
+    expect(screen.getByTestId("chat-header-pr-checks")).toHaveTextContent("2");
+  });
+
+  it("keeps the last checks after a failed refresh and offers Retry now", async () => {
+    renderSurfaces();
+    await screen.findByTestId("pr-checks-toggle");
+    poll.mockResolvedValueOnce({
+      status: "error",
+      error: {
+        kind: "rate_limited",
+        message: "API rate limit exceeded",
+        retryAfterSecs: 40,
+      },
+    });
+    fireEvent.click(screen.getByTestId("pr-actions-menu"));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /Refresh PR/ })
+    );
+
+    // Only the reason is announced, not the ticking ages around it.
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /^Couldn’t refresh: GitHub rate limit reached · try again in 40s\.$/
+    );
+    expect(
+      screen.getByText(/Showing last known state from/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/auto in 40s/)).toBeInTheDocument();
+    expect(screen.getByTestId("pr-checks-toggle")).toHaveAccessibleName(
+      /^Checks: 3 failed/
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
+    expect(await screen.findByText(/^Updated/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry now" })).toBeNull();
+  });
+
+  it("marks only the routine refresh line as hideable in a narrow bar", async () => {
+    renderSurfaces();
+    const updated = await screen.findByText(/^Updated/);
+    expect(updated).toHaveClass("is-routine");
+
+    poll.mockResolvedValueOnce({
+      status: "error",
+      error: { kind: "other", message: "offline", retryAfterSecs: null },
+    });
+    fireEvent.click(screen.getByTestId("pr-actions-menu"));
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: /Refresh PR/ })
+    );
+    const failed = await screen.findByRole("alert");
+    expect(failed.closest(".pr-checks-refresh")).not.toHaveClass("is-routine");
+    // Counts stay readable from the glyphs, numbers and accessible name.
+    expect(screen.getByTestId("pr-checks-toggle")).toHaveAccessibleName(
+      /^Checks: 3 failed, 1 running, 1 queued, 1 passed/
+    );
+  });
+
+  it("asks before cancelling a run and names how many jobs stop with it", async () => {
+    const twoJobs = [
+      check("run:13", "build", "running"),
+      check("run:16", "build (macos)", "queued"),
+      check("run:15", "fmt", "passed"),
+      check("status:ci/ext", "external-ci", "running", {
+        provider: "External CI",
+        actionsJob: false,
+        actionsRun: null,
+        cancel: "provider",
+      }),
+      check("run:17", "deploy", "running", {
+        actionsRun: "4300",
+        cancel: "no_permission",
+      }),
+    ];
+    cancel.mockResolvedValue(ok(null));
+    renderSurfaces(twoJobs);
+    const drawer = await openDrawer();
+
+    const build = rowNamed(drawer, "build");
+    fireEvent.click(
+      within(build).getByRole("button", {
+        name: "Cancel the workflow run of build",
+      })
+    );
+    expect(cancel).not.toHaveBeenCalled();
+    expect(
+      within(build).getByText("Stop all 2 jobs in the run?")
+    ).toBeVisible();
+    const keep = within(build).getByRole("button", { name: "Keep running" });
+    keep.focus();
+    fireEvent.click(keep);
+    expect(within(build).queryByText(/Stop all/)).toBeNull();
+    // Focus returns to the control the question came from.
+    const ask = within(build).getByRole("button", {
+      name: "Cancel the workflow run of build",
+    });
+    expect(ask).toHaveFocus();
+
+    fireEvent.click(ask);
+    const confirm = within(build).getByRole("button", {
+      name: "Confirm: cancel the workflow run of build on GitHub Actions",
+    });
+    expect(confirm).toHaveFocus();
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(cancel).toHaveBeenCalledExactlyOnceWith(
+      WORKTREE,
+      BRANCH,
+      REPO,
+      482,
+      "run:13"
+    );
+    // The confirm step is gone; focus stays in the row.
+    expect(build.contains(document.activeElement)).toBe(true);
+    // Every job of the run reads as cancelling until GitHub reports it.
+    const after = screen.getByTestId("pr-checks-drawer");
+    expect(rowNamed(after, "build")).toHaveTextContent("cancelling");
+    expect(rowNamed(after, "build (macos)")).toHaveTextContent("cancelling");
+
+    expect(
+      within(rowNamed(after, "external-ci")).queryByRole("button", {
+        name: /^Cancel/,
+      })
+    ).toBeNull();
+    expect(
+      within(rowNamed(after, "deploy")).getByText("No cancel access")
+    ).toBeInTheDocument();
+    expect(
+      within(rowNamed(after, "fmt")).queryByRole("button", { name: /^Cancel/ })
+    ).toBeNull();
+  });
+
+  it("closes only the cancel question on Escape, leaving the drawer open", async () => {
+    renderSurfaces();
+    const drawer = await openDrawer();
+    const build = rowNamed(drawer, "build");
+    fireEvent.click(
+      within(build).getByRole("button", {
+        name: "Cancel the workflow run of build",
+      })
+    );
+    const question = within(build).getByRole("group", {
+      name: "Cancel the workflow run of build?",
+    });
+    fireEvent.keyDown(
+      within(question).getByRole("button", { name: "Keep running" }),
+      { key: "Escape" }
+    );
+    expect(within(build).queryByRole("group")).toBeNull();
+    expect(screen.getByTestId("pr-checks-drawer")).toBeInTheDocument();
+    expect(cancel).not.toHaveBeenCalled();
+  });
+});
