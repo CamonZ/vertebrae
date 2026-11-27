@@ -49,6 +49,8 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // Slow hosted runners pushed the heaviest render tests past the 5 s default.
+    testTimeout: 10_000,
     // Stylesheets stay stubbed; `?raw` imports return the source so tests
     // can check rules that jsdom cannot cascade.
     css: { include: [/\.css\?raw$/] },

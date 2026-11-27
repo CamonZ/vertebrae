@@ -13,10 +13,8 @@ split-debuginfo = "unpacked"    # Faster debug builds on macOS
 [profile.dev.package."*"]
 opt-level = 0
 
-# Test profile - slightly optimized for faster test execution
-[profile.test]
-opt-level = 1
-debug = "line-tables-only"
+# Tests inherit the dev profile. Optimizing them doubled workspace codegen time
+# without making the suites run faster.
 
 # Release profile - optimize for performance and size
 [profile.release]
