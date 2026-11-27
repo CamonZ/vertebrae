@@ -1,0 +1,139 @@
+/*
+ * GitHub thread markers inside Pierre's diff (its shadow root, so the app's
+ * stylesheets do not reach it; tokens inherit). Imported as a string and
+ * passed to Pierre's `unsafeCSS`.
+ *
+ * Every rendered line of a file with markers carries a lane: a fixed,
+ * opaque column at the visible right edge of the code (sticky while the
+ * code scrolls sideways). Code scrolls under the lane's edge rather than
+ * under a marker, markers align across rows, and lines reserve the lane's
+ * width so their ends can scroll clear of it. Markers carry no text nodes
+ * (initials and counts are generated content), so line text, copying and
+ * the cursor's text ranges are unaffected. GitHub markers stay neutral:
+ * rose marks private actions.
+ */
+:host([data-gh-markers]) {
+  --gh-lane: 64px;
+}
+
+:host([data-gh-markers]) [data-content] [data-line] {
+  padding-inline-end: calc(var(--gh-lane) + 4px);
+}
+
+[data-gh-marker-rail] {
+  display: block;
+  position: sticky;
+  left: var(--diffs-column-number-width, 0);
+  inline-size: var(--diffs-column-content-width, 100%);
+  block-size: 0;
+  pointer-events: none;
+  user-select: none;
+  z-index: 2;
+}
+
+/* The lane itself: one row tall, the diff's background, a hairline edge. */
+[data-gh-marker-rail]::before {
+  content: "";
+  position: absolute;
+  inset-inline-end: 0;
+  inset-block-start: 0;
+  inline-size: var(--gh-lane);
+  block-size: 1lh;
+  border-inline-start: 1px solid var(--color-line-soft, transparent);
+  background: var(--diffs-bg);
+}
+
+[data-gh-marker] {
+  appearance: none;
+  pointer-events: auto;
+  position: absolute;
+  inset-inline-end: 4px;
+  inset-block-start: calc((1lh - 20px) / 2);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-inline-size: 24px;
+  max-inline-size: calc(var(--gh-lane) - 8px);
+  block-size: 20px;
+  padding: 0 5px 0 2px;
+  overflow: hidden;
+  border: 1px solid var(--color-line-strong, var(--diffs-fg));
+  border-radius: var(--radius-full, 999px);
+  background: var(--color-bg-2, var(--diffs-bg));
+  color: var(--color-fg-soft, var(--diffs-fg));
+  font: 600 var(--text-meta) / 1 var(--font-sans, sans-serif);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+/* A 24px hit target around the 20px pill (WCAG 2.2 target size). */
+[data-gh-marker]::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+}
+
+[data-gh-marker]:hover,
+[data-gh-marker][aria-expanded="true"] {
+  border-color: var(--color-fg-mute, currentcolor);
+  color: var(--color-fg, var(--diffs-fg));
+}
+
+[data-gh-marker][data-resolved] {
+  border-style: dashed;
+  color: var(--color-fg-mute, var(--diffs-fg));
+}
+
+/* The app's one focus halo (styles/focus-halo.css cannot reach in here). */
+[data-gh-marker]:focus-visible {
+  outline: 1px solid transparent;
+  box-shadow: var(--focus-shadow);
+}
+
+[data-gh-avatar] {
+  display: inline-grid;
+  place-items: center;
+  inline-size: 16px;
+  block-size: 16px;
+  border-radius: 50%;
+  background: oklch(from var(--color-avatar) l c var(--gh-hue));
+  color: var(--color-fg, var(--diffs-fg));
+  font-size: var(--text-meta);
+}
+
+[data-gh-avatar]::before {
+  content: attr(data-initial);
+}
+
+[data-gh-avatar] + [data-gh-avatar] {
+  margin-inline-start: -6px;
+  box-shadow: 0 0 0 1.5px var(--color-bg-2, var(--diffs-bg));
+}
+
+[data-gh-count]::before {
+  content: attr(data-count);
+  padding-inline-start: 2px;
+}
+
+[data-gh-count][data-resolved-count]::after {
+  content: "✓" attr(data-resolved-count);
+  padding-inline-start: 3px;
+  color: var(--color-ok-fg, currentcolor);
+}
+
+[data-gh-drift] {
+  color: var(--color-info, currentcolor);
+  padding-inline-start: 1px;
+}
+
+[data-gh-drift="moved"]::before {
+  content: "↕";
+}
+
+[data-gh-drift="edited"]::before {
+  content: "✎";
+}
+
+[data-gh-drift="unverified"]::before {
+  content: "?";
+}

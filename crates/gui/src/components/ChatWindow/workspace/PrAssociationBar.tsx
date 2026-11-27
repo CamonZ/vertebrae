@@ -43,6 +43,8 @@ import { CheckCounts, ChecksRefreshLine, PrChecksDrawer } from "./PrChecks";
 import { checkCountsLabel } from "./prChecksView";
 import { AuthExpiredText, GhMissingText, GithubFailureText } from "./PrFailure";
 import "./prAssociation.css";
+import "./githubReview/githubReview.css";
+import { REVIEW_TOGGLE_ATTRIBUTE } from "./githubReview/useReviewController";
 
 const FOCUS_TARGET = "data-pr-focus";
 const focusTarget = { [FOCUS_TARGET]: "" };
@@ -57,6 +59,24 @@ type Ambiguous = Extract<WorktreePrAssociation, { status: "ambiguous" }>;
 
 /** The bar's one open panel: the checks drawer or the manual link. */
 type Panel = "checks" | "link" | null;
+
+/**
+ * The bar's entry into the Review rail: shown while threads load or fail
+ * too, since the rail is where their state and the checks are read.
+ */
+export interface ReviewEntry {
+  /** Unresolved threads, as the chat header chip counts them; null until read. */
+  openCount: number | null;
+  status: "loading" | "ready" | "failed";
+  open: boolean;
+  onToggle(): void;
+}
+
+function reviewEntryText(review: ReviewEntry): string {
+  if (review.openCount === null)
+    return review.status === "failed" ? "Threads unavailable" : "Threads…";
+  return `${review.openCount} open ${review.openCount === 1 ? "thread" : "threads"}`;
+}
 
 interface BarActions {
   busy: boolean;
@@ -118,6 +138,7 @@ function LinkedBar({
   drawerOpen,
   setDrawerOpen,
   toggleRef,
+  review,
 }: {
   association: Linked;
   actions: BarActions;
@@ -125,6 +146,7 @@ function LinkedBar({
   drawerOpen: boolean;
   setDrawerOpen: (open: boolean) => void;
   toggleRef: Ref<HTMLButtonElement>;
+  review?: ReviewEntry;
 }) {
   const { pr, readOnly } = association;
   const canOpen = isAbsoluteHttpUrl(pr.url);
@@ -175,6 +197,21 @@ function LinkedBar({
           >
             <CheckCounts counts={worktreePr.counts} />
             <ChevronGlyph up={drawerOpen} />
+          </button>
+        )}
+        {review && (
+          <button
+            type="button"
+            className="gh-thread-count"
+            aria-expanded={review.open}
+            aria-busy={review.status === "loading" || undefined}
+            data-status={review.status}
+            title={`${review.open ? "Close" : "Open"} the Review rail`}
+            {...{ [REVIEW_TOGGLE_ATTRIBUTE]: "" }}
+            onClick={review.onToggle}
+          >
+            {review.status === "loading" && <Spinner className="h-3 w-3" />}
+            {reviewEntryText(review)}
           </button>
         )}
         {readOnly ? (
@@ -474,10 +511,12 @@ function AssociationBody({
   panel,
   setPanel,
   toggleRef,
+  review,
 }: {
   association: WorktreePrAssociation | null;
   actions: BarActions;
   pr: WorktreePr;
+  review?: ReviewEntry;
 } & PanelProps): ReactNode {
   if (!association)
     return (
@@ -517,6 +556,7 @@ function AssociationBody({
           drawerOpen={panel === "checks"}
           setDrawerOpen={(open) => setPanel(open ? "checks" : null)}
           toggleRef={toggleRef}
+          review={review}
         />
       );
     case "ambiguous":
@@ -574,9 +614,12 @@ export interface PrBarHandle {
 export function PrAssociationBar({
   pr,
   ref,
+  review,
 }: {
   pr: WorktreePr;
   ref?: Ref<PrBarHandle>;
+  /** Shown once the linked PR's review threads are read. */
+  review?: ReviewEntry;
 }) {
   const { association, busy, entry } = pr;
   const rootRef = useRef<HTMLDivElement>(null);
@@ -654,6 +697,7 @@ export function PrAssociationBar({
         panel={panel}
         setPanel={setPanel}
         toggleRef={toggleRef}
+        review={review}
       />
       {entry.newer && association?.status === "linked" && (
         <NewerPrRow

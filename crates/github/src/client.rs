@@ -259,7 +259,7 @@ impl GitHubClient {
         PullRequestSummary::try_from(pr)
     }
 
-    async fn graphql<T: DeserializeOwned>(
+    pub(crate) async fn graphql<T: DeserializeOwned>(
         &self,
         token: &GitHubToken,
         query: &str,

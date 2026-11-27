@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import {
   CodeView,
@@ -32,7 +33,10 @@ import {
   type FilePatch,
 } from "../../thread/toolChange/diffLineMapper";
 import { GAP_CURSOR_ATTRIBUTE, useChangeGaps } from "./useChangeGaps";
-import type { ReviewAnnotation } from "../../thread/toolChange/DiffCommentThread";
+import {
+  hasReviewContent,
+  type ReviewAnnotation,
+} from "../../thread/toolChange/DiffCommentThread";
 import { DiffReviewContext } from "../../thread/toolChange/DiffReviewContext";
 import type { BackgroundOutputs } from "../../../background/types";
 import { MARKER_TEXT } from "../../thread/toolChange/worktreeDelta";
@@ -71,6 +75,20 @@ import {
 
 import { labelChips, type SemanticLabel } from "./semanticHunks";
 import { SEMANTIC_GUTTER_CSS, syncSemanticGutter } from "./semanticGutter";
+import { GITHUB_MARKERS_CSS } from "./githubReview/markers";
+import {
+  GithubAnnotationThreads,
+  GithubOutdatedPill,
+} from "./githubReview/GithubThreadCard";
+import {
+  githubCursorStops,
+  paintGithubMarkers,
+  useReportShownLines,
+  withGithubAnnotations,
+} from "./githubReview/diffAnnotations";
+import type { LineShown } from "./githubReview/model";
+import { exposeViewportAnchor, type ViewportAnchor } from "./viewportAnchor";
+import type { GithubDiffThreads } from "./githubReview/useReviewController";
 
 type ExpandedLabel = { id: string; label: SemanticLabel };
 
@@ -78,6 +96,8 @@ export interface JumpTarget extends SourceLocation {
   /** Distinguishes repeated jumps to the same file. */
   nonce: number;
   focusHeader?: boolean;
+  /** Put the line back at the top of the view, selecting nothing. */
+  keep?: true;
 }
 
 export interface AllChangesViewProps {
@@ -107,6 +127,12 @@ export interface AllChangesViewProps {
    * read here so a cursor move re-renders only this view.
    */
   chatChanges?: ChangesKey;
+  /** The linked PR's review threads, placed on this comparison. */
+  github?: GithubDiffThreads | null;
+  /** Which lines the diff shows now, revealed context included. */
+  onLinesShown?(shown: LineShown): void;
+  /** Set to read the line at the top of the view (kept across remounts). */
+  viewportRef?: RefObject<(() => ViewportAnchor | null) | null>;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
@@ -182,6 +208,9 @@ export default function AllChangesView({
   symbolGraphRequest,
   onRelatedJump,
   chatChanges,
+  github = null,
+  onLinesShown,
+  viewportRef,
 }: AllChangesViewProps): ReactNode {
   const onToggleViewed = onViewedChange
     ? (path: string) => onViewedChange(path, !viewedPaths.has(path))
@@ -321,6 +350,8 @@ export default function AllChangesView({
     viewRef,
   });
   const { fileDiffFor, onPostRender: onGapsPostRender } = gaps;
+  useReportShownLines(patchesByPath, gaps.context, onLinesShown);
+  exposeViewportAnchor(viewportRef, viewRef, containerRef, itemPaths);
   const lastCursorMove = useRef(-Infinity);
   // Read unconditionally (hooks); unused without a chat's Changes.
   const heldCursor = useChangesCursor(chatChanges ?? NO_CHANGES);
@@ -335,6 +366,7 @@ export default function AllChangesView({
     context: gaps.context,
     onRevealGap: gaps.reveal,
     selectionState: chatChanges ? heldCursor : undefined,
+    ...githubCursorStops(github),
     onCursorMove: (path, lineNumber, side) => {
       const now = performance.now();
       const behavior = changesCursorScrollBehavior(
@@ -362,6 +394,7 @@ export default function AllChangesView({
     itemPaths,
     expanded,
     onRelatedJump,
+    github,
   });
   gutterState.current = {
     semantic,
@@ -369,13 +402,27 @@ export default function AllChangesView({
     itemPaths,
     expanded,
     onRelatedJump,
+    github,
   };
   const paintGutter = useCallback(
-    (item: CodeViewRenderedItem<ReviewAnnotation, undefined>) => {
+    (
+      item: CodeViewRenderedItem<ReviewAnnotation, undefined>,
+      /** Pierre has just drawn this item, so its rows are final. */
+      rendered = false
+    ) => {
       const root = item.element.shadowRoot;
       if (item.type !== "diff" || !root) return;
       const state = gutterState.current;
       const path = state.itemPaths.get(item.id) ?? item.id;
+      paintGithubMarkers(
+        root,
+        item.element,
+        item.instance,
+        state.github,
+        path,
+        path === item.id,
+        rendered
+      );
       // Only the primary patch item receives a file's semantic coordinates.
       const file = path === item.id ? state.semantic.fileFor(path) : null;
       const links = linksForFile(state.related.links, path, file);
@@ -422,7 +469,7 @@ export default function AllChangesView({
       []) {
       paintGutter(item);
     }
-  }, [semantic, related, expanded, itemPaths, paintGutter]);
+  }, [semantic, related, expanded, itemPaths, paintGutter, github]);
 
   const itemVersions = useRef(
     new Map<
@@ -452,7 +499,19 @@ export default function AllChangesView({
               fileDiff: fileDiffFor(patchItem.id, patchItem.fileDiff),
             }
           : patchItem;
-        const review = own ? annotationsFor(item.id) : undefined;
+        const firstHunk = item.fileDiff.hunks[0];
+        const review = own
+          ? withGithubAnnotations(
+              github,
+              item.id,
+              annotationsFor(item.id),
+              firstHunk
+                ? firstHunk.additionCount > 0
+                  ? { side: "additions", lineNumber: firstHunk.additionStart }
+                  : { side: "deletions", lineNumber: firstHunk.deletionStart }
+                : null
+            )
+          : undefined;
         const active = expanded?.id === item.id ? expanded.label : undefined;
         const annotations =
           review && semantic.annotate(item.id, review, active);
@@ -491,6 +550,7 @@ export default function AllChangesView({
       semantic,
       related.links,
       expanded,
+      github,
     ]
   );
   const { gapCursor } = review;
@@ -529,6 +589,7 @@ export default function AllChangesView({
   };
   const evidenceSelection =
     jumpTarget?.line !== undefined &&
+    !jumpTarget.keep &&
     dismissedEvidence !== jumpTarget.nonce &&
     itemPaths.has(jumpTarget.path)
       ? {
@@ -567,7 +628,7 @@ export default function AllChangesView({
       // No top padding: the focus halo sits flush on the first file.
       layout: CODE_VIEW_LAYOUT,
       expansionLineCount: GAP_BATCH,
-      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}\n${COMMENTED_LINES_CSS}\n${semanticOn ? SEMANTIC_GUTTER_CSS : ""}`,
+      unsafeCSS: `${options.unsafeCSS}\n${GAP_CSS}\n${CHANGES_CURSOR_CSS}\n${COMMENTED_LINES_CSS}\n${GITHUB_MARKERS_CSS}\n${semanticOn ? SEMANTIC_GUTTER_CSS : ""}`,
       onPostRender: (...args: Parameters<typeof onGapsPostRender>) => {
         onGapsPostRender(...args);
         // Pierre renders an item before adding it to its rendered range, so
@@ -580,7 +641,7 @@ export default function AllChangesView({
             .find((item) => item.instance === instance);
           if (rendered) {
             requestFile(itemPaths.get(rendered.id) ?? rendered.id);
-            paintGutter(rendered);
+            paintGutter(rendered, true);
           }
         });
         scheduleCursorPaint();
@@ -674,7 +735,7 @@ export default function AllChangesView({
                 id: path,
                 lineNumber: target.line,
                 side: target.side === "old" ? "deletions" : "additions",
-                align: "center",
+                align: target.keep ? "start" : "center",
               }
             : { type: "item", id: path, align: "start" }
         );
@@ -754,7 +815,7 @@ export default function AllChangesView({
               : undefined
           }
           renderAnnotation={
-            review.enabled || semanticOn
+            review.enabled || semanticOn || github
               ? (...args: CodeViewAnnotationArgs<ReviewAnnotation>) => {
                   const [annotation, , item] = args;
                   const path = itemPaths.get(item.id) ?? item.id;
@@ -767,7 +828,7 @@ export default function AllChangesView({
                         )
                       : undefined;
                   const thread =
-                    review.enabled && !annotation.metadata.labelOnly
+                    review.enabled && hasReviewContent(annotation.metadata)
                       ? review.renderAnnotation(annotation)
                       : null;
                   return (
@@ -800,6 +861,15 @@ export default function AllChangesView({
                         />
                       )}
                       {thread}
+                      {github && "side" in annotation && (
+                        <GithubAnnotationThreads
+                          github={github}
+                          path={path}
+                          lineNumber={annotation.lineNumber}
+                          metadata={annotation.metadata}
+                          view={viewRef.current}
+                        />
+                      )}
                     </>
                   );
                 }
@@ -849,6 +919,15 @@ export default function AllChangesView({
                   </span>
                 </button>
                 <FormattingBadge file={semantic.fileFor(path)} />
+                {github && path === item.id && (
+                  <GithubOutdatedPill
+                    github={github}
+                    path={path}
+                    onExpand={() => {
+                      if (collapsedPaths.has(path)) expandPath(path);
+                    }}
+                  />
+                )}
                 {semanticView && (
                   <DeclarationCounts summary={semanticView.summary} />
                 )}

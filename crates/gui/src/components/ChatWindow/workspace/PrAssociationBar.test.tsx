@@ -868,11 +868,32 @@ describe("ChatHeader PR chip", () => {
         onOpenPrInChanges={onOpenPrInChanges}
       />
     );
-    const chip = screen.getByRole("button", { name: /PR #482 · Open/ });
+    const chip = screen.getByRole("button", {
+      name: /^PR #482 · Open · .*\. Review in Changes$/,
+    });
+    expect(chip).toHaveAttribute(
+      "title",
+      expect.stringMatching(/PR #482 · Open/)
+    );
     expect(chip).not.toHaveAttribute("aria-pressed");
     expect(chip).toHaveTextContent("#482");
     fireEvent.click(chip);
     expect(onOpenPrInChanges).toHaveBeenCalledTimes(1);
+
+    // Once the PR's threads are read, the chip counts the unresolved ones.
+    view.rerender(
+      <ChatHeader
+        {...header}
+        linkedPr={pr}
+        linkedPrOpenThreads={2}
+        onOpenPrInChanges={onOpenPrInChanges}
+      />
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /^PR #482 · Open · .* · 2 open threads\. Review in Changes$/,
+      })
+    ).toHaveTextContent(/#482.*2$/);
 
     view.rerender(<ChatHeader {...header} linkedPr={pr} />);
     expect(screen.getByTestId("chat-header-pr-chip").tagName).toBe("SPAN");

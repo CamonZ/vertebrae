@@ -9,6 +9,7 @@ pub(crate) mod local_backend;
 pub(crate) mod local_chat;
 mod private_file;
 pub mod project_config;
+pub(crate) mod review_anchors;
 pub(crate) mod shell_environment;
 pub(crate) mod telemetry;
 pub mod types;
@@ -209,6 +210,8 @@ fn create_builder() -> Builder {
             commands::rerun_github_pr_check,
             commands::cancel_github_pr_check,
             commands::get_worktree_published_head,
+            commands::get_github_pr_review_threads,
+            commands::map_worktree_pr_review_threads,
             commands::compare_changed_symbols,
             commands::list_comparison_choices,
             commands::list_worktree_directory,
@@ -292,6 +295,7 @@ pub fn run() {
     let tauri_app_builder = tauri::Builder::default()
         .manage(worktree_watch::WorktreeWatches::default())
         .manage(commands::chat_catalog::ReviewThreadObservations::default())
+        .manage(commands::ReviewThreadsCache::default())
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
                 window

@@ -621,6 +621,11 @@ export function ChatWindow({
         : null;
   const linkedPrChecks =
     linkedPr && worktreePr.entry.snapshot ? worktreePr.counts : null;
+  const linkedPrOpenThreads =
+    prWorktree && prBranch && linkedPr && worktreePr.reviewThreads.data
+      ? worktreePr.openThreads
+      : null;
+  const saveChangesView = useChatSideColumnStore((state) => state.saveChanges);
   const shownEvidence =
     !showChanges &&
     evidence?.sessionId === sessionId &&
@@ -748,10 +753,16 @@ export function ChatWindow({
         }
         linkedPr={linkedPr}
         linkedPrChecks={linkedPrChecks}
+        linkedPrOpenThreads={linkedPrOpenThreads}
         onOpenPrInChanges={
           worktreePath
             ? () => {
                 if (shownSection !== "changes") side.select("changes");
+                // The PR's review: its threads in the Review rail.
+                if (worktreePath === prWorktree)
+                  saveChangesView(sessionId, worktreePath, {
+                    reviewOpen: true,
+                  });
               }
             : undefined
         }

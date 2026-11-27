@@ -73,6 +73,9 @@ import {
   type PrBarHandle,
 } from "./workspace/PrAssociationBar";
 import { useWorktreePr } from "../../hooks/useWorktreePr";
+import { ReviewRail } from "./workspace/githubReview/ReviewRail";
+import { useWorktreeReview } from "./workspace/githubReview/useWorktreeReview";
+import type { ViewportAnchor } from "./workspace/viewportAnchor";
 import { OpenDocumentTabs } from "./workspace/OpenDocumentTabs";
 import {
   changesPaletteItems,
@@ -189,7 +192,7 @@ export function WorktreeChanges({
     () => ({ sessionId, worktreePath }),
     [sessionId, worktreePath]
   );
-  const { base, target, activePath } = useChangesView(changesKey);
+  const { base, target, activePath, reviewOpen } = useChangesView(changesKey);
   const saveChanges = useChatSideColumnStore((state) => state.saveChanges);
   const saveView = useCallback(
     (patch: Parameters<typeof saveChanges>[2]) =>
@@ -396,6 +399,16 @@ export function WorktreeChanges({
       ),
     [files]
   );
+  const parsedPatches = state.status === "ready" ? state.parsed : null;
+  const hunksByFile = useMemo(
+    () =>
+      files.map((_, index) =>
+        (parsedPatches?.[index]?.files ?? []).flatMap((diff) => diff.hunks)
+      ),
+    [files, parsedPatches]
+  );
+  const viewport = useRef<(() => ViewportAnchor | null) | null>(null);
+
   const { viewedPaths, setViewed } = useViewedPaths(
     JSON.stringify([worktreePath, comparisonRequest]),
     statuses
@@ -411,6 +424,33 @@ export function WorktreeChanges({
   );
 
   const nextLocalJump = useRef(0);
+  /**
+   * A new comparison remounts the diff: bring it back to the line at the top
+   * of the view (else the line cursor, else the active file) rather than to
+   * the top or an older jump.
+   */
+  const keepPlace = () => {
+    const shown = viewport.current?.();
+    if (shown) {
+      setJumpTarget({ ...shown, nonce: --nextLocalJump.current, keep: true });
+      return;
+    }
+    const memory =
+      useChatSideColumnStore.getState().bySession[sessionId]?.changes[
+        worktreePath
+      ];
+    const cursor = memory?.cursor;
+    const path = cursor?.path ?? activePath;
+    if (!path) return;
+    const side = cursor?.range.endSide ?? cursor?.range.side;
+    setJumpTarget({
+      path,
+      nonce: --nextLocalJump.current,
+      ...(cursor
+        ? { line: cursor.range.end, side: side === "deletions" ? "old" : "new" }
+        : {}),
+    });
+  };
   // Navigating by hand drops a reference's revealed lines.
   /** ⇧V: the file most recently marked viewed comes back, under the cursor. */
   const unviewLast = () => {
@@ -437,6 +477,22 @@ export function WorktreeChanges({
       focusHeader,
     });
   };
+
+  const review = useWorktreeReview({
+    worktreePath,
+    prBranch,
+    pr: worktreePr,
+    comparison,
+    generation,
+    files,
+    hunksByFile,
+    reviewOpen,
+    setReviewOpen: (open) => saveView({ reviewOpen: open }),
+    pane: sectionRef,
+    filesOpen,
+    hideFiles: () => setFilesOpen(false),
+    jumpToFile,
+  });
 
   const open = (path: string, view: "file" | "diff") => {
     dismissTurn();
@@ -609,6 +665,9 @@ export function WorktreeChanges({
             onRelatedJump={(location) =>
               jumpToFile(location.path, false, location)
             }
+            github={review.diff}
+            onLinesShown={review.onLinesShown}
+            viewportRef={viewport}
           />
         </Suspense>
       </div>
@@ -653,6 +712,7 @@ export function WorktreeChanges({
         targetButton={targetButton}
         onBaseChange={(endpoint) => {
           setBase(endpoint);
+          keepPlace();
           reload(false);
         }}
         onTargetChange={(endpoint) => {
@@ -660,6 +720,7 @@ export function WorktreeChanges({
           setTarget(endpoint);
           setHistoricalDocument(null);
           setMode("changes");
+          keepPlace();
           reload(false);
         }}
         diffStyle={diffStyle}
@@ -669,7 +730,9 @@ export function WorktreeChanges({
       />
       {/* Band 2 (review bar) and band 3 (checks drawer) sit under the
           comparison toolbar. */}
-      {prBranch && <PrAssociationBar ref={prBar} pr={worktreePr} />}
+      {prBranch && (
+        <PrAssociationBar ref={prBar} pr={worktreePr} review={review.review} />
+      )}
       {jumpTarget &&
         state.status === "ready" &&
         files.length > 0 &&
@@ -863,6 +926,18 @@ export function WorktreeChanges({
             />
           )}
         </div>
+        {review.showRail && (
+          <ReviewRail
+            railRef={review.railRef}
+            pr={worktreePr}
+            prNumber={review.placement.prNumber}
+            model={review.placement.model}
+            loading={review.placement.loading}
+            error={review.placement.error}
+            threads={review.rail}
+            onClose={review.closeRail}
+          />
+        )}
       </div>
       {external.error && <p role="alert">{external.error}</p>}
       <UnsavedChangesDialog

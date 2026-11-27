@@ -27,6 +27,10 @@ import {
 import { createPrPoller, type PrPoller, type PrPollAnswer } from "./prPoller";
 import { getProjectScopeGeneration } from "./projectScopedStores";
 import {
+  noticeNewThreads,
+  resetReviewThreadNotices,
+} from "./reviewThreadNotices";
+import {
   GithubCommandError,
   IDLE_CHECKS,
   IDLE_PR_ENTRY,
@@ -96,6 +100,8 @@ let generation = 0;
 let unsubscribers: (() => void)[] = [];
 let syncPending = false;
 const shown = new Map<string, number>();
+/** Each watched branch's requests as last given to the poller. */
+const watchedRequests = new Map<string, string>();
 const probes = new Map<
   string,
   { timer: ReturnType<typeof setInterval>; head: string | null | undefined }
@@ -103,6 +109,11 @@ const probes = new Map<
 /** Branches to read in full once their remotes are known. */
 const readOnce = new Set<string>();
 const resolving = new Map<string, Promise<boolean>>();
+/** The review-thread read out per branch; one at a time per PR and scope. */
+const threadReads = new Map<
+  string,
+  { target: string; at: number; forced: boolean; read: Promise<void> }
+>();
 
 const scopeOf = () => useWorktreePrStore.getState().scope;
 
@@ -276,6 +287,67 @@ function failedRead(
   return { status: "failed", failure, retryAt, attempt };
 }
 
+const threadsTarget = (key: string, pr: LinkedPr) =>
+  JSON.stringify([key, pr.host, `${pr.owner}/${pr.repo}`, pr.number]);
+
+/**
+ * Reads the linked PR's review threads. A read already out for the same PR
+ * is shared, unless this one must get past the backend's cache (`refresh`)
+ * and that one would not. An answer lands only on the PR it was asked for,
+ * in the scope it was asked in.
+ */
+function readThreads(state: BranchState, refresh: boolean): Promise<void> {
+  const pr = state.link?.pr;
+  if (!pr) return Promise.resolve();
+  const { key } = state;
+  const target = threadsTarget(key, pr);
+  const at = scopeOf();
+  const out = threadReads.get(key);
+  if (out && out.target === target && out.at === at && (out.forced || !refresh))
+    return out.read;
+  const onPr = (next: (entry: WorktreePrEntry) => WorktreePrEntry) =>
+    update(
+      key,
+      (entry) => (isSameLinkedPr(entry.link?.pr, pr) ? next(entry) : entry),
+      at
+    );
+  onPr((entry) => ({
+    ...entry,
+    reviewThreads: { ...entry.reviewThreads, loading: true },
+  }));
+  const pending = { target, at, forced: refresh } as {
+    target: string;
+    at: number;
+    forced: boolean;
+    read: Promise<void>;
+  };
+  pending.read = (async () => {
+    const outcome = await settleGithubCommand(() =>
+      commands.getGithubPrReviewThreads(
+        state.worktreePath,
+        state.branch,
+        `${pr.owner}/${pr.repo}`,
+        pr.number,
+        refresh
+      )
+    );
+    // A later read for the branch answers instead.
+    if (threadReads.get(key) !== pending || scopeOf() !== at) return;
+    if (outcome.ok) noticeNewThreads(target, outcome.data);
+    onPr((entry) => ({
+      ...entry,
+      reviewThreads: outcome.ok
+        ? { data: outcome.data, loading: false, error: null }
+        : // A failed read keeps the threads already shown.
+          { ...entry.reviewThreads, loading: false, error: outcome.failure },
+    }));
+  })().finally(() => {
+    if (threadReads.get(key) === pending) threadReads.delete(key);
+  });
+  threadReads.set(key, pending);
+  return pending.read;
+}
+
 /** Saves the link on every chat on the branch, and on its entry. */
 function saveLink(state: BranchState, link: ChatPrLink) {
   const store = useChatStore.getState();
@@ -356,6 +428,14 @@ function sync() {
       entry = prEntryOf(state.key);
     }
     const { polled, passive: listed } = watchRequests(state);
+    const asked = JSON.stringify(polled);
+    // The poller reads a watched request as soon as it changes.
+    const watchReads =
+      state.watched &&
+      polled.length > 0 &&
+      watchedRequests.get(state.key) !== asked;
+    if (state.watched) watchedRequests.set(state.key, asked);
+    else watchedRequests.delete(state.key);
     if (state.watched) {
       watch.push(...polled);
       passive.push(...listed);
@@ -364,15 +444,19 @@ function sync() {
     if (onScreen && entry.github && readOnce.has(state.key)) {
       readOnce.delete(state.key);
       const once = readRequests(state);
-      // A watched branch's changed request is read by the watch.
+      // A watched branch is read by the watch (now, if its request
+      // changed), else by this read; either brings the threads.
       if (!(state.watched && polled.length > 0) && once.length > 0)
         void poller?.pollNow(once);
+      else if (!watchReads) void readThreads(state, false);
     }
   }
   const watchedRemotes = new Set(watch.map((r) => remoteKey(r.host, r.repo)));
   watch.push(
     ...passive.filter((r) => watchedRemotes.has(remoteKey(r.host, r.repo)))
   );
+  for (const key of watchedRequests.keys())
+    if (!states.has(key)) watchedRequests.delete(key);
   for (const key of Object.keys(useWorktreePrStore.getState().entries))
     if (!states.has(key) && !shown.has(key)) evict(key);
   poller?.setWatch(watch, active);
@@ -420,6 +504,9 @@ function applyPr(
     };
   });
   if (state.link?.pr) refreshLink(state, linkedPrFrom(state.link.pr.host, pr));
+  // A refresh reads the threads itself, past the cache.
+  if (shown.has(state.key) && prEntryOf(state.key).read.status !== "refreshing")
+    void readThreads(state, false);
 }
 
 /**
@@ -540,6 +627,8 @@ function deliver({ requests, outcome, retries, now }: PrPollAnswer) {
 function stop() {
   poller?.dispose();
   poller = null;
+  // A new poller starts with nothing watched.
+  watchedRequests.clear();
   for (const unsubscribe of unsubscribers) unsubscribe();
   unsubscribers = [];
 }
@@ -657,8 +746,13 @@ export async function refreshWorktreePr(
     error: null,
   }));
   resolving.delete(key);
-  if (await resolve(worktreePath, branch))
-    await poller?.pollNow(readRequests(stateOf(worktreePath, branch)));
+  if (await resolve(worktreePath, branch)) {
+    const state = stateOf(worktreePath, branch);
+    await Promise.all([
+      poller?.pollNow(readRequests(state)),
+      readThreads(state, true),
+    ]);
+  }
   if (scopeOf() !== at) return false;
   const read = prEntryOf(key).read;
   if (read.status === "refreshing")
@@ -856,5 +950,8 @@ export function resetPrSync() {
   shown.clear();
   readOnce.clear();
   resolving.clear();
+  threadReads.clear();
+  watchedRequests.clear();
+  resetReviewThreadNotices();
   useWorktreePrStore.getState().reset();
 }

@@ -1,7 +1,7 @@
 use super::*;
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, specta::Type)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, specta::Type)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum ReviewThreadSide {
     Left,

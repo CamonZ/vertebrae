@@ -6,7 +6,7 @@ use crate::commands::github::checks::{
 use std::{collections::HashMap, sync::Mutex as TestMutex};
 use vertebrae_github::{
     CheckCancel, CheckOutcome, CheckRerun, CheckStatus, OpenPrSearchResult, PullRequestCheck,
-    PullRequestChecks, PullRequestChecksBatch, RateLimitStatus, RepoRef,
+    PullRequestChecks, PullRequestChecksBatch, PullRequestReviewThreads, RateLimitStatus, RepoRef,
 };
 
 fn check(id: &str, status: CheckStatus, job: Option<u64>) -> PullRequestCheck {
@@ -67,6 +67,7 @@ fn demo() -> RepoRef {
 struct FakeLookup {
     open: HashMap<String, Result<OpenPrSearchResult, GitHubError>>,
     checks: HashMap<String, Result<PullRequestChecksBatch, GitHubError>>,
+    threads: HashMap<String, Result<PullRequestReviewThreads, GitHubError>>,
     write_result: Option<Result<(), GitHubError>>,
     calls: TestMutex<Vec<String>>,
     reruns: TestMutex<Vec<u64>>,
@@ -132,6 +133,18 @@ impl PrLookup for FakeLookup {
     async fn cancel_run(&self, _repo: &RepoRef, run_id: u64) -> Result<(), GitHubError> {
         self.cancels.lock().unwrap().push(run_id);
         self.write_result.clone().unwrap_or(Ok(()))
+    }
+
+    async fn review_threads(
+        &self,
+        repo: &RepoRef,
+        number: u64,
+    ) -> Result<PullRequestReviewThreads, GitHubError> {
+        self.record(format!("threads {} {number}", repo.full_name()));
+        self.threads
+            .get(&repo.full_name())
+            .cloned()
+            .unwrap_or_else(|| Err(missing(repo.full_name())))
     }
 }
 
@@ -320,3 +333,93 @@ async fn a_remote_without_branches_or_numbers_never_queries_github() {
 }
 
 mod poll_oracle;
+
+/// Review threads are read for the named PR through the same lookup as
+/// polling, answered from the cache until a refresh, per PR.
+#[tokio::test]
+async fn review_threads_are_read_for_the_named_pr_and_cached_until_refresh() {
+    use crate::commands::{chat_catalog::ReviewThreadSide, github::review_threads::review_threads};
+    use vertebrae_github::{DiffSide, ReviewAuthor, ReviewComment, ReviewThread};
+
+    let thread = ReviewThread {
+        id: "T1".into(),
+        path: "src/retry.rs".into(),
+        side: DiffSide::Left,
+        start_side: Some(DiffSide::Right),
+        line: Some(4),
+        start_line: Some(2),
+        original_line: Some(4),
+        original_start_line: Some(2),
+        original_commit_oid: None,
+        file_level: false,
+        outdated: false,
+        resolved: false,
+        viewer_can_resolve: true,
+        viewer_can_unresolve: false,
+        viewer_can_reply: true,
+        comments: vec![ReviewComment {
+            id: "C1".into(),
+            author: Some(ReviewAuthor {
+                login: "alice".into(),
+            }),
+            body: "Bound the retries".into(),
+            created_at: None,
+            url: "https://github.com/example/demo-repo/pull/7#discussion_C1".into(),
+        }],
+        comments_truncated: false,
+    };
+    let lookup = FakeLookup {
+        threads: HashMap::from([(
+            "example/demo-repo".to_string(),
+            Ok(PullRequestReviewThreads {
+                head_oid: "1111111111111111111111111111111111111111".into(),
+                base_oid: "2222222222222222222222222222222222222222".into(),
+                threads: vec![thread],
+                truncated: false,
+            }),
+        )]),
+        ..FakeLookup::default()
+    };
+    let cache = ReviewThreadsCache::default();
+    let repo = demo();
+
+    let loaded = review_threads(&cache, &repo, 7, false, &lookup)
+        .await
+        .unwrap();
+    assert_eq!(
+        (loaded.repo.as_str(), loaded.pr_number),
+        ("example/demo-repo", 7)
+    );
+    let anchor = &loaded.threads[0].anchor;
+    assert_eq!(anchor.side, ReviewThreadSide::Left);
+    assert_eq!(anchor.start_side, Some(ReviewThreadSide::Right));
+    assert_eq!((anchor.start_line, anchor.line), (Some(2), Some(4)));
+    assert_eq!(anchor.original_start_line, Some(2));
+    assert_eq!(
+        loaded.threads[0].comments[0].author,
+        Some(GithubReviewAuthor {
+            login: "alice".into()
+        })
+    );
+
+    assert_eq!(
+        review_threads(&cache, &repo, 7, false, &lookup)
+            .await
+            .unwrap(),
+        loaded
+    );
+    review_threads(&cache, &repo, 7, true, &lookup)
+        .await
+        .unwrap();
+    review_threads(&cache, &repo, 8, false, &lookup)
+        .await
+        .unwrap();
+    assert_eq!(
+        lookup.calls(),
+        vec![
+            "threads example/demo-repo 7",
+            "threads example/demo-repo 7",
+            "threads example/demo-repo 8",
+        ]
+    );
+}

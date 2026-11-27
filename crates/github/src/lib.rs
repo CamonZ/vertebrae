@@ -9,6 +9,7 @@ mod error;
 mod rate_limit;
 mod remote;
 mod rest;
+mod review_threads;
 mod step_cache;
 mod types;
 mod wire;
@@ -22,4 +23,7 @@ pub use client::GitHubClient;
 pub use error::GitHubError;
 pub use rate_limit::RateLimitStatus;
 pub use remote::parse_github_remote_url;
+pub use review_threads::{
+    DiffSide, PullRequestReviewThreads, ReviewAuthor, ReviewComment, ReviewThread,
+};
 pub use types::{OpenPrSearchResult, PullRequestState, PullRequestSummary, RepoRef};

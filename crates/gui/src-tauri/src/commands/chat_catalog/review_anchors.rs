@@ -1,18 +1,20 @@
 //! Local Git storage and line mapping for review threads.
 
-use std::path::Path;
-
-use git2::{DiffOptions, ErrorCode, Oid, Patch, Repository};
+use git2::{ErrorCode, Oid, Repository};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
-use crate::local_chat::{
-    annotations::LocalChatAnnotationStore,
-    file_history::{self, HistoryRead},
-    worktree_delta::git::{self, CacheBudget, Limits, Side},
-    worktree_files,
+use crate::{
+    local_chat::{
+        annotations::LocalChatAnnotationStore,
+        file_history::{self, HistoryRead},
+        worktree_files,
+    },
+    review_anchors::{self as anchors, AnchorError},
 };
+
+pub use crate::review_anchors::ReviewLineRange;
 
 use super::review_threads::{
     ReviewThreadHome, ReviewThreadInput, ReviewThreadOrigin, ReviewThreadSide, ReviewThreadStatus,
@@ -40,29 +42,17 @@ impl From<git2::Error> for ReviewAnchorError {
     }
 }
 
-#[derive(Clone, Copy, Deserialize, Serialize, specta::Type)]
-#[serde(rename_all = "camelCase")]
-pub struct ReviewLineRange {
-    start_line: u32,
-    line: u32,
-}
-
-impl ReviewLineRange {
-    fn slice(self, bytes: &[u8]) -> Result<&[u8], ReviewAnchorError> {
-        if self.start_line == 0 || self.line < self.start_line {
-            return Err(ReviewAnchorError::InvalidRange);
+/// Core reads keep their own detail; the wire keeps its coarse kinds.
+impl From<AnchorError> for ReviewAnchorError {
+    fn from(error: AnchorError) -> Self {
+        match error {
+            AnchorError::NotRepository => Self::NotRepository,
+            AnchorError::UnbornHead => Self::UnbornHead,
+            AnchorError::InvalidPath => Self::InvalidPath,
+            AnchorError::InvalidRange => Self::InvalidRange,
+            AnchorError::Unreadable => Self::ContentUnavailable,
+            AnchorError::MissingCommit | AnchorError::Git => Self::Git,
         }
-        let mut lines = bytes.split_inclusive(|byte| *byte == b'\n');
-        let start = lines
-            .by_ref()
-            .take((self.start_line - 1) as usize)
-            .map(<[u8]>::len)
-            .sum();
-        let mut end = start;
-        for _ in self.start_line..=self.line {
-            end += lines.next().ok_or(ReviewAnchorError::InvalidRange)?.len();
-        }
-        Ok(&bytes[start..end])
     }
 }
 
@@ -159,14 +149,7 @@ fn repository(folder: &str) -> Result<Repository, ReviewAnchorError> {
 
 fn open(worktree: &str) -> Result<(Repository, Oid), ReviewAnchorError> {
     let repo = repository(worktree)?;
-    let head = repo
-        .head()
-        .map_err(|error| match error.code() {
-            ErrorCode::UnbornBranch | ErrorCode::NotFound => ReviewAnchorError::UnbornHead,
-            _ => error.into(),
-        })?
-        .peel_to_commit()?
-        .id();
+    let head = anchors::open_head(&repo)?;
     Ok((repo, head))
 }
 
@@ -243,7 +226,6 @@ fn worktree_content(
     }
     let relative =
         worktree_files::relative(&location.path).map_err(|_| ReviewAnchorError::InvalidPath)?;
-    let path = Path::new(&relative);
     match &location.source {
         ReviewAnchorSource::ToolCall { .. } | ReviewAnchorSource::FullFile { .. } => {
             Err(ReviewAnchorError::ContentUnavailable)
@@ -251,34 +233,7 @@ fn worktree_content(
         ReviewAnchorSource::Worktree { commit: None }
             if location.side == ReviewThreadSide::Right =>
         {
-            // The app only opens user-selected checkouts. Within that trust
-            // boundary, reject directory symlinks before the recorder reads
-            // the Git path. The final component may itself be a Git symlink.
-            let root = repo
-                .workdir()
-                .ok_or(ReviewAnchorError::NotRepository)?
-                .canonicalize()
-                .map_err(|_| ReviewAnchorError::InvalidPath)?;
-            let parent = root.join(path.parent().ok_or(ReviewAnchorError::InvalidPath)?);
-            match parent.canonicalize() {
-                Ok(resolved) if resolved == parent => {}
-                Ok(_) => return Err(ReviewAnchorError::InvalidPath),
-                Err(error)
-                    if matches!(
-                        error.kind(),
-                        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
-                    ) =>
-                {
-                    return Ok(None)
-                }
-                Err(_) => return Err(ReviewAnchorError::ContentUnavailable),
-            }
-            let limits = Limits::default();
-            match git::read_side(&root, &relative, &limits, &mut CacheBudget::new(&limits)) {
-                Side::Content { bytes, .. } => Ok(Some(bytes.to_vec())),
-                Side::Absent => Ok(None),
-                _ => Err(ReviewAnchorError::ContentUnavailable),
-            }
+            Ok(anchors::working_file(repo, &relative)?)
         }
         ReviewAnchorSource::Worktree { commit } => {
             let commit = commit
@@ -286,19 +241,7 @@ fn worktree_content(
                 .map(Oid::from_str)
                 .transpose()?
                 .unwrap_or(head);
-            let tree = repo.find_commit(commit)?.tree()?;
-            match tree.get_path(path) {
-                Ok(entry) => {
-                    let (size, kind) = repo.odb()?.read_header(entry.id())?;
-                    if kind != git2::ObjectType::Blob || size as u64 > Limits::default().side_bytes
-                    {
-                        return Err(ReviewAnchorError::ContentUnavailable);
-                    }
-                    Ok(Some(repo.find_blob(entry.id())?.content().to_vec()))
-                }
-                Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
-                Err(error) => Err(error.into()),
-            }
+            Ok(anchors::commit_file(repo, commit, &relative)?)
         }
     }
 }
@@ -330,47 +273,6 @@ async fn git_job<T: Send + 'static>(
             tracing::warn!(%error, "review_anchor_worker_failed");
             ReviewAnchorError::Git
         })?
-}
-
-fn map_range(
-    original: &[u8],
-    current: &[u8],
-    range: ReviewLineRange,
-) -> Result<Option<ReviewLineRange>, ReviewAnchorError> {
-    let anchored = range.slice(original)?;
-    let mut options = DiffOptions::new();
-    options.context_lines(0).force_text(true);
-    let patch = Patch::from_buffers(original, None, current, None, Some(&mut options))?;
-    let mut offset = 0_i64;
-    for index in 0..patch.num_hunks() {
-        let (hunk, _) = patch.hunk(index)?;
-        let start = hunk.old_start();
-        let removed = hunk.old_lines();
-        if removed == 0 {
-            if start >= range.line {
-                break;
-            }
-            if start >= range.start_line {
-                return Ok(None);
-            }
-        } else {
-            if start > range.line {
-                break;
-            }
-            if start + removed > range.start_line {
-                return Ok(None);
-            }
-        }
-        offset += i64::from(hunk.new_lines()) - i64::from(removed);
-    }
-
-    let mapped = ReviewLineRange {
-        start_line: u32::try_from(i64::from(range.start_line) + offset)
-            .map_err(|_| ReviewAnchorError::InvalidRange)?,
-        line: u32::try_from(i64::from(range.line) + offset)
-            .map_err(|_| ReviewAnchorError::InvalidRange)?,
-    };
-    Ok((mapped.slice(current).ok() == Some(anchored)).then_some(mapped))
 }
 
 #[tauri::command]
@@ -546,7 +448,7 @@ fn map_thread(repo: &Repository, head: Oid, thread: ReviewMappingRequest) -> Map
         if std::str::from_utf8(&current).is_err() || current.contains(&0) {
             return Ok(None);
         }
-        map_range(blob.content(), &current, thread.range)
+        Ok(anchors::map_range(blob.content(), &current, thread.range)?)
     })();
     let (status, range) = match mapped {
         Ok(Some(range)) => (ReviewMappingStatus::Open, Some(range)),
@@ -580,7 +482,8 @@ pub async fn read_review_anchor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command;
+    use crate::local_chat::worktree_delta::git::Limits;
+    use std::{path::Path, process::Command};
 
     fn git(path: &Path, args: &[&str]) {
         let output = Command::new("git")
@@ -593,117 +496,6 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
-    }
-
-    #[test]
-    fn mapping_follows_only_contiguous_unchanged_lines() {
-        let original = b"before\nfirst\nsecond\nafter\n";
-        let range = ReviewLineRange {
-            start_line: 2,
-            line: 3,
-        };
-        for (current, expected) in [
-            (&b"before\nfirst\nsecond\nafter\n"[..], Some((2, 3))),
-            (&b"new\nbefore\nfirst\nsecond\nafter\n"[..], Some((3, 4))),
-            (&b"before\nnew\nfirst\nsecond\nafter\n"[..], Some((3, 4))),
-            (&b"first\nsecond\nafter\n"[..], Some((1, 2))),
-            (&b"before\nfirst\nsecond\nnew\nafter\n"[..], Some((2, 3))),
-            (&b"before\nfirst\nnew\nsecond\nafter\n"[..], None),
-            (&b"before\nfirst\nedited\nafter\n"[..], None),
-            (&b"before\nsecond\nafter\n"[..], None),
-            (&b""[..], None),
-        ] {
-            for _ in 0..2 {
-                let mapped = map_range(original, current, range).unwrap();
-                assert_eq!(mapped.map(|r| (r.start_line, r.line)), expected);
-                if let Some(mapped) = mapped {
-                    assert_eq!(
-                        mapped.slice(current).unwrap(),
-                        range.slice(original).unwrap()
-                    );
-                }
-            }
-        }
-    }
-
-    #[hegel::test]
-    fn line_mapping_matches_a_generated_edit_oracle(tc: hegel::TestCase) {
-        use hegel::generators as gs;
-        use std::collections::BTreeMap;
-        let count = tc.draw(gs::integers::<usize>().min_value(4).max_value(30));
-        let start = tc.draw(gs::integers::<usize>().max_value(count - 1));
-        let end = tc.draw(
-            gs::integers::<usize>()
-                .min_value(start)
-                .max_value(count - 1),
-        );
-        let original: Vec<_> = (0..count).map(|index| format!("line-{index}\n")).collect();
-        // Assign two or three edits to distinct original lines. Track original
-        // identities through the edits to find the range without diffing text.
-        let edit_count = tc.draw(gs::integers::<usize>().min_value(2).max_value(3));
-        let mut edits = BTreeMap::new();
-        let mut candidates: Vec<_> = (0..count).collect();
-        for _ in 0..edit_count {
-            let index = tc.draw(gs::integers::<usize>().max_value(candidates.len() - 1));
-            let operation = tc.draw(gs::integers::<u8>().max_value(2));
-            edits.insert(candidates.swap_remove(index), operation);
-        }
-        let mut current = String::new();
-        let mut surviving = Vec::new();
-        let mut current_line = 0;
-        for (index, line) in original.iter().enumerate() {
-            match edits.get(&index) {
-                Some(0) => {
-                    current.push_str(&format!("inserted-{index}\n"));
-                    current_line += 1;
-                }
-                Some(1) => continue,
-                Some(2) => {
-                    current.push_str(&format!("edited-{index}\n"));
-                    current_line += 1;
-                    continue;
-                }
-                _ => {}
-            }
-            if (start..=end).contains(&index) {
-                surviving.push(current_line);
-            }
-            current.push_str(line);
-            current_line += 1;
-        }
-        let expected = (surviving.len() == end - start + 1
-            && surviving
-                .windows(2)
-                .all(|window| window[1] == window[0] + 1))
-        .then(|| surviving[0]);
-        let original = original.concat();
-        let range = ReviewLineRange {
-            start_line: start as u32 + 1,
-            line: end as u32 + 1,
-        };
-        let mapped = map_range(original.as_bytes(), current.as_bytes(), range).unwrap();
-        assert_eq!(
-            mapped.map(|range| range.start_line),
-            expected.map(|start| start as u32 + 1)
-        );
-        if let Some(mapped) = mapped {
-            assert_eq!(
-                range.slice(original.as_bytes()).unwrap(),
-                mapped.slice(current.as_bytes()).unwrap()
-            );
-        }
-    }
-
-    #[test]
-    fn mapping_survives_repeated_lines_and_no_final_newline() {
-        let range = ReviewLineRange {
-            start_line: 2,
-            line: 3,
-        };
-        let mapped = map_range(b"same\nsame\nend", b"inserted\nsame\nsame\nend", range)
-            .unwrap()
-            .unwrap();
-        assert_eq!((mapped.start_line, mapped.line), (3, 4));
     }
 
     #[test]

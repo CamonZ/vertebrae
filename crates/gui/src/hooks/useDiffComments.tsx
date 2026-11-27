@@ -148,6 +148,13 @@ export interface DiffCursorOptions {
     DiffSelection | null,
     Dispatch<SetStateAction<DiffSelection | null>>,
   ];
+  /** More lines ⌥↑/⌥↓ stop at, beside comments and discussions. */
+  marks?(path: string): readonly { side: SelectionSide; line: number }[];
+  /**
+   * `o` on a line without a discussion of its own: open what the surface
+   * has there. True when it did.
+   */
+  onOpenAt?(path: string, side: SelectionSide, line: number): boolean;
 }
 
 export interface DiffSelection {
@@ -197,6 +204,8 @@ export function useDiffComments(
     context,
     onRevealGap,
     selectionState,
+    marks,
+    onOpenAt,
   } = cursor;
   const view: CursorView = {
     layout,
@@ -545,11 +554,13 @@ export function useDiffComments(
     );
   };
 
-  const landmarkMarks = (path: string) =>
-    (annotationsByPath.get(path) ?? NONE).map((annotation) => ({
+  const landmarkMarks = (path: string) => [
+    ...(annotationsByPath.get(path) ?? NONE).map((annotation) => ({
       side: annotation.side,
       line: annotation.lineNumber,
-    }));
+    })),
+    ...(marks?.(path) ?? []),
+  ];
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.defaultPrevented || event.nativeEvent.isComposing) return;
@@ -727,6 +738,16 @@ export function useDiffComments(
       event.preventDefault();
       if (!event.repeat) discussion.reopen(thread.id, { focus: true });
       return;
+    }
+    if (!thread && onOpenAt && event.key === DISCUSSION_OPEN_KEY && plain) {
+      if (event.repeat) {
+        event.preventDefault();
+        return;
+      }
+      if (onOpenAt(current.path, cursorSide(current), current.range.end)) {
+        event.preventDefault();
+        return;
+      }
     }
     if (thread && matchesChatShortcut(event, DISCUSSION_COLLAPSE_SHORTCUT)) {
       event.preventDefault();

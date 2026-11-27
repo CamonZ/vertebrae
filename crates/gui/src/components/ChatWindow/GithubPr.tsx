@@ -71,14 +71,21 @@ function chipChecks(
 export function ChatHeaderPrChip({
   pr,
   checks = null,
+  openThreads = null,
   onOpenChanges,
 }: {
   pr: LinkedPr;
   checks?: PrCheckCounts | null;
+  /** Unresolved review threads; null until they are read. */
+  openThreads?: number | null;
   onOpenChanges?: () => void;
 }) {
   const shown = checks ? chipChecks(checks) : null;
   const checksText = checks ? ` · Checks: ${checkCountsLabel(checks)}` : "";
+  const threadsText =
+    openThreads === null
+      ? ""
+      : ` · ${openThreads} open ${openThreads === 1 ? "thread" : "threads"}`;
   const summary = [
     `PR #${pr.number}`,
     pr.state && PR_STATE_LABEL[pr.state],
@@ -86,7 +93,7 @@ export function ChatHeaderPrChip({
   ]
     .filter(Boolean)
     .join(" · ")
-    .concat(checksText);
+    .concat(checksText, threadsText);
   const content = (
     <>
       <GitHubGlyph size="xs" />
@@ -99,6 +106,11 @@ export function ChatHeaderPrChip({
         >
           <CheckGlyph status={shown.status} />
           {shown.count}
+        </span>
+      )}
+      {openThreads !== null && openThreads > 0 && (
+        <span className="pr-chip-threads" aria-hidden="true">
+          {openThreads}
         </span>
       )}
     </>
@@ -118,7 +130,7 @@ export function ChatHeaderPrChip({
     <button
       type="button"
       className="pr-header-chip is-action"
-      aria-label={`${summary}. Show in Changes`}
+      aria-label={`${summary}. Review in Changes`}
       title={summary}
       data-testid="chat-header-pr-chip"
       onClick={onOpenChanges}

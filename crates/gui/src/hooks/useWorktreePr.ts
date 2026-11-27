@@ -20,6 +20,7 @@ import {
   IDLE_PR_ENTRY,
   associationView,
   isPrBusy,
+  openThreadCount,
   useWorktreePrStore,
   worktreePrKey,
   type WorktreePrEntry,
@@ -111,6 +112,8 @@ export function useWorktreePr(
     association,
     checks,
     counts,
+    reviewThreads: entry.reviewThreads,
+    openThreads: openThreadCount(entry.reviewThreads),
     busy: isPrBusy(entry),
     ...actions,
   };

@@ -489,25 +489,25 @@ function CheckRow({
 }
 
 /**
- * Band 3 under the review bar. It skips its own counts header because the
- * bar already shows the same counts.
+ * The linked PR's checks, one row each; the first failure with detail
+ * starts open. `dense` is the Review rail's narrower list.
  */
-export function PrChecksDrawer({
-  id,
+export function PrChecksList({
   prNumber,
   checks,
   truncated,
   now,
   onRerun,
   onCancel,
+  dense = false,
 }: {
-  id: string;
   prNumber: number;
   checks: readonly PrCheckView[];
   truncated: boolean;
   now: number;
   onRerun: (checkId: string) => void;
   onCancel: (checkId: string) => void;
+  dense?: boolean;
 }) {
   // The first failure with detail starts open; the user's choice then sticks.
   const [open, setOpen] = useState<string | null | undefined>(undefined);
@@ -520,13 +520,16 @@ export function PrChecksDrawer({
     open === undefined ? (firstFailed?.check.id ?? null) : open;
 
   return (
-    <div id={id} className="pr-checks-drawer" data-testid="pr-checks-drawer">
+    <>
       {checks.length === 0 ? (
         <p className="pr-assoc-mute">
           GitHub reports no checks for PR #{prNumber}.
         </p>
       ) : (
-        <ul className="pr-checks-list" aria-label={`Checks on PR #${prNumber}`}>
+        <ul
+          className={`pr-checks-list${dense ? " is-dense" : ""}`}
+          aria-label={`Checks on PR #${prNumber}`}
+        >
           {checks.map((view) => (
             <CheckRow
               key={view.check.id}
@@ -548,6 +551,21 @@ export function PrChecksDrawer({
           Showing the first 100 checks; open the PR on GitHub for the rest.
         </p>
       )}
+    </>
+  );
+}
+
+/**
+ * Band 3 under the review bar. It skips its own counts header because the
+ * bar already shows the same counts.
+ */
+export function PrChecksDrawer({
+  id,
+  ...list
+}: { id: string } & Omit<Parameters<typeof PrChecksList>[0], "dense">) {
+  return (
+    <div id={id} className="pr-checks-drawer" data-testid="pr-checks-drawer">
+      <PrChecksList {...list} />
     </div>
   );
 }

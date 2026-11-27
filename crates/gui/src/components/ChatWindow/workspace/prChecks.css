@@ -127,6 +127,17 @@
   list-style: none;
 }
 
+/* The Review rail's narrower list: one line per check. */
+.pr-checks-list.is-dense .pr-check-row {
+  flex-wrap: nowrap;
+  min-height: 26px;
+}
+
+.pr-checks-list.is-dense .pr-check-toggle {
+  flex: 1 1 auto;
+  gap: 6px;
+}
+
 .pr-check-row {
   display: flex;
   flex-wrap: wrap;

@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::{future::Future, path::Path};
 use vertebrae_github::{
     CheckCancel, CheckOutcome, CheckRerun, CheckStatus, GitHubError, OpenPrSearchResult,
-    PullRequestCheck, PullRequestChecks, PullRequestChecksBatch, PullRequestSummary,
-    RateLimitStatus, RepoRef,
+    PullRequestCheck, PullRequestChecks, PullRequestChecksBatch, PullRequestReviewThreads,
+    PullRequestSummary, RateLimitStatus, RepoRef,
 };
 
 /// Below this many remaining points, polling waits for the window to reset.
@@ -293,6 +293,12 @@ pub(super) trait PrLookup: Sync {
         repo: &RepoRef,
         run_id: u64,
     ) -> impl Future<Output = Result<(), GitHubError>> + Send;
+
+    fn review_threads(
+        &self,
+        repo: &RepoRef,
+        number: u64,
+    ) -> impl Future<Output = Result<PullRequestReviewThreads, GitHubError>> + Send;
 }
 
 impl PrLookup for GitHubLookup {
@@ -331,6 +337,15 @@ impl PrLookup for GitHubLookup {
     async fn cancel_run(&self, repo: &RepoRef, run_id: u64) -> Result<(), GitHubError> {
         let (client, token) = self.session().await?;
         client.cancel_actions_run(&token, repo, run_id).await
+    }
+
+    async fn review_threads(
+        &self,
+        repo: &RepoRef,
+        number: u64,
+    ) -> Result<PullRequestReviewThreads, GitHubError> {
+        let (client, token) = self.session().await?;
+        client.list_review_threads(&token, repo, number).await
     }
 }
 

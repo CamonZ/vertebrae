@@ -441,6 +441,8 @@
 }
 
 .changes-workspace {
+  container: changes-workspace / inline-size;
+  position: relative;
   /* Type tiers: 13px content (code, file names, paths), 12px secondary
      (directories, notes, tabs, actions), 11px meta (status, counts). */
   --diffs-font-size: var(--text-code);
