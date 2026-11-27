@@ -57,14 +57,14 @@ describe("CHANGES_HINT_GROUPS", () => {
     const collapse = shortcutText(DISCUSSION_COLLAPSE_SHORTCUT);
     expect(pairs("Changes · line cursor")).toEqual(
       expect.arrayContaining([
-        ["o", "Open discussion at line"],
+        ["o", "Open discussion or GitHub thread at line"],
         [collapse, "Collapse or expand the discussion at line"],
       ])
     );
     expect(pairs("Changes · inline discussion")).toEqual([
       ["↵", "Open discussion (on its marker)"],
       [shortcutText(DISCUSSION_ASK_SHORTCUT), "Ask follow-up"],
-      [shortcutText(DISCUSSION_SEND_SHORTCUT), "Send follow-up to main chat"],
+      [shortcutText(DISCUSSION_SEND_SHORTCUT), "Send to main chat"],
       [collapse, "Collapse or expand earlier turns"],
       ["↵", "Show all turns (on “▸ N earlier turns”)"],
       ["Esc", "Close and return to line"],

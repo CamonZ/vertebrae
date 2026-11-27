@@ -91,6 +91,19 @@ fn line_mapping_matches_a_generated_edit_oracle(tc: hegel::TestCase) {
         mapped.map(|range| range.start_line),
         expected.map(|start| start as u32 + 1)
     );
+    // The edited lines are exactly the range's replaced or removed lines;
+    // an insertion inside the range edits no published line.
+    let edited: Vec<u32> = (start..=end)
+        .filter(|index| matches!(edits.get(index), Some(1 | 2)))
+        .map(|index| index as u32 + 1)
+        .collect();
+    assert_eq!(
+        LineMap::new(original.as_bytes(), current.as_bytes())
+            .unwrap()
+            .edited_lines(range)
+            .unwrap(),
+        edited
+    );
     if let Some(mapped) = mapped {
         assert_eq!(
             range.slice(original.as_bytes()).unwrap(),

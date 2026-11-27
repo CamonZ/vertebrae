@@ -39,10 +39,12 @@ export interface SentDiffComment {
   /** "All Changes" or "Tool call …", as written in the message. */
   home: string;
   path: string;
-  startLine: number;
-  endLine: number;
+  /** Null for a comment on a whole file (a file-level GitHub thread). */
+  startLine: number | null;
+  endLine: number | null;
   side: "new" | "old";
   outdated: boolean;
+  /** Empty when the comment was sent without code. */
   hunk: string;
   body: string;
 }
@@ -61,6 +63,7 @@ const ENTRY_START = /^(\d+)\. (.*)$/;
 const DIFF_HEADING =
   /^(.+) · (.+):(\d+)(?:-(\d+)) \((new|old)\)( \[outdated\])?$/;
 const DIFF_HEADING_SINGLE = /^(.+) · (.+):(\d+) \((new|old)\)( \[outdated\])?$/;
+const DIFF_HEADING_FILE = /^(.+) · (.+) \((new|old)\)( \[outdated\])?$/;
 const FENCE = /^(`{3,})diff$/;
 
 /** Bold runs split out of one quote line. */
@@ -161,27 +164,33 @@ function diffEntry(
 ): SentDiffComment | null {
   const range = DIFF_HEADING.exec(title);
   const single = range ? null : DIFF_HEADING_SINGLE.exec(title);
-  if (!range && !single) return null;
+  const file = range || single ? null : DIFF_HEADING_FILE.exec(title);
+  const heading: readonly (string | undefined)[] | null = range
+    ? [range[1], range[2], range[3], range[4], range[5], range[6]]
+    : single
+      ? [single[1], single[2], single[3], single[3], single[4], single[5]]
+      : file
+        ? [file[1], file[2], undefined, undefined, file[3], file[4]]
+        : null;
+  if (!heading) return null;
+  // The code, when the comment was sent with any.
   const fence = FENCE.exec(lines[0] ?? "");
-  if (!fence) return null;
-  const close = lines.indexOf(fence[1], 1);
-  if (close < 0) return null;
+  const close = fence ? lines.indexOf(fence[1], 1) : -1;
+  if (fence && close < 0) return null;
   const body = replyAfter(lines.slice(close + 1));
   if (body === null) return null;
 
-  const [home, path, start, end, side, outdated] = range
-    ? [range[1], range[2], range[3], range[4], range[5], range[6]]
-    : [single![1], single![2], single![3], single![3], single![4], single![5]];
+  const [home, path, start, end, side, outdated] = heading;
   return {
     kind: "diff",
     number,
-    home,
-    path,
-    startLine: Number(start),
-    endLine: Number(end),
+    home: home!,
+    path: path!,
+    startLine: start === undefined ? null : Number(start),
+    endLine: end === undefined ? null : Number(end),
     side: side as "new" | "old",
     outdated: !!outdated,
-    hunk: lines.slice(1, close).join("\n"),
+    hunk: fence ? lines.slice(1, close).join("\n") : "",
     body,
   };
 }

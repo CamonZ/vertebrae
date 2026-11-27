@@ -11,18 +11,44 @@ import {
   type ThreadAnchor,
 } from "./selectionDiscussions";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
+import type { PlacedThread } from "./workspace/githubReview/model";
+
+/**
+ * Whether a GitHub thread's discussion opened; else why not: the capture's
+ * error, or null when it cannot start here (or one is already starting).
+ */
+export type GithubDiscussResult =
+  | { opened: true }
+  | { opened: false; error: string | null };
 
 export interface DiscussionActions {
   canAsk: boolean;
   canAskFullFile?: boolean;
   select(anchor: CodeSelection | null): void;
   discuss(anchor: CodeSelection, question: string): Promise<boolean>;
+  /**
+   * Discuss a GitHub review thread privately, at the lines it is commented
+   * on; reopens its discussion if it has one.
+   */
+  discussGithub(placed: PlacedThread): Promise<GithubDiscussResult>;
   attach(anchor: CodeSelection, outdated?: boolean, question?: string): void;
+  /** Send to main chat: attach a thread (and a GitHub thread's discussion). */
+  attachThread(id: string, question: string): void;
+  /** Whether Send to main chat is offered for GitHub threads here. */
+  canAttachGithub: boolean;
+  /**
+   * Send to main chat for a GitHub thread: with its private discussion when
+   * it has one, else the thread alone.
+   */
+  attachGithub(placed: PlacedThread): void;
   /**
    * `focus` puts the caret in the opened discussion's composer. `inPlace`
    * opens it where it is listed instead of showing its anchor in Changes.
    */
-  reopen(id: string | null, options?: { focus?: boolean; inPlace?: boolean }): void;
+  reopen(
+    id: string | null,
+    options?: { focus?: boolean; inPlace?: boolean }
+  ): void;
   send(id: string, text: string): void;
   cancel(id: string): void;
   reconcile(snapshot: WorktreeSnapshot): void;
@@ -30,6 +56,11 @@ export interface DiscussionActions {
   toggleCollapsed(id: string): void;
   /** The thread's composer took the focus `reopen` asked for. */
   focusTaken(id: string): void;
+  /** Changes showed the GitHub thread `reveal` asked for. */
+  revealed(nonce: number): void;
+  /** A thread's unsent question, kept while it is closed. */
+  draft(id: string): string;
+  setDraft(id: string, text: string): void;
 }
 
 /** Presentation-only state, kept per thread while the pane is open. */

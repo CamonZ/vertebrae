@@ -16,12 +16,14 @@ import type {
 } from "../../bindings";
 import type { ChatSession } from "../../stores/chatStore";
 import {
+  codeCommentHeading,
   diffCommentHomeLabel,
   diffCommentLocation,
   formatTextCommentsForReply,
+  lineRangeSuffix,
   replyHunk,
+  type PendingCodeComment,
   type PendingComment,
-  type PendingDiffComment,
 } from "./assistantTextComments";
 import { CommentShortcutHint } from "./CommentShortcutHint";
 import { useCommentCardAnchor } from "./useCommentCardAnchor";
@@ -48,9 +50,12 @@ function CommentCard(props: ComponentPropsWithRef<"div">) {
   );
 }
 
-/** A code selection sent to the main chat; its own text is optional. */
+/** What Send to main chat attached; its own text is optional. */
 function isAttachment(comment: PendingComment): boolean {
-  return comment.kind === "diff" && comment.selectionCode !== undefined;
+  return (
+    comment.kind === "github_thread" ||
+    (comment.kind === "diff" && comment.selectionCode !== undefined)
+  );
 }
 
 /** The in-diff bubble of a diff comment, when the diff is on screen. */
@@ -68,13 +73,11 @@ function diffBubbleFor(
 }
 
 /** `file.ts:12-14` for a chip; the full path is in the popover. */
-function chipDiffLabel(comment: PendingDiffComment): string {
+function chipDiffLabel(comment: PendingCodeComment): string {
   const name = comment.path.split("/").pop() || comment.path;
-  const range =
-    comment.endLine === comment.startLine
-      ? `${comment.startLine}`
-      : `${comment.startLine}-${comment.endLine}`;
-  return `${name}:${range}`;
+  const label = `${name}${lineRangeSuffix(comment)}`;
+  if (comment.kind !== "github_thread") return label;
+  return `${label} · ${comment.discussionId ? "thread + discussion" : "thread"}`;
 }
 import {
   LOCAL_CHAT_HARNESS_UNAVAILABLE_MESSAGE,
@@ -378,10 +381,11 @@ export function ChatComposer({
       modelSettingsHandle.current = null;
     };
   }, [hasModelSettings, modelSettingsHandle]);
-  const canEditModel = visibleHarness && (
-    !localChatCapabilities(visibleHarness.harness).nativeSettings ||
-    !!visibleHarness.models?.length || !!visibleHarness.default_model_id
-  );
+  const canEditModel =
+    visibleHarness &&
+    (!localChatCapabilities(visibleHarness.harness).nativeSettings ||
+      !!visibleHarness.models?.length ||
+      !!visibleHarness.default_model_id);
   const defaultSpeedTierId =
     speedTiers.find((tier) => tier.is_default)?.id ?? speedTiers[0]?.id ?? "";
   const modelSummary = (() => {
@@ -401,7 +405,8 @@ export function ChatComposer({
       (tier) => tier.id === session.selectedSpeedTier
     );
     const parts = [
-      localChatCapabilities(visibleHarness.harness).nativeSettings && !canEditModel
+      localChatCapabilities(visibleHarness.harness).nativeSettings &&
+      !canEditModel
         ? "Agent defaults"
         : modelLabel,
     ];
@@ -591,10 +596,12 @@ export function ChatComposer({
           isActive &&
           (isEditing || !diffBubbleFor(commentsAccessoryRef.current, comment));
         const chipText =
-          comment.kind === "diff"
-            ? `${diffCommentHomeLabel(comment)} · ${diffCommentLocation(comment)} (${comment.side})${
-                comment.body.trim() ? `: ${comment.body.trim()}` : ""
-              }`
+          comment.kind !== "text"
+            ? `${codeCommentHeading(comment)}${
+                comment.kind === "github_thread" && comment.discussionId
+                  ? " · thread + private discussion"
+                  : ""
+              }${comment.body.trim() ? `: ${comment.body.trim()}` : ""}`
             : `“${comment.quote.replace(/\s+/g, " ").trim()}”${
                 comment.body.trim() ? `: ${comment.body.trim()}` : ""
               }`;
@@ -677,15 +684,16 @@ export function ChatComposer({
               }}
             >
               <span className="chat-comment-chip-icon" aria-hidden="true">
-                {comment.kind === "diff" ? <CodeGlyph /> : <QuoteGlyph />}
+                {comment.kind !== "text" ? <CodeGlyph /> : <QuoteGlyph />}
               </span>
-              {comment.kind === "diff" ? (
+              {comment.kind !== "text" ? (
                 <span className="chat-comment-chip-label">
-                  {comment.selectionCode !== undefined && (
-                    <span className="selection-chip-label sr-only">
-                      {diffCommentLocation(comment)}
-                    </span>
-                  )}
+                  {comment.kind === "diff" &&
+                    comment.selectionCode !== undefined && (
+                      <span className="selection-chip-label sr-only">
+                        {diffCommentLocation(comment)}
+                      </span>
+                    )}
                   <span className="mono">{chipDiffLabel(comment)}</span>
                 </span>
               ) : (
@@ -723,7 +731,9 @@ export function ChatComposer({
               >
                 <div className="chat-comment-card-header">
                   <span className="chat-comment-card-title">
-                    {comment.kind === "diff" ? (
+                    {comment.kind === "github_thread" ? (
+                      codeCommentHeading(comment)
+                    ) : comment.kind === "diff" ? (
                       <>
                         {diffCommentHomeLabel(comment)} ·{" "}
                         <span className="mono">
@@ -762,12 +772,15 @@ export function ChatComposer({
                     </>
                   ) : null}
                 </div>
-                {comment.kind === "diff" ? (
+                {comment.kind === "github_thread" &&
+                !comment.code ? null : comment.kind !== "text" ? (
                   <pre
                     className="chat-comment-quote chat-comment-quote-code"
                     data-testid="local-chat-comment-hunk"
                   >
-                    {replyHunk(comment)}
+                    {comment.kind === "diff"
+                      ? replyHunk(comment)
+                      : comment.code}
                   </pre>
                 ) : (
                   <blockquote className="chat-comment-quote">
@@ -1088,10 +1101,14 @@ export function ChatComposer({
                                       value: effort.id,
                                       label:
                                         effort.label +
-                                        (effort.id === visibleHarness.default_reasoning_effort &&
-                                        (!localChatCapabilities(visibleHarness.harness).nativeSettings ||
+                                        (effort.id ===
+                                          visibleHarness.default_reasoning_effort &&
+                                        (!localChatCapabilities(
+                                          visibleHarness.harness
+                                        ).nativeSettings ||
                                           !session.selectedModelId ||
-                                          session.selectedModelId === visibleHarness.default_model_id)
+                                          session.selectedModelId ===
+                                            visibleHarness.default_model_id)
                                           ? " (default)"
                                           : ""),
                                     })

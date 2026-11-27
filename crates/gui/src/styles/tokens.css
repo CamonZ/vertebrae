@@ -166,9 +166,10 @@
   --text-secondary--line-height: calc(1.125 / 0.8125);
   --text-content: 0.875rem; /* 14px — prose, code, file names, table cells, task titles */
   --text-content--line-height: calc(1.25 / 0.875);
-  /* Code always reads at the content size (Pierre diffs, CodeSnippet,
-     PierrePanelCode, markdown code blocks). */
-  --text-code: var(--text-content);
+  /* Code reads at the interface's size (Pierre diffs, CodeSnippet,
+     PierrePanelCode, markdown code blocks): a monospace face looks larger
+     than the sans at the same size, so the content tier reads too big. */
+  --text-code: var(--text-secondary);
   /* Headings and display. */
   --text-lg: 1rem; /* 16px — entity and section headings */
   --text-lg--line-height: calc(1.75 / 1.125);

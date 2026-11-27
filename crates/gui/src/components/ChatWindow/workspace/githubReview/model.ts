@@ -20,9 +20,11 @@ export type ThreadDrift =
   | { kind: "moved"; delta: number }
   /**
    * The commented lines differ in the shown comparison (local edits, or a
-   * different base); drawn at the published line.
+   * different base); drawn at the published line. `lines` are the published
+   * lines changed or removed (none when lines were only inserted inside);
+   * `commit` holds them as published.
    */
-  | { kind: "edited" }
+  | { kind: "edited"; lines: readonly number[]; commit: string }
   /** The published commit is not in this clone; drawn where GitHub says. */
   | { kind: "unverified" };
 
@@ -51,6 +53,8 @@ export type PlacedThread =
       originalStartLine: number | null;
       originalLine: number | null;
       original: GithubSnippetLines;
+      /** The commit `original` was read from; null without a snippet. */
+      originalCommit: string | null;
     }
   /** File-level comments, or files the comparison does not show. */
   | { kind: "file"; thread: GithubReviewThread; shown: boolean }
@@ -149,7 +153,11 @@ function placeThread(
         startLine: placement.startLine,
         line: placement.line,
         publishedLine: placement.line,
-        drift: { kind: "edited" },
+        drift: {
+          kind: "edited",
+          lines: placement.editedLines,
+          commit: placement.publishedCommit,
+        },
         published: placement.published,
         inDiff: false,
       };
@@ -172,6 +180,7 @@ function placeThread(
         originalStartLine: placement.originalStartLine,
         originalLine: placement.originalLine,
         original: placement.original,
+        originalCommit: placement.originalCommit,
       };
     case "file_level":
       return { kind: "file", thread, shown: true };
@@ -307,6 +316,29 @@ export function lineLabel(placed: PlacedThread): string {
   }
 }
 
+/** "line 546", "lines 543–545 and 548"; null for none. */
+export function lineList(lines: readonly number[]): string | null {
+  const runs: [number, number][] = [];
+  for (const line of lines) {
+    const last = runs[runs.length - 1];
+    if (last && line === last[1] + 1) last[1] = line;
+    else runs.push([line, line]);
+  }
+  if (runs.length === 0) return null;
+  const parts = runs.map(([from, to]) =>
+    from === to ? `${from}` : `${from}–${to}`
+  );
+  const joined =
+    parts.length === 1
+      ? parts[0]
+      : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return `${lines.length === 1 ? "line" : "lines"} ${joined}`;
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function plural(count: number, word: string) {
   return `${count} ${word}${count === 1 ? "" : "s"}`;
 }
@@ -327,10 +359,22 @@ export function driftExplanation(
         ? `Published on line ${publishedLine} of the PR's base; this comparison's base has it ${by}.`
         : `Published on line ${publishedLine}; your local edits moved it ${by}. GitHub re-anchors after you push.`;
     }
-    case "edited":
-      return base
-        ? `The commented line differs in this comparison's base; reviewers still see line ${publishedLine} of the PR's base.`
-        : `You edited the commented line locally; reviewers still see line ${publishedLine} as published.`;
+    case "edited": {
+      if (placed.startLine >= placed.line)
+        return base
+          ? `The commented line differs in this comparison's base; reviewers still see line ${publishedLine} of the PR's base.`
+          : `You edited the commented line locally; reviewers still see line ${publishedLine} as published.`;
+      // A range: name the lines that changed, as the snippet marks them.
+      const range = span(placed.startLine, placed.line);
+      const edited = lineList(drift.lines);
+      if (base)
+        return edited
+          ? `${capitalize(edited)} of the commented ${range} ${drift.lines.length === 1 ? "differs" : "differ"} in this comparison's base; reviewers still see the PR's base.`
+          : `This comparison's base has lines added inside the commented ${range}; reviewers still see the PR's base.`;
+      return edited
+        ? `You edited ${edited} of the commented ${range} locally; reviewers still see them as published.`
+        : `You added lines inside the commented ${range} locally; reviewers still see them as published.`;
+    }
     case "unverified":
       return `Shown on line ${publishedLine} as published; fetch the PR branch to check it against your local copy.`;
   }
@@ -395,4 +439,40 @@ export function authorOf(comment: GithubReviewComment | undefined): string {
 /** The first non-blank line of a comment, for one-line summaries. */
 export function firstLine(text: string) {
   return text.split("\n").find((line) => line.trim()) ?? "";
+}
+
+/** Where `[` and `]` step from: a thread, a line in a file, or nowhere. */
+export type ThreadStepFrom =
+  | { kind: "thread"; id: string }
+  | { kind: "line"; path: string; line: number }
+  | null;
+
+/**
+ * The thread `[` (-1) or `]` (1) moves to, in the Review rail's order
+ * (files in path order, threads in line order). From a line, the nearest
+ * thread strictly past it in that file, else in the next file over; from
+ * nowhere (or a thread the PR no longer has), the first or last. Null past
+ * either end: stepping does not wrap.
+ */
+export function stepThread(
+  model: GithubReviewModel,
+  from: ThreadStepFrom,
+  direction: -1 | 1
+): PlacedThread | null {
+  const order = model.files.flatMap((file) => file.threads);
+  const index =
+    from?.kind === "thread"
+      ? order.findIndex(({ thread }) => thread.id === from.id)
+      : -1;
+  if (index >= 0) return order[index + direction] ?? null;
+  if (from?.kind === "line") {
+    const past = (placed: PlacedThread) =>
+      direction *
+        (placed.thread.anchor.path.localeCompare(from.path) ||
+          lineOf(placed) - from.line) >
+      0;
+    const ahead = direction === 1 ? order : [...order].reverse();
+    return ahead.find(past) ?? null;
+  }
+  return order[direction === 1 ? 0 : order.length - 1] ?? null;
 }

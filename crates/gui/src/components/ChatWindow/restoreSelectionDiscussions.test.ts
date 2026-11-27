@@ -1,8 +1,11 @@
 import { expect, it, vi } from "vitest";
+import * as hegel from "@hegeldev/hegel";
+import * as gs from "@hegeldev/hegel/generators";
 import { commands, type ReviewThread } from "../../bindings";
 import type { ChatSession } from "../../stores/chatStore";
 import { parsePatch } from "../thread/toolChange/diffLineMapper";
 import {
+  githubThreadOf,
   readSavedDiscussion,
   placeWorktreeDiscussions,
 } from "./restoreSelectionDiscussions";
@@ -145,3 +148,53 @@ it("loads only readable anchors from the saved checkout and attaches their sessi
   expect(controller.getSnapshot().activeId).toBe(id);
   expect(controller.getSnapshot().threads).toEqual(restored);
 });
+
+it("restores a GitHub thread's discussion with its thread, wherever the diff has its lines", () =>
+  hegel.test(
+    (tc) => {
+      const originRef = tc.draw(
+        gs.sampledFrom([
+          null,
+          "full-file:null",
+          "github-thread:PRRT_kwDOsynthetic1",
+          "github-thread:",
+        ])
+      );
+      const status = tc.draw(gs.sampledFrom(["open", "outdated"] as const));
+      const shown = tc.draw(gs.booleans());
+      const row = thread("saved", "RIGHT");
+      const record = {
+        thread: { ...row, payload: { ...row.payload, originRef, status } },
+        home: { kind: "worktree" } as const,
+        sessionId: null,
+        code: "after",
+      };
+      const files = shown
+        ? parsePatch(
+            "diff --git a/old b/new\n--- a/old\n+++ b/new\n@@ -1 +1 @@\n-before\n+after\n"
+          )
+        : [];
+      const [restored] = placeWorktreeDiscussions([record], {
+        files,
+        wholeBranch: false,
+      });
+      const githubThreadId = githubThreadOf(originRef);
+      expect(restored.githubThreadId).toBe(githubThreadId);
+      expect(githubThreadId).toBe(
+        originRef === "github-thread:PRRT_kwDOsynthetic1"
+          ? "PRRT_kwDOsynthetic1"
+          : null
+      );
+      // GitHub places it: never detached or outdated by its own anchor.
+      expect(restored.status.kind).toBe(
+        githubThreadId !== null
+          ? "inline"
+          : status === "outdated"
+            ? "outdated"
+            : shown
+              ? "inline"
+              : "detached"
+      );
+    },
+    { testCases: 100 }
+  ));

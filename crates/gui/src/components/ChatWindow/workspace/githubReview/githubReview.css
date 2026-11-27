@@ -1,5 +1,6 @@
 /* GitHub review threads in Changes. GitHub-facing controls stay neutral and
-   carry the GitHub glyph; rose is reserved for private Vertebrae actions. */
+   carry the GitHub glyph; private Vertebrae actions never do, and look as
+   they do on a selection discussion (one accent primary per row). */
 
 .gh-mute {
   color: var(--color-fg-mute);
@@ -27,6 +28,14 @@
 .gh-icon-button:hover {
   background: var(--color-bg-hover);
   color: var(--color-fg);
+}
+
+/* Open on GitHub: neutral, the GitHub glyph and the leaving-the-app arrow. */
+.gh-open-github {
+  display: inline-flex;
+  gap: 2px;
+  inline-size: auto;
+  padding-inline: 4px;
 }
 
 .gh-avatar {
@@ -119,6 +128,26 @@
   color: var(--color-fg);
 }
 
+/* A published line the local edit changed: tinted as the diff tints a
+   removed line, with a − in the gutter (the note names it in text). */
+.gh-snippet-line[data-edited] {
+  background: color-mix(
+    in oklab,
+    var(
+        --diffs-deletion-color-override,
+        var(--hearth-call-diagram-deletion-fallback)
+      )
+      14%,
+    var(--color-bg-3)
+  );
+}
+
+.gh-snippet-line[data-edited] .gh-snippet-number::before {
+  content: "−";
+  float: inline-start;
+  padding-inline-start: 2px;
+}
+
 .gh-snippet-number {
   display: inline-block;
   min-inline-size: 4ch;
@@ -171,27 +200,16 @@
   font-size: var(--text-meta);
 }
 
+/*
+ * The card's actions use the selection discussion composer's action row
+ * (.diff-comment-editor-actions): the same hints, buttons and one primary.
+ */
 .gh-thread-foot {
-  display: flex;
-  justify-content: flex-end;
   padding: 0 8px 8px;
 }
 
-.gh-github-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  min-block-size: 24px;
-  padding: 2px 8px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-sm);
-  color: var(--color-fg-soft);
-  font-size: var(--text-meta);
-}
-
-.gh-github-action:hover {
-  border-color: var(--color-line-strong);
-  color: var(--color-fg);
+.gh-thread-discussion {
+  padding: 0 8px;
 }
 
 /* A file header's Outdated pill. */
@@ -367,21 +385,17 @@
   white-space: nowrap;
 }
 
-.gh-rail-checks {
-  margin-block-start: 10px;
-  padding-block-start: 6px;
-  border-block-start: 1px solid var(--color-line-soft);
-}
-
-.gh-rail-checks .pr-checks-list {
-  padding: 0 6px;
-}
-
-/* "GitHub reports no checks": inset like the rail's other notes. */
-.gh-rail-checks > .pr-assoc-mute {
-  margin: 4px 10px 8px;
-}
-
 .gh-sep {
   margin-inline: 0.4em;
+}
+
+/* Why the card's private discussion did not start. */
+.gh-thread-error {
+  margin: 0 10px 8px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in oklch, var(--color-err) 45%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--color-err) 10%, transparent);
+  color: var(--color-err);
+  font-size: var(--text-meta);
 }

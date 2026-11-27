@@ -88,6 +88,7 @@ import {
 import type {
   PendingComment,
   PendingDiffComment,
+  PendingGithubThreadComment,
   PendingTextComment,
   TextSelectionAnchor,
 } from "./assistantTextComments";
@@ -514,6 +515,12 @@ export function ChatWindow({
       : (turnRoot ?? evidenceCheckout)
     : ownWorktreePath;
 
+  const discussionKey = JSON.stringify([
+    chat.session?.projectPath,
+    sessionId,
+    ownWorktreePath,
+  ]);
+  const discussions = useChatDiscussions(discussionKey);
   const attachSelection = (
     anchor: CodeSelection,
     outdated = false,
@@ -530,9 +537,32 @@ export function ChatWindow({
 
     inputRef.current?.focus();
   };
+  // Sending a GitHub thread again replaces what it attached.
+  const attachGithubThread = (attachment: PendingGithubThreadComment) => {
+    updatePendingComments((comments) => [
+      ...comments.filter(
+        (comment) =>
+          comment.kind !== "github_thread" ||
+          comment.githubThreadId !== attachment.githubThreadId
+      ),
+      attachment,
+    ]);
+    inputRef.current?.focus();
+  };
   const handleNavigateComment = useCallback(
     (id: string) => {
       const comment = pendingComments.find((candidate) => candidate.id === id);
+      // A GitHub thread's chip shows the thread, reopening its discussion.
+      if (comment?.kind === "github_thread") {
+        if (!ownWorktreePath) return;
+        setSourceRequest(null);
+        activate(ownWorktreePath, null);
+        showSection(sessionId, "changes");
+        if (comment.discussionId)
+          discussions.controller.reveal(comment.discussionId);
+        else discussions.controller.revealGithub(comment.githubThreadId);
+        return;
+      }
       if (comment?.kind !== "diff") return;
       setFocusState({
         sessionId,
@@ -553,6 +583,7 @@ export function ChatWindow({
       pendingComments,
       sessionId,
       ownWorktreePath,
+      discussions.controller,
       changesOpen,
       worktreePath,
       showSection,
@@ -632,12 +663,6 @@ export function ChatWindow({
     (evidence.fileReference || evidence.checkout === evidenceCheckout)
       ? evidence
       : null;
-  const discussionKey = JSON.stringify([
-    chat.session?.projectPath,
-    sessionId,
-    ownWorktreePath,
-  ]);
-  const discussions = useChatDiscussions(discussionKey);
   const backgroundWork = chat.session?.backgroundWork;
   const backgroundRunning = activeBackgroundWorkCount(backgroundWork);
   const changedFiles = worktreeSnapshot
@@ -1037,6 +1062,8 @@ export function ChatWindow({
           snapshot={worktreeSnapshot}
           onOpen={() => side.select("changes")}
           onAttach={attachSelection}
+          onAttachGithub={attachGithubThread}
+          githubThreads={worktreePr.reviewThreads.data?.threads}
         >
           <FileReferenceNavigationContext.Provider value={openFileReference}>
             {content}

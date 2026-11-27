@@ -5,6 +5,7 @@ import { FileReferenceNavigationContext } from "../shared/FileReferenceNavigatio
 import {
   formatTextCommentsForReply,
   type PendingDiffComment,
+  type PendingGithubThreadComment,
   type PendingTextComment,
 } from "./assistantTextComments";
 
@@ -130,6 +131,49 @@ describe("sent comments in the user turn", () => {
       (screen.getByRole("button", { name: /^Comment 2:/ }) as HTMLButtonElement)
         .disabled
     ).toBe(true);
+  });
+
+  it("names a GitHub thread's card and renders its thread as markdown", () => {
+    const github: PendingGithubThreadComment = {
+      kind: "github_thread",
+      id: "g1",
+      body: "Worth a test?",
+      githubThreadId: "PRRT_1",
+      discussionId: "d1",
+      path: "src/lib.rs",
+      side: "new",
+      startLine: 13,
+      endLine: 13,
+      code: "let total = 2;",
+      author: "alice",
+      comments: [{ author: "alice", body: "Why **2**?" }],
+      turns: [
+        { role: "user", text: "Is it idempotent?" },
+        { role: "assistant", text: "Yes." },
+      ],
+    };
+    render(
+      <EventRow
+        evt="u3"
+        type="user"
+        label="You"
+        text={formatTextCommentsForReply([github], "")}
+        textFormat="comments"
+      />
+    );
+    const card = screen
+      .getByRole("button", {
+        name: "Comment 1: GitHub thread from alice, open src/lib.rs:13 (new)",
+      })
+      .closest("li")!;
+    expect(card).toHaveAttribute("data-kind", "github_thread");
+    // The thread's comment is quoted and its author bold, not raw Markdown.
+    const quote = card.querySelector("blockquote")!;
+    expect(quote).toHaveTextContent("alice: Why 2?");
+    expect(quote.querySelector("strong")).toHaveTextContent("alice:");
+    expect(card).toHaveTextContent("You: Is it idempotent?");
+    expect(card).toHaveTextContent("Worth a test?");
+    expect(card.textContent).not.toContain("**");
   });
 
   it("renders text that is not a comment set as ordinary markdown", () => {

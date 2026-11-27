@@ -17,7 +17,7 @@ import type { CodeSelection } from "../../ChatWindow/selectionDiscussions";
 import {
   DiscussionModelNotice,
   InlineSelectionDiscussion,
-} from "../../ChatWindow/SelectionDiscussionContext";
+} from "../../ChatWindow/SelectionDiscussionThread";
 import {
   DIFF_COMPOSER_SEND_SHORTCUT,
   DIFF_COMPOSER_SUBMIT_SHORTCUT,

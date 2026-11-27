@@ -1557,6 +1557,44 @@ describe("ChatWindow diff review comments", () => {
     );
   });
 
+  it.each([
+    ["its discussion", "d1"],
+    ["the thread sent alone", null],
+  ])(
+    "opens Changes from a GitHub thread attachment's chip, to reveal %s",
+    async (_what, discussionId) => {
+      seedSession();
+      usePendingCommentsStore.setState({
+        byScope: {
+          "test-session:/worktree": [
+            {
+              kind: "github_thread",
+              id: "github-thread-PRRT_1",
+              body: "",
+              githubThreadId: "PRRT_1",
+              discussionId,
+              path: "src/retry.rs",
+              side: "new",
+              startLine: 4,
+              endLine: 4,
+              code: "let budget = 3;",
+              author: "alice",
+              comments: [{ author: "alice", body: "Why retry here?" }],
+              turns: [],
+            },
+          ],
+        },
+      });
+      render(<ChatWindow sessionId="test-session" />);
+      expect(screen.queryByTestId("local-chat-view-changes")).toBeNull();
+      fireEvent.click(screen.getByTestId("local-chat-comment-icon-1"));
+      expect(screen.getByRole("button", { name: "Changes" })).toHaveAttribute(
+        "aria-pressed",
+        "true"
+      );
+    }
+  );
+
   it("marks an All Changes comment outdated when the patch changes on refresh", async () => {
     seedSession();
     render(<ChatWindow sessionId="test-session" />);

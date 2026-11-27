@@ -1,12 +1,7 @@
-import { useId, type KeyboardEvent, type ReactNode, type Ref } from "react";
+import type { KeyboardEvent, ReactNode, Ref } from "react";
 import type { GithubFailure } from "../../../../bindings";
 import { Spinner } from "../../../Spinner";
-import {
-  useChecksFreshness,
-  type WorktreePr,
-} from "../../../../hooks/useWorktreePr";
 import { GitHubGlyph } from "../../GithubPr";
-import { CheckCounts, PrChecksList } from "../PrChecks";
 import { GithubFailureText } from "../PrFailure";
 import { GithubThreadCard } from "./GithubThreadCard";
 import {
@@ -123,55 +118,13 @@ function ThreadsSection({
   );
 }
 
-/** The linked PR's checks, as the review bar's drawer lists them, denser. */
-function ChecksSection({ pr, prNumber }: { pr: WorktreePr; prNumber: number }) {
-  const { now } = useChecksFreshness(pr.entry);
-  const snapshot = pr.entry.snapshot;
-  const headingId = useId();
-  return (
-    <section className="gh-rail-checks" aria-labelledby={headingId}>
-      <h3 id={headingId} className="gh-rail-section">
-        Checks
-        {snapshot && (
-          <>
-            <Separator />
-            <CheckCounts counts={pr.counts} />
-          </>
-        )}
-      </h3>
-      {snapshot ? (
-        <PrChecksList
-          dense
-          prNumber={prNumber}
-          checks={pr.checks}
-          truncated={snapshot.truncated}
-          now={now}
-          onRerun={(checkId) => void pr.rerun(checkId)}
-          onCancel={(checkId) => void pr.cancel(checkId)}
-        />
-      ) : pr.entry.read.status === "failed" ? (
-        <p className="gh-rail-empty" role="alert">
-          Couldn’t read checks:{" "}
-          <GithubFailureText failure={pr.entry.read.failure} />
-        </p>
-      ) : (
-        <p className="gh-mute gh-rail-empty gh-inline" role="status">
-          <Spinner className="h-3 w-3" />
-          Reading checks…
-        </p>
-      )}
-    </section>
-  );
-}
-
 /**
  * The Review rail: the linked PR's GitHub threads grouped by file in line
- * order, then its checks. Choosing a thread shows it in the diff; a thread
+ * order (its checks stay in the review bar's drawer). Choosing a thread shows it in the diff; a thread
  * the diff cannot show (a file-level comment, a line or file outside this
  * comparison) expands here instead.
  */
 export function ReviewRail({
-  pr,
   prNumber,
   model,
   loading,
@@ -180,7 +133,6 @@ export function ReviewRail({
   onClose,
   railRef,
 }: {
-  pr: WorktreePr;
   prNumber: number | null;
   model: GithubReviewModel | null;
   loading: boolean;
@@ -190,7 +142,9 @@ export function ReviewRail({
   railRef?: Ref<HTMLElement>;
 }) {
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== "Escape") return;
+    // An Esc something inside already handled (a private discussion
+    // closing) does not also close the rail.
+    if (event.key !== "Escape" || event.defaultPrevented) return;
     if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)
       return;
     event.preventDefault();
@@ -222,7 +176,6 @@ export function ReviewRail({
           error={error}
           threads={threads}
         />
-        <ChecksSection pr={pr} prNumber={prNumber} />
       </>
     );
   return (

@@ -155,8 +155,12 @@ fn unchanged_lines_anchor_exactly_and_shift_with_local_edits_above() {
             start_line,
             line,
             published,
+            edited_lines,
+            published_commit,
         } => {
             assert_eq!((*start_line, *line), (2, 2));
+            assert_eq!(edited_lines, &vec![2]);
+            assert_eq!(published_commit, &head.to_string());
             assert_eq!(focus(published), vec![(2, "    let budget = 3;")]);
             assert_eq!(published.first().map(|line| line.number), Some(1));
             assert_eq!(published.last().map(|line| line.number), Some(3));
@@ -203,10 +207,17 @@ fn multi_line_and_cross_side_ranges_are_placed_whole_or_on_their_last_line() {
             start_line: 4,
             line: 5,
             published,
-        } => assert_eq!(
-            focus(published),
-            vec![(4, "    attempt(budget);"), (5, "    wait(delay);")]
-        ),
+            edited_lines,
+            published_commit,
+        } => {
+            assert_eq!(published_commit, &head.to_string());
+            assert_eq!(
+                focus(published),
+                vec![(4, "    attempt(budget);"), (5, "    wait(delay);")]
+            );
+            // Only the call that changed, not the whole range.
+            assert_eq!(edited_lines, &vec![5]);
+        }
         other => panic!("expected Edited 4..=5, got {other:?}"),
     }
     assert_eq!(
@@ -267,14 +278,18 @@ fn outdated_file_level_missing_and_unfetched_threads_are_classified() {
     };
     std::fs::remove_file(dir.path().join("src/other.rs")).unwrap();
 
+    let original_oid = original.to_string();
     let placed = placements(&repo, &request(head, vec![outdated, file_level, deleted]));
     match &placed[0] {
         Outdated {
             original_start_line,
             original_line,
             original,
+            original_commit,
         } => {
             assert_eq!((*original_start_line, *original_line), (Some(2), Some(3)));
+            // The snippet's commit, so a discussion can capture those lines.
+            assert_eq!(original_commit.as_deref(), Some(&*original_oid));
             assert_eq!(
                 focus(original),
                 vec![(2, "    let budget = 3;"), (3, "    let delay = 10;")]
@@ -344,8 +359,13 @@ fn left_side_threads_map_from_the_merge_base_onto_the_shown_base() {
         },
     )];
     match &placements(&repo, &request)[0] {
-        Outdated { original, .. } => {
-            assert_eq!(focus(original), vec![(2, "    let budget = 3;")])
+        Outdated {
+            original,
+            original_commit,
+            ..
+        } => {
+            assert_eq!(focus(original), vec![(2, "    let budget = 3;")]);
+            assert_eq!(original_commit.as_deref(), Some(&*base.to_string()));
         }
         other => panic!("expected Outdated, got {other:?}"),
     }
@@ -353,7 +373,11 @@ fn left_side_threads_map_from_the_merge_base_onto_the_shown_base() {
     request.threads[0].anchor.original_commit_oid =
         Some("1111111111111111111111111111111111111111".into());
     match &placements(&repo, &request)[0] {
-        Outdated { original, .. } => assert!(original.is_empty()),
+        Outdated {
+            original,
+            original_commit,
+            ..
+        } => assert!(original.is_empty() && original_commit.is_none()),
         other => panic!("expected Outdated, got {other:?}"),
     }
 }

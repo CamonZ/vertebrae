@@ -1,7 +1,12 @@
 import type { KeyboardEvent } from "react";
 import { isEditableShortcutTarget } from "../../../utils/keyboard";
 import { DIFF_CURSOR_HOST_ATTRIBUTE } from "../../thread/toolChange/diffCursor";
-import { CHANGED_FILE_LIST_KEYS, CHANGES_VIEWED_KEY } from "../chatShortcuts";
+import {
+  CHANGED_FILE_LIST_KEYS,
+  CHANGES_REVIEW_KEY,
+  CHANGES_THREAD_STEP_CODES,
+  CHANGES_VIEWED_KEY,
+} from "../chatShortcuts";
 
 /** What Changes' keys do. */
 export interface ChangesKeyActions {
@@ -16,12 +21,17 @@ export interface ChangesKeyActions {
   fileList: HTMLElement | null;
   /** v: toggle the active file's viewed mark; null without a file. */
   toggleViewed: (() => void) | null;
+  /** r: open or close the Review rail; null without a linked PR. */
+  toggleReview: (() => void) | null;
+  /** [ and ]: the previous or next GitHub thread, from the focused one. */
+  stepThread: ((origin: HTMLElement, direction: -1 | 1) => void) | null;
 }
 
 /**
  * Changes' keys, handled in the capture phase so they beat the diff and
  * editors: ⌘S, / to find a file, ⌥⇧↑/↓ between file headings, ⇧V to
- * unmark the last viewed file, ↑/↓ in the file list, v to mark viewed.
+ * unmark the last viewed file, ↑/↓ in the file list, v to mark viewed,
+ * r for the Review rail, [ and ] between GitHub threads.
  */
 export function handleChangesKeyDown(
   event: KeyboardEvent<HTMLElement>,
@@ -97,6 +107,17 @@ export function handleChangesKeyDown(
     return;
   }
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
+
+  const step = CHANGES_THREAD_STEP_CODES[event.code];
+  if (step && actions.stepThread) {
+    const { stepThread } = actions;
+    handled(() => stepThread(origin, step));
+    return;
+  }
+  if (event.key === CHANGES_REVIEW_KEY && actions.toggleReview) {
+    handled(actions.toggleReview);
+    return;
+  }
 
   const list = actions.fileList;
   if (list?.contains(origin) && vertical) {

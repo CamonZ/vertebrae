@@ -1,6 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { anchored, at, reviewThread } from "./fixture";
+import * as hegel from "@hegeldev/hegel";
+import * as gs from "@hegeldev/hegel/generators";
+import { anchored, at, outdated, reviewThread } from "./fixture";
 import { buildReviewModel, markerKey } from "./model";
 import { useReviewController } from "./useReviewController";
 
@@ -42,4 +44,56 @@ describe("choosing a rail entry shown in the diff", () => {
       markerKey("src/lib.rs", "additions", 13)
     );
   });
+});
+
+describe("revealing a thread for its private discussion", () => {
+  /*
+   * Model (3e4d738d, criterion 3): a reveal shows the thread wherever it
+   * can be read, the diff when Changes can show it there, else expanded in
+   * the Review rail, and keeps it shown however often it is revealed (a
+   * rail entry's select toggles; a reveal never hides).
+   */
+  it("shows the thread in the diff or the rail, and never hides it", () =>
+    hegel.test(
+      (tc) => {
+        const placement = tc.draw(
+          gs.sampledFrom([anchored(13), outdated(9), outdated(null)])
+        );
+        const threads = [reviewThread("t1"), reviewThread("t2")];
+        const shownModel = buildReviewModel(
+          7,
+          threads,
+          [at("t1", placement), at("t2", placement)],
+          false
+        );
+        const target = shownModel.byThread.get("t1")!;
+        const inDiff = tc.draw(
+          gs.arrays(gs.booleans(), { minSize: 1, maxSize: 4 })
+        );
+        let call = 0;
+        const pane = { current: document.createElement("div") };
+        const { result, unmount } = renderHook(() =>
+          useReviewController(shownModel, pane, () => inDiff[call] ?? false)
+        );
+        const shown = { diff: false, rail: false };
+        for (call = 0; call < inDiff.length; call++) {
+          let where: "diff" | "rail" = "rail";
+          act(() => {
+            where = result.current.reveal(target);
+          });
+          expect(where).toBe(inDiff[call] ? "diff" : "rail");
+          shown[where] = true;
+        }
+        const { diff, rail } = result.current;
+        expect(diff!.openThreads.has("t1")).toBe(shown.diff);
+        expect(rail.inline.has("t1")).toBe(shown.rail);
+        // An outdated thread opens with its file's other outdated threads.
+        expect(diff!.openThreads.has("t2")).toBe(
+          shown.diff && target.kind === "outdated"
+        );
+        if (shown.diff) expect(diff!.focusThreadId).toBe("t1");
+        unmount();
+      },
+      { testCases: 100 }
+    ));
 });

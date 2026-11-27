@@ -1,4 +1,6 @@
 import {
+  Fragment,
+  useContext,
   useEffect,
   useId,
   useRef,
@@ -29,6 +31,19 @@ import {
   OUTDATED_TOGGLE_ATTRIBUTE,
   type GithubDiffThreads,
 } from "./useReviewController";
+import { MiniThread } from "../../SelectionDiscussionThread";
+import {
+  SelectionDiscussionContext,
+  type DiscussionValue,
+  type GithubDiscussResult,
+} from "../../selectionDiscussionState";
+import { canDiscussGithub } from "./githubDiscussion";
+import {
+  DIFF_COMPOSER_SEND_SHORTCUT,
+  GITHUB_THREAD_DISCUSS_KEY,
+  shortcutText,
+} from "../../chatShortcuts";
+import { isEditableShortcutTarget } from "../../../../utils/keyboard";
 import "./githubReview.css";
 
 function GithubAvatar({ login }: { login: string }) {
@@ -46,9 +61,12 @@ function GithubAvatar({ login }: { login: string }) {
 function Snippet({
   lines,
   label,
+  edited = [],
 }: {
   lines: readonly { number: number; text: string; focus: boolean }[];
   label: string;
+  /** Lines a local edit changed, marked as a diff marks removed lines. */
+  edited?: readonly number[];
 }) {
   if (lines.length === 0) return null;
   return (
@@ -58,6 +76,7 @@ function Snippet({
           key={line.number}
           className="gh-snippet-line"
           data-focus={line.focus || undefined}
+          data-edited={edited.includes(line.number) || undefined}
         >
           <span className="gh-snippet-number" aria-hidden="true">
             {line.number}
@@ -104,7 +123,11 @@ function AnchorNote({ placed }: { placed: PlacedThread }) {
     <div className="gh-anchor-note" data-kind={placed.drift.kind}>
       <p>{text}</p>
       {placed.drift.kind === "edited" && (
-        <Snippet lines={placed.published} label="Code as published" />
+        <Snippet
+          lines={placed.published}
+          label="Code as published"
+          edited={placed.drift.lines}
+        />
       )}
     </div>
   );
@@ -137,13 +160,38 @@ export function GithubThreadCard({
     ref.current.focus({ preventScroll: true });
     onFocused?.();
   }, [autoFocus, onFocused]);
+  const discussion = useContext(SelectionDiscussionContext);
+  // Why its private discussion did not start, said on the card that asked.
+  const [startError, setStartError] = useState<string | null>(null);
+  const discuss = async (discussion: DiscussionValue) => {
+    setStartError(null);
+    const result = await discussInline(discussion, placed);
+    if (result && !result.opened) setStartError(result.error);
+  };
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== "Escape" || !onClose) return;
-    if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)
+    // The private discussion's composer keeps its own keys (its Esc closes
+    // only the discussion, its ⌘⇧↵ sends with the follow-up).
+    if (event.defaultPrevented || isEditableShortcutTarget(event.target))
       return;
-    event.preventDefault();
-    event.stopPropagation();
-    onClose();
+    const act = (run: () => void) => {
+      event.preventDefault();
+      event.stopPropagation();
+      run();
+    };
+    const plain =
+      !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+    if (event.key === "Escape" && plain && onClose) act(onClose);
+    else if (event.key === GITHUB_THREAD_DISCUSS_KEY && plain && discussion)
+      act(() => void discuss(discussion));
+    else if (
+      event.key === "Enter" &&
+      event.metaKey &&
+      event.shiftKey &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      discussion?.canAttachGithub
+    )
+      act(() => discussion.attachGithub(placed));
   };
   return (
     <section
@@ -184,6 +232,18 @@ export function GithubThreadCard({
             onClick={() => setShown(!shown)}
           >
             {shown ? "Hide" : "Show"}
+          </button>
+        )}
+        {url && isAbsoluteHttpUrl(url) && (
+          <button
+            type="button"
+            className="gh-icon-button gh-open-github"
+            aria-label="Open on GitHub"
+            title="Open on GitHub"
+            onClick={() => openExternalUrl(url)}
+          >
+            <GitHubGlyph size="xs" />
+            <ExternalLinkGlyph />
           </button>
         )}
         {onClose && (
@@ -243,20 +303,133 @@ export function GithubThreadCard({
           )}
         </div>
       )}
-      {url && isAbsoluteHttpUrl(url) && (
-        <footer className="gh-thread-foot">
+      <GithubThreadDiscussion
+        placed={placed}
+        onClosed={() => ref.current?.focus({ preventScroll: true })}
+      />
+      {startError && (
+        <p role="alert" className="gh-thread-error">
+          Couldn’t start the private discussion: {startError}
+        </p>
+      )}
+      <ThreadActions placed={placed} closable={!!onClose} onDiscuss={discuss} />
+    </section>
+  );
+}
+
+/**
+ * The private discussion of a GitHub thread, when it is open. Closing it
+ * gives focus back to its card, so the card's keys go on working.
+ */
+function GithubThreadDiscussion({
+  placed,
+  onClosed,
+}: {
+  placed: PlacedThread;
+  onClosed(): void;
+}) {
+  const discussion = useContext(SelectionDiscussionContext);
+  const thread = discussion?.threads.find(
+    ({ githubThreadId }) => githubThreadId === placed.thread.id
+  );
+  if (!discussion || !thread || discussion.activeId !== thread.id) return null;
+  return (
+    <div className="gh-thread-discussion">
+      <MiniThread thread={thread} discussion={discussion} onClosed={onClosed} />
+    </div>
+  );
+}
+
+const sendKeys = shortcutText(DIFF_COMPOSER_SEND_SHORTCUT);
+
+/**
+ * Show the thread's private discussion, focused, or start one when the
+ * thread has lines to discuss here; the result of a start.
+ */
+async function discussInline(
+  discussion: DiscussionValue,
+  placed: PlacedThread
+): Promise<GithubDiscussResult | null> {
+  const thread = discussion.threads.find(
+    ({ githubThreadId }) => githubThreadId === placed.thread.id
+  );
+  if (thread) discussion.reopen(thread.id, { focus: true, inPlace: true });
+  else if (discussion.canAsk && canDiscussGithub(placed))
+    return discussion.discussGithub(placed);
+  return null;
+}
+
+/**
+ * The card's actions, as a selection discussion's composer lays them out:
+ * key hints, then Send to main chat, then the primary Discuss inline (or
+ * Show private discussion). Hidden while the discussion is open; its
+ * composer offers the same actions.
+ */
+function ThreadActions({
+  placed,
+  closable,
+  onDiscuss,
+}: {
+  placed: PlacedThread;
+  closable: boolean;
+  onDiscuss(discussion: DiscussionValue): Promise<void>;
+}) {
+  const discussion = useContext(SelectionDiscussionContext);
+  const [starting, setStarting] = useState(false);
+  if (!discussion) return null;
+  const thread = discussion.threads.find(
+    ({ githubThreadId }) => githubThreadId === placed.thread.id
+  );
+  if (thread && discussion.activeId === thread.id) return null;
+  const canDiscuss =
+    !!thread || (discussion.canAsk && canDiscussGithub(placed));
+  const canSend = discussion.canAttachGithub;
+  if (!canDiscuss && !canSend) return null;
+  const discussLabel = thread ? "Show private discussion" : "Discuss inline";
+  const hints = [
+    canDiscuss && ([GITHUB_THREAD_DISCUSS_KEY, discussLabel] as const),
+    canSend && ([sendKeys, "Send to main chat"] as const),
+    closable && (["esc", "Close"] as const),
+  ].filter((hint) => hint !== false);
+  return (
+    <footer className="gh-thread-foot diff-comment-editor-actions">
+      <span className="diff-comment-editor-hint" aria-hidden="true">
+        {hints.map(([keys, label], index) => (
+          <Fragment key={label}>
+            {index > 0 && " · "}
+            <kbd>{keys}</kbd> {label.toLowerCase()}
+          </Fragment>
+        ))}
+      </span>
+      <div className="diff-comment-editor-buttons">
+        {canSend && (
           <button
             type="button"
-            className="gh-github-action"
-            onClick={() => openExternalUrl(url)}
+            title={`Send to main chat (${sendKeys})`}
+            aria-keyshortcuts="Meta+Shift+Enter"
+            onClick={() => discussion.attachGithub(placed)}
           >
-            <GitHubGlyph size="xs" />
-            Open on GitHub
-            <ExternalLinkGlyph />
+            Send to main chat
           </button>
-        </footer>
-      )}
-    </section>
+        )}
+        {canDiscuss && (
+          <button
+            type="button"
+            data-primary
+            disabled={starting}
+            aria-busy={starting || undefined}
+            title={`${discussLabel} (${GITHUB_THREAD_DISCUSS_KEY})`}
+            aria-keyshortcuts={GITHUB_THREAD_DISCUSS_KEY}
+            onClick={() => {
+              setStarting(!thread);
+              void onDiscuss(discussion).finally(() => setStarting(false));
+            }}
+          >
+            {discussLabel}
+          </button>
+        )}
+      </div>
+    </footer>
   );
 }
 

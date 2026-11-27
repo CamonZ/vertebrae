@@ -20,11 +20,20 @@
   padding-inline-end: calc(var(--gh-lane) + 4px);
 }
 
+/*
+ * The lane is pinned by its right edge, never sized from the row's start:
+ * it sits flush with the row's end (its margin cancels the reserved
+ * padding) and sticks to the scroller's right edge when the row is wider.
+ * So it stays put whether or not Pierre measures the code column (it only
+ * does while the file has annotations, as when a thread card is open), and
+ * never overshoots the visible edge by the row's start padding.
+ */
 [data-gh-marker-rail] {
   display: block;
   position: sticky;
-  left: var(--diffs-column-number-width, 0);
-  inline-size: var(--diffs-column-content-width, 100%);
+  right: 0;
+  inline-size: var(--gh-lane);
+  margin-inline: auto calc(-1 * (var(--gh-lane) + 4px));
   block-size: 0;
   pointer-events: none;
   user-select: none;

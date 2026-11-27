@@ -111,7 +111,7 @@ token on every surface.
 | Token | Default | Use |
 | --- | --- | --- |
 | `--text-content` (`text-content`) | 14px | Chat prose, user turns, the composer, file names, table cells, task titles, body copy |
-| `--text-code` (`text-code`) | = content | Code blocks, Pierre diffs (`--diffs-font-size`), `CodeSnippet`, `PierrePanelCode`, call trees |
+| `--text-code` (`text-code`) | = secondary | Code blocks, Pierre diffs (`--diffs-font-size`), `CodeSnippet`, `PierrePanelCode`, call trees |
 | `--text-secondary` (`text-secondary`) | 13px | Supporting text, controls, labels, descriptions, inline code within content |
 | `--text-meta` (`text-meta`) | 12px | Timestamps, counts, IDs, badges, key hints, eyebrows; the smallest text size |
 | `--text-lg` … `--text-5xl`, `--text-lede`, `--text-hero`, `--text-display` | 16–56px, clamp | Headings, ledes and display moments |

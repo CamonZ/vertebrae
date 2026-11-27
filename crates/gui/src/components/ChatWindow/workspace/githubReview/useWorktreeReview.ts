@@ -1,10 +1,31 @@
-import { useCallback, useMemo, useRef, useState, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import type { ComparisonSnapshot, WorktreeChange } from "../../../../bindings";
 import type { WorktreePr } from "../../../../hooks/useWorktreePr";
+import type { DiffCursor } from "../../../../stores/chatSideColumnStore";
+import { DIFF_CURSOR_HOST_ATTRIBUTE } from "../../../thread/toolChange/diffCursor";
+import type { DiscussionValue } from "../../selectionDiscussionState";
 import type { ReviewEntry } from "../PrAssociationBar";
-import { hunksShow, type LineShown, type PlacedThread } from "./model";
+import {
+  hunksShow,
+  stepThread,
+  type GithubReviewModel,
+  type LineShown,
+  type PlacedThread,
+  type ThreadStepFrom,
+} from "./model";
 import { useGithubPlacement } from "./useGithubPlacement";
-import { useRailFocus, useReviewController } from "./useReviewController";
+import {
+  REVIEW_ENTRY_ATTRIBUTE,
+  useRailFocus,
+  useReviewController,
+} from "./useReviewController";
 
 /** Below this Changes width, opening the rail folds the file list. */
 const RAIL_WITH_FILES_MIN_WIDTH = 960;
@@ -126,6 +147,41 @@ export function useWorktreeReview({
     setReviewOpen(!reviewOpen);
   };
 
+  /**
+   * Show a GitHub thread where it can be read (the diff, else the Review
+   * rail). "pending" until the threads are placed; "missing" when the PR no
+   * longer has it.
+   */
+  const revealThread = (
+    githubThreadId: string
+  ): "shown" | "pending" | "missing" => {
+    const { model } = placement;
+    if (!model) return "pending";
+    const placed = model.byThread.get(githubThreadId);
+    if (!placed) return "missing";
+    if (controller.reveal(placed) === "rail" && !reviewOpen) toggleRail();
+    return "shown";
+  };
+
+  /**
+   * `[` (-1) or `]` (1): the previous or next thread, shown with focus in its
+   * card (the Review rail opens for one the diff cannot show). False when
+   * there is none that way.
+   */
+  const lastStepped = useRef<string | null>(null);
+  const stepThreads = (from: ThreadStepFrom, direction: -1 | 1): boolean => {
+    const { model } = placement;
+    if (!model) return false;
+    // Stepping again from outside the threads continues from the last one.
+    const start = from ?? lastThread(model, lastStepped.current);
+    const next = stepThread(model, start, direction);
+    if (!next) return false;
+    lastStepped.current = next.thread.id;
+    const fromId = start?.kind === "thread" ? start.id : null;
+    if (controller.step(fromId, next) === "rail" && !reviewOpen) toggleRail();
+    return true;
+  };
+
   const review: ReviewEntry | undefined =
     prNumber === null
       ? undefined
@@ -147,7 +203,61 @@ export function useWorktreeReview({
     railRef,
     showRail,
     closeRail: () => setReviewOpen(false),
+    revealThread,
+    stepThreads,
     review,
     onLinesShown,
   };
+}
+
+function lastThread(
+  model: GithubReviewModel,
+  id: string | null
+): ThreadStepFrom {
+  return id && model.byThread.has(id) ? { kind: "thread", id } : null;
+}
+
+/**
+ * Show the GitHub thread a discussion asks to see (from Discussions or its
+ * attachment chip), in the diff or the Review rail, once the threads are
+ * placed.
+ */
+export function useThreadRevealRequests(
+  review: Pick<
+    ReturnType<typeof useWorktreeReview>,
+    "placement" | "revealThread"
+  >,
+  discussion: Pick<DiscussionValue, "reveal" | "revealed"> | null
+): void {
+  const request = discussion?.reveal ?? null;
+  const placed = review.placement.model;
+  const latest = useRef({ discussion, revealThread: review.revealThread });
+  latest.current = { discussion, revealThread: review.revealThread };
+  useEffect(() => {
+    const { discussion, revealThread } = latest.current;
+    if (!request || !discussion) return;
+    const shown = revealThread(request.githubThreadId);
+    if (shown !== "pending") discussion.revealed(request.nonce);
+  }, [request, placed]);
+}
+
+/**
+ * Where `[`/`]` step from: the GitHub thread card or rail entry with focus,
+ * else the line cursor when the diff has focus, else the last thread
+ * stepped to (null).
+ */
+export function stepOrigin(
+  origin: HTMLElement,
+  cursor: DiffCursor
+): ThreadStepFrom {
+  const thread =
+    origin.closest<HTMLElement>(".gh-thread[data-thread-id]")?.dataset
+      .threadId ??
+    origin
+      .closest<HTMLElement>(`[${REVIEW_ENTRY_ATTRIBUTE}]`)
+      ?.getAttribute(REVIEW_ENTRY_ATTRIBUTE);
+  if (thread) return { kind: "thread", id: thread };
+  if (cursor && origin.closest(`[${DIFF_CURSOR_HOST_ATTRIBUTE}]`))
+    return { kind: "line", path: cursor.path, line: cursor.range.end };
+  return null;
 }

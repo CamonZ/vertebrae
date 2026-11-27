@@ -154,13 +154,15 @@ fn placement_follows_published_lines_through_local_edits(tc: hegel::TestCase) {
     let repo = init(dir.path());
     let shown = (!matches!(mode, Mode::Absent)).then_some(current.as_bytes());
     let unknown = Oid::from_str("1111111111111111111111111111111111111111").unwrap();
-    let mut request = match side {
+    // The commit holding the published file: the head, or on the old side
+    // the base (the merge base of base and head).
+    let (mut request, published_commit) = match side {
         ReviewThreadSide::Right => {
             let head = commit_of(&repo, Some(published.as_bytes()), &[], true);
             if let Some(bytes) = shown {
                 std::fs::write(dir.path().join(PATH), bytes).unwrap();
             }
-            request(head, Vec::new())
+            (request(head, Vec::new()), head)
         }
         ReviewThreadSide::Left => {
             let base = commit_of(&repo, Some(published.as_bytes()), &[], true);
@@ -169,7 +171,7 @@ fn placement_follows_published_lines_through_local_edits(tc: hegel::TestCase) {
             let mut request = request(head, Vec::new());
             request.base_oid = base.to_string();
             request.shown_base = shown_base.to_string();
-            request
+            (request, base)
         }
     };
     if matches!(mode, Mode::Unfetched) {
@@ -243,8 +245,19 @@ fn placement_follows_published_lines_through_local_edits(tc: hegel::TestCase) {
                 start_line,
                 line,
                 published: snippet,
+                edited_lines,
+                published_commit: read_from,
             } => {
+                assert_eq!(read_from, published_commit.to_string());
                 assert!(!untouched || repeats, "left an unchanged range");
+                // The edited lines are the published lines that did not
+                // survive; an insertion inside the range edits none.
+                if !repeats {
+                    let lost: Vec<u32> = (start..=end)
+                        .filter(|number| !now_at.contains_key(&(*number as usize - 1)))
+                        .collect();
+                    assert_eq!(edited_lines, lost);
+                }
                 assert_eq!((start_line, line), (start, end));
                 let expected: Vec<_> = (start..=end)
                     .map(|number| (number, texts[number as usize - 1].as_str()))

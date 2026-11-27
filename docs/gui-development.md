@@ -1276,7 +1276,10 @@ threads read-only. GitHub reads and local placement are kept apart:
   local edits move threads without another GitHub read. A thread is placed:
   - on its unchanged lines (a range for multi-line comments), possibly moved
     by local edits or by a different comparison base;
-  - edited, which keeps the published line and published code;
+  - edited, which keeps the published line and published code. The card
+    names the published lines the edit changed (`editedLines`, from the same
+    line map) and marks them in the published snippet; an edit that only
+    inserted lines inside a range is named as such;
   - outdated, with the original code;
   - unverified, when the PR head isn't fetched locally;
   - unplaceable, when the anchor is invalid or the file can't be read;
@@ -1288,7 +1291,9 @@ threads read-only. GitHub reads and local placement are kept apart:
   and `ReviewRail.tsx`.
 - `markers.ts` draws one neutral avatar marker per side and line into
   Pierre's rows. A file with markers gives every drawn line a lane on the
-  right (`markers.shadow.css`), so markers never cover code. Threads that
+  right (`markers.shadow.css`), so markers never cover code. The lane is
+  pinned by its right edge (sticky), so it does not shift when Pierre starts
+  measuring the code column (as it does once a card is open). Threads that
   share a line share one marker. The marker has no text nodes: its initials,
   count and drift glyph come from CSS. Activating it expands its threads in
   the line's annotation slot. Resolved threads fold to their first line
@@ -1296,9 +1301,10 @@ threads read-only. GitHub reads and local placement are kept apart:
 - Each file header has an **Outdated n** pill that lists that file's outdated
   threads in the first diff row's annotation slot, beside any line threads
   there.
-- The Review rail lists every thread grouped by file in line order, then the
-  PR's checks. It opens from the PR bar's thread count or from the header PR
-  chip; on a narrow Changes pane it folds the file list or overlays the
+- The Review rail lists every thread grouped by file in line order; the PR's
+  checks stay in the review bar's drawer. It opens from the PR bar's thread
+  count, the header PR chip, `r` anywhere in Changes outside text fields, or
+  **Show review threads** in the Changes palette; on a narrow Changes pane it folds the file list or overlays the
   diff. Choosing an entry shows its thread in the diff (an overlaying rail
   closes so it does not cover the thread). A thread the diff can't show
   expands in the rail instead.
@@ -1308,8 +1314,62 @@ threads read-only. GitHub reads and local placement are kept apart:
   recycled rows and a second pane never take the focus.
 - ⌥↑/⌥↓ stop at marker lines. `o` on a line without a Vertebrae discussion
   toggles its GitHub threads.
+- `[` and `]` (matched by physical key) step to the previous and next thread
+  in the rail's order (`stepThread` in `model.ts`), from the focused card or
+  rail entry, else from the line cursor, else from the last thread stepped
+  to. The card stepped from closes; the next one opens where it can be read
+  (the diff, else the rail, which opens) with focus in it. Stepping stops at
+  either end. The palette offers **Next/Previous GitHub thread**.
+- A focused card takes `c` (discuss inline, or show its discussion), ⌘⇧↵
+  (Send to main chat) and Esc (close). Keys typed in the discussion's
+  composer stay the composer's.
+- **Open on GitHub** is a neutral icon (GitHub glyph and external arrow) in
+  the card's header.
 - Open threads and the rail survive comparison switches. A switch keeps the
   topmost visible line in place.
+
+#### Private discussions of GitHub threads
+
+A thread card's **Discuss inline** (never the GitHub glyph) starts a
+read-only side discussion of that thread, using the same
+`SelectionDiscussions` controller and discussion sessions as a selection.
+The card's actions reuse the selection composer's action row
+(`.diff-comment-editor-actions`): key hints, a neutral **Send to main chat**
+and one accent primary, **Discuss inline** (or **Show private discussion**).
+
+- `githubDiscussion.ts` picks the lines to capture. A thread on a line is
+  captured from the shown side, exactly as a selection of those lines would
+  be. An outdated thread is captured from the commit its snippet came from
+  (`originalCommit` on the placement). File-level, not-shown and unplaceable
+  threads have no lines, so there is no button.
+- `capture_review_anchor` takes a typed `subject`: a selection (its text is
+  checked against the captured lines) or a GitHub thread (the lines are read
+  as is). A GitHub subject needs worktree content and a GitHub node ID, and
+  it is stored as `origin_ref = github-thread:<id>`. Restore reads the ID
+  back into `SelectionThread.githubThreadId`.
+- The discussion is drawn only inside its GitHub thread's card, wherever the
+  card shows: under its line, in the Outdated group or expanded in the Review
+  rail. It therefore follows the GitHub thread ID through refreshes and
+  comparison switches. It is never one of the diff's own anchors, and
+  re-mapping never moves it. Discussions lists it under **On GitHub
+  threads**, where `o` shows the thread in Changes.
+- The first turn carries the thread (`githubThread`: resolution, outdated
+  state, comments) from the PR state `useWorktreePr` holds.
+- Esc, close, resolution and comparison switches only close the discussion
+  view. The discussion and any unsent question (kept by the controller)
+  stay.
+- **Send to main chat** (on every card, private, so no GitHub glyph)
+  attaches a `github_thread` pending comment: the code, the GitHub comments
+  and, when the thread has a discussion, its questions and replies. Without
+  one, it carries the lines the thread is drawn on and their code as the
+  diff shows them (an outdated thread's original snippet), else GitHub's
+  anchor lines without code (none for a file-level comment). It sends
+  nothing, and a discussion's draft stays. There is one attachment per
+  thread: sending again replaces it. The message is formatted like a diff
+  comment (without a code block or line range when it has none), so the sent
+  turn reads back into a code card. Its chip reveals the thread
+  (`SelectionDiscussions.reveal` or `revealGithub`), in the diff or the
+  Review rail, reopening its discussion when it has one.
 
 ### Tool activity disclosure
 

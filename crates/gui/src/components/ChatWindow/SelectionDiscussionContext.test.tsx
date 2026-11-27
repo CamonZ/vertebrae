@@ -13,6 +13,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { useContext } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -32,10 +33,8 @@ import {
   resetLocalChatTurnRoutingForTests,
   useLocalChatEventRouter,
 } from "../../hooks/useLocalChatEventRouter";
-import {
-  SelectionDiscussionProvider,
-  InlineSelectionDiscussion,
-} from "./SelectionDiscussionContext";
+import { SelectionDiscussionProvider } from "./SelectionDiscussionContext";
+import { InlineSelectionDiscussion } from "./SelectionDiscussionThread";
 import {
   SelectionDiscussions,
   captureCodeSelection,
@@ -43,6 +42,10 @@ import {
 } from "./selectionDiscussions";
 import { parsePatch } from "../thread/toolChange/diffLineMapper";
 import { SideDiscussions } from "./SideDiscussions";
+import type { PendingGithubThreadComment } from "./assistantTextComments";
+import { GithubThreadCard } from "./workspace/githubReview/GithubThreadCard";
+import { buildReviewModel } from "./workspace/githubReview/model";
+import { anchored, at, reviewThread } from "./workspace/githubReview/fixture";
 
 const transport = vi.hoisted(() => ({
   text: null as ((event: { payload: LocalChatTextEvent }) => void) | null,
@@ -305,7 +308,11 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue({
       status: "ok",
-      data: { originalBlobId: "blob", originalCommitId: "commit" },
+      data: {
+        originalBlobId: "blob",
+        originalCommitId: "commit",
+        code: "selected\n",
+      },
     });
   vi.mocked(commands.mapReviewThreads)
     .mockReset()
@@ -330,6 +337,39 @@ beforeEach(() => {
     status: "ok",
     data: null,
   });
+});
+
+it("keeps its actions when the chat re-renders with a new GitHub attach callback", () => {
+  // The chat passes a fresh callback each render; new actions would redraw
+  // every diff that reads them and drop its line selection.
+  const seen: Array<ContextType<typeof SelectionDiscussionContext>> = [];
+  function Probe() {
+    seen.push(useContext(SelectionDiscussionContext));
+    return null;
+  }
+  const provider = () => (
+    <SelectionDiscussionProvider
+      controller={controllerFor("stable")}
+      snapshot={null}
+      worktreePath="/stable"
+      parentChatId="parent-stable"
+      projectPath="/project"
+      harness="claude"
+      onOpen={vi.fn()}
+      onAttach={vi.fn()}
+      onAttachGithub={() => {}}
+    >
+      <Probe />
+    </SelectionDiscussionProvider>
+  );
+  const { rerender } = render(provider());
+  const before = seen.at(-1)!;
+  rerender(provider());
+  const after = seen.at(-1)!;
+
+  expect(after.canAttachGithub).toBe(true);
+  expect(after.attachGithub).toBe(before.attachGithub);
+  expect(after.attachThread).toBe(before.attachThread);
 });
 
 it("selection, opening a thread and attaching are passive; explicit asks capture context", async () => {
@@ -519,7 +559,11 @@ it("keeps a captured discussion when the checkout changes and closes its process
   });
   vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
     status: "ok",
-    data: { originalBlobId: "blob", originalCommitId: "commit" },
+    data: {
+      originalBlobId: "blob",
+      originalCommitId: "commit",
+      code: "selected\n",
+    },
   });
   vi.mocked(commands.mapReviewThreads).mockResolvedValue({
     status: "ok",
@@ -875,7 +919,11 @@ it("leaves focus where the user moved it while the discussion was starting", asy
   await act(async () =>
     capture({
       status: "ok",
-      data: { originalBlobId: "blob", originalCommitId: "commit" },
+      data: {
+        originalBlobId: "blob",
+        originalCommitId: "commit",
+        code: "selected\n",
+      },
     })
   );
   await screen.findByRole("textbox", { name: "Ask about selected code" });
@@ -1550,13 +1598,11 @@ it("opens and closes a discussion from its anchor line and collapses earlier tur
   )!;
   const add = (kind: "user" | "assistant", text: string) =>
     act(() =>
-      useChatStore
-        .getState()
-        .addMessage(session.id, {
-          kind,
-          text,
-          timestamp: new Date().toISOString(),
-        })
+      useChatStore.getState().addMessage(session.id, {
+        kind,
+        text,
+        timestamp: new Date().toISOString(),
+      })
     );
   add("user", "second question");
   add("assistant", "second answer");
@@ -1753,7 +1799,11 @@ it("resumes a bound discussion with its original provider and model after switch
   });
   vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
     status: "ok",
-    data: { originalBlobId: "blob", originalCommitId: "commit" },
+    data: {
+      originalBlobId: "blob",
+      originalCommitId: "commit",
+      code: "selected\n",
+    },
   });
   const parentChatId = "provider-switch-parent";
   render(fixture("A", vi.fn(), parentChatId, "/project"));
@@ -2436,7 +2486,11 @@ it("captures the selected range before starting an inline thread", async () => {
   });
   vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
     status: "ok",
-    data: { originalCommitId: "commit", originalBlobId: "blob" },
+    data: {
+      originalCommitId: "commit",
+      originalBlobId: "blob",
+      code: "selected\n",
+    },
   });
   render(codeFixture(vi.fn(), vi.fn(), "main-chat"));
   fireEvent.click(screen.getByRole("button", { name: "Add code comment" }));
@@ -2462,7 +2516,7 @@ it("captures the selected range before starting an inline thread", async () => {
       },
     },
     range: { startLine: 1, line: 1 },
-    selectedText: "selected",
+    subject: { kind: "selection", selectedText: "selected" },
     parent: { chatId: "main-chat", projectPath: "/project" },
   });
 });
@@ -2496,7 +2550,10 @@ it("captures a historical selection and sends the exact recorded code to the rea
       source: { kind: "full_file", turn },
     },
     range: { startLine: 4, line: 5 },
-    selectedText: "recorded first\nrecorded second",
+    subject: {
+      kind: "selection",
+      selectedText: "recorded first\nrecorded second",
+    },
     parent: { chatId: "main-chat", projectPath: "/project" },
   });
   await waitFor(() =>
@@ -2524,7 +2581,11 @@ it("moves a Git-anchored discussion and displays the captured lines when outdate
   });
   vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
     status: "ok",
-    data: { originalCommitId: "commit", originalBlobId: "blob" },
+    data: {
+      originalCommitId: "commit",
+      originalBlobId: "blob",
+      code: "selected\n",
+    },
   });
   vi.mocked(commands.mapReviewThreads)
     .mockImplementationOnce(async (_worktree, [request]) => ({
@@ -2612,7 +2673,11 @@ it("re-anchors a thread on a snapshot change while no side column is mounted", a
   });
   vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
     status: "ok",
-    data: { originalCommitId: "commit", originalBlobId: "blob" },
+    data: {
+      originalCommitId: "commit",
+      originalBlobId: "blob",
+      code: "selected\n",
+    },
   });
   vi.mocked(commands.mapReviewThreads)
     .mockReset()
@@ -2666,7 +2731,11 @@ it("keeps the newest mapping and clears a transient mapping error", async () => 
   });
   vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
     status: "ok",
-    data: { originalCommitId: "commit", originalBlobId: "blob" },
+    data: {
+      originalCommitId: "commit",
+      originalBlobId: "blob",
+      code: "selected\n",
+    },
   });
   type Mapping = Awaited<ReturnType<typeof commands.mapReviewThreads>>;
   let resolveOlder!: (result: Mapping) => void;
@@ -2716,7 +2785,11 @@ it("keeps an unavailable anchor separate from a confirmed outdated selection", a
   });
   vi.mocked(commands.captureReviewAnchor).mockResolvedValue({
     status: "ok",
-    data: { originalCommitId: "commit", originalBlobId: "blob" },
+    data: {
+      originalCommitId: "commit",
+      originalBlobId: "blob",
+      code: "selected\n",
+    },
   });
   vi.mocked(commands.mapReviewThreads)
     .mockReset()
@@ -3358,4 +3431,317 @@ it("rejects a direct discussion request for the deleted side of a tool patch", a
     ).toBe(false);
   });
   expect(commands.captureReviewAnchor).not.toHaveBeenCalled();
+});
+
+/*
+ * A GitHub thread's private discussion (3e4d738d), on synthetic review data:
+ * the thread card in Changes or the Discussions list, as the side column
+ * shows one section at a time.
+ */
+const GITHUB_THREAD = "PRRT_kwDOsynthetic1";
+const githubThreadData = reviewThread(GITHUB_THREAD, {
+  path: "a",
+  line: 1,
+  author: "alice",
+  body: "Why retry here?",
+});
+const shownComparison = (target: string, workingTree: boolean) => ({
+  base_commit: "a".repeat(40),
+  selected_base_commit: "a".repeat(40),
+  target_commit: target,
+  working_tree: workingTree,
+  merge_base: false,
+});
+const placedOn = (line: number) =>
+  buildReviewModel(
+    7,
+    [githubThreadData],
+    [at(GITHUB_THREAD, anchored(line))],
+    false
+  ).byThread.get(GITHUB_THREAD)!;
+
+function githubTree({
+  section = "changes",
+  line = 1,
+  target = "b".repeat(40),
+  workingTree = true,
+  onAttachGithub = vi.fn(),
+}: {
+  section?: "changes" | "discussions";
+  line?: number;
+  target?: string;
+  workingTree?: boolean;
+  onAttachGithub?: (comment: PendingGithubThreadComment) => void;
+} = {}) {
+  return (
+    <SelectionDiscussionProvider
+      controller={controller}
+      snapshot={{
+        wholeBranch: true,
+        files: fixtureFiles,
+        comparison: shownComparison(target, workingTree),
+      }}
+      worktreePath="/A"
+      parentChatId="main-chat"
+      projectPath="/project"
+      harness="claude"
+      onOpen={vi.fn()}
+      onAttach={vi.fn()}
+      onAttachGithub={onAttachGithub}
+      githubThreads={[githubThreadData]}
+    >
+      <Controls showThreads={false} />
+      {section === "changes" ? (
+        <GithubThreadCard placed={placedOn(line)} onClose={vi.fn()} />
+      ) : (
+        <SideDiscussions />
+      )}
+    </SelectionDiscussionProvider>
+  );
+}
+
+async function discussGithubThread() {
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+  const discuss = await screen.findByRole("button", {
+    name: "Discuss inline",
+  });
+  // A private action: never the GitHub glyph.
+  expect(discuss.querySelector(".pr-gh-glyph")).toBeNull();
+  fireEvent.click(discuss);
+  return screen.findByRole("region", { name: "Private discussion" });
+}
+
+it("keeps a GitHub thread's private discussion through Esc, a comparison switch and Discussions", async () => {
+  const view = render(githubTree());
+  const card = screen.getByRole("region", {
+    name: "GitHub thread from alice, line 1",
+  });
+  const discussion = await discussGithubThread();
+  expect(card).toContainElement(discussion);
+  // Captured where the thread is drawn, linked to it rather than a selection.
+  expect(commands.captureReviewAnchor).toHaveBeenCalledWith({
+    worktree: "/A",
+    threadId: expect.any(String),
+    location: {
+      path: "a",
+      side: "RIGHT",
+      source: { kind: "worktree", commit: null },
+    },
+    range: { startLine: 1, line: 1 },
+    subject: { kind: "github_thread", githubThreadId: GITHUB_THREAD },
+    parent: { chatId: "main-chat", projectPath: "/project" },
+  });
+  // The capture returns the lines it kept: they are not read back.
+  expect(liveDiscussion.threads[0].anchor.code).toBe("selected");
+  expect(commands.readReviewAnchor).not.toHaveBeenCalled();
+  // Private, and never marked as GitHub's.
+  expect(discussion).toHaveAttribute("data-private");
+  expect(discussion.querySelector(".pr-gh-glyph")).toBeNull();
+
+  const composer = screen.getByRole("textbox", {
+    name: "Ask about this GitHub thread",
+  });
+  expect(composer).toHaveAttribute(
+    "placeholder",
+    "Ask privately about this thread…"
+  );
+  fireEvent.change(composer, { target: { value: "Is it idempotent?" } });
+  // Esc closes the discussion, not the GitHub thread around it.
+  fireEvent.keyDown(composer, { key: "Escape" });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("region", { name: "Private discussion" })
+    ).not.toBeInTheDocument()
+  );
+  expect(card).toBeInTheDocument();
+  expect(liveDiscussion.threads).toHaveLength(1);
+
+  // A comparison switch moves the thread's line; the discussion follows it.
+  view.rerender(
+    githubTree({ line: 3, target: "c".repeat(40), workingTree: false })
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Show private discussion" })
+  );
+  expect(
+    within(
+      screen.getByRole("region", { name: "GitHub thread from alice, line 3" })
+    ).getByRole("region", { name: "Private discussion" })
+  ).toBeVisible();
+  expect(
+    screen.getByRole("textbox", { name: "Ask about this GitHub thread" })
+  ).toHaveValue("Is it idempotent?");
+  fireEvent.keyDown(
+    screen.getByRole("textbox", { name: "Ask about this GitHub thread" }),
+    { key: "Escape" }
+  );
+
+  // Listed under GitHub threads; `o` shows it with its thread in Changes.
+  view.rerender(githubTree({ section: "discussions", line: 3 }));
+  const group = screen.getByRole("group", { name: "On GitHub threads, 1" });
+  const row = within(group).getByRole("button", {
+    name: "Private discussion of the GitHub thread on a:1 (new)",
+  });
+  fireEvent.keyDown(row, { key: "o" });
+  expect(liveDiscussion.reveal?.githubThreadId).toBe(
+    liveDiscussion.threads[0].githubThreadId
+  );
+  expect(liveDiscussion.activeId).toBe(liveDiscussion.threads[0].id);
+  expect(commands.mapReviewThreads).not.toHaveBeenCalled();
+});
+
+it("says on the GitHub thread's card why its private discussion did not start", async () => {
+  render(githubTree());
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+  vi.mocked(commands.captureReviewAnchor).mockResolvedValueOnce({
+    status: "error",
+    error: "git",
+  });
+  const card = screen.getByRole("region", {
+    name: "GitHub thread from alice, line 1",
+  });
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }))
+  );
+  expect(within(card).getByRole("alert")).toHaveTextContent(
+    /^Couldn’t start the private discussion: .+/
+  );
+  expect(
+    screen.queryByRole("region", { name: "Private discussion" })
+  ).toBeNull();
+  expect(liveDiscussion.threads).toHaveLength(0);
+
+  // Trying again clears it.
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "Discuss inline" }))
+  );
+  expect(within(card).queryByRole("alert")).toBeNull();
+  expect(
+    await screen.findByRole("region", { name: "Private discussion" })
+  ).toBeInTheDocument();
+});
+
+it("sends a GitHub thread and its discussion to the main chat without sending, keeping the draft", async () => {
+  const onAttachGithub = vi.fn();
+  const view = render(githubTree({ onAttachGithub }));
+  await discussGithubThread();
+  const composer = screen.getByRole("textbox", {
+    name: "Ask about this GitHub thread",
+  });
+  fireEvent.change(composer, { target: { value: "Draft question" } });
+  fireEvent.click(screen.getByRole("button", { name: "Send to main chat" }));
+
+  expect(onAttachGithub).toHaveBeenCalledTimes(1);
+  const [attached] = onAttachGithub.mock.calls[0] as [
+    PendingGithubThreadComment,
+  ];
+  expect(attached).toMatchObject({
+    kind: "github_thread",
+    githubThreadId: liveDiscussion.threads[0].githubThreadId,
+    discussionId: liveDiscussion.threads[0].id,
+    path: "a",
+    side: "new",
+    startLine: 1,
+    endLine: 1,
+    code: "selected",
+    author: "alice",
+    comments: [{ author: "alice", body: "Why retry here?" }],
+    turns: [],
+    body: "",
+  });
+  // Nothing is sent, and the discussion's draft stays.
+  expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+  expect(commands.sendLocalChatMessage).not.toHaveBeenCalled();
+  expect(composer).toHaveValue("Draft question");
+
+  // The chip reveals its discussion again, draft intact.
+  fireEvent.keyDown(composer, { key: "Escape" });
+  view.rerender(githubTree({ onAttachGithub, line: 2 }));
+  act(() => controller.reveal(attached.discussionId!));
+  expect(
+    await screen.findByRole("textbox", { name: "Ask about this GitHub thread" })
+  ).toHaveValue("Draft question");
+  expect(liveDiscussion.reveal?.githubThreadId).toBe(attached.githubThreadId);
+});
+
+it("sends a GitHub thread to the main chat without a discussion, and c discusses it inline", async () => {
+  const onAttachGithub = vi.fn();
+  render(githubTree({ onAttachGithub }));
+  const card = screen.getByRole("region", {
+    name: "GitHub thread from alice, line 1",
+  });
+  // Leaving for GitHub is a neutral icon; sending stays private (no glyph).
+  expect(
+    within(card).getByRole("button", { name: "Open on GitHub" })
+  ).toBeInTheDocument();
+  const send = within(card).getByRole("button", { name: "Send to main chat" });
+  expect(send.querySelector(".pr-gh-glyph")).toBeNull();
+  // Laid out as a selection discussion's composer: its action row, one
+  // primary (Discuss inline), and hints for the card's keys.
+  const discuss = await within(card).findByRole("button", {
+    name: "Discuss inline",
+  });
+  const actions = send.closest(".diff-comment-editor-actions");
+  expect(actions).not.toBeNull();
+  expect(actions).toContainElement(discuss);
+  expect(
+    [...actions!.querySelectorAll("button")].filter((button) =>
+      button.hasAttribute("data-primary")
+    )
+  ).toEqual([discuss]);
+  expect(actions!.querySelector(".diff-comment-editor-hint")).toHaveTextContent(
+    /^c discuss inline · \S+ send to main chat · esc close$/
+  );
+
+  fireEvent.click(send);
+  expect(onAttachGithub).toHaveBeenCalledTimes(1);
+  expect(onAttachGithub.mock.calls[0][0]).toMatchObject({
+    kind: "github_thread",
+    id: `github-thread-${GITHUB_THREAD}`,
+    githubThreadId: GITHUB_THREAD,
+    discussionId: null,
+    path: "a",
+    side: "new",
+    startLine: 1,
+    endLine: 1,
+    author: "alice",
+    comments: [{ author: "alice", body: "Why retry here?" }],
+    turns: [],
+  });
+  expect(commands.createLocalChatSession).not.toHaveBeenCalled();
+
+  // The card's keys: ⌘⇧↵ sends again (one attachment per thread), c opens
+  // the private discussion with the caret in its composer.
+  card.focus();
+  fireEvent.keyDown(card, { key: "Enter", metaKey: true, shiftKey: true });
+  expect(onAttachGithub).toHaveBeenCalledTimes(2);
+  expect(onAttachGithub.mock.calls[1][0].id).toBe(
+    onAttachGithub.mock.calls[0][0].id
+  );
+  await waitFor(() => expect(liveDiscussion.canAsk).toBe(true));
+  fireEvent.keyDown(card, { key: "c" });
+  const discussion = await screen.findByRole("region", {
+    name: "Private discussion",
+  });
+  expect(card).toContainElement(discussion);
+  // Typing in its composer is not a card key.
+  const composer = within(discussion).getByRole("textbox", {
+    name: "Ask about this GitHub thread",
+  });
+  fireEvent.keyDown(composer, { key: "c" });
+  expect(
+    screen.getAllByRole("region", { name: "Private discussion" })
+  ).toHaveLength(1);
+  // Open, the discussion's composer offers Send to main chat; the card's
+  // own button steps aside.
+  expect(
+    within(card).getAllByRole("button", { name: "Send to main chat" })
+  ).toHaveLength(1);
+  // Esc closes the discussion and gives focus back to the card.
+  await waitFor(() => expect(liveDiscussion.focusRequest).toBeNull());
+  fireEvent.keyDown(composer, { key: "Escape" });
+  expect(
+    screen.queryByRole("region", { name: "Private discussion" })
+  ).toBeNull();
+  expect(card).toHaveFocus();
 });

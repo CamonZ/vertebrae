@@ -316,6 +316,10 @@ export const CHANGES_COMMANDS = {
   openPr: "Open PR on GitHub",
   linkPr: "Link PR…",
   unlinkPr: "Unlink PR (local only)",
+  showReview: "Show review threads",
+  hideReview: "Hide review threads",
+  nextThread: "Next GitHub thread",
+  previousThread: "Previous GitHub thread",
 } as const;
 
 /** Toggle a file's viewed mark (folds it; the cursor skips it). */
@@ -364,6 +368,17 @@ export const DIFF_COMMENT_KEYS = ["c", "Enter"] as const;
 /** Line cursor on a discussion's anchor: open it and focus its composer. */
 export const DISCUSSION_OPEN_KEY = "o";
 
+/** Changes: open or close the Review rail of the linked PR's threads. */
+export const CHANGES_REVIEW_KEY = "r";
+
+/** Changes: previous and next GitHub thread, by physical key ([ and ]). */
+export const CHANGES_THREAD_STEP_CODES: Readonly<
+  Partial<Record<string, -1 | 1>>
+> = { BracketLeft: -1, BracketRight: 1 };
+
+/** A focused GitHub thread card: discuss it inline (or show its discussion). */
+export const GITHUB_THREAD_DISCUSS_KEY = "c";
+
 /** Discussion composer: ask the follow-up inline. */
 export const DISCUSSION_ASK_SHORTCUT = {
   modifiers: ["meta"],
@@ -377,7 +392,7 @@ export const DISCUSSION_SEND_SHORTCUT = {
   modifiers: ["meta", "shift"],
   keys: ["Enter"],
   displayKey: "↵",
-  label: "Send follow-up to main chat",
+  label: "Send to main chat",
 } as const satisfies ChatShortcutDefinition;
 
 /** Show only the latest response of a discussion, or every turn again. */
@@ -450,6 +465,11 @@ const RESIZE_HINTS: KeyHint[] = [
  * Every Changes binding, grouped by where focus is when it applies, for the
  * ⌘⇧/ overlay. Actions without a single key are in the ⌘K palette.
  */
+const THREAD_STEP_HINT: KeyHint = {
+  keys: ["[ / ]"],
+  label: "Previous / next GitHub thread",
+};
+
 export const CHANGES_HINT_GROUPS: readonly {
   title: string;
   hints: readonly KeyHint[];
@@ -463,6 +483,8 @@ export const CHANGES_HINT_GROUPS: readonly {
       { keys: ["↓"], label: "Line cursor (from a file heading)" },
       { keys: [CHANGES_VIEWED_KEY], label: "Mark file viewed" },
       CHANGES_UNVIEW_HINT,
+      { keys: [CHANGES_REVIEW_KEY], label: "Show or hide review threads" },
+      THREAD_STEP_HINT,
       ...RESIZE_HINTS,
     ],
   },
@@ -496,7 +518,11 @@ export const CHANGES_HINT_GROUPS: readonly {
         label: DIFF_COPY_SHORTCUT.label,
       },
       { keys: ["c / ↵"], label: "Discuss selection" },
-      { keys: [DISCUSSION_OPEN_KEY], label: "Open discussion at line" },
+      {
+        keys: [DISCUSSION_OPEN_KEY],
+        label: "Open discussion or GitHub thread at line",
+      },
+      THREAD_STEP_HINT,
       {
         keys: modifierKeys(DISCUSSION_COLLAPSE_SHORTCUT),
         label: "Collapse or expand the discussion at line",
@@ -505,6 +531,18 @@ export const CHANGES_HINT_GROUPS: readonly {
       CHANGES_UNVIEW_HINT,
       ...PALETTE_HINTS,
       { keys: ["Esc"], label: "Single line / back to chat" },
+    ],
+  },
+  {
+    title: "Changes · GitHub thread",
+    hints: [
+      THREAD_STEP_HINT,
+      { keys: [GITHUB_THREAD_DISCUSS_KEY], label: "Discuss inline" },
+      {
+        keys: modifierKeys(DIFF_COMPOSER_SEND_SHORTCUT),
+        label: DIFF_COMPOSER_SEND_SHORTCUT.label,
+      },
+      { keys: ["Esc"], label: "Close thread" },
     ],
   },
   {

@@ -588,6 +588,25 @@ button.vtb-comment-quote.sent-comment-anchor {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.sent-comment-home {
+  flex: none;
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+}
+.sent-comment-home::after {
+  content: " ·";
+  color: var(--color-fg-mute);
+}
+.sent-comment-markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.sent-comment-markdown > :first-child {
+  margin-top: 0;
+}
+.sent-comment-markdown > :last-child {
+  margin-bottom: 0;
+}
 .sent-comment .vtb-comment-quote-code {
   max-height: calc(4 * 1.55em);
   overflow: hidden;

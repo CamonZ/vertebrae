@@ -2531,7 +2531,7 @@ async fn capture_sessionless_tool_thread(world: &mut GuiWorld) {
             "worktree": path, "threadId": id,
             "location": {"path": "selection.ts", "side": "RIGHT",
                 "source": {"kind": "tool_call", "chatId": parent, "toolUseId": tool["tool_id"]}},
-            "range": {"startLine": 2, "line": 2}, "selectedText": "const selected = 42;",
+            "range": {"startLine": 2, "line": 2}, "subject": {"kind": "selection", "selectedText": "const selected = 42;"},
             "parent": {"chatId": parent, "projectPath": path}
         }}),
     )
@@ -2885,7 +2885,10 @@ async fn open_recorded_file(client: &fantoccini::Client, label: &str, code: &str
         &format!(
             r#"{DEEP}
            const file = document.querySelector('[aria-label="File selection.ts"]');
-           return !!file && deep(file, '[data-line="2"]')?.textContent.includes(arguments[0]);"#
+           const turn = [...document.querySelectorAll('[role="radio"]')]
+             .find((radio) => radio.textContent.trim() === "At this turn");
+           return !!file && turn?.getAttribute("aria-checked") === "true"
+             && deep(file, '[data-line="2"]')?.textContent.includes(arguments[0]);"#
         ),
         vec![json!(code)],
         Duration::from_secs(20),

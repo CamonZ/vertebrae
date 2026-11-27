@@ -59,6 +59,7 @@ function thread(
     },
     outdatedNoted: false,
     sessionId: null,
+    githubThreadId: null,
   };
 }
 
@@ -107,6 +108,14 @@ function Discussions({
       send: vi.fn(),
       cancel: vi.fn(),
       reconcile: vi.fn(),
+      reveal: null,
+      discussGithub: vi.fn(async () => ({ opened: true as const })),
+      attachThread: vi.fn(),
+      canAttachGithub: false,
+      attachGithub: vi.fn(),
+      revealed: vi.fn(),
+      draft: () => "",
+      setDraft: vi.fn(),
       toggleCollapsed: (id) =>
         setCollapsed((current) => {
           const next = new Set(current);

@@ -1,6 +1,10 @@
 import type { CapturedReviewAnchor, MappedReviewThread } from "../../bindings";
+import type { GithubDiscussionContext } from "./workspace/githubReview/githubDiscussion";
 import type { SelectedLineRange } from "@pierre/diffs";
-import type { DiffCommentHome, PendingDiffComment } from "./assistantTextComments";
+import type {
+  DiffCommentHome,
+  PendingDiffComment,
+} from "./assistantTextComments";
 import {
   canonicalPath,
   resolveSelection,
@@ -19,9 +23,15 @@ export interface FullFileSource {
   turn: { sessionId: string; turnId: string } | null;
 }
 
-export function sameFullFile(a: FullFileSource | undefined, b: FullFileSource | undefined) {
-  return a?.checkout === b?.checkout &&
-    a?.turn?.sessionId === b?.turn?.sessionId && a?.turn?.turnId === b?.turn?.turnId;
+export function sameFullFile(
+  a: FullFileSource | undefined,
+  b: FullFileSource | undefined
+) {
+  return (
+    a?.checkout === b?.checkout &&
+    a?.turn?.sessionId === b?.turn?.sessionId &&
+    a?.turn?.turnId === b?.turn?.turnId
+  );
 }
 
 export interface CodeSelection extends LineSpan {
@@ -32,16 +42,29 @@ export interface CodeSelection extends LineSpan {
   fullFile?: FullFileSource;
 }
 
+/** Where a thread's captured lines are kept: its commit and retained blob. */
+export type ReviewAnchorIds = Pick<
+  CapturedReviewAnchor,
+  "originalCommitId" | "originalBlobId"
+>;
+
 export interface SelectionThread {
   id: string;
   anchor: CodeSelection;
   status: ThreadStatus;
-  git: { original: CodeSelection; capture: CapturedReviewAnchor };
+  git: { original: CodeSelection; capture: ReviewAnchorIds };
   /** Whether the agent has been told the context is outdated. */
   outdatedNoted: boolean;
 
   /** The read-only chat session the conversation runs in, once asked. */
   sessionId: string | null;
+
+  /**
+   * The GitHub review thread this privately discusses. It is drawn with that
+   * thread wherever the thread shows (its line, Outdated group or the Review
+   * rail), so it follows GitHub's anchor rather than its own.
+   */
+  githubThreadId: string | null;
 }
 
 export type ThreadStatus =
@@ -50,8 +73,10 @@ export type ThreadStatus =
   | { kind: "unavailable"; lastKnown: "open" | "outdated" };
 
 export function isOutdated({ status }: SelectionThread): boolean {
-  return status.kind === "outdated" ||
-    (status.kind === "unavailable" && status.lastKnown === "outdated");
+  return (
+    status.kind === "outdated" ||
+    (status.kind === "unavailable" && status.lastKnown === "outdated")
+  );
 }
 
 /**
@@ -77,7 +102,13 @@ export function selectionAttachment(
         endLine: anchor.endLine,
         hunk: anchor.code,
       }
-    : createDiffComment({ home: anchor.home, file: anchor.file, span: anchor, body, id });
+    : createDiffComment({
+        home: anchor.home,
+        file: anchor.file,
+        span: anchor,
+        body,
+        id,
+      });
   return comment && { ...comment, selectionCode: anchor.code, outdated };
 }
 
@@ -87,12 +118,23 @@ export function anchorsInChanges(anchor: CodeSelection): boolean {
 }
 
 /**
- * Where a thread is drawn: nowhere when detached, else at its anchor in
- * Changes, a tool call's patch in the transcript, or a full-file document.
+ * Where a thread is drawn: with its GitHub thread, nowhere when detached,
+ * else at its anchor in Changes, a tool call's patch in the transcript, or a
+ * full-file document.
  */
-export type ThreadPlace = "detached" | "changes" | "transcript" | "document";
+export type ThreadPlace =
+  | "detached"
+  | "changes"
+  | "github"
+  | "transcript"
+  | "document";
 
-export function threadPlace({ status, anchor }: SelectionThread): ThreadPlace {
+export function threadPlace({
+  status,
+  anchor,
+  githubThreadId,
+}: SelectionThread): ThreadPlace {
+  if (githubThreadId !== null) return "github";
   if (status.kind !== "inline") return "detached";
   if (anchor.fullFile) return "document";
   return anchor.home.kind === "worktree" ? "changes" : "transcript";
@@ -101,6 +143,7 @@ export function threadPlace({ status, anchor }: SelectionThread): ThreadPlace {
 export const THREAD_PLACES: readonly ThreadPlace[] = [
   "detached",
   "changes",
+  "github",
   "transcript",
   "document",
 ];
@@ -108,8 +151,8 @@ export const THREAD_PLACES: readonly ThreadPlace[] = [
 /**
  * The Discussions section's list, grouped by where each thread is drawn:
  * detached threads (their code changed or their anchor is gone) first, then
- * Changes, transcript and document ones, each in creation order. Every
- * thread is listed exactly once.
+ * Changes, GitHub thread, transcript and document ones, each in creation
+ * order. Every thread is listed exactly once.
  */
 export function discussionList(
   threads: readonly SelectionThread[]
@@ -117,6 +160,7 @@ export function discussionList(
   const groups: Record<ThreadPlace, SelectionThread[]> = {
     detached: [],
     changes: [],
+    github: [],
     transcript: [],
     document: [],
   };
@@ -124,17 +168,41 @@ export function discussionList(
   return groups;
 }
 
-export type ThreadAnchor = Pick<SelectionThread, "id" | "anchor"> & { detached: boolean };
+export type ThreadAnchor = Pick<SelectionThread, "id" | "anchor"> & {
+  detached: boolean;
+};
 
-/** Whether a diff surface draws this thread inline: only on its own home. */
-export function drawnOn({ anchor, detached }: ThreadAnchor, surface: ReviewSurface): boolean {
-  const home = anchor.home;
-  if (detached || anchor.fullFile || home.kind !== surface.kind) return false;
-  return home.kind !== "tool_call" ||
-    (surface.kind === "tool_call" && home.toolUseId === surface.toolUseId);
+/**
+ * What the diff surfaces draw at an anchor. A GitHub thread's discussion is
+ * drawn with that thread instead, so it is never among them.
+ */
+function drawnAnchors(threads: readonly SelectionThread[]): ThreadAnchor[] {
+  return threads
+    .filter((thread) => thread.githubThreadId === null)
+    .map(({ id, anchor, status }) => ({
+      id,
+      anchor,
+      detached: status.kind !== "inline",
+    }));
 }
 
-export function mergeDiscussion(previous: SelectionThread | undefined, restored: SelectionThread): SelectionThread {
+/** Whether a diff surface draws this thread inline: only on its own home. */
+export function drawnOn(
+  { anchor, detached }: ThreadAnchor,
+  surface: ReviewSurface
+): boolean {
+  const home = anchor.home;
+  if (detached || anchor.fullFile || home.kind !== surface.kind) return false;
+  return (
+    home.kind !== "tool_call" ||
+    (surface.kind === "tool_call" && home.toolUseId === surface.toolUseId)
+  );
+}
+
+export function mergeDiscussion(
+  previous: SelectionThread | undefined,
+  restored: SelectionThread
+): SelectionThread {
   return {
     ...restored,
     sessionId: restored.sessionId ?? previous?.sessionId ?? null,
@@ -146,6 +214,11 @@ export interface DiscussionState {
   selection: CodeSelection | null;
   threads: SelectionThread[];
   activeId: string | null;
+  /**
+   * A GitHub thread to bring into view: Changes shows it (in the diff or the
+   * Review rail) and reports it taken.
+   */
+  reveal: { githubThreadId: string; nonce: number } | null;
 }
 
 export function captureCodeSelection(
@@ -168,17 +241,32 @@ export function captureCodeSelection(
   return { ...span, path, code, file, home };
 }
 
-function sameSelection(left: CodeSelection | null, right: CodeSelection | null) {
+function sameSelection(
+  left: CodeSelection | null,
+  right: CodeSelection | null
+) {
   if (left === right) return true;
-  if (!left || !right || left.file !== right.file || left.path !== right.path ||
-      left.side !== right.side || left.startLine !== right.startLine ||
-      left.endLine !== right.endLine || left.code !== right.code ||
-      !sameFullFile(left.fullFile, right.fullFile)) return false;
+  if (
+    !left ||
+    !right ||
+    left.file !== right.file ||
+    left.path !== right.path ||
+    left.side !== right.side ||
+    left.startLine !== right.startLine ||
+    left.endLine !== right.endLine ||
+    left.code !== right.code ||
+    !sameFullFile(left.fullFile, right.fullFile)
+  )
+    return false;
   const a = left.home;
   const b = right.home;
   return a.kind === "worktree"
-    ? b.kind === "worktree" && a.wholeBranch === b.wholeBranch && a.comparisonIdentity === b.comparisonIdentity
-    : b.kind === "tool_call" && a.toolUseId === b.toolUseId && a.toolName === b.toolName;
+    ? b.kind === "worktree" &&
+        a.wholeBranch === b.wholeBranch &&
+        a.comparisonIdentity === b.comparisonIdentity
+    : b.kind === "tool_call" &&
+        a.toolUseId === b.toolUseId &&
+        a.toolName === b.toolName;
 }
 
 export function selectionLabel(anchor: CodeSelection): string {
@@ -199,7 +287,8 @@ export const OUTDATED_CONTEXT_NOTE =
 export function discussionFirstTurn(
   anchor: CodeSelection,
   outdated: boolean,
-  question: string
+  question: string,
+  github?: GithubDiscussionContext
 ): string {
   const context = {
     path: anchor.path,
@@ -208,6 +297,7 @@ export function discussionFirstTurn(
     endLine: anchor.endLine,
     code: anchor.code,
     outdated,
+    ...(github ? { githubThread: github } : {}),
   };
 
   return `Context: ${JSON.stringify(context)}\nQuestion: ${question}`;
@@ -226,11 +316,18 @@ export function discussionFollowUp(question: string, noteOutdated: boolean) {
 export function discussionTurn(
   thread: SelectionThread,
   continues: boolean,
-  question: string
+  question: string,
+  /** The GitHub thread it discusses, as last read; a fresh session carries it. */
+  github?: GithubDiscussionContext
 ): { payload: string; notesOutdated: boolean } {
   if (!continues)
     return {
-      payload: discussionFirstTurn(thread.anchor, isOutdated(thread), question),
+      payload: discussionFirstTurn(
+        thread.anchor,
+        isOutdated(thread),
+        question,
+        github
+      ),
       notesOutdated: isOutdated(thread),
     };
 
@@ -252,10 +349,14 @@ export class SelectionDiscussions {
     selection: null,
     threads: [],
     activeId: null,
+    reveal: null,
   };
 
   private snapshot: WorktreeSnapshot | null = null;
   private anchors: readonly ThreadAnchor[] = [];
+  private revealNonce = 0;
+  /** Unsent follow-up questions, kept while a thread is closed. Not published. */
+  private drafts = new Map<string, string>();
   private listeners = new Set<() => void>();
 
   subscribe = (listener: () => void) => {
@@ -283,7 +384,8 @@ export class SelectionDiscussions {
   ask(
     anchor: CodeSelection,
     id: string,
-    capture: CapturedReviewAnchor
+    { originalCommitId, originalBlobId }: ReviewAnchorIds,
+    githubThreadId: string | null = null
   ): string {
     // Capture can publish a catalog event before its command returns.
     if (this.thread(id)) {
@@ -294,41 +396,45 @@ export class SelectionDiscussions {
     const thread: SelectionThread = {
       id,
       anchor,
-      git: { original: anchor, capture },
+      git: { original: anchor, capture: { originalCommitId, originalBlobId } },
       status: { kind: "inline" },
       outdatedNoted: false,
       sessionId: null,
+      githubThreadId,
     };
     const threads = [...this.state.threads, thread];
     const nextState = { ...this.state, activeId: id, threads };
 
-    this.anchors = [...this.anchors, { id, anchor, detached: false }];
+    this.anchors = drawnAnchors(threads);
     this.publish(nextState);
 
     return id;
   }
 
   restore(restored: readonly SelectionThread[]) {
-    const byId = new Map(this.state.threads.map((thread) => [thread.id, thread]));
-    for (const thread of restored) byId.set(thread.id, mergeDiscussion(byId.get(thread.id), thread));
+    const byId = new Map(
+      this.state.threads.map((thread) => [thread.id, thread])
+    );
+    for (const thread of restored)
+      byId.set(thread.id, mergeDiscussion(byId.get(thread.id), thread));
     if (restored.length) this.publishThreads([...byId.values()]);
   }
 
   private publishThreads(threads: SelectionThread[]) {
-    this.anchors = threads.map(({ id, anchor, status }) => ({
-      id, anchor, detached: status.kind !== "inline",
-    }));
+    this.anchors = drawnAnchors(threads);
     this.publish({ ...this.state, threads });
   }
 
   remove(id: string) {
     const thread = this.thread(id);
     if (!thread) return undefined;
+    this.drafts.delete(id);
     if (this.state.activeId === id) {
       this.state = {
         ...this.state,
         activeId: null,
-        selection: this.state.selection === thread.anchor ? null : this.state.selection,
+        selection:
+          this.state.selection === thread.anchor ? null : this.state.selection,
       };
     }
     this.publishThreads(this.state.threads.filter((item) => item.id !== id));
@@ -342,8 +448,53 @@ export class SelectionDiscussions {
       this.publish({
         ...this.state,
         activeId: id,
-        selection: thread?.status.kind === "inline" ? thread.anchor : this.state.selection,
+        // A GitHub thread's discussion highlights nothing: GitHub places it.
+        selection:
+          thread?.status.kind === "inline" && thread.githubThreadId === null
+            ? thread.anchor
+            : this.state.selection,
       });
+  }
+
+  /** Open a GitHub thread's discussion and ask Changes to show its thread. */
+  reveal(id: string) {
+    const githubThreadId = this.thread(id)?.githubThreadId;
+    if (!githubThreadId) return;
+    this.publish({
+      ...this.state,
+      activeId: id,
+      reveal: { githubThreadId, nonce: ++this.revealNonce },
+    });
+  }
+
+  /** Ask Changes to show a GitHub thread that was sent without discussion. */
+  revealGithub(githubThreadId: string) {
+    this.publish({
+      ...this.state,
+      reveal: { githubThreadId, nonce: ++this.revealNonce },
+    });
+  }
+
+  /** Changes showed the thread `reveal` asked for. */
+  revealed(nonce: number) {
+    if (this.state.reveal?.nonce === nonce)
+      this.publish({ ...this.state, reveal: null });
+  }
+
+  /** The discussion of a GitHub review thread, if there is one. */
+  forGithubThread(githubThreadId: string): SelectionThread | undefined {
+    return this.state.threads.find(
+      (thread) => thread.githubThreadId === githubThreadId
+    );
+  }
+
+  draft(id: string): string {
+    return this.drafts.get(id) ?? "";
+  }
+
+  setDraft(id: string, text: string) {
+    if (text) this.drafts.set(id, text);
+    else this.drafts.delete(id);
   }
 
   thread(id: string): SelectionThread | undefined {
@@ -378,15 +529,30 @@ export class SelectionDiscussions {
     const positions = new Map(mappings.map((row) => [row.threadId, row]));
     const threads = this.state.threads.map((thread) => {
       const position = positions.get(thread.id);
-      if (!position || thread.status.kind === "unreadable" || thread.git.original.home.kind !== "worktree") return thread;
+      // A GitHub thread's discussion follows GitHub's anchor, not its own.
+      if (
+        !position ||
+        thread.githubThreadId !== null ||
+        thread.status.kind === "unreadable" ||
+        thread.git.original.home.kind !== "worktree"
+      )
+        return thread;
       const original = thread.git.original;
-      const file = original.fullFile ? undefined : snapshot?.files.find((file) =>
-        original.side === "old"
-          ? file.oldPath === original.file.oldPath
-          : file.newPath === original.path
-      );
+      const file = original.fullFile
+        ? undefined
+        : snapshot?.files.find((file) =>
+            original.side === "old"
+              ? file.oldPath === original.file.oldPath
+              : file.newPath === original.path
+          );
       if (position.status === "unavailable")
-        return { ...thread, status: { kind: "unavailable", lastKnown: isOutdated(thread) ? "outdated" : "open" } } satisfies SelectionThread;
+        return {
+          ...thread,
+          status: {
+            kind: "unavailable",
+            lastKnown: isOutdated(thread) ? "outdated" : "open",
+          },
+        } satisfies SelectionThread;
       const outdated = position.status === "outdated";
       const anchor =
         outdated || position.startLine === null || position.line === null
@@ -401,7 +567,13 @@ export class SelectionDiscussions {
       return {
         ...thread,
         anchor,
-        status: { kind: outdated ? "outdated" : (original.fullFile || (file && spanRows(file, anchor))) ? "inline" : "detached" },
+        status: {
+          kind: outdated
+            ? "outdated"
+            : original.fullFile || (file && spanRows(file, anchor))
+              ? "inline"
+              : "detached",
+        },
       } satisfies SelectionThread;
     });
 
@@ -414,8 +586,15 @@ export class SelectionDiscussions {
     const selection = this.state.selection;
     if (selection?.home.kind !== "worktree" || selection.fullFile) return;
 
-    const file = snapshot.files.find((file) => canonicalPath(file) === selection.path);
-    if (!file || spanRows(file, selection)?.map((row) => row.text).join("\n") !== selection.code)
+    const file = snapshot.files.find(
+      (file) => canonicalPath(file) === selection.path
+    );
+    if (
+      !file ||
+      spanRows(file, selection)
+        ?.map((row) => row.text)
+        .join("\n") !== selection.code
+    )
       this.publish({ ...this.state, selection: null });
   }
 }

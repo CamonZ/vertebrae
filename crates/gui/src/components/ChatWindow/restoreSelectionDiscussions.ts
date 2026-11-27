@@ -6,6 +6,16 @@ import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 import type { FullFileSource, SelectionThread } from "./selectionDiscussions";
 import { unwrapAnchor } from "./reviewAnchors";
 
+/** `origin_ref` prefix of a GitHub review thread's private discussion. */
+const GITHUB_THREAD_ORIGIN = "github-thread:";
+
+/** The GitHub review thread a saved discussion is about, if any. */
+export function githubThreadOf(originRef: string | null): string | null {
+  return originRef?.startsWith(GITHUB_THREAD_ORIGIN)
+    ? originRef.slice(GITHUB_THREAD_ORIGIN.length) || null
+    : null;
+}
+
 interface SavedDiscussion {
   thread: ReviewThread;
   home: { kind: "worktree" } | { kind: "tool_call"; toolUseId: string };
@@ -157,6 +167,7 @@ export function placeWorktreeDiscussions(
         ...(fullFile ? { fullFile } : {}),
       } as const;
       const outdated = payload.status === "outdated";
+      const githubThreadId = githubThreadOf(payload.originRef);
       const anchor = {
         ...original,
         startLine: payload.startLine ?? original.startLine,
@@ -175,15 +186,21 @@ export function placeWorktreeDiscussions(
         status: readError
           ? { kind: "unreadable", message: readError.message }
           : {
-              kind: outdated
-                ? "outdated"
-                : !fullFile && home.kind === "worktree" &&
-                    (!worktreeFile || !spanRows(worktreeFile, anchor))
-                  ? "detached"
-                  : "inline",
+              // GitHub places a GitHub thread's discussion, not the catalog.
+              kind:
+                githubThreadId !== null
+                  ? "inline"
+                  : outdated
+                    ? "outdated"
+                    : !fullFile &&
+                        home.kind === "worktree" &&
+                        (!worktreeFile || !spanRows(worktreeFile, anchor))
+                      ? "detached"
+                      : "inline",
             },
         outdatedNoted: payload.outdatedNoted,
         sessionId,
+        githubThreadId,
       };
     }
   );

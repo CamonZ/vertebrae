@@ -590,6 +590,13 @@ describe("Changes keyboard line cursor", () => {
     reconcile: vi.fn(),
     toggleCollapsed: vi.fn(),
     focusTaken: vi.fn(),
+    discussGithub: vi.fn(() => Promise.resolve({ opened: true as const })),
+    attachThread: vi.fn(),
+    canAttachGithub: false,
+    attachGithub: vi.fn(),
+    revealed: vi.fn(),
+    draft: vi.fn(() => ""),
+    setDraft: vi.fn(),
   } satisfies DiscussionActions;
   const writeText = vi.fn(() => Promise.resolve());
 
@@ -681,7 +688,9 @@ describe("Changes keyboard line cursor", () => {
 
   it("starts the cursor from a focused file heading", () => {
     renderChanges();
-    const heading = screen.getByRole("button", { name: "Toggle diff for g.ts" });
+    const heading = screen.getByRole("button", {
+      name: "Toggle diff for g.ts",
+    });
     act(() => heading.focus());
     press("ArrowDown");
     expect(selected()).toEqual({
@@ -845,7 +854,10 @@ describe("Changes keyboard line cursor", () => {
     expect(press("PageDown")).toBe(false);
     expect(scrollBy).toHaveBeenLastCalledWith({ top: 60, behavior: "instant" });
     expect(press("PageUp", { shiftKey: true })).toBe(false);
-    expect(scrollBy).toHaveBeenLastCalledWith({ top: -60, behavior: "instant" });
+    expect(scrollBy).toHaveBeenLastCalledWith({
+      top: -60,
+      behavior: "instant",
+    });
     // ⌘PgDn stays with the app.
     expect(press("PageDown", { metaKey: true })).toBe(true);
     expect(scrollBy).toHaveBeenCalledTimes(2);
@@ -887,7 +899,9 @@ describe("Changes keyboard line cursor", () => {
       range: { start: 1, end: 1, side: "additions" },
     });
     // Unfolding a viewed file unmarks it.
-    fireEvent.click(screen.getByRole("button", { name: "Toggle diff for f.ts" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Toggle diff for f.ts" })
+    );
     expect(
       screen.getByRole("button", { name: "Toggle diff for f.ts" })
     ).toHaveAttribute("aria-expanded", "true");
@@ -899,7 +913,10 @@ describe("Changes keyboard line cursor", () => {
     press("c");
     expect(
       screen.getByRole("button", { name: "Send to main chat" })
-    ).toHaveAttribute("title", expect.stringMatching(/Send to main chat \(.+↵\)/));
+    ).toHaveAttribute(
+      "title",
+      expect.stringMatching(/Send to main chat \(.+↵\)/)
+    );
     expect(
       screen.getByRole("button", { name: "Discuss inline" })
     ).toHaveAttribute("title", expect.stringMatching(/Discuss inline \(.+↵\)/));
@@ -1018,7 +1035,9 @@ describe("Changes collapsed unchanged lines", () => {
     expect(selected()).toEqual(line("m.ts", 47));
     // ↵ on an ordinary line still opens the comment box.
     await press("Enter");
-    expect(screen.getByRole("textbox", { name: "New diff comment" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "New diff comment" })
+    ).toBeInTheDocument();
   });
 
   it("reveals a section at the other end with ⌥↵, and ⇧↵ does not reveal the gap", async () => {

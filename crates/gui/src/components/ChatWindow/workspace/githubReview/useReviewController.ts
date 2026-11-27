@@ -197,6 +197,52 @@ export function useReviewController(
     focusTarget,
   ]);
 
+  /** A thread opens in the diff with its file's other outdated threads. */
+  const shownWith = useCallback(
+    (placed: PlacedThread): string[] =>
+      placed.kind === "outdated" && model
+        ? (model.outdatedByPath.get(placed.thread.anchor.path) ?? []).map(
+            ({ thread }) => thread.id
+          )
+        : [placed.thread.id],
+    [model]
+  );
+
+  /**
+   * Bring a thread into view wherever it can be read: expanded in the diff,
+   * else expanded in the Review rail (which the caller opens).
+   */
+  const reveal = useCallback(
+    (placed: PlacedThread): "diff" | "rail" => {
+      const id = placed.thread.id;
+      if (showInDiff(placed)) {
+        open(shownWith(placed), homeOf(id) ?? { kind: "railOpener" }, id);
+        return "diff";
+      }
+      setInline((current) => new Set([...current, id]));
+      return "rail";
+    },
+    [showInDiff, open, shownWith, homeOf]
+  );
+
+  /**
+   * `[`/`]`: the card stepped from closes (with what opened with it), the
+   * next thread is revealed with focus in its card.
+   */
+  const step = useCallback(
+    (fromId: string | null, next: PlacedThread): "diff" | "rail" => {
+      const from = fromId ? model?.byThread.get(fromId) : undefined;
+      if (from) {
+        const ids = shownWith(from);
+        for (const id of ids) returns.current.delete(id);
+        close(ids);
+        setInline((current) => without(current, [from.thread.id]));
+      }
+      return reveal(next);
+    },
+    [model, shownWith, close, reveal]
+  );
+
   const rail = useMemo<RailThreads>(
     () => ({
       inline,
@@ -208,13 +254,7 @@ export function useReviewController(
           ? (homeOf(id) ?? { kind: "railOpener" })
           : { kind: "rail", threadId: id };
         if (!inline.has(id) && showInDiff(placed)) {
-          const ids =
-            placed.kind === "outdated" && model
-              ? (model.outdatedByPath.get(placed.thread.anchor.path) ?? []).map(
-                  ({ thread }) => thread.id
-                )
-              : [id];
-          open(ids, back, id);
+          open(shownWith(placed), back, id);
           return;
         }
         setInline((current) =>
@@ -226,15 +266,16 @@ export function useReviewController(
         focusTarget({ kind: "rail", threadId });
       },
     }),
-    [inline, model, open, showInDiff, railCovers, homeOf, focusTarget]
+    [inline, open, shownWith, showInDiff, railCovers, homeOf, focusTarget]
   );
 
-  return { diff, rail, focusTarget };
+  return { diff, rail, focusTarget, reveal, step };
 }
 
 /**
  * The Review rail's open state: opening it moves focus into it (a rail
- * restored on mount does not), closing it gives focus back to the control
+ * restored on mount does not, nor one whose card already took focus, as
+ * stepping to a thread does), closing it gives focus back to the control
  * that opened it in the pane.
  */
 export function useRailFocus(
@@ -244,8 +285,9 @@ export function useRailFocus(
 ) {
   const wasOpen = useRef(showRail);
   useEffect(() => {
-    if (showRail && !wasOpen.current)
-      railRef.current?.focus({ preventScroll: true });
+    const rail = railRef.current;
+    if (showRail && !wasOpen.current && !rail?.contains(document.activeElement))
+      rail?.focus({ preventScroll: true });
     else if (!showRail && wasOpen.current) {
       // Focus was in the rail (now gone) rather than on what closed it.
       const active = document.activeElement;
