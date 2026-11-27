@@ -1,3 +1,4 @@
+use crate::RateLimitStatus;
 use percent_encoding::{utf8_percent_encode, AsciiSet, CONTROLS};
 use serde::{Deserialize, Serialize};
 
@@ -94,6 +95,8 @@ pub struct PullRequestSummary {
 pub struct OpenPrSearchResult {
     pub prs: Vec<PullRequestSummary>,
     pub has_more: bool,
+    /// The tightest rate-limit window GitHub reported across the pages read.
+    pub rate_limit: Option<RateLimitStatus>,
 }
 
 #[cfg(test)]

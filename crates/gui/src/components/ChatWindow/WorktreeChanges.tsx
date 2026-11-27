@@ -68,7 +68,11 @@ import { ChangesSummary } from "./workspace/ChangesSummary";
 import { SideEmptyState } from "./SideEmptyState";
 import { CodeGlyph } from "./commentIcons";
 import { ComparisonControls } from "./workspace/ComparisonControls";
-import { PrAssociationBar } from "./workspace/PrAssociationBar";
+import {
+  PrAssociationBar,
+  type PrBarHandle,
+} from "./workspace/PrAssociationBar";
+import { useWorktreePr } from "../../hooks/useWorktreePr";
 import { OpenDocumentTabs } from "./workspace/OpenDocumentTabs";
 import {
   changesPaletteItems,
@@ -153,6 +157,8 @@ export function WorktreeChanges({
 }) {
   const baseButton = useRef<HTMLButtonElement>(null);
   const targetButton = useRef<HTMLButtonElement>(null);
+  const prBar = useRef<PrBarHandle>(null);
+  const worktreePr = useWorktreePr(prBranch ? worktreePath : null, prBranch);
   const fileList = useRef<HTMLElement>(null);
   const sectionRef = useRef<HTMLElement | null>(null);
   const [fileCursorRequest, setFileCursorRequest] = useState<{
@@ -505,6 +511,8 @@ export function WorktreeChanges({
           discussion,
           baseButton: baseButton.current,
           targetButton: targetButton.current,
+          pr: prBranch ? worktreePr : null,
+          prBar: prBar.current,
         },
         {
           jumpToFile,
@@ -636,9 +644,6 @@ export function WorktreeChanges({
         if (path) setActivePath(path);
       }}
     >
-      {prBranch && (
-        <PrAssociationBar worktreePath={worktreePath} branch={prBranch} />
-      )}
       <ComparisonControls
         comparison={comparisonChoices}
         base={base}
@@ -662,6 +667,9 @@ export function WorktreeChanges({
         refreshDisabled={state.status === "loading"}
         onRefresh={refreshAll}
       />
+      {/* Band 2 (review bar) and band 3 (checks drawer) sit under the
+          comparison toolbar. */}
+      {prBranch && <PrAssociationBar ref={prBar} pr={worktreePr} />}
       {jumpTarget &&
         state.status === "ready" &&
         files.length > 0 &&

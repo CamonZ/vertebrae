@@ -1,6 +1,7 @@
 import type { AssociationEntity, Step, Task } from "../../bindings";
 import { queryClient } from "../../query/queryClient";
 import { queryKeys } from "../../query/queryKeys";
+import { cachedTasksById } from "../../query/cachedTasks";
 import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 
 /** Use existing cached entities only. Reading candidates never starts a query. */
@@ -9,26 +10,7 @@ export function cachedAssociationCandidates(
 ): AssociationEntity[] {
   if (generation !== getProjectScopeGeneration()) return [];
 
-  const tasks = new Map<string, Task>();
-  const lists = queryClient.getQueriesData<Task[]>({
-    queryKey: queryKeys.tasks.lists(generation),
-  });
-
-  const details = queryClient.getQueriesData<Task>({
-    queryKey: queryKeys.tasks.details(generation),
-  });
-
-  for (const [, list] of lists) {
-    for (const task of list ?? []) {
-      tasks.set(task.id, task);
-    }
-  }
-
-  for (const [, task] of details) {
-    if (task) {
-      tasks.set(task.id, task);
-    }
-  }
+  const tasks = cachedTasksById(generation);
 
   return [...tasks.values()]
     .filter((task) => isEligibleEntity(task, generation))

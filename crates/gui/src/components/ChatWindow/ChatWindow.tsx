@@ -54,7 +54,8 @@ import { useChatSession } from "../../hooks/useChatSession";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatAssociation } from "../../hooks/useChatAssociation";
 import { WorktreeChanges } from "./WorktreeChanges";
-import { useWorktreePrAssociation } from "../../hooks/useWorktreePrAssociation";
+import { useWorktreePr } from "../../hooks/useWorktreePr";
+import { savedPrOf } from "../../stores/prLinks";
 import { linkedPullRequest } from "../../stores/worktreePrStore";
 import {
   activate,
@@ -609,8 +610,17 @@ export function ChatWindow({
     ? null
     : association.record.worktreePath;
   const prBranch = prWorktree ? association.record.branch : null;
-  const worktreePr = useWorktreePrAssociation(prWorktree, prBranch);
-  const linkedPr = linkedPullRequest(worktreePr.association);
+  const worktreePr = useWorktreePr(prWorktree, prBranch);
+  // A chat synced from another machine has no worktree here: its saved PR
+  // is shown as is, never read.
+  const linkedPr =
+    prWorktree && prBranch
+      ? linkedPullRequest(worktreePr.association)
+      : chat.session
+        ? savedPrOf(chat.session)
+        : null;
+  const linkedPrChecks =
+    linkedPr && worktreePr.entry.snapshot ? worktreePr.counts : null;
   const shownEvidence =
     !showChanges &&
     evidence?.sessionId === sessionId &&
@@ -680,8 +690,7 @@ export function ChatWindow({
   // The side column always sits beside the transcript (shown, it expands the
   // chat). Narrow, source evidence replaces the transcript as the chat's view.
   const sidePlacement =
-    shownSection ||
-    panelResize.available >= SIDE_COLUMN_BESIDE_MIN_WIDTH
+    shownSection || panelResize.available >= SIDE_COLUMN_BESIDE_MIN_WIDTH
       ? "beside"
       : "view";
   const panelProps = {
@@ -729,7 +738,16 @@ export function ChatWindow({
           projectLabel ??
           localChatSessionProjectDisplayName(chat.session.projectPath)
         }
+        entity={
+          association.record.ticketId
+            ? {
+                id: association.record.ticketId,
+                level: association.record.entityLevel ?? "ticket",
+              }
+            : null
+        }
         linkedPr={linkedPr}
+        linkedPrChecks={linkedPrChecks}
         onOpenPrInChanges={
           worktreePath
             ? () => {

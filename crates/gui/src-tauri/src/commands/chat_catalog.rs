@@ -20,11 +20,9 @@ use vertebrae_sacrum_client::GraphqlClient;
 mod delivery;
 mod entity;
 mod migration;
-mod pr_associations;
 mod review_anchors;
 mod review_threads;
 mod storage;
-pub(crate) use pr_associations::*;
 pub(crate) use review_anchors::*;
 pub(crate) use review_threads::*;
 
@@ -220,6 +218,103 @@ fn installation(root: &Path) -> Result<String, CommandError> {
     vertebrae_installer::installation_id_in(root).map_err(|_| error())
 }
 
+/// A chat's linked PR as the GUI saves it on the association
+/// (`stores/prLinks.ts`). Sacrum keeps its `host`, `owner`, `repo` and
+/// `number` as `pr_<field>`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LinkedPrRecord {
+    host: String,
+    owner: String,
+    repo: String,
+    number: u64,
+    title: String,
+    state: Option<String>,
+    url: String,
+}
+
+/// The association's `pullRequest`: pinned to a worktree branch, or to none
+/// for a chat synced from another machine. `pr: None` is an unlink.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrLinkRecord {
+    worktree_path: Option<String>,
+    branch: Option<String>,
+    pr: Option<LinkedPrRecord>,
+    changed_at: Option<String>,
+}
+
+fn text_field<'a>(association: &'a Value, field: &str) -> Option<&'a str> {
+    association.get(field).and_then(Value::as_str)
+}
+
+/// The PR linked where the association is now: the same worktree and
+/// branch, or no worktree for both. A link saved for elsewhere, an unlink or
+/// a malformed record links nothing.
+fn linked_pr(association: &Value) -> Option<LinkedPrRecord> {
+    let link: PrLinkRecord =
+        serde_json::from_value(association.get("pullRequest")?.clone()).ok()?;
+    let here = link.worktree_path.as_deref() == text_field(association, "worktreePath")
+        && link.branch.as_deref() == text_field(association, "branch");
+    link.pr.filter(|pr| here && pr.number > 0)
+}
+
+/// The PR Sacrum holds for a chat, if every field is well-formed.
+fn remote_pr(metadata: &Value) -> Option<(String, String, String, u64)> {
+    let text = |key: &str| {
+        metadata
+            .get(format!("pr_{key}"))?
+            .as_str()
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+    };
+    let number = metadata.get("pr_number")?.as_u64().filter(|n| *n > 0)?;
+    Some((text("host")?, text("owner")?, text("repo")?, number))
+}
+
+/// Sacrum's PR for the chat, pinned to where the association is (no
+/// worktree for a chat from another machine). The local link stands while
+/// it names the same PR (it carries what was last read from GitHub);
+/// otherwise Sacrum's replaces it. Without one, a local link is dropped but a
+/// local unlink stays, since Sacrum does not keep unlinks.
+fn hydrate_pr_link(association: &mut Value, metadata: &Value) {
+    let local = linked_pr(association);
+    match remote_pr(metadata) {
+        Some((host, owner, repo, number)) => {
+            let same = local.as_ref().is_some_and(|pr| {
+                pr.host == host
+                    && pr.owner.eq_ignore_ascii_case(&owner)
+                    && pr.repo.eq_ignore_ascii_case(&repo)
+                    && pr.number == number
+            });
+            if same {
+                return;
+            }
+            let link = PrLinkRecord {
+                worktree_path: text_field(association, "worktreePath").map(str::to_owned),
+                branch: text_field(association, "branch").map(str::to_owned),
+                pr: Some(LinkedPrRecord {
+                    url: format!("https://{host}/{owner}/{repo}/pull/{number}"),
+                    host,
+                    owner,
+                    repo,
+                    number,
+                    title: String::new(),
+                    state: None,
+                }),
+                changed_at: None,
+            };
+            association["pullRequest"] = serde_json::to_value(link).expect("PR link serialization");
+        }
+        None if local.is_some() => {
+            if let Some(fields) = association.as_object_mut() {
+                fields.remove("pullRequest");
+            }
+        }
+        None => {}
+    }
+}
+
 /// Keep this allowlist independent of the session struct's future fields.
 fn projection(session: &LocalChatSessionIndexEntry) -> Value {
     let value = serde_json::to_value(session).expect("session serialization");
@@ -262,6 +357,12 @@ fn projection(session: &LocalChatSessionIndexEntry) -> Value {
         .unwrap_or(&Value::Null);
     if let Some(level) = association.get("entityLevel") {
         metadata.insert("entityLevel".into(), level.clone());
+    }
+    if let Some(pr) = linked_pr(association) {
+        metadata.insert("pr_host".into(), json!(pr.host));
+        metadata.insert("pr_owner".into(), json!(pr.owner));
+        metadata.insert("pr_repo".into(), json!(pr.repo));
+        metadata.insert("pr_number".into(), json!(pr.number));
     }
 
     if discussion.is_some() {
@@ -969,6 +1070,7 @@ fn hydrate_record(
             .cloned()
             .filter(|v| v.is_string())
             .unwrap_or_else(|| json!("ticket"));
+        hydrate_pr_link(&mut association, &payload["metadata"]);
         value["association"] = association;
     }
 
@@ -1663,6 +1765,112 @@ mod tests {
             LocalChatActivityStatus::Working
         );
         assert_eq!(reloaded[1].activity_status, LocalChatActivityStatus::Idle);
+    }
+
+    fn pr(owner: &str, number: u64) -> Value {
+        json!({
+            "host": "github.com",
+            "owner": owner,
+            "repo": "demo-repo",
+            "number": number,
+            "title": "Fix retry budget",
+            "state": "open",
+            "url": format!("https://github.com/{owner}/demo-repo/pull/{number}"),
+        })
+    }
+
+    /// Where a chat is: a worktree branch here, or (synced from another
+    /// machine) no worktree.
+    fn chat_at(tc: &TestCase) -> (Value, Value) {
+        if tc.draw(gs::booleans()) {
+            (json!("/work/demo"), json!("feature/retry"))
+        } else {
+            (Value::Null, Value::Null)
+        }
+    }
+
+    /// No link, an unlink, a link where the chat is, one saved for another
+    /// branch of the worktree, or one saved for no worktree.
+    fn pr_association(kind: u8, (worktree, branch): &(Value, Value), local: &Value) -> Value {
+        let mut association = json!({
+            "ticketId": null,
+            "worktreePath": worktree,
+            "branch": branch,
+        });
+        let on = |worktree: &Value, branch: &Value, pr: Value| json!({"worktreePath": worktree, "branch": branch, "pr": pr, "changedAt": null});
+        match kind {
+            1 => association["pullRequest"] = on(worktree, branch, Value::Null),
+            2 => association["pullRequest"] = on(worktree, branch, local.clone()),
+            3 => {
+                association["pullRequest"] =
+                    on(&json!("/work/demo"), &json!("feature/old"), local.clone())
+            }
+            4 => association["pullRequest"] = on(&Value::Null, &Value::Null, local.clone()),
+            _ => {}
+        }
+        association
+    }
+
+    /// Sacrum keeps exactly the PR linked where the chat is (a worktree
+    /// branch, or no worktree for a chat from another machine), and hydrating
+    /// its keys back keeps a local link naming the same PR (with what was
+    /// last read from GitHub), takes Sacrum's otherwise, pinned to where the
+    /// chat is, and keeps an unlink, which Sacrum does not hold.
+    #[hegel::test]
+    fn the_linked_pr_round_trips_through_sacrum_metadata(tc: TestCase) {
+        let at = chat_at(&tc);
+        let kind = tc.draw(gs::integers::<u8>().max_value(4));
+        let local = pr(tc.draw(gs::sampled_from(&["example", "Example"][..])), 7);
+        let association = pr_association(kind, &at, &local);
+        let linked_here = kind == 2 || (kind == 4 && at.0.is_null());
+        let mut session = payload(1)["metadata"].clone();
+        session["id"] = json!("chat");
+        session["association"] = association.clone();
+        let session: LocalChatSessionIndexEntry = serde_json::from_value(session).unwrap();
+        let projected = projection(&session)["metadata"].clone();
+        let metadata: serde_json::Map<String, Value> = projected
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(key, _)| key.starts_with("pr_"))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
+        assert_eq!(metadata.is_empty(), !linked_here, "{association}");
+        if linked_here {
+            assert_eq!(metadata["pr_owner"], local["owner"]);
+            assert_eq!(metadata["pr_number"], 7);
+        }
+
+        // Sacrum: nothing, what was projected, or another PR.
+        let remote = match tc.draw(gs::integers::<u8>().max_value(2)) {
+            0 => json!({}),
+            1 => Value::Object(metadata),
+            _ => {
+                json!({"pr_host": "github.com", "pr_owner": "EXAMPLE", "pr_repo": "demo-repo", "pr_number": 9})
+            }
+        };
+        tc.note(&format!("local {association}, remote {remote}"));
+        let mut hydrated = association.clone();
+        hydrate_pr_link(&mut hydrated, &remote);
+
+        let expected = match remote_pr(&remote) {
+            Some(_) if linked_here && remote["pr_number"] == 7 => {
+                association["pullRequest"].clone()
+            }
+            Some((host, owner, repo, number)) => json!({
+                "worktreePath": at.0,
+                "branch": at.1,
+                "pr": {
+                    "host": host, "owner": owner, "repo": repo, "number": number,
+                    "title": "", "state": null,
+                    "url": format!("https://{host}/{owner}/{repo}/pull/{number}"),
+                },
+                "changedAt": null,
+            }),
+            None if linked_here => Value::Null,
+            None => association["pullRequest"].clone(),
+        };
+        assert_eq!(hydrated["pullRequest"], expected);
     }
 
     #[hegel::test]

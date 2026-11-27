@@ -1,4 +1,9 @@
 import type { WorktreeChange } from "../../../bindings";
+import type { WorktreePr } from "../../../hooks/useWorktreePr";
+import {
+  isAbsoluteHttpUrl,
+  openExternalUrl,
+} from "../../../utils/openExternalUrl";
 import { useChatStore } from "../../../stores/chatStore";
 import { useCommandPaletteStore } from "../../../stores/commandPaletteStore";
 import { focusedPaletteScopes } from "../../CommandPalette/paletteScopes";
@@ -18,6 +23,7 @@ import {
 import type { DiscussionValue } from "../selectionDiscussionState";
 import { isOutdated, selectionLabel } from "../selectionDiscussions";
 import type { DiffStyle } from "./ComparisonControls";
+import type { PrBarHandle } from "./PrAssociationBar";
 import { STATUS_LETTER } from "./status";
 
 const FILE_ITEM_PREFIX = "changes-file-";
@@ -165,6 +171,9 @@ export interface ChangesPaletteState {
   /** The comparison selects' triggers, opened by their entries. */
   baseButton: HTMLButtonElement | null;
   targetButton: HTMLButtonElement | null;
+  /** The chat branch's PR, when Changes shows its review bar. */
+  pr: WorktreePr | null;
+  prBar: PrBarHandle | null;
 }
 
 /** What Changes does for its palette entries. */
@@ -367,7 +376,77 @@ export function changesPaletteItems(
   ];
   return [
     ...commands,
+    ...prItems(state.pr, state.prBar, refocus),
     ...changesDiscussionItems(state.discussion, refocus),
     ...fileItems,
   ];
+}
+
+/** The review bar's actions: its checks, a refresh, the PR on GitHub, linking. */
+function prItems(
+  pr: WorktreePr | null,
+  bar: PrBarHandle | null,
+  refocus: () => void
+): PaletteItem[] {
+  const association = pr?.association;
+  if (!pr || !bar || !association) return [];
+  const linked = association.status === "linked" ? association : null;
+  const hint = linked ? `#${linked.pr.number}` : undefined;
+  const item = (
+    id: string,
+    label: string,
+    keywords: string,
+    run: () => void
+  ): PaletteItem => ({
+    id: `changes-pr-${id}`,
+    scope: "changes",
+    label,
+    hint,
+    access: "palette-only",
+    keywords: `pull request github ${keywords}`,
+    run,
+  });
+  const items: PaletteItem[] = [];
+  if (bar.checksOpen !== null)
+    items.push(
+      item(
+        "checks",
+        bar.checksOpen
+          ? CHANGES_COMMANDS.hideChecks
+          : CHANGES_COMMANDS.showChecks,
+        "ci checks drawer",
+        bar.toggleChecks
+      )
+    );
+  if (!pr.busy && !linked?.readOnly && association.status !== "not_applicable")
+    items.push(
+      item("refresh", CHANGES_COMMANDS.refreshPr, "reload check again", () => {
+        void pr.refresh();
+        refocus();
+      })
+    );
+  if (linked && isAbsoluteHttpUrl(linked.pr.url))
+    items.push(
+      item("open", CHANGES_COMMANDS.openPr, "browser external", () => {
+        openExternalUrl(linked.pr.url);
+        refocus();
+      })
+    );
+  if (bar.openLink)
+    items.push(
+      item(
+        "link",
+        CHANGES_COMMANDS.linkPr,
+        "associate number url",
+        bar.openLink
+      )
+    );
+  if (linked && !linked.readOnly && !pr.busy)
+    items.push(
+      item("unlink", CHANGES_COMMANDS.unlinkPr, "remove detach", () => {
+        void pr.unlinkPr();
+        refocus();
+      })
+    );
+  return items;
 }

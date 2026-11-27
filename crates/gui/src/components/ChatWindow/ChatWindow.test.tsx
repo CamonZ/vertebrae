@@ -33,8 +33,14 @@ import {
   applyBackgroundUpdate,
   EMPTY_BACKGROUND_WORK,
 } from "../../stores/backgroundWork";
-import { commands, type WorktreePrAssociation } from "../../bindings";
-import { resetWorktreePrStore } from "../../stores/worktreePrStore";
+import { commands } from "../../bindings";
+import { resetPrSync } from "../../stores/prSync";
+import {
+  addPr,
+  fakeGithub,
+  installFakeGithub,
+  pullRequest,
+} from "../../test/fakeGithub";
 import { useDocumentStore } from "./workspace/documentStore";
 import { loadPersistedLocalChatSession } from "../../utils/localChatPersistence";
 import {
@@ -108,7 +114,15 @@ vi.mock("../../bindings", async () => {
           totals: { additions: 0, deletions: 0, binary_files: 0 },
         },
       }),
-      getWorktreePrAssociation: vi.fn(),
+      resolveWorktreeGithub: vi.fn(),
+      pollGithubPrs: vi.fn(),
+      listGithubOpenPrs: vi.fn(),
+      getGithubPr: vi.fn(),
+      rerunGithubPrCheck: vi.fn(),
+      cancelGithubPrCheck: vi.fn(),
+      getWorktreePublishedHead: vi
+        .fn()
+        .mockResolvedValue({ status: "ok", data: null }),
       listWorktreeDirectory: vi.fn().mockResolvedValue({
         status: "ok",
         data: { path: "", entries: [], truncated: false },
@@ -1504,18 +1518,20 @@ describe("ChatWindow", () => {
       data: {
         default_harness: "acp",
         default_provider: ids[0],
-        harnesses: [{
-          harness: "acp",
-          label: "ACP agent",
-          available: true,
-          unavailable_reason: null,
-          default_model_id: null,
-          default_reasoning_effort: null,
-          reasoning_efforts: [],
-          supports_resume: false,
-          models: [],
-          permission_modes: [],
-        }],
+        harnesses: [
+          {
+            harness: "acp",
+            label: "ACP agent",
+            available: true,
+            unavailable_reason: null,
+            default_model_id: null,
+            default_reasoning_effort: null,
+            reasoning_efforts: [],
+            supports_resume: false,
+            models: [],
+            permission_modes: [],
+          },
+        ],
         providers: ids.map((id, index) => ({
           id,
           label: index === 0 ? "First connection" : "Second connection",
@@ -1541,18 +1557,35 @@ describe("ChatWindow", () => {
       },
     });
     useChatStore.setState({
-      sessions: { "test-session": createSession({ harness: "acp", providerId: ids[0] }) },
+      sessions: {
+        "test-session": createSession({ harness: "acp", providerId: ids[0] }),
+      },
       activeSessionId: "test-session",
       panelOpen: true,
     });
     render(<ChatWindow sessionId="test-session" />);
-    chooseDropdownValue(await findComposerPicker("local-chat-provider-picker"), ids[1]);
-    chooseDropdownValue(await findComposerPicker("local-chat-model-picker"), "native-model");
-    chooseDropdownValue(await findComposerPicker("local-chat-effort-picker"), "low");
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-provider-picker"),
+      ids[1]
+    );
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-model-picker"),
+      "native-model"
+    );
+    chooseDropdownValue(
+      await findComposerPicker("local-chat-effort-picker"),
+      "low"
+    );
     await user.type(screen.getByTestId("local-chat-composer"), "Hello{Enter}");
     await waitFor(() =>
       expect(mockedCommands.createLocalChatSession).toHaveBeenCalledWith(
-        expect.objectContaining({ harness: "acp", provider_id: ids[1], initial_prompt: "Hello", model_id: "native-model", reasoning_effort: "low" })
+        expect.objectContaining({
+          harness: "acp",
+          provider_id: ids[1],
+          initial_prompt: "Hello",
+          model_id: "native-model",
+          reasoning_effort: "low",
+        })
       )
     );
   });
@@ -2628,13 +2661,15 @@ describe("ChatWindow", () => {
     });
     render(<ChatWindow sessionId="test-session" />);
     await user.click(screen.getByText("2 queued · Paused"));
-    expect(screen.getByRole("list", { name: "Queued messages" })).toHaveTextContent(
-      "First unsent prompt"
-    );
+    expect(
+      screen.getByRole("list", { name: "Queued messages" })
+    ).toHaveTextContent("First unsent prompt");
     expect(screen.getByRole("button", { name: "Resume queue" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Discard queue" }));
     expect(screen.queryByText("2 queued · Paused")).not.toBeInTheDocument();
-    expect(useChatStore.getState().sessions["test-session"].queuePaused).toBe(false);
+    expect(useChatStore.getState().sessions["test-session"].queuePaused).toBe(
+      false
+    );
   });
 
   it("stops ACP generation and sends the follow-up to the same backend", async () => {
@@ -4901,29 +4936,7 @@ describe("ChatWindow PR chip", () => {
     awaitingWorktree: null,
     recentWorktrees: [],
   };
-  const linked = (branch: string, number: number) => ({
-    status: "ok" as const,
-    data: {
-      status: "linked",
-      branch,
-      repo: "example/demo-repo",
-      pr: {
-        owner: "example",
-        repo: "demo-repo",
-        number,
-        title: `PR ${number}`,
-        state: "open",
-        headRef: branch,
-        headRepo: "example/demo-repo",
-        baseRef: "main",
-        url: `https://github.com/example/demo-repo/pull/${number}`,
-        author: null,
-        updatedAt: null,
-      },
-      staleError: null,
-    } satisfies WorktreePrAssociation,
-  });
-  const getAssociation = () => mockedCommands.getWorktreePrAssociation;
+  const getAssociation = () => mockedCommands.resolveWorktreeGithub;
 
   function seed(association: object) {
     useChatStore.setState({
@@ -4938,12 +4951,15 @@ describe("ChatWindow PR chip", () => {
     vi.clearAllMocks();
     localStorage.clear();
     // Every branch has an open PR; only the pinned one may be asked about.
-    getAssociation().mockImplementation(async (_path, branch) =>
-      linked(branch, branch === "feature/pinned" ? 482 : 479)
-    );
+    const world = fakeGithub();
+    addPr(world, pullRequest(482, { headRef: "feature/pinned" }));
+    addPr(world, pullRequest(479, { headRef: "feature/other" }));
+    installFakeGithub(mockedCommands, world);
   });
 
-  afterEach(() => resetWorktreePrStore());
+  afterEach(() => {
+    resetPrSync();
+  });
 
   it("shows no chip and runs no PR lookup while the chat holds its creation default", async () => {
     seed({
@@ -4968,6 +4984,30 @@ describe("ChatWindow PR chip", () => {
     expect(getAssociation()).not.toHaveBeenCalled();
   });
 
+  it("shows the associated entity's id after the title, before the PR chip", async () => {
+    seed({
+      ...base,
+      ticketId: "38893955-a6a0-4b6d-b91e-b35aa3520ecf",
+      entityLevel: "ticket",
+    });
+    render(<ChatWindow sessionId="test-session" />);
+
+    const id = await screen.findByTestId("chat-header-entity-id");
+    expect(id).toHaveTextContent("38893955");
+    expect(id).toHaveAccessibleName("Copy full ticket ID");
+    const chip = await screen.findByTestId("chat-header-pr-chip");
+    expect(
+      id.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it("shows no entity id while the chat has no associated entity", async () => {
+    seed(base);
+    render(<ChatWindow sessionId="test-session" />);
+    await screen.findByTestId("chat-header-pr-chip");
+    expect(screen.queryByTestId("chat-header-entity-id")).toBeNull();
+  });
+
   it("follows the branch pinned on the association record", async () => {
     seed(base);
     render(<ChatWindow sessionId="test-session" />);
@@ -4977,8 +5017,7 @@ describe("ChatWindow PR chip", () => {
     );
     expect(getAssociation()).toHaveBeenCalledExactlyOnceWith(
       "/worktree",
-      "feature/pinned",
-      false
+      "feature/pinned"
     );
 
     act(() =>
@@ -4994,8 +5033,7 @@ describe("ChatWindow PR chip", () => {
     );
     expect(getAssociation()).toHaveBeenLastCalledWith(
       "/worktree",
-      "feature/other",
-      false
+      "feature/other"
     );
   });
 });

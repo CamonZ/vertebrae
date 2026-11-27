@@ -1,11 +1,19 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { commands, type WorktreeChanges as Changes } from "../../bindings";
 import {
-  commands,
-  type GithubPullRequest,
-  type WorktreeChanges as Changes,
-} from "../../bindings";
-import { resetWorktreePrStore } from "../../stores/worktreePrStore";
+  addPr,
+  chatSession,
+  fakeGithub,
+  installFakeGithub,
+  linkedPr,
+  prLink,
+  pullRequest,
+  resetFakeGithub,
+  seedChats,
+} from "../../test/fakeGithub";
+import { focusedPaletteScopes } from "../CommandPalette/paletteScopes";
+import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
 import { WorktreeChanges } from "./WorktreeChanges";
 import { useWorktreeWatch } from "./workspace/useWorktreeWatch";
 
@@ -19,12 +27,18 @@ vi.mock("../../bindings", () => ({
     listComparisonChoices: vi.fn(),
     listWorktreeDirectory: vi.fn(),
     worktreeFileExists: vi.fn(),
-    getWorktreePrAssociation: vi.fn(),
+    resolveWorktreeGithub: vi.fn(),
+    pollGithubPrs: vi.fn(),
+    listGithubOpenPrs: vi.fn(),
+    getGithubPr: vi.fn(),
+    rerunGithubPrCheck: vi.fn(),
+    cancelGithubPrCheck: vi.fn(),
+    getWorktreePublishedHead: vi.fn(),
   },
 }));
 
 const load = vi.mocked(commands.loadWorktreeChanges);
-const getAssociation = vi.mocked(commands.getWorktreePrAssociation);
+const resolve = vi.mocked(commands.resolveWorktreeGithub);
 
 function changesAt(head: string): Changes {
   return {
@@ -39,35 +53,6 @@ function changesAt(head: string): Changes {
     },
     totals: { additions: 0, deletions: 0, binary_files: 0 },
     files: [],
-  };
-}
-
-function pullRequest(number: number, headRef: string): GithubPullRequest {
-  return {
-    owner: "example",
-    repo: "demo-repo",
-    number,
-    title: `PR ${number}`,
-    state: "open",
-    headRef,
-    headRepo: "example/demo-repo",
-    baseRef: "main",
-    url: `https://github.com/example/demo-repo/pull/${number}`,
-    author: null,
-    updatedAt: null,
-  };
-}
-
-function linkedOn(branch: string, number: number) {
-  return {
-    status: "ok" as const,
-    data: {
-      status: "linked" as const,
-      branch,
-      repo: "example/demo-repo",
-      pr: pullRequest(number, branch),
-      staleError: null,
-    },
   };
 }
 
@@ -87,13 +72,23 @@ describe("WorktreeChanges PR association", () => {
       status: "ok",
       data: { path: "", truncated: false, entries: [] },
     });
+    const world = fakeGithub();
+    const pr = pullRequest(482, { headRef: "feature/a" });
+    addPr(world, pr);
+    installFakeGithub(commands, world);
+    seedChats(
+      chatSession("chat", "/wt", "feature/a", {
+        link: prLink("/wt", "feature/a", linkedPr(pr)),
+      })
+    );
   });
 
-  afterEach(() => resetWorktreePrStore());
+  afterEach(() => {
+    resetFakeGithub();
+  });
 
-  it("looks up the pinned branch once and never re-discovers on reloads or commits", async () => {
+  it("resolves the pinned branch once and never again on reloads or commits", async () => {
     load.mockResolvedValue({ status: "ok", data: changesAt("sha-a") });
-    getAssociation.mockResolvedValue(linkedOn("feature/a", 482));
 
     render(
       <WorktreeChanges
@@ -105,11 +100,7 @@ describe("WorktreeChanges PR association", () => {
     expect(
       await screen.findByRole("button", { name: "Open PR #482 on GitHub" })
     ).toBeInTheDocument();
-    expect(getAssociation).toHaveBeenCalledExactlyOnceWith(
-      "/wt",
-      "feature/a",
-      false
-    );
+    expect(resolve).toHaveBeenCalledExactlyOnceWith("/wt", "feature/a");
 
     // A file edit, then a checkout of another branch at a new commit.
     watcherReload();
@@ -120,17 +111,54 @@ describe("WorktreeChanges PR association", () => {
     expect(
       screen.getByRole("button", { name: "Open PR #482 on GitHub" })
     ).toBeInTheDocument();
-    expect(getAssociation).toHaveBeenCalledTimes(1);
+    expect(resolve).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the PR bar's actions in the Changes palette", async () => {
+    load.mockResolvedValue({ status: "ok", data: changesAt("sha-a") });
+    render(
+      <WorktreeChanges
+        sessionId="chat"
+        worktreePath="/wt"
+        prBranch="feature/a"
+      />
+    );
+    const toggle = await screen.findByTestId("pr-checks-toggle");
+    const prEntries = () => {
+      const { contexts, initial } = focusedPaletteScopes(toggle);
+      act(() =>
+        useCommandPaletteStore.getState().openPalette(initial, contexts)
+      );
+      const items =
+        useCommandPaletteStore
+          .getState()
+          .contexts.find((scope) => scope.id === "changes")
+          ?.items.filter((item) => item.id.startsWith("changes-pr-")) ?? [];
+      act(() => useCommandPaletteStore.getState().closePalette());
+      return items;
+    };
+
+    const items = prEntries();
+    expect(items.map((item) => [item.label, item.hint])).toEqual([
+      ["Show PR checks", "#482"],
+      ["Refresh PR", "#482"],
+      ["Open PR on GitHub", "#482"],
+      ["Unlink PR (local only)", "#482"],
+    ]);
+    await act(async () => {
+      await items[0].run();
+    });
+    expect(screen.getByTestId("pr-checks-drawer")).toBeInTheDocument();
+    expect(prEntries()[0].label).toBe("Hide PR checks");
   });
 
   it("shows no PR bar and asks nothing without a pinned branch", async () => {
     load.mockResolvedValue({ status: "ok", data: changesAt("sha-a") });
-    getAssociation.mockResolvedValue(linkedOn("feature/a", 482));
 
     render(<WorktreeChanges sessionId="chat" worktreePath="/wt" />);
     await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
     await act(async () => {});
     expect(screen.queryByTestId("pr-association-bar")).not.toBeInTheDocument();
-    expect(getAssociation).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
   });
 });

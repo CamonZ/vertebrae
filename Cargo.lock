@@ -8246,6 +8246,7 @@ dependencies = [
 name = "vertebrae-github"
 version = "0.1.0"
 dependencies = [
+ "hegeltest",
  "percent-encoding",
  "reqwest",
  "serde",

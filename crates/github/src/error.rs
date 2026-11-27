@@ -36,7 +36,7 @@ pub enum GitHubError {
     InvalidInput { message: String },
 }
 
-const MAX_MESSAGE_CHARS: usize = 300;
+pub(crate) const MAX_MESSAGE_CHARS: usize = 300;
 
 /// Trims and truncates untrusted text (GitHub messages, `gh` stderr) so error
 /// values stay bounded regardless of what the other side sends.

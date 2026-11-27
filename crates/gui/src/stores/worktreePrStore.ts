@@ -1,64 +1,285 @@
 import { create } from "zustand";
-import {
-  commands,
-  type GithubFailure,
-  type GithubPullRequest,
-  type Result,
-  type WorktreePrAssociation,
+import type {
+  GithubFailure,
+  GithubPrChecks,
+  GithubPullRequest,
+  Result,
+  WorktreeGithub,
 } from "../bindings";
 import { errorMessage } from "../query";
+import type { BranchLink, LinkedPr } from "./prLinks";
 
 /**
- * How often a mounted, linked PR is re-read in the background. The backend
- * answers from its own cache until its linked-PR TTL lapses, so this bounds
- * GitHub traffic to roughly one query per interval per mounted worktree.
+ * The one owner of each chat worktree branch's PR state, keyed by
+ * `worktreePrKey`: the branch's newest link, where it lives on GitHub, its
+ * open PRs, and the linked PR's checks. Written only by the PR sync
+ * (`prSync`). The link itself is saved on the chats' association records
+ * (`prLinks`); the entry carries the newest one so readers need only this
+ * store. Not persisted; cleared with the project-scoped stores.
  */
-export const LINKED_PR_REVALIDATE_MS = 30_000;
 
-export type WorktreePrPhase =
-  | "idle"
-  | "discovering"
-  | "ready"
-  | "revalidating"
-  | "refreshing"
-  | "mutating";
+/**
+ * Checks older than this, with no read pending, are shown as stale: two
+ * idle poll ticks (`PR_POLL_IDLE_MS`).
+ */
+export const CHECKS_STALE_AFTER_MS = 10 * 60_000;
+/** An accepted re-run or cancel GitHub has not shown yet stops overriding. */
+export const WRITE_PENDING_MAX_MS = 3 * 60_000;
 
-export interface WorktreePrEntry {
-  phase: WorktreePrPhase;
-  association: WorktreePrAssociation | null;
-  lookupFailure: GithubFailure | null;
-  error: GithubFailure | null;
-  /**
-   * Branch whose state the user confirmed by an explicit refresh or a
-   * link/unlink. A background read for this branch may update the PR's data
-   * but cannot switch it to a different association status.
-   */
-  confirmedBranch: string | null;
+/**
+ * The last read of the branch: of its linked PR, or of its open PRs while
+ * nothing is linked. Resolving the worktree failing is a failed read with no
+ * `github`.
+ */
+export type PrRead =
+  | { status: "idle" }
+  | { status: "refreshing" }
+  | {
+      status: "failed";
+      failure: GithubFailure;
+      /** `null` when nothing retries on its own (only the user can fix it). */
+      retryAt: number | null;
+      attempt: number;
+    };
+
+/**
+ * A re-run (keyed by check id) or cancel (keyed by workflow run) request.
+ * `requested` means GitHub accepted it; the view overrides the checks until
+ * GitHub reports the result.
+ */
+export type PrWriteState =
+  | { status: "requesting" }
+  | { status: "requested"; at: number }
+  | { status: "failed"; message: string };
+
+/** The open PRs of the branch in one repository. */
+export interface RepoOpenPrs {
+  prs: GithubPullRequest[];
+  /** Every open PR of the branch is listed. */
+  complete: boolean;
 }
 
-export const IDLE_PR_ENTRY: WorktreePrEntry = {
-  phase: "idle",
-  association: null,
-  lookupFailure: null,
-  error: null,
-  confirmedBranch: null,
+/** The linked PR's checks, reset whenever the link changes. */
+export interface PrChecksState {
+  snapshot: GithubPrChecks | null;
+  fetchedAt: number | null;
+  reruns: Readonly<Record<string, PrWriteState>>;
+  cancels: Readonly<Record<string, PrWriteState>>;
+  /** A pushed commit GitHub has not reported as the PR head yet. */
+  awaitingHead: string | null;
+  /** Reads spent waiting for `awaitingHead`. */
+  awaitingPolls: number;
+}
+
+export interface WorktreePrEntry extends PrChecksState {
+  /** The newest link among the branch's chats. */
+  link: BranchLink;
+  /** Where the branch lives on GitHub; `null` until resolved. */
+  github: WorktreeGithub | null;
+  read: PrRead;
+  /** A link, unlink or accept is being written. */
+  linking: boolean;
+  /** The user's last link, unlink or accept failed. */
+  error: GithubFailure | null;
+  /** Open PRs of the branch by `owner/name`, as last listed. */
+  openPrs: Readonly<Record<string, RepoOpenPrs>>;
+  /** A newer PR for the branch after the linked one was merged. */
+  newer: GithubPullRequest | null;
+  /** The newer PR the user chose not to link. */
+  dismissedNewer: number | null;
+}
+
+export const IDLE_CHECKS: PrChecksState = {
+  snapshot: null,
+  fetchedAt: null,
+  reruns: {},
+  cancels: {},
+  awaitingHead: null,
+  awaitingPolls: 0,
 };
 
-export function isPrBusy(phase: WorktreePrPhase): boolean {
-  return phase === "refreshing" || phase === "mutating";
+export const IDLE_PR_ENTRY: WorktreePrEntry = {
+  ...IDLE_CHECKS,
+  link: undefined,
+  github: null,
+  read: { status: "idle" },
+  linking: false,
+  error: null,
+  openPrs: {},
+  newer: null,
+  dismissedNewer: null,
+};
+
+/** What the PR bar shows for a branch. */
+export type WorktreePrAssociation =
+  | {
+      status: "linked";
+      branch: string;
+      repo: string;
+      pr: LinkedPr;
+      /** The worktree is not on this machine: shown as last saved, not read. */
+      readOnly: boolean;
+    }
+  | { status: "none"; branch: string; repo: string; createPrUrl: string }
+  | {
+      status: "ambiguous";
+      branch: string;
+      repo: string;
+      candidates: GithubPullRequest[];
+    }
+  | { status: "gh_missing" }
+  | { status: "auth_expired"; reason: string }
+  | { status: "unavailable"; error: GithubFailure }
+  | { status: "not_applicable"; branch: string | null; reason: string };
+
+export function isPrBusy(entry: Pick<WorktreePrEntry, "read" | "linking">) {
+  return entry.read.status === "refreshing" || entry.linking;
 }
 
 export function linkedPullRequest(
   association: WorktreePrAssociation | null
-): GithubPullRequest | null {
+): LinkedPr | null {
   return association?.status === "linked" ? association.pr : null;
 }
 
-type Outcome<T> = { ok: true; data: T } | { ok: false; failure: GithubFailure };
+export function needsUserFix(failure: GithubFailure): boolean {
+  return failure.kind === "gh_missing" || failure.kind === "auth_expired";
+}
 
-async function settle<T>(
+export const isPendingStatus = (status: string) =>
+  status === "running" || status === "queued";
+
+/** The repository and open PRs the branch's candidates come from, if read. */
+export function branchCandidates(
+  entry: WorktreePrEntry
+): { repo: string; open: RepoOpenPrs } | null | undefined {
+  const github = entry.github;
+  if (github?.status !== "github") return undefined;
+  for (const repo of github.searchRepos) {
+    const open = entry.openPrs[repo];
+    if (!open) return undefined;
+    if (open.prs.length > 0 || !open.complete) return { repo, open };
+  }
+  return null;
+}
+
+/** The PR's head is the branch in the repository it is pushed to. */
+export function isOwnHead(github: WorktreeGithub, pr: GithubPullRequest) {
+  return (
+    github.status === "github" &&
+    pr.headRepo !== null &&
+    pr.headRepo.toLowerCase() === github.headRepo.toLowerCase()
+  );
+}
+
+/** The branch's only open PR, if its head is the branch's own and the list is complete. */
+export function onlyOwnPr(entry: WorktreePrEntry): GithubPullRequest | null {
+  const found = branchCandidates(entry);
+  if (!found || !entry.github) return null;
+  const { prs, complete } = found.open;
+  return complete && prs.length === 1 && isOwnHead(entry.github, prs[0])
+    ? prs[0]
+    : null;
+}
+
+function failureView(failure: GithubFailure): WorktreePrAssociation {
+  if (failure.kind === "gh_missing") return { status: "gh_missing" };
+  if (failure.kind === "auth_expired")
+    return { status: "auth_expired", reason: failure.message };
+  return { status: "unavailable", error: failure };
+}
+
+/**
+ * The bar's state from the branch's link and what GitHub last said. `null`
+ * while the first read is still out.
+ */
+export function associationView(
+  entry: WorktreePrEntry
+): WorktreePrAssociation | null {
+  const { github, link, read } = entry;
+  if (link?.pr)
+    return {
+      status: "linked",
+      branch: link.branch,
+      repo: `${link.pr.owner}/${link.pr.repo}`,
+      pr: link.pr,
+      readOnly: github?.status === "not_applicable",
+    };
+  const failure = read.status === "failed" ? read.failure : null;
+  if (!github) return failure ? failureView(failure) : null;
+  if (github.status === "not_applicable")
+    return {
+      status: "not_applicable",
+      branch: github.branch,
+      reason: github.reason,
+    };
+  const { branch, baseRepo, createPrUrl } = github;
+  const none: WorktreePrAssociation = {
+    status: "none",
+    branch,
+    repo: baseRepo,
+    createPrUrl,
+  };
+  if (link) return none;
+  const found = branchCandidates(entry);
+  if (found)
+    return {
+      status: "ambiguous",
+      branch,
+      repo: found.repo,
+      candidates: found.open.prs,
+    };
+  if (found === null) return none;
+  return failure ? failureView(failure) : null;
+}
+
+/**
+ * Drops overrides GitHub has caught up with: a re-run whose failed attempt
+ * was replaced or no longer failed, a cancel whose run has no pending job
+ * left, or a request too old to trust.
+ */
+export function reconcileWrites(
+  entry: Pick<PrChecksState, "reruns" | "cancels">,
+  snapshot: GithubPrChecks,
+  now: number
+): Pick<PrChecksState, "reruns" | "cancels"> {
+  const failedIds = new Set(
+    snapshot.checks
+      .filter((check) => check.status === "failed")
+      .map((check) => check.id)
+  );
+  const pendingRuns = new Set(
+    snapshot.checks
+      .filter((check) => isPendingStatus(check.status) && check.actionsRun)
+      .map((check) => check.actionsRun as string)
+  );
+  const keep = (
+    writes: Readonly<Record<string, PrWriteState>>,
+    live: Set<string>
+  ) => {
+    const kept: Record<string, PrWriteState> = {};
+    for (const [id, state] of Object.entries(writes)) {
+      if (state.status === "requesting") kept[id] = state;
+      else if (!live.has(id)) continue;
+      else if (state.status === "failed") kept[id] = state;
+      else if (now - state.at < WRITE_PENDING_MAX_MS) kept[id] = state;
+    }
+    return kept;
+  };
+  return {
+    reruns: keep(entry.reruns, failedIds),
+    cancels: keep(entry.cancels, pendingRuns),
+  };
+}
+
+export type GithubOutcome<T> =
+  | { ok: true; data: T }
+  | { ok: false; failure: GithubFailure };
+
+/** A GitHub command's answer; a rejected IPC call reads as an `other` failure. */
+export async function settleGithubCommand<T>(
   command: () => Promise<Result<T, GithubFailure>>
-): Promise<Outcome<T>> {
+): Promise<GithubOutcome<T>> {
   try {
     const result = await command();
     return result.status === "ok"
@@ -74,14 +295,6 @@ async function settle<T>(
       },
     };
   }
-}
-
-async function unwrapPr<T>(
-  command: () => Promise<Result<T, GithubFailure>>
-): Promise<T> {
-  const outcome = await settle(command);
-  if (outcome.ok) return outcome.data;
-  throw new GithubCommandError(outcome.failure);
 }
 
 export class GithubCommandError extends Error {
@@ -100,242 +313,23 @@ export function githubFailureOf(error: unknown): GithubFailure {
     : { kind: "other", message: errorMessage(error), retryAfterSecs: null };
 }
 
-/** States that only the user can fix; background reads must not poll them. */
-function needsUserFix(association: WorktreePrAssociation | null): boolean {
-  return (
-    association?.status === "gh_missing" ||
-    association?.status === "auth_expired"
-  );
-}
-
 export function worktreePrKey(worktreePath: string, branch: string): string {
   return JSON.stringify([worktreePath, branch]);
 }
 
 interface WorktreePrStoreState {
   entries: Record<string, WorktreePrEntry>;
+  /** Bumped by `reset`; async work started before it writes nothing. */
+  scope: number;
+  reset: () => void;
 }
 
-export const useWorktreePrStore = create<WorktreePrStoreState>(() => ({
+export const useWorktreePrStore = create<WorktreePrStoreState>((set) => ({
   entries: {},
+  scope: 0,
+  reset: () => set((state) => ({ entries: {}, scope: state.scope + 1 })),
 }));
 
-let requestCounter = 0;
-const latestRequest = new Map<string, number>();
-const backgroundRead = new Map<string, Promise<void>>();
-const consumers = new Map<string, number>();
-const revalidateTimers = new Map<string, ReturnType<typeof setInterval>>();
-
-function entryOf(key: string): WorktreePrEntry | undefined {
-  return useWorktreePrStore.getState().entries[key];
-}
-
-function update(
-  key: string,
-  next: (entry: WorktreePrEntry) => WorktreePrEntry
-) {
-  useWorktreePrStore.setState((state) => ({
-    entries: {
-      ...state.entries,
-      [key]: next(state.entries[key] ?? IDLE_PR_ENTRY),
-    },
-  }));
-}
-
-function beginRequest(key: string): number {
-  requestCounter += 1;
-  latestRequest.set(key, requestCounter);
-  return requestCounter;
-}
-
-function isCurrent(key: string, request: number): boolean {
-  return latestRequest.get(key) === request;
-}
-
-function acceptBackground(
-  entry: WorktreePrEntry,
-  association: WorktreePrAssociation
-): WorktreePrEntry {
-  const sameBranch =
-    entry.confirmedBranch !== null &&
-    association.branch === entry.confirmedBranch;
-  if (
-    sameBranch &&
-    entry.association &&
-    entry.association.status !== association.status
-  ) {
-    return { ...entry, phase: "ready" };
-  }
-  return {
-    ...entry,
-    phase: "ready",
-    association,
-    lookupFailure: null,
-    confirmedBranch: sameBranch ? entry.confirmedBranch : null,
-  };
-}
-
-function readInBackground(
-  worktreePath: string,
-  branch: string,
-  phase: "discovering" | "revalidating"
-): Promise<void> {
-  const key = worktreePrKey(worktreePath, branch);
-  const pending = backgroundRead.get(key);
-  if (pending) return pending;
-
-  const request = beginRequest(key);
-  update(key, (entry) => ({ ...entry, phase }));
-  const read = (async () => {
-    const outcome = await settle(() =>
-      commands.getWorktreePrAssociation(worktreePath, branch, false)
-    );
-    if (!isCurrent(key, request)) return;
-    update(key, (entry) => {
-      if (outcome.ok) return acceptBackground(entry, outcome.data);
-      return {
-        ...entry,
-        phase: "ready",
-        lookupFailure: entry.association ? null : outcome.failure,
-      };
-    });
-  })();
-  const shared = read.finally(() => {
-    if (backgroundRead.get(key) === shared) backgroundRead.delete(key);
-  });
-  backgroundRead.set(key, shared);
-  return shared;
-}
-
-export function revalidateWorktreePr(
-  worktreePath: string,
-  branch: string
-): Promise<void> {
-  const entry = entryOf(worktreePrKey(worktreePath, branch));
-  if (!entry || entry.phase !== "ready" || needsUserFix(entry.association))
-    return Promise.resolve();
-  return readInBackground(worktreePath, branch, "revalidating");
-}
-
-async function runExplicit(
-  key: string,
-  phase: "refreshing" | "mutating",
-  command: () => Promise<Result<WorktreePrAssociation, GithubFailure>>
-): Promise<boolean> {
-  const entry = entryOf(key);
-  if (!entry || isPrBusy(entry.phase)) return false;
-
-  const request = beginRequest(key);
-  // A superseded background read can no longer write; stop sharing it.
-  backgroundRead.delete(key);
-  update(key, (current) => ({ ...current, phase, error: null }));
-  const outcome = await settle(command);
-  if (!isCurrent(key, request)) return false;
-  if (outcome.ok) {
-    const association = outcome.data;
-    update(key, () => ({
-      phase: "ready",
-      association,
-      lookupFailure: null,
-      error: null,
-      confirmedBranch: association.branch,
-    }));
-    return true;
-  }
-  update(key, (current) => ({
-    ...current,
-    phase: "ready",
-    error: outcome.failure,
-  }));
-  return false;
-}
-
-export function refreshWorktreePr(
-  worktreePath: string,
-  branch: string
-): Promise<boolean> {
-  return runExplicit(worktreePrKey(worktreePath, branch), "refreshing", () =>
-    commands.getWorktreePrAssociation(worktreePath, branch, true)
-  );
-}
-
-export function linkWorktreePr(
-  worktreePath: string,
-  branch: string,
-  prNumber: number,
-  repo: string | null
-): Promise<boolean> {
-  return runExplicit(worktreePrKey(worktreePath, branch), "mutating", () =>
-    commands.linkWorktreePr(worktreePath, branch, prNumber, repo)
-  );
-}
-
-export function unlinkWorktreePr(
-  worktreePath: string,
-  branch: string
-): Promise<boolean> {
-  return runExplicit(worktreePrKey(worktreePath, branch), "mutating", () =>
-    commands.unlinkWorktreePr(worktreePath, branch)
-  );
-}
-
-export function listWorktreeOpenPrs(
-  worktreePath: string,
-  branch: string
-): Promise<GithubPullRequest[]> {
-  return unwrapPr(() => commands.listWorktreeOpenPrs(worktreePath, branch));
-}
-
-function evict(key: string) {
-  consumers.delete(key);
-  latestRequest.delete(key);
-  backgroundRead.delete(key);
-  const timer = revalidateTimers.get(key);
-  if (timer !== undefined) clearInterval(timer);
-  revalidateTimers.delete(key);
-  useWorktreePrStore.setState((state) => {
-    if (!(key in state.entries)) return state;
-    const entries = { ...state.entries };
-    delete entries[key];
-    return { entries };
-  });
-}
-
-/** Defer eviction one microtask so a Strict Mode remount can reuse discovery. */
-export function acquireWorktreePr(
-  worktreePath: string,
-  branch: string
-): () => void {
-  const key = worktreePrKey(worktreePath, branch);
-  consumers.set(key, (consumers.get(key) ?? 0) + 1);
-  if (!revalidateTimers.has(key)) {
-    revalidateTimers.set(
-      key,
-      setInterval(() => {
-        if (entryOf(key)?.association?.status === "linked")
-          void revalidateWorktreePr(worktreePath, branch);
-      }, LINKED_PR_REVALIDATE_MS)
-    );
-  }
-  if ((entryOf(key)?.phase ?? "idle") === "idle")
-    void readInBackground(worktreePath, branch, "discovering");
-
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    consumers.set(key, (consumers.get(key) ?? 1) - 1);
-    queueMicrotask(() => {
-      if ((consumers.get(key) ?? 0) <= 0) evict(key);
-    });
-  };
-}
-
-export function resetWorktreePrStore() {
-  for (const timer of revalidateTimers.values()) clearInterval(timer);
-  revalidateTimers.clear();
-  consumers.clear();
-  latestRequest.clear();
-  backgroundRead.clear();
-  useWorktreePrStore.setState({ entries: {} });
+export function prEntryOf(key: string): WorktreePrEntry {
+  return useWorktreePrStore.getState().entries[key] ?? IDLE_PR_ENTRY;
 }
