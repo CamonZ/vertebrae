@@ -19,12 +19,14 @@ import {
   InlineSelectionDiscussion,
 } from "../../ChatWindow/SelectionDiscussionThread";
 import {
+  DIFF_COMPOSER_GITHUB_SHORTCUT,
   DIFF_COMPOSER_SEND_SHORTCUT,
   DIFF_COMPOSER_SUBMIT_SHORTCUT,
   shortcutText,
 } from "../../ChatWindow/chatShortcuts";
 import { EditGlyph, TrashGlyph } from "../../ChatWindow/commentIcons";
 import { DiffReviewContext, type DiffReviewFocus } from "./DiffReviewContext";
+import { useSelectionGithub } from "../../ChatWindow/workspace/githubReview/SelectionGithub";
 import { focusKeepProps } from "../../../utils/focusKeep";
 import { useKeepFocus } from "../../../hooks/useKeepFocus";
 
@@ -186,6 +188,11 @@ function CommentEditor({
   onSubmit,
   onCancel,
   onSendToMain,
+  actions,
+  onPostToGithub,
+  githubTarget,
+  locked = false,
+  held = false,
   disabled,
 }: {
   label: string;
@@ -197,11 +204,25 @@ function CommentEditor({
   onSubmit(): void;
   onCancel(): void;
   onSendToMain?(): void;
+  /** More ways on for the text, between Send to main chat and submit. */
+  actions?: ReactNode;
+  /**
+   * ⌘⌥↵ posts the text to GitHub: undefined with no PR to post to, null
+   * while it cannot post (the key then does nothing).
+   */
+  onPostToGithub?: (() => void) | null;
+  /** Where ⌘⌥↵ posts and as whom, shown in the hint row. */
+  githubTarget?: string | null;
+  /** The text is being posted and must stay as sent. */
+  locked?: boolean;
+  /** The text stays as sent, though the editor can still close. */
+  held?: boolean;
   disabled?: boolean;
 }): ReactNode {
   const submitKeys = shortcutText(DIFF_COMPOSER_SUBMIT_SHORTCUT);
   const sendKeys = shortcutText(DIFF_COMPOSER_SEND_SHORTCUT);
-  const canSubmit = !!value.trim() && !disabled;
+  const githubKeys = shortcutText(DIFF_COMPOSER_GITHUB_SHORTCUT);
+  const canSubmit = !!value.trim() && !disabled && !locked;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   useKeepFocus(inputRef);
   useFocusOnMount(inputRef);
@@ -219,9 +240,15 @@ function CommentEditor({
         data-testid={`${testIdPrefix}-input`}
         value={value}
         rows={2}
+        readOnly={locked || held}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;
+          if (locked) {
+            if (event.key === "Escape" || event.key === "Enter")
+              event.preventDefault();
+            return;
+          }
           if (event.key === "Escape") {
             event.preventDefault();
             onCancel();
@@ -230,7 +257,9 @@ function CommentEditor({
           if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey))
             return;
           event.preventDefault();
-          if (event.shiftKey) onSendToMain?.();
+          if (event.altKey) {
+            if (!event.shiftKey && !event.repeat) onPostToGithub?.();
+          } else if (event.shiftKey) onSendToMain?.();
           else if (canSubmit) onSubmit();
         }}
       />
@@ -243,11 +272,23 @@ function CommentEditor({
               <kbd>{sendKeys}</kbd> send to main chat
             </>
           )}
+          {onPostToGithub !== undefined && (
+            <>
+              {" · "}
+              <kbd>{githubKeys}</kbd> comment on GitHub
+              {githubTarget && ` → ${githubTarget}`}
+            </>
+          )}
           {" · "}
           <kbd>esc</kbd> cancel
         </span>
         <div className="diff-comment-editor-buttons">
-          <button type="button" title="Cancel (Esc)" onClick={onCancel}>
+          <button
+            type="button"
+            title="Cancel (Esc)"
+            disabled={locked}
+            onClick={onCancel}
+          >
             Cancel
           </button>
           {onSendToMain && (
@@ -255,11 +296,13 @@ function CommentEditor({
               type="button"
               title={`${DIFF_COMPOSER_SEND_SHORTCUT.label} (${sendKeys})`}
               aria-keyshortcuts="Meta+Shift+Enter"
+              disabled={locked}
               onClick={onSendToMain}
             >
               Send to main chat
             </button>
           )}
+          {actions}
           <button
             type="button"
             data-primary
@@ -284,6 +327,8 @@ export function DiffCommentThread({
   onCancelDraft,
   onDiscussDraft,
   onAttachDraft,
+  draftAnchor,
+  onGithubPosted,
   onDiscussionClosed,
 }: {
   annotation: ReviewAnnotation;
@@ -291,6 +336,12 @@ export function DiffCommentThread({
   onCancelDraft(): void;
   onDiscussDraft?(body: string): void;
   onAttachDraft?(body: string): void;
+  /**
+   * The draft's selection, when it may go to GitHub as a comment (offered
+   * once its lines are on the linked PR); `onGithubPosted` when it went.
+   */
+  draftAnchor?: CodeSelection | null;
+  onGithubPosted?(): void;
   /** A discussion here closed; return the cursor to its anchor line. */
   onDiscussionClosed?(anchor: CodeSelection): void;
 }): ReactNode {
@@ -307,6 +358,11 @@ export function DiffCommentThread({
     submit?.(body);
   };
   const sendDraftToMain = () => onAttachDraft?.(draft.trim());
+  const github = useSelectionGithub(
+    annotation.draft ? (draftAnchor ?? null) : null,
+    draft,
+    () => onGithubPosted?.()
+  );
 
   return (
     <div className="diff-comment-thread" data-owns-escape="">
@@ -346,8 +402,17 @@ export function DiffCommentThread({
             testIdPrefix="diff-comment-draft"
             onSubmit={submitDraft}
             onSendToMain={onAttachDraft ? sendDraftToMain : undefined}
-            onCancel={onCancelDraft}
+            actions={github.action}
+            onPostToGithub={github.action ? github.post : undefined}
+            githubTarget={github.target}
+            locked={github.busy}
+            held={github.held}
+            onCancel={() => {
+              github.reset();
+              onCancelDraft();
+            }}
           />
+          {github.status}
         </div>
       ) : null}
     </div>

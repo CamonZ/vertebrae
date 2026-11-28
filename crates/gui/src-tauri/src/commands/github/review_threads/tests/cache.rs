@@ -16,6 +16,7 @@ fn read(version: u32) -> GithubPrReviewThreads {
     GithubPrReviewThreads {
         repo: "example/demo-repo".into(),
         pr_number: version,
+        viewer_login: None,
         head_oid: String::new(),
         base_oid: String::new(),
         threads: Vec::new(),
@@ -61,7 +62,8 @@ impl Model {
 
 /// Under a controlled clock, reads answer exactly as an age-ordered,
 /// capped model: younger than the TTL, the oldest evicted first, a re-read
-/// moving its PR to the back; the host is part of the key.
+/// moving its PR to the back, an invalidated PR forgotten; the host is
+/// part of the key.
 #[hegel::test(test_cases = 100)]
 fn cache_matches_an_expiring_capped_model(tc: hegel::TestCase) {
     let start = Instant::now();
@@ -74,8 +76,12 @@ fn cache_matches_an_expiring_capped_model(tc: hegel::TestCase) {
             tc.draw(gs::integers::<u8>().max_value(1)),
             tc.draw(gs::integers::<u64>().max_value(CAPACITY as u64 + 8)),
         );
-        match tc.draw(gs::integers::<u8>().max_value(3)) {
+        match tc.draw(gs::integers::<u8>().max_value(4)) {
             0 => now += Duration::from_secs(tc.draw(gs::integers::<u64>().max_value(25))),
+            4 => {
+                entries.remove(&key);
+                model.0.retain(|(other, _, _)| *other != key);
+            }
             1 => assert_eq!(
                 entries.get(&key, now).map(|read| read.pr_number),
                 model.get(&key, now)
@@ -155,4 +161,26 @@ async fn concurrent_reads_of_one_pr_share_one_request() {
     assert_eq!(second.unwrap(), read(1));
     assert_eq!(other.unwrap(), read(2));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+/// A write between a read's request and its answer: the read still answers
+/// its caller, but the next read asks GitHub instead of showing it.
+#[tokio::test]
+async fn a_read_out_during_a_write_is_not_remembered() {
+    let cache = ReviewThreadsCache::default();
+    let release = tokio::sync::Notify::new();
+    let (before, _) = tokio::join!(
+        cache.read(key(0, 7), false, || async {
+            release.notified().await;
+            Ok(read(1))
+        }),
+        async {
+            tokio::task::yield_now().await;
+            cache.invalidate(&key(0, 7));
+            release.notify_one();
+        },
+    );
+    assert_eq!(before.unwrap(), read(1));
+    let after = cache.read(key(0, 7), false, || async { Ok(read(2)) }).await;
+    assert_eq!(after.unwrap(), read(2));
 }

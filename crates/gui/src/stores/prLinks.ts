@@ -186,3 +186,8 @@ export function sameLink(a: BranchLink, b: BranchLink): boolean {
     samePr(a.pr, b.pr)
   );
 }
+
+export const isSameLinkedPr = (
+  a: LinkedPr | null | undefined,
+  b: LinkedPr | null
+) => !!a && !!b && isSamePr(a, b.host, `${b.owner}/${b.repo}`, b.number);

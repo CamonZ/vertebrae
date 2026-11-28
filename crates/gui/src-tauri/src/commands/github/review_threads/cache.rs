@@ -86,6 +86,12 @@ impl Entries {
         }
     }
 
+    pub(super) fn remove(&mut self, key: &ThreadsKey) {
+        if self.reads.remove(key).is_some() {
+            self.order.retain(|other| other != key);
+        }
+    }
+
     #[cfg(test)]
     pub(super) fn keys(&self) -> Vec<ThreadsKey> {
         assert_eq!(self.reads.len(), self.order.len());
@@ -95,10 +101,17 @@ impl Entries {
 
 type Shared = Arc<OnceCell<Result<GithubPrReviewThreads, GithubFailure>>>;
 
+/// The reads kept and the reads still out, under one lock so a read cannot
+/// be remembered across an `invalidate` that ran after it was checked.
+#[derive(Default)]
+struct State {
+    entries: Entries,
+    in_flight: HashMap<ThreadsKey, Shared>,
+}
+
 pub struct ReviewThreadsCache {
     clock: Arc<dyn Clock>,
-    entries: Mutex<Entries>,
-    in_flight: Mutex<HashMap<ThreadsKey, Shared>>,
+    state: Mutex<State>,
 }
 
 impl Default for ReviewThreadsCache {
@@ -117,9 +130,16 @@ impl ReviewThreadsCache {
     pub(super) fn with_clock(clock: Arc<dyn Clock>) -> Self {
         Self {
             clock,
-            entries: Mutex::default(),
-            in_flight: Mutex::default(),
+            state: Mutex::default(),
         }
+    }
+
+    /// Forget `key`'s read, and any read of it still out, so the next read
+    /// asks GitHub: after a write, neither can show the result.
+    pub(super) fn invalidate(&self, key: &ThreadsKey) {
+        let mut state = lock(&self.state);
+        state.entries.remove(key);
+        state.in_flight.remove(key);
     }
 
     /// The cached read of `key` unless `refresh`; otherwise `fetch`, shared
@@ -136,30 +156,40 @@ impl ReviewThreadsCache {
         Fut: Future<Output = Result<GithubPrReviewThreads, GithubFailure>>,
     {
         if !refresh {
-            if let Some(read) = lock(&self.entries).get(&key, self.clock.now()) {
+            if let Some(read) = lock(&self.state).entries.get(&key, self.clock.now()) {
                 return Ok(read);
             }
         }
-        let shared = lock(&self.in_flight)
+        let shared = lock(&self.state)
+            .in_flight
             .entry(key.clone())
             .or_default()
             .clone();
+        let current = |in_flight: &HashMap<ThreadsKey, Shared>| {
+            in_flight
+                .get(&key)
+                .is_some_and(|current| Arc::ptr_eq(current, &shared))
+        };
         let result = shared
             .get_or_init(|| async {
                 let result = fetch().await;
+                // A read invalidated while out answers its callers but is
+                // not remembered: a write may have landed since it began.
                 if let Ok(read) = &result {
-                    lock(&self.entries).insert(key.clone(), read.clone(), self.clock.now());
+                    let mut state = lock(&self.state);
+                    if current(&state.in_flight) {
+                        state
+                            .entries
+                            .insert(key.clone(), read.clone(), self.clock.now());
+                    }
                 }
                 result
             })
             .await
             .clone();
-        let mut in_flight = lock(&self.in_flight);
-        if in_flight
-            .get(&key)
-            .is_some_and(|current| Arc::ptr_eq(current, &shared))
-        {
-            in_flight.remove(&key);
+        let mut state = lock(&self.state);
+        if current(&state.in_flight) {
+            state.in_flight.remove(&key);
         }
         result
     }

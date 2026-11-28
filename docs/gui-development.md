@@ -1218,6 +1218,12 @@ denies everything else with "Selection discussions are read only.".
 Implementation requests can be attached to the main composer. One thread is
 active at a time; collapsed diff markers reopen prior discussions. Changed
 patches mark anchors outdated without replacing their original code snapshots.
+Away from the diff, an opened anchored discussion in the Discussions section
+shows its diff chunk (`spanChunk`: the span's hunk rows plus up to three rows
+of context, as a one-hunk patch from `chunkPatch`). The chunk is drawn by a
+lazily loaded Pierre `PatchDiff` with the Changes view's diff options and the
+discussed lines selected. Listed rows stay one line each, and a detached
+discussion shows its original selection instead.
 
 Diff surfaces subscribe to stable discussion actions and anchor locations;
 streamed message state updates only the thread UI. Screen readers receive a
@@ -1251,15 +1257,17 @@ and cleared on send. They are in-memory only; the DocumentEditor diff has none.
 ### GitHub review threads in Changes
 
 When the chat's pinned branch has a linked PR, Changes shows the PR's review
-threads read-only. GitHub reads and local placement are kept apart:
+threads, and the viewer can reply, resolve and reopen them (see
+[Posting to GitHub threads](#posting-to-github-threads)). GitHub reads and
+local placement are kept apart:
 
 - `get_github_pr_review_threads` reads the threads of the PR the caller
   names through `crates/github`, at most 10 pages of 50 threads and 30
   comments per thread, and reports truncation. The backend caches answers
   for 20 seconds (64 PRs, keyed by host, repository and PR) and shares a read
   already in flight; `refresh` bypasses the cache.
-- `stores/prSync.ts` owns the threads, like the rest of a branch's PR state:
-  they live in the branch's `worktreePrStore` entry (`reviewThreads`) and
+- `stores/prSync.ts` owns the threads, like the rest of a branch's PR state
+  (`stores/prReviewThreadsSync.ts` does the reads): they live in the branch's `worktreePrStore` entry (`reviewThreads`) and
   reset whenever its link changes. A shown branch's threads are read with
   each fresh read of its PR, so they share the poller's cadence, its pause
   while the window is hidden, its backoff and GitHub's rate-limit hold-off.
@@ -1370,6 +1378,71 @@ and one accent primary, **Discuss inline** (or **Show private discussion**).
   turn reads back into a code card. Its chip reveals the thread
   (`SelectionDiscussions.reveal` or `revealGithub`), in the diff or the
   Review rail, reopening its discussion when it has one.
+
+#### Posting to GitHub threads
+
+A card offers **Reply on GitHub**, **Resolve** and **Reopen** only where the
+thread read says the viewer may (`viewerCanReply`, `viewerCanResolve`,
+`viewerCanUnresolve`); without permission they are hidden. A private line
+discussion offers **Comment on GitHub** once its lines are on the PR. So
+does the selection box in Changes, beside **Send to main chat** and
+**Discuss inline**, with no private discussion: `map_review_selection` maps
+the shown lines onto the PR's published side (read only; nothing is
+retained), and the button or ⌘⌥↵ posts the typed text at once as a new
+thread. The button's tooltip and the box's hint row name the PR, lines and
+audience. The text is read only while the post is out and after a timeout
+until the check settles it, a failure keeps it with Retry (a timeout checks
+GitHub first), and a posted comment closes the selection, unless another
+selection has replaced it. Cancel or closing the selection forgets a failed
+post. Every
+public action is neutral with the GitHub glyph; the accent stays on private
+actions.
+
+- `crates/github` sends each write as one GraphQL mutation
+  (`write_review_thread`, a `ReviewThreadWrite`), through the client's
+  authentication and error mapping. A GraphQL `FORBIDDEN` or an HTTP 403 is
+  `forbidden`, and a request timeout is `timeout`. A mutation GitHub took
+  without errors but whose answer does not show the written node is
+  `Unconfirmed`, which reaches the GUI as `timeout`: it may be on the PR, so
+  it is checked before it is sent again. These reach the GUI as
+  `GithubErrorKind`s. The thread read also returns `viewerLogin`.
+- `write_github_pr_review_thread` sends the write once and then drops the
+  PR's cached thread read. A read already in flight still answers its
+  callers, but its answer is not cached. `prSync.writeWorktreeReviewThread`
+  refuses a write when the branch now links a PR other than the one the user
+  saw. After any outcome it re-reads the threads past the cache and drops
+  reads that started before the write.
+- `githubReview/threadWrites.ts` keeps the drafts per chat: one slot per
+  GitHub thread (`thread:<id>`, its reply and resolve state) and per line
+  discussion (`comment:<id>`), plus the selection box's post
+  (`selection:<side>:<path>:<lines>`). They are separate from the unsent private
+  questions of `SelectionDiscussions`, so closing a card, Esc and comparison
+  switches keep both. `GithubWritesContext` (provided by `ChatWindow`)
+  binds the store to the linked PR.
+- The composer names the PR, the lines and the audience before posting. A
+  click posts, and so does ⌘↵ (the hint, a live status, names the post it
+  sends). **Discard** offers **Undo**, which takes the focus. **Draft reply** in a GitHub
+  thread's private discussion seeds the reply from the latest answer. It
+  never posts, and **Send to main chat** only attaches private context.
+- A failed post keeps the draft. A 403 offers no Retry, only "<Action> on
+  GitHub". Other failures keep Retry. A timeout's retry first re-reads the
+  thread. The write counts as posted when a matching node (the viewer's
+  comment with that body, the resolved state, a new thread by the viewer on
+  those lines) appears beyond what matched before. When the threads cannot
+  settle it (unknown viewer, truncated comments), the user is sent to GitHub
+  instead. **Reply and resolve** posts the reply and then resolves. If the
+  resolve fails, the reply is kept and only the resolve is offered again;
+  when a timed-out reply is found posted, its resolve is sent then. A send
+  that throws counts as a timeout.
+- **Comment on GitHub** maps the discussion's retained lines onto the PR head
+  (its base for removed lines) with `map_review_threads`. It is unavailable
+  until they are there unchanged. A posted comment starts a thread,
+  published at once as a one-comment review rather than left in the
+  viewer's pending review (where only they see it and it cannot be
+  resolved), and
+  `put_review_thread` with `github_thread` moves the discussion under it
+  (`origin_ref`). The discussion keeps its ID, transcript and draft. A failed
+  post leaves it on its lines.
 
 ### Tool activity disclosure
 

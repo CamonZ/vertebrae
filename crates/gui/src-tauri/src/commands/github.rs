@@ -95,6 +95,10 @@ pub enum GithubErrorKind {
     AuthExpired,
     RateLimited,
     NotFound,
+    /// GitHub refused: retrying cannot help.
+    Forbidden,
+    /// No answer in time: a write may have been applied.
+    Timeout,
     Other,
 }
 
@@ -128,6 +132,11 @@ impl From<&GitHubError> for GithubFailure {
                 retry_after_secs.map(|secs| u32::try_from(secs).unwrap_or(u32::MAX)),
             ),
             GitHubError::NotFound { .. } => (GithubErrorKind::NotFound, None),
+            GitHubError::Forbidden { .. } => (GithubErrorKind::Forbidden, None),
+            // Both may have been applied: the caller checks before resending.
+            GitHubError::Timeout { .. } | GitHubError::Unconfirmed { .. } => {
+                (GithubErrorKind::Timeout, None)
+            }
             _ => (GithubErrorKind::Other, None),
         };
         Self {

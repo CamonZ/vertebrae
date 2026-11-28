@@ -28,6 +28,11 @@ import {
 import "./workspaceTabs.css";
 import { SelectionDiscussionProvider } from "./SelectionDiscussionContext";
 import { useChatDiscussions } from "./selectionDiscussionState";
+import {
+  GithubWritesContext,
+  useGithubWritesValue,
+  useThreadWritesStore,
+} from "./workspace/githubReview/threadWritesContext";
 import { ChatSideColumn, SIDE_COLUMN_BESIDE_MIN_WIDTH } from "./ChatSideColumn";
 import { SideDiscussions } from "./SideDiscussions";
 import { useChatSideColumn } from "./useChatSideColumn";
@@ -650,6 +655,14 @@ export function ChatWindow({
       : chat.session
         ? savedPrOf(chat.session)
         : null;
+  const threadWrites = useThreadWritesStore(discussionKey);
+  const githubWrites = useGithubWritesValue(
+    threadWrites,
+    prWorktree,
+    prBranch,
+    linkedPr,
+    worktreePr.reviewThreads.data
+  );
   const linkedPrChecks =
     linkedPr && worktreePr.entry.snapshot ? worktreePr.counts : null;
   const linkedPrOpenThreads =
@@ -1047,28 +1060,30 @@ export function ChatWindow({
       value={evidenceCheckout ? openSource : undefined}
     >
       <DiffReviewContext.Provider value={diffReview}>
-        <SelectionDiscussionProvider
-          key={discussionKey}
-          controller={discussions.controller}
-          worktreePath={ownWorktreePath ?? worktreePath ?? ""}
-          parentChatId={sessionId}
-          projectPath={chat.session.projectPath}
-          harness={chat.session.harness}
-          providerId={chat.session.providerId ?? undefined}
-          modelId={chat.session.selectedModelId}
-          reasoningEffort={chat.session.selectedReasoningEffort}
-          speedTier={chat.session.selectedSpeedTier}
-          personality={chat.session.selectedPersonality}
-          snapshot={worktreeSnapshot}
-          onOpen={() => side.select("changes")}
-          onAttach={attachSelection}
-          onAttachGithub={attachGithubThread}
-          githubThreads={worktreePr.reviewThreads.data?.threads}
-        >
-          <FileReferenceNavigationContext.Provider value={openFileReference}>
-            {content}
-          </FileReferenceNavigationContext.Provider>
-        </SelectionDiscussionProvider>
+        <GithubWritesContext.Provider value={githubWrites}>
+          <SelectionDiscussionProvider
+            key={discussionKey}
+            controller={discussions.controller}
+            worktreePath={ownWorktreePath ?? worktreePath ?? ""}
+            parentChatId={sessionId}
+            projectPath={chat.session.projectPath}
+            harness={chat.session.harness}
+            providerId={chat.session.providerId ?? undefined}
+            modelId={chat.session.selectedModelId}
+            reasoningEffort={chat.session.selectedReasoningEffort}
+            speedTier={chat.session.selectedSpeedTier}
+            personality={chat.session.selectedPersonality}
+            snapshot={worktreeSnapshot}
+            onOpen={() => side.select("changes")}
+            onAttach={attachSelection}
+            onAttachGithub={attachGithubThread}
+            githubThreads={worktreePr.reviewThreads.data?.threads}
+          >
+            <FileReferenceNavigationContext.Provider value={openFileReference}>
+              {content}
+            </FileReferenceNavigationContext.Provider>
+          </SelectionDiscussionProvider>
+        </GithubWritesContext.Provider>
       </DiffReviewContext.Provider>
     </EvidenceNavigationContext.Provider>
   );

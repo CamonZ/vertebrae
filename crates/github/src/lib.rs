@@ -1,6 +1,7 @@
 //! GitHub adapter with `gh` CLI authentication: pull requests and their
 //! checks over GraphQL, batched per repository, and Actions job re-runs and
-//! workflow-run cancels over REST.
+//! workflow-run cancels over REST, and review threads with their replies,
+//! resolution and new threads over GraphQL.
 
 mod auth;
 mod checks;
@@ -9,6 +10,7 @@ mod error;
 mod rate_limit;
 mod remote;
 mod rest;
+mod review_thread_writes;
 mod review_threads;
 mod step_cache;
 mod types;
@@ -23,6 +25,7 @@ pub use client::GitHubClient;
 pub use error::GitHubError;
 pub use rate_limit::RateLimitStatus;
 pub use remote::parse_github_remote_url;
+pub use review_thread_writes::{NewReviewThread, ReviewThreadWrite, MAX_COMMENT_CHARS};
 pub use review_threads::{
     DiffSide, PullRequestReviewThreads, ReviewAuthor, ReviewComment, ReviewThread,
 };

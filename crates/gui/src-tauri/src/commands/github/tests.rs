@@ -232,6 +232,25 @@ fn github_errors_map_to_typed_failure_kinds() {
         kind(GitHubError::Forbidden {
             message: String::new()
         }),
+        GithubErrorKind::Forbidden
+    );
+    assert_eq!(
+        kind(GitHubError::Timeout {
+            message: String::new()
+        }),
+        GithubErrorKind::Timeout
+    );
+    // Taken but not confirmed: checked before resending, like a timeout.
+    assert_eq!(
+        kind(GitHubError::Unconfirmed {
+            message: String::new()
+        }),
+        GithubErrorKind::Timeout
+    );
+    assert_eq!(
+        kind(GitHubError::Network {
+            message: String::new()
+        }),
         GithubErrorKind::Other
     );
     let limited = GithubFailure::from(GitHubError::RateLimited {

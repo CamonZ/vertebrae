@@ -430,6 +430,11 @@ export function useDiffComments(
                 }
               : undefined
           }
+          draftAnchor={draft?.anchor}
+          onGithubPosted={() => {
+            // A post answering late must not close a newer selection.
+            if (currentDraft.current === draft) clearDraft();
+          }}
           onAttachDraft={
             discussion && draft
               ? (body) => {

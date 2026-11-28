@@ -44,6 +44,17 @@ import {
   shortcutText,
 } from "../../chatShortcuts";
 import { isEditableShortcutTarget } from "../../../../utils/keyboard";
+import { replySlot } from "./threadWrites";
+import {
+  useGithubWrites,
+  useWriteSlot,
+  type GithubWritesValue,
+} from "./threadWritesContext";
+import {
+  GithubComposer,
+  GithubPostButton,
+  WriteFailureAlert,
+} from "./GithubWriteControls";
 import "./githubReview.css";
 
 function GithubAvatar({ login }: { login: string }) {
@@ -152,8 +163,10 @@ export function GithubThreadCard({
   const first = thread.comments[0];
   const url = first?.url;
   const author = authorOf(first);
-  // Resolved threads fold to one line until shown, as on GitHub.
-  const [shown, setShown] = useState(!thread.resolved);
+  // Resolved threads fold to one line until shown, as on GitHub; an open
+  // one (reopened, say) is always shown.
+  const [unfolded, setUnfolded] = useState(false);
+  const shown = !thread.resolved || unfolded;
   const bodyId = useId();
   useEffect(() => {
     if (!autoFocus || !ref.current) return;
@@ -229,7 +242,7 @@ export function GithubThreadCard({
             className="gh-text-button"
             aria-expanded={shown}
             aria-controls={shown ? bodyId : undefined}
-            onClick={() => setShown(!shown)}
+            onClick={() => setUnfolded(!shown)}
           >
             {shown ? "Hide" : "Show"}
           </button>
@@ -312,6 +325,7 @@ export function GithubThreadCard({
           Couldn’t start the private discussion: {startError}
         </p>
       )}
+      <ThreadReply placed={placed} onEscape={onClose} />
       <ThreadActions placed={placed} closable={!!onClose} onDiscuss={discuss} />
     </section>
   );
@@ -359,11 +373,134 @@ async function discussInline(
   return null;
 }
 
+/** Where the thread's public writes go, and how the audience reads it. */
+function threadAudience(writes: GithubWritesValue, placed: PlacedThread) {
+  return `#${writes.pr.number}, ${lineLabel(placed)} · visible to everyone on the PR${
+    writes.viewer ? ` as ${writes.viewer}` : ""
+  }`;
+}
+
+/**
+ * The thread's public reply: its composer while a draft is open (kept when
+ * the card closes or the comparison changes), Undo after Discard, and a
+ * resolve or reopen that failed.
+ */
+function ThreadReply({
+  placed,
+  onEscape,
+}: {
+  placed: PlacedThread;
+  onEscape?(): void;
+}) {
+  const writes = useGithubWrites();
+  const { thread } = placed;
+  const key = replySlot(thread.id);
+  const slot = useWriteSlot(writes?.store, key);
+  if (!writes) return null;
+  const url = thread.comments[0]?.url ?? null;
+  const port = writes.port();
+  const canResolve = !thread.resolved && thread.viewerCanResolve;
+  return (
+    <div className="gh-thread-reply">
+      <GithubComposer
+        store={writes.store}
+        slotKey={key}
+        title="Reply on GitHub"
+        audience={threadAudience(writes, placed)}
+        textLabel={`Reply to ${authorOf(thread.comments[0])} on GitHub`}
+        placeholder="Write a reply…"
+        posts={[
+          {
+            label: "Reply on GitHub",
+            plan: { kind: "reply", threadId: thread.id, resolve: false },
+          },
+          ...(canResolve
+            ? [
+                {
+                  label: "Reply and resolve",
+                  plan: { kind: "reply", threadId: thread.id, resolve: true },
+                  primary: true,
+                } as const,
+              ]
+            : []),
+        ]}
+        port={port}
+        url={url}
+        onEscape={onEscape}
+      />
+      {slot.draft === null && slot.failure && (
+        <WriteFailureAlert
+          failure={slot.failure}
+          draftKept={false}
+          url={url}
+          pending={slot.pending !== null}
+          onRetry={() => void writes.store.retry(key, port)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Reply, Resolve and Reopen, each only where GitHub says the viewer may.
+ * Hidden while the reply composer is open: it posts (and resolves) itself.
+ */
+function GithubThreadButtons({ placed }: { placed: PlacedThread }) {
+  const writes = useGithubWrites();
+  const { thread } = placed;
+  const key = replySlot(thread.id);
+  const slot = useWriteSlot(writes?.store, key);
+  if (!writes || slot.draft !== null) return null;
+  const toggle = thread.resolved
+    ? thread.viewerCanUnresolve && ("reopen" as const)
+    : thread.viewerCanResolve && ("resolve" as const);
+  const pending = slot.pending;
+  return (
+    <>
+      {thread.viewerCanReply && (
+        <GithubPostButton
+          disabled={pending !== null}
+          onClick={() => writes.store.open(key)}
+        >
+          Reply on GitHub
+        </GithubPostButton>
+      )}
+      {toggle && (
+        <GithubPostButton
+          pending={pending === toggle}
+          disabled={pending !== null}
+          title={
+            toggle === "resolve"
+              ? "Resolve the thread on GitHub"
+              : "Reopen the thread on GitHub"
+          }
+          onClick={() =>
+            void writes.store.post(
+              key,
+              { kind: toggle, threadId: thread.id },
+              writes.port()
+            )
+          }
+        >
+          {pending === toggle
+            ? toggle === "resolve"
+              ? "Resolving…"
+              : "Reopening…"
+            : toggle === "resolve"
+              ? "Resolve"
+              : "Reopen"}
+        </GithubPostButton>
+      )}
+    </>
+  );
+}
+
 /**
  * The card's actions, as a selection discussion's composer lays them out:
- * key hints, then Send to main chat, then the primary Discuss inline (or
- * Show private discussion). Hidden while the discussion is open; its
- * composer offers the same actions.
+ * key hints, then the GitHub writes the viewer may make, Send to main chat,
+ * then the primary Discuss inline (or Show private discussion). While the
+ * discussion is open its composer offers the private actions, so only the
+ * GitHub ones stay.
  */
 function ThreadActions({
   placed,
@@ -375,16 +512,23 @@ function ThreadActions({
   onDiscuss(discussion: DiscussionValue): Promise<void>;
 }) {
   const discussion = useContext(SelectionDiscussionContext);
+  const writes = useGithubWrites();
   const [starting, setStarting] = useState(false);
-  if (!discussion) return null;
-  const thread = discussion.threads.find(
+  const thread = discussion?.threads.find(
     ({ githubThreadId }) => githubThreadId === placed.thread.id
   );
-  if (thread && discussion.activeId === thread.id) return null;
+  const open = !!thread && discussion?.activeId === thread.id;
   const canDiscuss =
-    !!thread || (discussion.canAsk && canDiscussGithub(placed));
-  const canSend = discussion.canAttachGithub;
-  if (!canDiscuss && !canSend) return null;
+    !!discussion &&
+    !open &&
+    (!!thread || (discussion.canAsk && canDiscussGithub(placed)));
+  const canSend = !!discussion?.canAttachGithub && !open;
+  const github = placed.thread;
+  const canWrite =
+    !!writes &&
+    (github.viewerCanReply ||
+      (github.resolved ? github.viewerCanUnresolve : github.viewerCanResolve));
+  if (!canDiscuss && !canSend && !canWrite) return null;
   const discussLabel = thread ? "Show private discussion" : "Discuss inline";
   const hints = [
     canDiscuss && ([GITHUB_THREAD_DISCUSS_KEY, discussLabel] as const),
@@ -402,7 +546,8 @@ function ThreadActions({
         ))}
       </span>
       <div className="diff-comment-editor-buttons">
-        {canSend && (
+        <GithubThreadButtons placed={placed} />
+        {canSend && discussion && (
           <button
             type="button"
             title={`Send to main chat (${sendKeys})`}
@@ -412,7 +557,7 @@ function ThreadActions({
             Send to main chat
           </button>
         )}
-        {canDiscuss && (
+        {canDiscuss && discussion && (
           <button
             type="button"
             data-primary

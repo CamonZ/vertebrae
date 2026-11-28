@@ -1,9 +1,18 @@
 //! The review-thread contract with the frontend: mirrors of the adapter's
-//! plain types, and the placement request and answer.
+//! plain types, writes, and the placement request and answer.
 
 use crate::commands::chat_catalog::ReviewThreadSide;
 use serde::{Deserialize, Serialize};
-use vertebrae_github::{DiffSide, ReviewComment, ReviewThread};
+use vertebrae_github::{DiffSide, NewReviewThread, ReviewComment, ReviewThread, ReviewThreadWrite};
+
+impl From<ReviewThreadSide> for DiffSide {
+    fn from(side: ReviewThreadSide) -> Self {
+        match side {
+            ReviewThreadSide::Left => Self::Left,
+            ReviewThreadSide::Right => Self::Right,
+        }
+    }
+}
 
 impl From<DiffSide> for ReviewThreadSide {
     fn from(side: DiffSide) -> Self {
@@ -112,11 +121,57 @@ impl From<ReviewThread> for GithubReviewThread {
 pub struct GithubPrReviewThreads {
     pub repo: String,
     pub pr_number: u32,
+    /// The signed-in GitHub user, who authors replies and new threads.
+    pub viewer_login: Option<String>,
     /// Commit the published `Right` anchors refer to.
     pub head_oid: String,
     pub base_oid: String,
     pub threads: Vec<GithubReviewThread>,
     pub truncated: bool,
+}
+
+/// One write to a PR's review threads, as the user asked for it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GithubThreadWrite {
+    #[serde(rename_all = "camelCase")]
+    Reply { thread_id: String, body: String },
+    #[serde(rename_all = "camelCase")]
+    Resolve { thread_id: String },
+    #[serde(rename_all = "camelCase")]
+    Reopen { thread_id: String },
+    /// A new thread on published lines of the PR's diff.
+    #[serde(rename_all = "camelCase")]
+    Start {
+        path: String,
+        side: ReviewThreadSide,
+        start_line: Option<u32>,
+        line: u32,
+        body: String,
+    },
+}
+
+impl From<GithubThreadWrite> for ReviewThreadWrite {
+    fn from(write: GithubThreadWrite) -> Self {
+        match write {
+            GithubThreadWrite::Reply { thread_id, body } => Self::Reply { thread_id, body },
+            GithubThreadWrite::Resolve { thread_id } => Self::Resolve { thread_id },
+            GithubThreadWrite::Reopen { thread_id } => Self::Reopen { thread_id },
+            GithubThreadWrite::Start {
+                path,
+                side,
+                start_line,
+                line,
+                body,
+            } => Self::Start(NewReviewThread {
+                path,
+                side: side.into(),
+                start_line,
+                line,
+                body,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, specta::Type)]

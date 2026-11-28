@@ -399,3 +399,130 @@
   color: var(--color-err);
   font-size: var(--text-meta);
 }
+
+/*
+ * Posting to GitHub: neutral, with the GitHub glyph, never the private
+ * accent. Inside a composer row it takes that row's button shape; the
+ * row's main post is filled with the foreground colour.
+ */
+.gh-post-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.diff-comment-editor-actions .gh-post-button[data-github-primary] {
+  border-color: var(--color-fg-soft);
+  background: var(--color-fg);
+  color: var(--color-bg);
+}
+
+.diff-comment-editor-actions
+  .gh-post-button[data-github-primary]:hover:not(:disabled) {
+  border-color: var(--color-fg);
+  background: var(--color-fg-soft);
+  color: var(--color-bg);
+}
+
+.gh-spinner {
+  inline-size: 10px;
+  block-size: 10px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: var(--radius-full);
+  animation: gh-spin 0.9s linear infinite;
+}
+
+@keyframes gh-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gh-spinner {
+    animation: none;
+  }
+}
+
+.gh-thread-reply {
+  padding: 0 8px;
+}
+
+.gh-thread-reply:empty {
+  display: none;
+}
+
+/* A public composer: neutral card naming its target and audience. */
+.gh-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block: 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  color: var(--color-fg);
+}
+
+.selection-mini-thread .gh-composer {
+  margin-block-start: 8px;
+}
+
+.gh-composer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  font: 500 var(--text-meta) / 1.4 var(--font-sans);
+}
+
+.gh-composer-head .gh-mute {
+  font-weight: 400;
+}
+
+.gh-composer-text {
+  min-block-size: 56px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-1);
+  color: var(--color-fg);
+  font: 400 var(--text-secondary) / 1.45 var(--font-sans);
+  resize: vertical;
+}
+
+.gh-composer-actions {
+  align-items: center;
+}
+
+/* A write GitHub did not take, with what the user can do next. */
+.gh-write-alert {
+  margin-block: 0 8px;
+  padding: 6px 8px;
+  border-inline-start: 3px solid var(--color-err);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-2);
+  font-size: var(--text-meta);
+}
+
+.gh-write-alert p {
+  margin: 0;
+}
+
+.gh-write-alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-block-start: 4px;
+}
+
+.gh-undo-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: var(--color-fg-mute);
+  font-size: var(--text-meta);
+}

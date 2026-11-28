@@ -2,7 +2,7 @@
  * An inline discussion as it shows in a diff, the Discussions section or a
  * GitHub thread's card: its transcript, composer and turn controls.
  */
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useInlineScrollFollow } from "./useInlineScrollFollow";
 import { useUIStore } from "../../stores/uiStore";
 import { ThinkingIndicator } from "./ThinkingIndicator";
@@ -35,6 +35,7 @@ import {
 import { focusKeepProps } from "../../utils/focusKeep";
 import { useKeepFocus } from "../../hooks/useKeepFocus";
 import { OWNS_ESCAPE_ATTRIBUTE } from "../../hooks/useGlassPanel";
+import { useDiscussionGithub } from "./workspace/githubReview/DiscussionGithub";
 
 const collapseKeys = shortcutText(DISCUSSION_COLLAPSE_SHORTCUT);
 const askKeys = shortcutText(DISCUSSION_ASK_SHORTCUT);
@@ -83,10 +84,13 @@ export function MiniThread({
   thread,
   discussion,
   onClosed,
+  code,
 }: {
   thread: DiscussionState["threads"][number];
   discussion: DiscussionValue;
   onClosed?(anchor: CodeSelection): void;
+  /** The code it is about, where the thread is shown away from it. */
+  code?: ReactNode;
 }) {
   // A closed discussion keeps its unsent question for when it reopens.
   const [question, setQuestionState] = useState(() =>
@@ -110,6 +114,12 @@ export function MiniThread({
   const failed = getLocalChatLifecycle(session) === "error";
   const announcement = useTurnAnnouncement(activeTurn, failed);
   const notice = anchorNotice(thread.status);
+  // Its way onto GitHub: always a separate, explicit post.
+  const githubWrite = useDiscussionGithub(
+    thread,
+    discussion,
+    session?.messages ?? NO_MESSAGES
+  );
 
   // Opening from the keyboard puts the caret in the composer, once. Opening
   // also highlights the anchor, and the diff re-renders its rows a frame
@@ -277,6 +287,7 @@ export function MiniThread({
           </svg>
         </button>
       </header>
+      {code}
       {thread.status.kind !== "inline" &&
         thread.status.kind !== "unreadable" && (
           <pre aria-label="Original selected code">
@@ -366,6 +377,7 @@ export function MiniThread({
               Cancel response
             </button>
           )}
+          {githubWrite.action}
           <button
             type="button"
             disabled={unreadable}
@@ -386,9 +398,12 @@ export function MiniThread({
           </button>
         </div>
       </form>
+      {githubWrite.composer}
     </section>
   );
 }
+
+const NO_MESSAGES: never[] = [];
 
 /** Marks what stays in Vertebrae, never posted to GitHub. */
 export function LockGlyph() {

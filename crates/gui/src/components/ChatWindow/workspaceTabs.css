@@ -224,7 +224,9 @@
   border-radius: 999px;
   background: var(--color-warn);
 }
-.selection-model-notice[data-tone="warn"] .selection-model-notice-text > :first-child {
+.selection-model-notice[data-tone="warn"]
+  .selection-model-notice-text
+  > :first-child {
   color: var(--color-warn);
 }
 .selection-model-notice-text {
@@ -499,6 +501,17 @@ button:has(> .selection-chip-label) {
   background: var(--color-bg-2);
   color: var(--color-fg-soft);
   font: 400 var(--text-meta)/1.5 var(--font-mono);
+}
+/* An opened discussion's diff chunk, highlighted as in Changes. */
+.side-discussion-diff {
+  max-height: 240px;
+  margin: 4px 0 0;
+  overflow: auto;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-lg);
+}
+.side-discussion-diff > .side-discussion-code {
+  margin: 0;
 }
 
 /* Each section's keys, listed at its foot. */

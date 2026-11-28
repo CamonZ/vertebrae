@@ -1302,6 +1302,18 @@ async mapReviewThreads(worktree: string, threads: ReviewMappingRequest[]) : Prom
     else return { status: "error", error: e  as any };
 }
 },
+/**
+ * Where lines `range` of the shown `from` are in `onto` (such as the PR's
+ * published side), unchanged. Reads only: nothing is retained or saved.
+ */
+async mapReviewSelection(worktree: string, from: ReviewAnchorLocation, range: ReviewLineRange, onto: ReviewAnchorLocation) : Promise<Result<MappedReviewRange, ReviewAnchorError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("map_review_selection", { worktree, from, range, onto }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async readReviewAnchor(worktree: string, threadId: string, range: ReviewLineRange) : Promise<Result<string, ReviewAnchorError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("read_review_anchor", { worktree, threadId, range }) };
@@ -1516,6 +1528,19 @@ async getWorktreePublishedHead(worktreePath: string, branch: string) : Promise<R
 async getGithubPrReviewThreads(worktreePath: string, branch: string, repo: string, prNumber: number, refresh: boolean | null) : Promise<Result<GithubPrReviewThreads, GithubFailure>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_github_pr_review_threads", { worktreePath, branch, repo, prNumber, refresh }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Reply to, resolve, reopen or start a review thread on PR `pr_number` in
+ * `repo` (one of the worktree's GitHub remotes); the ID of the thread
+ * written. Posts to GitHub, once.
+ */
+async writeGithubPrReviewThread(worktreePath: string, branch: string, repo: string, prNumber: number, write: GithubThreadWrite) : Promise<Result<string, GithubFailure>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("write_github_pr_review_thread", { worktreePath, branch, repo, prNumber, write }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -2555,7 +2580,15 @@ export type GithubCheckCancel = "allowed" | "no_permission" | "provider" | "not_
 export type GithubCheckOutcome = "success" | "neutral" | "skipped" | "failure" | "cancelled" | "timed_out" | "action_required" | "startup_failure" | "stale" | "error"
 export type GithubCheckRerun = "allowed" | "no_permission" | "pull_request_closed" | "run_in_progress" | "provider" | "not_applicable"
 export type GithubCheckStatus = "failed" | "running" | "queued" | "passed"
-export type GithubErrorKind = "gh_missing" | "auth_expired" | "rate_limited" | "not_found" | "other"
+export type GithubErrorKind = "gh_missing" | "auth_expired" | "rate_limited" | "not_found" |
+/**
+ * GitHub refused: retrying cannot help.
+ */
+"forbidden" |
+/**
+ * No answer in time: a write may have been applied.
+ */
+"timeout" | "other"
 export type GithubFailure = { kind: GithubErrorKind; message: string; retryAfterSecs: number | null }
 export type GithubOpenPrsPoll =
 /**
@@ -2600,6 +2633,10 @@ numbers: number[] }
  * One read of a PR's review threads.
  */
 export type GithubPrReviewThreads = { repo: string; prNumber: number;
+/**
+ * The signed-in GitHub user, who authors replies and new threads.
+ */
+viewerLogin: string | null;
 /**
  * Commit the published `Right` anchors refer to.
  */
@@ -2692,6 +2729,14 @@ export type GithubThreadPlacement =
  */
 { kind: "not_shown" }
 export type GithubThreadPosition = { threadId: string; placement: GithubThreadPlacement }
+/**
+ * One write to a PR's review threads, as the user asked for it.
+ */
+export type GithubThreadWrite = { kind: "reply"; threadId: string; body: string } | { kind: "resolve"; threadId: string } | { kind: "reopen"; threadId: string } |
+/**
+ * A new thread on published lines of the PR's diff.
+ */
+{ kind: "start"; path: string; side: ReviewThreadSide; startLine: number | null; line: number; body: string }
 export type GithubUnplaceableReason =
 /**
  * The published range does not exist in the published file.
@@ -3036,6 +3081,10 @@ export type LocalChatTurnStartedEvent = { backend_session_id: string; harness: L
  * An application or editor command that can open local source/text files.
  */
 export type LocalFileEditor = { id: string; name: string; path: string }
+/**
+ * Where a selection's lines are in another version of the file.
+ */
+export type MappedReviewRange = { startLine: number | null; line: number | null; status: ReviewMappingStatus }
 export type MappedReviewThread = { threadId: string; startLine: number | null; line: number | null; status: ReviewMappingStatus }
 /**
  * Why a changed file is listed without hunks.
@@ -3223,7 +3272,12 @@ export type ReviewThreadOrigin = "local"
 export type ReviewThreadPosition = { status: ReviewThreadStatus; startLine: number | null; line: number | null }
 export type ReviewThreadSide = "LEFT" | "RIGHT"
 export type ReviewThreadStatus = "open" | "outdated"
-export type ReviewThreadUpdate = { kind: "position"; position: ReviewThreadPosition } | { kind: "outdated_note" } | { kind: "anchor"; anchor: ReviewThreadInput }
+export type ReviewThreadUpdate = { kind: "position"; position: ReviewThreadPosition } | { kind: "outdated_note" } | { kind: "anchor"; anchor: ReviewThreadInput } |
+/**
+ * A line discussion was posted to GitHub as this new review thread: it
+ * is drawn with that thread from now on, keeping its history.
+ */
+{ kind: "github_thread"; githubThreadId: string }
 /**
  * Config of a `route` step.
  */
