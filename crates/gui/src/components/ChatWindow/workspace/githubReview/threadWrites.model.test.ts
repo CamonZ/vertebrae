@@ -2,21 +2,23 @@
  * Thread writes against a synthetic GitHub. The landed check is tested
  * against GitHub's own application of a write (`applyThreadWrite`): a write
  * applied shows as landed, one not applied as absent, and threads that
- * cannot tell say so. The drafts store is driven by random user actions
- * while GitHub answers each write at random (posted, 403, a transient
- * failure, a timeout that did or did not apply), and must:
+ * cannot tell say so.
  *
- * - send only from Post or Retry, the draft's text, at most its plan;
- * - keep the draft whenever a post fails, and close it once posted;
- * - after reply and resolve whose resolve failed, keep the posted reply
- *   and offer only the resolve again;
- * - never retry a 403, and never post twice after a timeout that landed;
- * - treat a send that threw (before or after GitHub applied it) as a
- *   timeout, and never stay pending when the port throws;
- * - finish a reply and resolve whose reply landed with the resolve, even
- *   when the text was changed or cleared before the retry;
- * - bring a discarded draft back with Undo;
- * - report each thread a comment started once.
+ * The drafts store is then checked two ways:
+ *
+ * - Failure sequences by construction: one plan is attempted round after
+ *   round (Post, or Retry once a write failed) with edits between rounds,
+ *   while GitHub answers each write from a failure-heavy mix (posted, 403,
+ *   rejected, transient, an answer lost after it did or did not apply, a
+ *   port that threw) and the read after it (fresh, failed, or blind to the
+ *   viewer). A reference model of the plan's progress predicts, after every
+ *   round, the slot and what GitHub has; GitHub itself is the oracle that
+ *   nothing posted twice. Timeouts that landed, edits between attempts and
+ *   reply-and-resolve recovery are reached by every multi-round case, not
+ *   by chance.
+ * - Random user actions across two slots, for the properties that hold
+ *   whatever the order: sends only from Post or Retry, Discard and Undo
+ *   round trips, and each started thread reported once.
  */
 import { describe, expect, it } from "vitest";
 import * as hegel from "@hegeldev/hegel";
@@ -34,6 +36,9 @@ import {
   landed,
   matching,
   replySlot,
+  threadOffers,
+  type FailureKind,
+  type WriteAnswer,
   type WritePlan,
   type WritePort,
 } from "./threadWrites";
@@ -48,17 +53,12 @@ const prThreads = (
 ): GithubPrReviewThreads => ({
   repo: "example/demo-repo",
   prNumber: 7,
+  pullRequestId: "PR_kwDOsynthetic7",
   viewerLogin,
   headOid: "1".repeat(40),
   baseOid: "2".repeat(40),
   threads,
   truncated,
-});
-
-const failure = (kind: GithubFailure["kind"]): GithubFailure => ({
-  kind,
-  message: `${kind} from GitHub`,
-  retryAfterSecs: null,
 });
 
 const drawThreads = (tc: hegel.TestCase) =>
@@ -84,6 +84,7 @@ const drawWrite = (tc: hegel.TestCase): GithubThreadWrite => {
     default:
       return {
         kind: "start",
+        pullRequestId: "PR_kwDOsynthetic7",
         path: "src/lib.rs",
         side: tc.draw(gs.sampledFrom(["LEFT", "RIGHT"] as const)),
         startLine: null,
@@ -136,27 +137,10 @@ describe("whether a write landed", () => {
     ));
 });
 
-type Answer =
-  | "posted"
-  | "forbidden"
-  | "transient"
-  | "timeout_applied"
-  | "timeout_lost"
-  | "threw_applied"
-  | "threw_lost";
-
-const ANSWERS: Answer[] = [
-  "posted",
-  "forbidden",
-  "transient",
-  "timeout_applied",
-  "timeout_lost",
-  "threw_applied",
-  "threw_lost",
-];
-
+const SCOPE = "example/demo-repo#7";
+const PR_ID = "PR_kwDOsynthetic7";
 const REPLY = replySlot("PRRT_a");
-const COMMENT = commentSlot("discussion-1");
+const COMMENT = commentSlot(SCOPE, "discussion-1");
 const PLACE = {
   path: "src/lib.rs",
   side: "RIGHT" as const,
@@ -164,97 +148,453 @@ const PLACE = {
   line: 20,
 };
 
+/** GitHub's answer to one write. `lost_*`: no answer, applied or not. */
+type Answer =
+  | "posted"
+  | "forbidden"
+  | "rejected"
+  | "transient"
+  | "lost_landed"
+  | "lost_absent"
+  | "threw_landed"
+  | "threw_absent";
+
+/** The threads read after a write, or by Retry's check. */
+type Read = "fresh" | "failed" | "blind";
+
+const ANSWERS: Answer[] = [
+  "posted",
+  "forbidden",
+  "rejected",
+  "transient",
+  "lost_landed",
+  "lost_absent",
+  "threw_landed",
+  "threw_absent",
+];
+const READS: Read[] = ["fresh", "failed", "blind"];
+
+const WIRE_KIND: Record<
+  "forbidden" | "rejected" | "transient" | "lost_landed" | "lost_absent",
+  GithubFailure["kind"]
+> = {
+  forbidden: "forbidden",
+  rejected: "rejected",
+  transient: "other",
+  lost_landed: "ambiguous",
+  lost_absent: "ambiguous",
+};
+
+const lands = (answer: Answer) =>
+  answer === "posted" || answer === "lost_landed" || answer === "threw_landed";
+
 const sameWrite = (left: GithubThreadWrite, right: GithubThreadWrite) =>
   JSON.stringify(left) === JSON.stringify(right);
 
-describe("the drafts store against GitHub", () => {
-  it("resolves after a reply whose timeout landed, though the text was cleared", async () => {
-    let github = [reviewThread("PRRT_a", { body: "Please fix" })];
-    const sends: GithubThreadWrite[] = [];
-    let timeOut = true;
-    const port: WritePort = {
-      shown: () => prThreads(github),
-      async send(write) {
-        sends.push(write);
-        github = applyThreadWrite(github, write, VIEWER, "PRRT_new");
-        if (timeOut) {
-          timeOut = false;
-          return { ok: false, failure: failure("timeout") };
-        }
-        return { ok: true, data: "PRRT_a" };
+/** A synthetic GitHub for one PR, answering as a test case says. */
+class FakeGithub {
+  threads: GithubReviewThread[];
+  sends: GithubThreadWrite[] = [];
+  rereads = 0;
+  private nodes = 0;
+  constructor(
+    threads: GithubReviewThread[],
+    /** The answer to a send, and the read right after it. */
+    private next: () => { answer: Answer; read: Read },
+    /** What Retry's check reads. */
+    private recheck: () => Read
+  ) {
+    this.threads = threads;
+  }
+  private view(read: Read) {
+    if (read === "failed") return null;
+    return prThreads(this.threads, read === "blind" ? null : VIEWER);
+  }
+  port(scope = SCOPE): WritePort {
+    return {
+      scope,
+      shown: () => prThreads(this.threads),
+      send: async (write): Promise<WriteAnswer> => {
+        this.sends.push(write);
+        const { answer, read } = this.next();
+        const id = `PRRT_n${++this.nodes}`;
+        if (lands(answer))
+          this.threads = applyThreadWrite(this.threads, write, VIEWER, id);
+        if (answer === "threw_landed" || answer === "threw_absent")
+          throw new Error("the port threw");
+        const threads = this.view(read);
+        if (answer === "posted")
+          return {
+            outcome: {
+              ok: true,
+              data: write.kind === "start" ? id : write.threadId,
+            },
+            threads,
+          };
+        return {
+          outcome: {
+            ok: false,
+            failure: {
+              kind: WIRE_KIND[answer],
+              message: `${answer} from GitHub`,
+              retryAfterSecs: null,
+            },
+          },
+          threads,
+        };
       },
-      reread: async () => prThreads(github),
+      reread: async () => {
+        this.rereads += 1;
+        return this.view(this.recheck());
+      },
     };
+  }
+}
+
+type PlanKind = "reply" | "reply_resolve" | "resolve" | "reopen" | "start";
+type WriteKind = GithubThreadWrite["kind"];
+
+const planOf = (kind: PlanKind): WritePlan =>
+  kind === "start"
+    ? { kind: "start", pullRequestId: PR_ID, place: PLACE }
+    : kind === "reply" || kind === "reply_resolve"
+      ? { kind: "reply", threadId: "PRRT_a", resolve: kind === "reply_resolve" }
+      : { kind, threadId: "PRRT_a" };
+
+const writesOfPlan = (kind: PlanKind): WriteKind[] =>
+  kind === "reply_resolve" ? ["reply", "resolve"] : [kind === "reply" ? "reply" : kind];
+
+const isText = (kind: WriteKind) => kind === "reply" || kind === "start";
+
+/**
+ * What the store should hold after each round: the plan's writes still to
+ * land, the composer, the failure, and the bodies GitHub took. Written from
+ * the spec of a write's outcome, not from the store's code.
+ */
+interface Model {
+  remaining: WriteKind[];
+  draft: string | null;
+  discarded: string | null;
+  failure: {
+    kind: FailureKind;
+    write: WriteKind;
+    /** GitHub applied it (a lost answer that landed). */
+    applied: boolean;
+    /** The body it was sent with. */
+    body: string | null;
+  } | null;
+  refused: WriteKind[];
+  /** Bodies of the viewer's replies or new threads on GitHub. */
+  posted: string[];
+  sends: number;
+  rereads: number;
+}
+
+const trimmed = (text: string | null) => text?.trim() ?? "";
+
+/** The model's send of the remaining writes, as GitHub answers each. */
+function modelSend(
+  model: Model,
+  next: () => { answer: Answer; read: Read }
+) {
+  while (model.remaining.length > 0) {
+    const write = model.remaining[0];
+    const body = isText(write) ? trimmed(model.draft) : null;
+    if (body === "") return;
+    const { answer, read } = next();
+    model.sends += 1;
+    const applied = lands(answer);
+    if (applied && body !== null) model.posted.push(body);
+    let failed: FailureKind | null = null;
+    if (answer === "forbidden") failed = "forbidden";
+    else if (answer === "rejected") failed = "rejected";
+    else if (answer === "transient") failed = "transient";
+    else if (answer !== "posted") {
+      const threw = answer.startsWith("threw");
+      // The write's own read settles a lost answer at once.
+      if (threw || read === "failed") failed = "ambiguous";
+      else if (read === "blind" && isText(write)) failed = "unconfirmed";
+      else if (!applied) failed = "ambiguous";
+    }
+    if (failed) {
+      model.failure = { kind: failed, write, applied, body };
+      if (failed === "forbidden" && !model.refused.includes(write))
+        model.refused.push(write);
+      return;
+    }
+    model.failure = null;
+    model.remaining.shift();
+    if (body !== null) {
+      model.draft = null;
+      model.discarded = null;
+    }
+  }
+}
+
+/** The model's Retry: a lost answer is checked before anything is resent. */
+function modelRetry(
+  model: Model,
+  retryRead: Read,
+  next: () => { answer: Answer; read: Read }
+) {
+  const { failure } = model;
+  if (!failure) return;
+  if (failure.kind !== "ambiguous" && failure.kind !== "transient") return;
+  if (failure.kind === "ambiguous") {
+    model.rereads += 1;
+    if (retryRead === "failed") return;
+    if (retryRead === "blind" && isText(failure.write)) {
+      model.failure = { ...failure, kind: "unconfirmed" };
+      return;
+    }
+    if (failure.applied) {
+      model.failure = null;
+      model.remaining.shift();
+      if (failure.body !== null) {
+        // Text edited after the post that landed stays for Undo.
+        const edited =
+          model.draft !== null && trimmed(model.draft) !== failure.body;
+        model.discarded = edited ? model.draft : null;
+        model.draft = null;
+      }
+      modelSend(model, next);
+      return;
+    }
+  }
+  modelSend(model, next);
+}
+
+describe("the drafts store through failure sequences", () => {
+  it("settles a lost answer from the write's own read, without a second read", async () => {
+    const answers: Answer[] = ["lost_landed"];
+    const github = new FakeGithub(
+      [reviewThread("PRRT_a", { body: "Please fix" })],
+      () => ({ answer: answers.shift() ?? "posted", read: "fresh" }),
+      () => "fresh"
+    );
     const store = new ThreadWrites();
     store.open(REPLY, "Fixed.");
-    await store.post(
-      REPLY,
-      { kind: "reply", threadId: "PRRT_a", resolve: true },
-      port
+    await store.post(REPLY, planOf("reply"), github.port());
+    expect(store.slot(REPLY)).toMatchObject({ draft: null, failure: null });
+    expect(github.sends).toHaveLength(1);
+    expect(github.rereads).toBe(0);
+  });
+
+  it("resolves after a reply whose lost answer landed, though the text was cleared", async () => {
+    // The read after the reply fails, so only Retry's check settles it.
+    const answers: Answer[] = ["lost_landed"];
+    const github = new FakeGithub(
+      [reviewThread("PRRT_a", { body: "Please fix" })],
+      () => ({
+        answer: answers.shift() ?? "posted",
+        read: answers.length === 0 ? "failed" : "fresh",
+      }),
+      () => "fresh"
     );
-    expect(store.slot(REPLY).failure?.kind).toBe("timeout");
+    const store = new ThreadWrites();
+    store.open(REPLY, "Fixed.");
+    await store.post(REPLY, planOf("reply_resolve"), github.port());
+    expect(store.slot(REPLY).failure?.kind).toBe("ambiguous");
     store.edit(REPLY, "");
-    await store.retry(REPLY, port);
-    expect(sends.map(({ kind }) => kind)).toEqual(["reply", "resolve"]);
-    expect(github[0].resolved).toBe(true);
+    await store.retry(REPLY, github.port());
+    expect(github.sends.map(({ kind }) => kind)).toEqual(["reply", "resolve"]);
+    expect(github.threads[0].resolved).toBe(true);
     expect(store.slot(REPLY).failure).toBeNull();
   });
 
-  it("posts only on request, keeps drafts, and never posts a landed write twice", () =>
+  it("agrees with the reference model after every round", () =>
     hegel.testAsync(
       async (tc) => {
-        let github = [reviewThread("PRRT_a", { body: "Please fix" })];
-        let nodes = 0;
-        const sends: GithubThreadWrite[] = [];
-        /** The last send per slot, and whether GitHub applied it. */
-        const applied = new Map<string, boolean>();
+        const kind = tc.draw(
+          gs.sampledFrom<PlanKind>([
+            "reply",
+            "reply_resolve",
+            "resolve",
+            "reopen",
+            "start",
+          ])
+        );
+        const key = kind === "start" ? COMMENT : REPLY;
+        const draw = () => ({
+          answer: tc.draw(gs.sampledFrom(ANSWERS)),
+          read: tc.draw(gs.sampledFrom(READS)),
+        });
+        // Each send's answer and read are drawn once, and the model replays
+        // the same draws.
+        let queued: { answer: Answer; read: Read }[] = [];
+        const take = () => {
+          const drawn = draw();
+          queued.push(drawn);
+          return drawn;
+        };
+        let replay: { answer: Answer; read: Read }[] = [];
+        let retryRead: Read = "fresh";
+        const github = new FakeGithub(
+          [
+            reviewThread("PRRT_a", {
+              body: "Please fix",
+              resolved: kind === "reopen",
+              viewerCanUnresolve: true,
+            }),
+          ],
+          take,
+          () => retryRead
+        );
+        const text = writesOfPlan(kind).some(isText);
+        const store = new ThreadWrites();
+        const model: Model = {
+          remaining: writesOfPlan(kind),
+          draft: null,
+          discarded: null,
+          failure: null,
+          refused: [],
+          posted: [],
+          sends: 0,
+          rereads: 0,
+        };
+        if (text) {
+          store.open(key, "Fixed.");
+          model.draft = "Fixed.";
+        }
+        const rounds = tc.draw(gs.integers({ minValue: 1, maxValue: 5 }));
+        for (let round = 0; round < rounds; round += 1) {
+          if (round > 0 && model.draft !== null) {
+            const edit = tc.draw(
+              gs.sampledFrom(["keep", "change", "clear"] as const)
+            );
+            const next =
+              edit === "keep" ? model.draft : edit === "change" ? "Fixed, thanks." : "";
+            store.edit(key, next);
+            model.draft = next;
+          }
+          queued = [];
+          const failure = model.failure;
+          if (model.remaining.length === 0) break;
+          // A rejected text is changed and posted again; a rejected resolve
+          // or reopen is finished on GitHub, like a 403.
+          if (failure?.kind === "rejected" && !isText(failure.write)) break;
+          if (!failure || failure.kind === "rejected") {
+            await store.post(key, planOf(kind), github.port());
+            replay = queued;
+            modelSend(model, () => replay.shift()!);
+          } else {
+            retryRead = tc.draw(gs.sampledFrom(READS));
+            await store.retry(key, github.port());
+            replay = queued;
+            modelRetry(model, retryRead, () => replay.shift()!);
+          }
+
+          const slot = store.slot(key);
+          expect(slot.pending).toBeNull();
+          expect(slot.draft).toBe(model.draft);
+          expect(slot.discarded).toBe(model.discarded);
+          expect(slot.failure?.kind ?? null).toBe(model.failure?.kind ?? null);
+          expect(slot.failure?.sent.kind ?? null).toBe(
+            model.failure?.write ?? null
+          );
+          expect(slot.failure?.replied ?? false).toBe(
+            kind === "reply_resolve" && model.failure?.write === "resolve"
+          );
+          expect(slot.failure?.scope ?? SCOPE).toBe(SCOPE);
+          expect([...slot.refused].sort()).toEqual([...model.refused].sort());
+          expect(github.sends).toHaveLength(model.sends);
+          expect(github.rereads).toBe(model.rereads);
+
+          // GitHub is the oracle: nothing the slot wrote is on it twice,
+          // and a plan with nothing left is all there.
+          const mine = github.threads[0].comments
+            .filter((comment) => comment.author?.login === VIEWER)
+            .map((comment) => comment.body);
+          const started = github.threads.filter(
+            ({ comments }) => comments[0]?.author?.login === VIEWER
+          );
+          expect(mine.length + started.length).toBeLessThanOrEqual(1);
+          expect(mine.concat(started.map((t) => t.comments[0].body))).toEqual(
+            model.posted
+          );
+          if (model.remaining.length === 0 && model.failure === null) {
+            if (text) expect(model.posted).toHaveLength(1);
+            if (kind === "reply_resolve" || kind === "resolve")
+              expect(github.threads[0].resolved).toBe(true);
+            if (kind === "reopen") expect(github.threads[0].resolved).toBe(false);
+          }
+        }
+      },
+      { testCases: 400 }
+    ));
+});
+
+describe("the drafts store's scope", () => {
+  it("never retries a failure through another PR, and keeps each PR's comment apart", async () => {
+    const github = new FakeGithub(
+      [],
+      () => ({ answer: "transient", read: "fresh" }),
+      () => "fresh"
+    );
+    const store = new ThreadWrites();
+    store.open(COMMENT, "On PR 7");
+    await store.post(COMMENT, planOf("start"), github.port());
+    expect(store.slot(COMMENT).failure?.scope).toBe(SCOPE);
+    const other = commentSlot("example/demo-repo#8", "discussion-1");
+    expect(other).not.toBe(COMMENT);
+    expect(store.slot(other).draft).toBeNull();
+    await store.retry(COMMENT, github.port("example/demo-repo#8"));
+    expect(github.sends).toHaveLength(1);
+    await store.retry(COMMENT, github.port());
+    expect(github.sends).toHaveLength(2);
+  });
+
+  it("offers no Resolve after GitHub refused it with a 403, and keeps that past Forget", async () => {
+    const github = new FakeGithub(
+      [reviewThread("PRRT_a")],
+      () => ({ answer: "forbidden", read: "fresh" }),
+      () => "fresh"
+    );
+    const store = new ThreadWrites();
+    const thread = github.threads[0];
+    expect(threadOffers(thread, store.slot(REPLY)).toggle).toBe("resolve");
+    await store.post(REPLY, planOf("resolve"), github.port());
+    expect(threadOffers(thread, store.slot(REPLY))).toEqual({
+      reply: true,
+      toggle: null,
+      replyAndResolve: false,
+    });
+    store.forget(REPLY);
+    expect(store.slot(REPLY).refused).toEqual(["resolve"]);
+    expect(store.slot(REPLY).failure).toBeNull();
+    // An open composer stands in for the buttons.
+    store.open(REPLY, "Why not?");
+    expect(threadOffers(thread, store.slot(REPLY))).toMatchObject({
+      reply: false,
+      toggle: null,
+    });
+  });
+});
+
+describe("the drafts store under random user actions", () => {
+  it("posts only on request, round-trips Discard and Undo, and reports each started thread once", () =>
+    hegel.testAsync(
+      async (tc) => {
         const started: string[] = [];
-        let slotOfSend = "";
-        const port: WritePort = {
-          shown: () => prThreads(github),
-          async send(write) {
-            sends.push(write);
-            const answer = tc.draw(gs.sampledFrom(ANSWERS));
-            const lands =
-              answer === "posted" ||
-              answer === "timeout_applied" ||
-              answer === "threw_applied";
-            const id = `PRRT_n${++nodes}`;
-            if (lands) github = applyThreadWrite(github, write, VIEWER, id);
-            applied.set(slotOfSend, lands);
-            if (answer === "threw_applied" || answer === "threw_lost")
-              throw new Error("the port threw");
-            if (answer === "posted")
-              return {
-                ok: true,
-                data: write.kind === "start" ? id : write.threadId,
-              };
-            return {
-              ok: false,
-              failure: failure(
-                answer === "forbidden"
-                  ? "forbidden"
-                  : answer === "transient"
-                    ? "other"
-                    : "timeout"
-              ),
-            };
-          },
-          reread: async () => {
-            const read = tc.draw(gs.sampledFrom(["read", "null", "threw"]));
-            if (read === "threw") throw new Error("the reread threw");
-            return read === "read" ? prThreads(github) : null;
-          },
+        const github = new FakeGithub(
+          [reviewThread("PRRT_a", { body: "Please fix" })],
+          () => ({
+            answer: tc.draw(gs.sampledFrom(ANSWERS)),
+            read: tc.draw(gs.sampledFrom(READS)),
+          }),
+          () => tc.draw(gs.sampledFrom(READS))
+        );
+        const port = (): WritePort => ({
+          ...github.port(),
           started: (threadId) => {
             started.push(threadId);
             if (tc.draw(gs.booleans())) throw new Error("following up threw");
           },
-        };
+        });
         const store = new ThreadWrites();
         const steps = tc.draw(gs.integers({ minValue: 1, maxValue: 30 }));
         for (let step = 0; step < steps; step += 1) {
           const key = tc.draw(gs.sampledFrom([REPLY, COMMENT]));
-          slotOfSend = key;
           const op = tc.draw(
             gs.sampledFrom([
               "open",
@@ -267,8 +607,7 @@ describe("the drafts store against GitHub", () => {
             ] as const)
           );
           const slot = store.slot(key);
-          const sent = sends.length;
-          const threadsBefore = github;
+          const sent = github.sends.length;
           if (op === "open") {
             store.open(key, tc.draw(gs.sampledFrom(["", ...BODIES])));
             if (slot.draft !== null)
@@ -282,7 +621,6 @@ describe("the drafts store against GitHub", () => {
           } else if (op === "discard") {
             store.discard(key);
             expect(store.slot(key).draft).toBeNull();
-            // Discard then Undo is a round trip.
             if (slot.draft !== null) {
               expect(store.slot(key).discarded).toBe(slot.draft);
               store.undo(key);
@@ -296,89 +634,44 @@ describe("the drafts store against GitHub", () => {
           } else if (op === "post" || op === "toggle") {
             const plan: WritePlan =
               key === COMMENT
-                ? { kind: "start", place: PLACE }
+                ? planOf("start")
                 : op === "toggle"
-                  ? {
-                      kind: github[0].resolved ? "reopen" : "resolve",
-                      threadId: "PRRT_a",
-                    }
-                  : {
-                      kind: "reply",
-                      threadId: "PRRT_a",
-                      resolve: tc.draw(gs.booleans()),
-                    };
-            await store.post(key, plan, port);
-            const posted = sends.slice(sent);
-            const body = slot.draft?.trim() ?? "";
+                  ? planOf(github.threads[0].resolved ? "reopen" : "resolve")
+                  : planOf(tc.draw(gs.booleans()) ? "reply_resolve" : "reply");
+            await store.post(key, plan, port());
+            const posted = github.sends.slice(sent);
             const needsText = plan.kind === "reply" || plan.kind === "start";
-            if (needsText && !body) {
-              expect(posted).toEqual([]);
-              continue;
-            }
-            expect(posted.length).toBeGreaterThan(0);
-            expect(posted.length).toBeLessThanOrEqual(
-              plan.kind === "reply" && plan.resolve ? 2 : 1
-            );
-            const first = posted[0];
-            if (needsText) expect(first).toMatchObject({ body });
-            const after = store.slot(key);
-            const firstFailed =
-              after.failure !== null && sameWrite(after.failure.sent, first);
-            if (needsText)
-              expect(after.draft).toBe(firstFailed ? slot.draft : null);
-            if (after.failure && !firstFailed) {
-              // The reply posted; its resolve failed. The reply stays.
-              expect(after.failure.replied).toBe(true);
-              expect(after.failure.plan.kind).toBe("resolve");
-              expect(
-                github[0].comments.some(
-                  (comment) =>
-                    comment.author?.login === VIEWER &&
-                    comment.body === body &&
-                    !threadsBefore[0].comments.includes(comment)
-                )
-              ).toBe(true);
+            if (needsText && !slot.draft?.trim()) expect(posted).toEqual([]);
+            else {
+              expect(posted.length).toBeGreaterThan(0);
+              if (needsText)
+                expect(posted[0]).toMatchObject({ body: slot.draft!.trim() });
             }
           } else {
-            const { failure: failed } = slot;
-            const appliedBefore = applied.get(key);
-            await store.retry(key, port);
-            const retried = sends.slice(sent);
-            const after = store.slot(key);
+            await store.retry(key, port());
+            const { failure } = slot;
             if (
-              !failed ||
-              failed.kind === "forbidden" ||
-              failed.kind === "unconfirmed"
-            ) {
-              expect(retried).toEqual([]);
-              expect(after).toEqual(slot);
-              continue;
-            }
-            if (failed.kind === "timeout" && appliedBefore)
-              expect(
-                retried.some((write) => sameWrite(write, failed.sent))
-              ).toBe(false);
-            // A landed reply's resolve is never dropped: it is sent, or the
-            // retry still says what is left.
-            if (
-              failed.plan.kind === "reply" &&
-              failed.plan.resolve &&
-              failed.kind === "timeout" &&
-              appliedBefore
+              !failure ||
+              failure.kind === "forbidden" ||
+              failure.kind === "rejected" ||
+              failure.kind === "unconfirmed"
             )
+              expect(github.sends.length).toBe(sent);
+            else if (failure.kind === "ambiguous")
+              // Never resent as it was before the check said it is absent.
               expect(
-                after.failure !== null ||
-                  retried.some((write) => write.kind === "resolve")
-              ).toBe(true);
+                github.sends
+                  .slice(sent)
+                  .filter((write) => sameWrite(write, failure.sent)).length
+              ).toBeLessThanOrEqual(1);
           }
           if (op !== "post" && op !== "toggle" && op !== "retry")
-            expect(sends.length).toBe(sent);
+            expect(github.sends.length).toBe(sent);
           expect(store.slot(key).pending).toBeNull();
         }
-        // Each thread a comment started is reported once, and is on GitHub.
         expect(new Set(started).size).toBe(started.length);
         for (const id of started)
-          expect(github.some((thread) => thread.id === id)).toBe(true);
+          expect(github.threads.some((thread) => thread.id === id)).toBe(true);
       },
       { testCases: 300 }
     ));

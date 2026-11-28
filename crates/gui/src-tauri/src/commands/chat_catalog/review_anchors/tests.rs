@@ -74,10 +74,7 @@ fn subject_decides_the_catalog_origin(tc: hegel::TestCase) {
         github_thread_id: id.clone(),
     };
     assert!(subject_matches(&snippet, &github));
-    let valid = !id.is_empty()
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_-=".contains(c));
+    let valid = vertebrae_github::is_valid_node_id(&id);
     match (catalog_home(&source, &github), &source) {
         (Ok((home, tool_use_id, origin_ref)), ReviewAnchorSource::Worktree { .. }) => {
             assert!(valid, "{id:?}");
@@ -91,15 +88,6 @@ fn subject_decides_the_catalog_origin(tc: hegel::TestCase) {
             assert!(!valid || !matches!(source, ReviewAnchorSource::Worktree { .. }));
         }
     }
-}
-
-#[test]
-fn github_thread_ids_accept_node_ids_and_reject_other_text() {
-    assert!(valid_github_thread_id("PRRT_kwDOAbc123-_="));
-    assert!(!valid_github_thread_id(""));
-    assert!(!valid_github_thread_id("PRRT 1"));
-    assert!(!valid_github_thread_id("github-thread:PRRT_1"));
-    assert!(!valid_github_thread_id(&"a".repeat(257)));
 }
 
 fn working_location(path: &str) -> ReviewAnchorLocation {

@@ -156,6 +156,10 @@ export interface FakeGithub {
 export const prId = (repo: string, number: number) =>
   `${repo}#${number}`.toLowerCase();
 
+/** The synthetic GitHub node ID of PR `number` in `repo`. */
+export const pullRequestNodeId = (repo: string, number: number) =>
+  `PR_${repo.replace(/[^A-Za-z0-9]/g, "_")}_${number}`;
+
 export function fakeGithub(): FakeGithub {
   return {
     worktrees: new Map(),
@@ -303,6 +307,7 @@ export function installFakeGithub(commands: GithubCommands, world: FakeGithub) {
           : ok({
               repo,
               prNumber,
+              pullRequestId: pullRequestNodeId(repo, prNumber),
               headOid: "1".repeat(40),
               baseOid: "2".repeat(40),
               threads: world.reviewThreads.get(prId(repo, prNumber)) ?? [],
@@ -317,6 +322,12 @@ export function installFakeGithub(commands: GithubCommands, world: FakeGithub) {
         const outcome = world.writeOutcomes.shift();
         const id = prId(repo, prNumber);
         const nodeId = `PRRT_written_${world.writes.length}`;
+        // A new thread goes to the PR node its write names, as on GitHub.
+        if (
+          write.kind === "start" &&
+          write.pullRequestId !== pullRequestNodeId(repo, prNumber)
+        )
+          return err(failure("not_found", "No pull request with that node ID"));
         if (!outcome || outcome.applied)
           world.reviewThreads.set(
             id,

@@ -97,8 +97,15 @@ pub enum GithubErrorKind {
     NotFound,
     /// GitHub refused: retrying cannot help.
     Forbidden,
-    /// No answer in time: a write may have been applied.
-    Timeout,
+    /// The request is invalid and was refused before it was sent:
+    /// resending it unchanged cannot help.
+    Rejected,
+    /// The request went out but its outcome is unknown (no answer in time,
+    /// a dropped connection, a server error, or an answer that does not
+    /// confirm the write): a write may have been applied, so check before
+    /// resending.
+    Ambiguous,
+    /// A transient failure the request never got past: retrying may help.
     Other,
 }
 
@@ -133,11 +140,20 @@ impl From<&GitHubError> for GithubFailure {
             ),
             GitHubError::NotFound { .. } => (GithubErrorKind::NotFound, None),
             GitHubError::Forbidden { .. } => (GithubErrorKind::Forbidden, None),
-            // Both may have been applied: the caller checks before resending.
-            GitHubError::Timeout { .. } | GitHubError::Unconfirmed { .. } => {
-                (GithubErrorKind::Timeout, None)
-            }
-            _ => (GithubErrorKind::Other, None),
+            // Each may have been applied: the caller checks before resending.
+            GitHubError::Timeout { .. }
+            | GitHubError::Interrupted { .. }
+            | GitHubError::Unconfirmed { .. } => (GithubErrorKind::Ambiguous, None),
+            // Refused before anything was sent: resending it unchanged
+            // cannot help.
+            GitHubError::InvalidInput { .. } => (GithubErrorKind::Rejected, None),
+            // A write classifies its own post-send failures as unconfirmed;
+            // these remain for reads and writes GitHub did not apply.
+            GitHubError::GhFailed { .. }
+            | GitHubError::Network { .. }
+            | GitHubError::Http { .. }
+            | GitHubError::GraphQl { .. }
+            | GitHubError::Decode { .. } => (GithubErrorKind::Other, None),
         };
         Self {
             kind,

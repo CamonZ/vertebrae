@@ -1,20 +1,19 @@
 //! Writes to pull request review threads: reply, resolve, reopen, and start
 //! a thread on published lines. Each write is one GraphQL mutation sent
-//! once; callers reconcile a failed or timed-out write by reading the
+//! once, to the node it names (a thread, or the pull request a read
+//! answered); callers reconcile a failed or timed-out write by reading the
 //! threads again.
 //!
 //! A new thread is published at once, as a review of its one comment:
 //! GitHub files a bare `addPullRequestReviewThread` in the viewer's pending
 //! review, where nobody else sees it and it cannot be resolved.
 
-use crate::{auth::GitHubToken, DiffSide, GitHubClient, GitHubError, RepoRef};
+use crate::{auth::GitHubToken, node_id::is_valid_node_id, DiffSide, GitHubClient, GitHubError};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 /// GitHub's limit on a comment body, in characters.
 pub const MAX_COMMENT_CHARS: usize = 65_536;
-/// GitHub node IDs are short; anything longer is not one.
-const MAX_NODE_ID_LEN: usize = 256;
 
 const REPLY_MUTATION: &str = r#"
 mutation ReplyToReviewThread($thread: ID!, $body: String!) {
@@ -36,14 +35,6 @@ const UNRESOLVE_MUTATION: &str = r#"
 mutation UnresolveReviewThread($thread: ID!) {
   unresolveReviewThread(input: { threadId: $thread }) {
     thread { id }
-  }
-}
-"#;
-
-const PULL_REQUEST_ID_QUERY: &str = r#"
-query PullRequestId($owner: String!, $repo: String!, $number: Int!) {
-  repository(owner: $owner, name: $repo) {
-    pullRequest(number: $number) { id }
   }
 }
 "#;
@@ -84,13 +75,26 @@ pub struct NewReviewThread {
     pub body: String,
 }
 
-/// One write to a pull request's review threads.
+/// One write to a pull request's review threads. Each names the node it
+/// writes to, so none can go out without its target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReviewThreadWrite {
-    Reply { thread_id: String, body: String },
-    Resolve { thread_id: String },
-    Reopen { thread_id: String },
-    Start(NewReviewThread),
+    Reply {
+        thread_id: String,
+        body: String,
+    },
+    Resolve {
+        thread_id: String,
+    },
+    Reopen {
+        thread_id: String,
+    },
+    /// A new thread on the pull request whose node ID a read of its threads
+    /// answered ([`crate::PullRequestReviewThreads::pull_request_id`]).
+    Start {
+        pull_request_id: String,
+        thread: NewReviewThread,
+    },
 }
 
 fn invalid(message: &str) -> GitHubError {
@@ -99,11 +103,12 @@ fn invalid(message: &str) -> GitHubError {
     }
 }
 
-fn check_node_id(id: &str) -> Result<(), GitHubError> {
-    if id.trim().is_empty() || id.len() > MAX_NODE_ID_LEN {
-        return Err(invalid("Review thread ID is not a GitHub node ID"));
+fn check_node_id(id: &str, what: &str) -> Result<(), GitHubError> {
+    if is_valid_node_id(id) {
+        Ok(())
+    } else {
+        Err(invalid(&format!("{what} ID is not a GitHub node ID")))
     }
-    Ok(())
 }
 
 fn check_body(body: &str) -> Result<(), GitHubError> {
@@ -120,13 +125,17 @@ fn check_body(body: &str) -> Result<(), GitHubError> {
 pub(crate) fn validate(write: &ReviewThreadWrite) -> Result<(), GitHubError> {
     match write {
         ReviewThreadWrite::Reply { thread_id, body } => {
-            check_node_id(thread_id)?;
+            check_node_id(thread_id, "Review thread")?;
             check_body(body)
         }
         ReviewThreadWrite::Resolve { thread_id } | ReviewThreadWrite::Reopen { thread_id } => {
-            check_node_id(thread_id)
+            check_node_id(thread_id, "Review thread")
         }
-        ReviewThreadWrite::Start(thread) => {
+        ReviewThreadWrite::Start {
+            pull_request_id,
+            thread,
+        } => {
+            check_node_id(pull_request_id, "Pull request")?;
             if thread.path.trim().is_empty() {
                 return Err(invalid("A new thread needs a file path"));
             }
@@ -149,11 +158,8 @@ fn side_name(side: DiffSide) -> &'static str {
 }
 
 /// The mutation for `write`, its variables, and the response field it
-/// answers in. A new thread also needs the pull request's node ID.
-pub(crate) fn mutation(
-    write: &ReviewThreadWrite,
-    pull_request_id: Option<&str>,
-) -> (&'static str, Value, &'static str) {
+/// answers in.
+pub(crate) fn mutation(write: &ReviewThreadWrite) -> (&'static str, Value, &'static str) {
     match write {
         ReviewThreadWrite::Reply { thread_id, body } => (
             REPLY_MUTATION,
@@ -170,7 +176,10 @@ pub(crate) fn mutation(
             json!({ "thread": thread_id }),
             "unresolveReviewThread",
         ),
-        ReviewThreadWrite::Start(thread) => {
+        ReviewThreadWrite::Start {
+            pull_request_id,
+            thread,
+        } => {
             // GitHub wants a range's start only when it differs from its end.
             let start = thread.start_line.filter(|start| *start < thread.line);
             (
@@ -253,35 +262,20 @@ impl PublishedReview {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct PullRequestIdData {
-    repository: Option<PullRequestIdRepo>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PullRequestIdRepo {
-    pull_request: Option<NodeRef>,
-}
-
 impl GitHubClient {
-    /// Sends `write` to PR `number` once and returns the ID of the thread it
-    /// wrote (for a new thread, the one GitHub created). Posts to GitHub.
+    /// Sends `write` once and returns the ID of the thread it wrote (for a
+    /// new thread, the one GitHub created). Posts to GitHub.
     pub async fn write_review_thread(
         &self,
         token: &GitHubToken,
-        repo: &RepoRef,
-        number: u64,
         write: &ReviewThreadWrite,
     ) -> Result<String, GitHubError> {
         validate(write)?;
-        let pull_request_id = match write {
-            ReviewThreadWrite::Start(_) => Some(self.pull_request_id(token, repo, number).await?),
-            _ => None,
-        };
-        let (query, variables, field) = mutation(write, pull_request_id.as_deref());
-        let mut data: serde_json::Map<String, Value> =
-            self.graphql(token, query, variables).await?;
+        let (query, variables, field) = mutation(write);
+        let mut data: serde_json::Map<String, Value> = self
+            .graphql(token, query, variables)
+            .await
+            .map_err(unresolved_after_send)?;
         // GitHub answered the mutation without errors, so from here on the
         // write may well be on the PR: an answer that does not name it is
         // unconfirmed, never a failure to send again blindly.
@@ -311,7 +305,7 @@ impl GitHubClient {
                 },
             ) => Ok(thread.id),
             (
-                ReviewThreadWrite::Start(_),
+                ReviewThreadWrite::Start { .. },
                 Payload {
                     pull_request_review: Some(review),
                     ..
@@ -324,29 +318,22 @@ impl GitHubClient {
             }),
         }
     }
+}
 
-    async fn pull_request_id(
-        &self,
-        token: &GitHubToken,
-        repo: &RepoRef,
-        number: u64,
-    ) -> Result<String, GitHubError> {
-        if number == 0 {
-            return Err(invalid("Pull request number must be greater than zero"));
-        }
-        let data: PullRequestIdData = self
-            .graphql(
-                token,
-                PULL_REQUEST_ID_QUERY,
-                json!({ "owner": repo.owner, "repo": repo.repo, "number": number }),
-            )
-            .await?;
-        data.repository
-            .and_then(|repo| repo.pull_request)
-            .map(|pr| pr.id)
-            .ok_or_else(|| GitHubError::NotFound {
-                message: format!("Pull request #{number} not found in {}", repo.full_name()),
-            })
+/// A failed write, by whether GitHub may have applied it. A server error,
+/// an answer that could not be read, or a GraphQL error GitHub gave no
+/// type to (its own failures, timeouts included, come back that way) all
+/// follow a request GitHub received: unconfirmed, so it is checked before
+/// it is sent again. Anything else says the write was not applied.
+fn unresolved_after_send(err: GitHubError) -> GitHubError {
+    match err {
+        GitHubError::Http { status, .. } if status >= 500 => GitHubError::Unconfirmed {
+            message: err.to_string(),
+        },
+        GitHubError::Decode { .. } | GitHubError::GraphQl { .. } => GitHubError::Unconfirmed {
+            message: err.to_string(),
+        },
+        other => other,
     }
 }
 

@@ -22,6 +22,11 @@ import {
 /** Where the chat's public writes go: its linked PR, whose threads are read. */
 export interface GithubWritesValue {
   store: ThreadWrites;
+  /**
+   * The PR's identity (`owner/repo#number`): what its comment and selection
+   * slots, and its writes' failures, are scoped to.
+   */
+  scope: string;
   /** The branch's worktree, which has the PR's commits. */
   worktreePath: string;
   pr: { number: number; url: string };
@@ -38,7 +43,10 @@ export const GithubWritesContext = createContext<GithubWritesValue | null>(
 
 export const useGithubWrites = () => useContext(GithubWritesContext);
 
-/** The chat's slots, kept until its key changes (as its discussions are). */
+/**
+ * The chat's slots, kept until its key changes (as its discussions are).
+ * Slots for different PRs live side by side, apart by their keys.
+ */
 export function useThreadWritesStore(key: string): ThreadWrites {
   const [owned, setOwned] = useState(() => ({
     key,
@@ -78,16 +86,21 @@ export function useGithubWritesValue(
       return null;
     const number = pr.number;
     const key = worktreePrKey(worktreePath, branch);
+    const scope = `${threads.repo}#${number}`;
     return {
       store,
+      scope,
       worktreePath,
       pr: { number, url: pr.url },
       viewer: threads.viewerLogin,
       threads,
       port: (started) => ({
+        scope,
         shown: () => {
           const data = prEntryOf(key).reviewThreads.data;
-          return data?.prNumber === number ? data : null;
+          return data && `${data.repo}#${data.prNumber}` === scope
+            ? data
+            : null;
         },
         send: (write) =>
           writeWorktreeReviewThread(worktreePath, branch, number, write),

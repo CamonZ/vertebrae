@@ -13,13 +13,14 @@ import {
 import { unwrapAnchor } from "../../reviewAnchors";
 import type { CodeSelection } from "../../selectionDiscussions";
 import { SelectionDiscussionActionsContext } from "../../selectionDiscussionState";
-import { rangeLabel, usePlaceOnPr, type PlaceQuery } from "./DiscussionGithub";
+import { rangeLabel } from "./DiscussionGithub";
 import { GithubPostButton, WriteFailureAlert } from "./GithubWriteControls";
 import { useGithubWrites, useWriteSlot } from "./threadWritesContext";
+import { unplacedReason, usePlaceOnPr, type PlaceQuery } from "./usePlaceOnPr";
 
-/** A selection's comment write, kept per side, file and lines. */
-export const selectionSlot = (anchor: CodeSelection) =>
-  `selection:${anchor.side}:${anchor.path}:${anchor.startLine}-${anchor.endLine}`;
+/** A selection's comment write on the PR `scope`, kept per side, file and lines. */
+export const selectionSlot = (scope: string, anchor: CodeSelection) =>
+  `selection:${scope}:${anchor.side}:${anchor.path}:${anchor.startLine}-${anchor.endLine}`;
 
 export interface SelectionGithub {
   /** The Comment on GitHub button; null with nowhere to post. */
@@ -31,8 +32,8 @@ export interface SelectionGithub {
   /** A post is out; the text must stay as sent. */
   busy: boolean;
   /**
-   * A timed-out post may be on GitHub: the text stays as sent until the
-   * check says what happened.
+   * A post whose outcome is unknown may be on GitHub: the text stays as
+   * sent until the check says what happened.
    */
   held: boolean;
   /** Where ⌘⌥↵ posts and as whom, for the hint row; null with nowhere. */
@@ -62,21 +63,24 @@ export function useSelectionGithub(
 ): SelectionGithub {
   const writes = useGithubWrites();
   const actions = useContext(SelectionDiscussionActionsContext);
+  // Only what the check reads: a reread of the threads leaves it alone.
+  const worktreePath = writes?.worktreePath;
+  const headOid = writes?.threads.headOid;
+  const baseOid = writes?.threads.baseOid;
   const query = useMemo<PlaceQuery | null>(() => {
     const from = anchor && actions?.locate?.(anchor);
-    if (!anchor || !from || !writes) return null;
-    const { worktreePath, threads } = writes;
+    if (!anchor || !from || !worktreePath || !headOid || !baseOid)
+      return null;
     const range = { startLine: anchor.startLine, line: anchor.endLine };
     const onto = {
       path: from.path,
       side: from.side,
       source: {
         kind: "worktree" as const,
-        commit: from.side === "LEFT" ? threads.baseOid : threads.headOid,
+        commit: from.side === "LEFT" ? baseOid : headOid,
       },
     };
     return {
-      identity: JSON.stringify([worktreePath, from, range, onto]),
       path: onto.path,
       side: onto.side,
       map: () =>
@@ -84,9 +88,10 @@ export function useSelectionGithub(
           commands.mapReviewSelection(worktreePath, from, range, onto)
         ),
     };
-  }, [anchor, actions, writes]);
+  }, [anchor, actions, worktreePath, headOid, baseOid]);
   const published = usePlaceOnPr(query);
-  const key = anchor ? selectionSlot(anchor) : "selection:none";
+  const key =
+    anchor && writes ? selectionSlot(writes.scope, anchor) : "selection:none";
   const slot = useWriteSlot(writes?.store, key);
   const store = writes?.store;
   // A selection that closes or moves takes its failed post with it.
@@ -95,9 +100,15 @@ export function useSelectionGithub(
   const place = published.kind === "published" ? published.place : null;
   const text = body.trim();
   const busy = slot.pending !== null;
-  // A refused or unconfirmed post is finished on GitHub, not here.
+  // A refused or unconfirmed post is finished on GitHub, not here; a
+  // rejected one posts again once the text changes.
+  const failed = slot.failure;
   const settled =
-    slot.failure?.kind === "forbidden" || slot.failure?.kind === "unconfirmed";
+    failed?.kind === "forbidden" ||
+    failed?.kind === "unconfirmed" ||
+    (failed?.kind === "rejected" &&
+      failed.sent.kind === "start" &&
+      failed.sent.body === text);
   const post =
     place && text && !busy && !settled
       ? () => {
@@ -105,19 +116,27 @@ export function useSelectionGithub(
           const port = writes.port(() => onPosted());
           store.open(key, text);
           store.edit(key, text);
-          // A timed-out post is checked on GitHub before it is sent again.
-          if (slot.failure?.kind === "timeout") void store.retry(key, port);
-          else void store.post(key, { kind: "start", place }, port);
+          // A post that may have landed is checked on GitHub before it is
+          // sent again.
+          if (failed?.kind === "ambiguous") void store.retry(key, port);
+          else
+            void store.post(
+              key,
+              {
+                kind: "start",
+                pullRequestId: writes.threads.pullRequestId,
+                place,
+              },
+              port
+            );
         }
       : null;
   const title =
-    published.kind === "checking"
-      ? "Checking the lines are on the PR…"
-      : !place
-        ? `These lines aren’t on PR #${writes.pr.number} yet · push them first`
-        : `Post to PR #${writes.pr.number}, ${rangeLabel(place)} · visible to everyone on the PR${
-            writes.viewer ? ` as ${writes.viewer}` : ""
-          }`;
+    published.kind !== "published"
+      ? unplacedReason(published, writes.pr.number)
+      : `Post to PR #${writes.pr.number}, ${rangeLabel(published.place)} · visible to everyone on the PR${
+          writes.viewer ? ` as ${writes.viewer}` : ""
+        }`;
   return {
     action: (
       <GithubPostButton
@@ -145,7 +164,7 @@ export function useSelectionGithub(
     ),
     post,
     busy,
-    held: slot.failure?.kind === "timeout",
+    held: failed?.kind === "ambiguous",
     target: place
       ? `#${writes.pr.number} ${rangeLabel(place)}${
           writes.viewer ? ` as ${writes.viewer}` : ""

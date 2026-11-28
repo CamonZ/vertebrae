@@ -44,7 +44,7 @@ import {
   shortcutText,
 } from "../../chatShortcuts";
 import { isEditableShortcutTarget } from "../../../../utils/keyboard";
-import { replySlot } from "./threadWrites";
+import { replySlot, threadLane, threadOffers } from "./threadWrites";
 import {
   useGithubWrites,
   useWriteSlot,
@@ -382,8 +382,8 @@ function threadAudience(writes: GithubWritesValue, placed: PlacedThread) {
 
 /**
  * The thread's public reply: its composer while a draft is open (kept when
- * the card closes or the comparison changes), Undo after Discard, and a
- * resolve or reopen that failed.
+ * the card closes or the comparison changes), Undo after Discard, and the
+ * thread's own failed resolve or reopen, which stays outside the composer.
  */
 function ThreadReply({
   placed,
@@ -399,7 +399,7 @@ function ThreadReply({
   if (!writes) return null;
   const url = thread.comments[0]?.url ?? null;
   const port = writes.port();
-  const canResolve = !thread.resolved && thread.viewerCanResolve;
+  const canResolve = threadOffers(thread, slot).replyAndResolve;
   return (
     <div className="gh-thread-reply">
       <GithubComposer
@@ -428,7 +428,7 @@ function ThreadReply({
         url={url}
         onEscape={onEscape}
       />
-      {slot.draft === null && slot.failure && (
+      {slot.failure && threadLane(slot.failure) && (
         <WriteFailureAlert
           failure={slot.failure}
           draftKept={false}
@@ -442,22 +442,26 @@ function ThreadReply({
 }
 
 /**
- * Reply, Resolve and Reopen, each only where GitHub says the viewer may.
- * Hidden while the reply composer is open: it posts (and resolves) itself.
+ * Reply, Resolve and Reopen, each only where GitHub says the viewer may and
+ * has not refused it here (`threadOffers`).
  */
-function GithubThreadButtons({ placed }: { placed: PlacedThread }) {
+function GithubThreadButtons({
+  placed,
+  offers,
+}: {
+  placed: PlacedThread;
+  offers: ReturnType<typeof threadOffers>;
+}) {
   const writes = useGithubWrites();
   const { thread } = placed;
   const key = replySlot(thread.id);
   const slot = useWriteSlot(writes?.store, key);
-  if (!writes || slot.draft !== null) return null;
-  const toggle = thread.resolved
-    ? thread.viewerCanUnresolve && ("reopen" as const)
-    : thread.viewerCanResolve && ("resolve" as const);
+  if (!writes) return null;
+  const { toggle } = offers;
   const pending = slot.pending;
   return (
     <>
-      {thread.viewerCanReply && (
+      {offers.reply && (
         <GithubPostButton
           disabled={pending !== null}
           onClick={() => writes.store.open(key)}
@@ -523,11 +527,9 @@ function ThreadActions({
     !open &&
     (!!thread || (discussion.canAsk && canDiscussGithub(placed)));
   const canSend = !!discussion?.canAttachGithub && !open;
-  const github = placed.thread;
-  const canWrite =
-    !!writes &&
-    (github.viewerCanReply ||
-      (github.resolved ? github.viewerCanUnresolve : github.viewerCanResolve));
+  const slot = useWriteSlot(writes?.store, replySlot(placed.thread.id));
+  const offers = threadOffers(placed.thread, slot);
+  const canWrite = !!writes && (offers.reply || offers.toggle !== null);
   if (!canDiscuss && !canSend && !canWrite) return null;
   const discussLabel = thread ? "Show private discussion" : "Discuss inline";
   const hints = [
@@ -546,7 +548,7 @@ function ThreadActions({
         ))}
       </span>
       <div className="diff-comment-editor-buttons">
-        <GithubThreadButtons placed={placed} />
+        {canWrite && <GithubThreadButtons placed={placed} offers={offers} />}
         {canSend && discussion && (
           <button
             type="button"

@@ -148,13 +148,8 @@ impl PrLookup for FakeLookup {
             .unwrap_or_else(|| Err(missing(repo.full_name())))
     }
 
-    async fn write_review_thread(
-        &self,
-        repo: &RepoRef,
-        number: u64,
-        write: &ReviewThreadWrite,
-    ) -> Result<String, GitHubError> {
-        self.record(format!("write {} {number} {write:?}", repo.full_name()));
+    async fn write_review_thread(&self, write: &ReviewThreadWrite) -> Result<String, GitHubError> {
+        self.record(format!("write {write:?}"));
         self.write_result
             .clone()
             .unwrap_or(Ok(()))
@@ -386,6 +381,7 @@ async fn review_threads_are_read_for_the_named_pr_and_cached_until_refresh() {
         threads: HashMap::from([(
             "example/demo-repo".to_string(),
             Ok(PullRequestReviewThreads {
+                pull_request_id: "PR_kwDOsynthetic7".into(),
                 viewer_login: Some("octo-viewer".into()),
                 head_oid: "1111111111111111111111111111111111111111".into(),
                 base_oid: "2222222222222222222222222222222222222222".into(),
@@ -449,6 +445,7 @@ async fn thread_writes_reach_github_once_and_invalidate_only_their_pr() {
         threads: HashMap::from([(
             "example/demo-repo".to_string(),
             Ok(PullRequestReviewThreads {
+                pull_request_id: "PR_kwDOsynthetic7".into(),
                 viewer_login: None,
                 head_oid: "1111111111111111111111111111111111111111".into(),
                 base_oid: "2222222222222222222222222222222222222222".into(),
@@ -471,6 +468,7 @@ async fn thread_writes_reach_github_once_and_invalidate_only_their_pr() {
         &repo,
         7,
         GithubThreadWrite::Start {
+            pull_request_id: "PR_kwDOsynthetic7".into(),
             path: "src/retry.rs".into(),
             side: crate::commands::chat_catalog::ReviewThreadSide::Right,
             start_line: Some(3),
@@ -495,7 +493,8 @@ async fn thread_writes_reach_github_once_and_invalidate_only_their_pr() {
             .count(),
         1
     );
-    assert!(calls.iter().any(|call| call.contains("side: Right")
+    assert!(calls.iter().any(|call| call.contains("PR_kwDOsynthetic7")
+        && call.contains("side: Right")
         && call.contains("start_line: Some(3)")
         && call.contains("line: 4")));
     assert_eq!(
@@ -531,4 +530,53 @@ async fn thread_writes_reach_github_once_and_invalidate_only_their_pr() {
     .await
     .unwrap_err();
     assert_eq!(failure.kind, GithubErrorKind::Forbidden);
+}
+
+/// A new thread names its pull request by node ID; one that is not PR
+/// `pr_number`'s, as the backend read it, is refused before anything is
+/// sent, so it can never land on another PR.
+#[tokio::test]
+async fn a_new_thread_for_another_pull_request_is_never_sent() {
+    let lookup = FakeLookup {
+        threads: HashMap::from([(
+            "example/demo-repo".to_string(),
+            Ok(PullRequestReviewThreads {
+                pull_request_id: "PR_kwDOsynthetic8".into(),
+                viewer_login: None,
+                head_oid: "1111111111111111111111111111111111111111".into(),
+                base_oid: "2222222222222222222222222222222222222222".into(),
+                threads: Vec::new(),
+                truncated: false,
+            }),
+        )]),
+        ..FakeLookup::default()
+    };
+    let start = |pull_request_id: &str| GithubThreadWrite::Start {
+        pull_request_id: pull_request_id.into(),
+        path: "src/retry.rs".into(),
+        side: crate::commands::chat_catalog::ReviewThreadSide::Right,
+        start_line: None,
+        line: 4,
+        body: "Why?".into(),
+    };
+    let cache = ReviewThreadsCache::default();
+    let failure = write_review_thread(&cache, &demo(), 8, start("PR_kwDOsynthetic7"), &lookup)
+        .await
+        .unwrap_err();
+    assert_eq!(failure.kind, GithubErrorKind::Rejected);
+    assert!(!lookup.calls().iter().any(|call| call.starts_with("write")));
+
+    let written = write_review_thread(&cache, &demo(), 8, start("PR_kwDOsynthetic8"), &lookup)
+        .await
+        .unwrap();
+    assert_eq!(written, "PRRT_written");
+    // The check reuses the read the first attempt cached.
+    assert_eq!(
+        lookup
+            .calls()
+            .iter()
+            .filter(|call| call.starts_with("threads"))
+            .count(),
+        1
+    );
 }

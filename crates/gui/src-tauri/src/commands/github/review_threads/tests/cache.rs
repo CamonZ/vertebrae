@@ -16,6 +16,7 @@ fn read(version: u32) -> GithubPrReviewThreads {
     GithubPrReviewThreads {
         repo: "example/demo-repo".into(),
         pr_number: version,
+        pull_request_id: format!("PR_{version}"),
         viewer_login: None,
         head_oid: String::new(),
         base_oid: String::new(),

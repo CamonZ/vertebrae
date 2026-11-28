@@ -121,6 +121,8 @@ impl From<ReviewThread> for GithubReviewThread {
 pub struct GithubPrReviewThreads {
     pub repo: String,
     pub pr_number: u32,
+    /// The PR's GitHub node ID: where a new thread is written.
+    pub pull_request_id: String,
     /// The signed-in GitHub user, who authors replies and new threads.
     pub viewer_login: Option<String>,
     /// Commit the published `Right` anchors refer to.
@@ -140,9 +142,11 @@ pub enum GithubThreadWrite {
     Resolve { thread_id: String },
     #[serde(rename_all = "camelCase")]
     Reopen { thread_id: String },
-    /// A new thread on published lines of the PR's diff.
+    /// A new thread on published lines of the diff of the PR whose node ID
+    /// its threads' read answered.
     #[serde(rename_all = "camelCase")]
     Start {
+        pull_request_id: String,
         path: String,
         side: ReviewThreadSide,
         start_line: Option<u32>,
@@ -158,18 +162,22 @@ impl From<GithubThreadWrite> for ReviewThreadWrite {
             GithubThreadWrite::Resolve { thread_id } => Self::Resolve { thread_id },
             GithubThreadWrite::Reopen { thread_id } => Self::Reopen { thread_id },
             GithubThreadWrite::Start {
+                pull_request_id,
                 path,
                 side,
                 start_line,
                 line,
                 body,
-            } => Self::Start(NewReviewThread {
-                path,
-                side: side.into(),
-                start_line,
-                line,
-                body,
-            }),
+            } => Self::Start {
+                pull_request_id,
+                thread: NewReviewThread {
+                    path,
+                    side: side.into(),
+                    start_line,
+                    line,
+                    body,
+                },
+            },
         }
     }
 }

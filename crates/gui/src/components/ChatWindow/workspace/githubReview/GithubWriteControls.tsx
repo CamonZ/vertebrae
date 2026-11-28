@@ -16,11 +16,12 @@ import {
   isAbsoluteHttpUrl,
   openExternalUrl,
 } from "../../../../utils/openExternalUrl";
-import type {
-  ThreadWrites,
-  WriteFailure,
-  WritePlan,
-  WritePort,
+import {
+  threadLane,
+  type ThreadWrites,
+  type WriteFailure,
+  type WritePlan,
+  type WritePort,
 } from "./threadWrites";
 import { useWriteSlot } from "./threadWritesContext";
 import {
@@ -113,23 +114,27 @@ function failureText(
     ? "Reply posted. Resolve failed."
     : failure.kind === "forbidden"
       ? `GitHub refused the ${noun}.`
-      : failure.kind === "timeout" || failure.kind === "unconfirmed"
-        ? `GitHub didn’t confirm the ${noun}.`
-        : posts
-          ? `${verb} didn’t post.`
-          : `${verb} failed.`;
+      : failure.kind === "rejected"
+        ? `The ${noun} wasn’t sent.`
+        : failure.kind === "ambiguous" || failure.kind === "unconfirmed"
+          ? `GitHub didn’t confirm the ${noun}.`
+          : posts
+            ? `${verb} didn’t post.`
+            : `${verb} failed.`;
   const detail =
     failure.kind === "forbidden"
       ? "GitHub returned 403: you can’t do this here, so retrying can’t help."
-      : failure.kind === "timeout"
-        ? `It may have ${posts ? "posted" : "applied"}; retrying checks the thread first so nothing posts twice.`
-        : failure.message;
+      : failure.kind === "rejected"
+        ? `${failure.message}${posts && draftKept ? " Change the text and post again." : ""}`
+        : failure.kind === "ambiguous"
+          ? `It may have ${posts ? "posted" : "applied"}; retrying checks the thread first so nothing posts twice.`
+          : failure.message;
   return { title, detail: detail + kept };
 }
 
 /**
- * A failed write. A 403 never offers Retry, only the way round on GitHub; a
- * timeout's Retry checks the thread first.
+ * A failed write. A 403 or a rejected write never offers Retry, only the
+ * way round on GitHub; an ambiguous write's Retry checks the thread first.
  */
 export function WriteFailureAlert({
   failure,
@@ -150,7 +155,7 @@ export function WriteFailureAlert({
   const retry =
     failure.kind === "transient"
       ? `Retry ${verb.toLowerCase()}`
-      : failure.kind === "timeout"
+      : failure.kind === "ambiguous"
         ? "Check thread and retry"
         : null;
   return (
@@ -184,7 +189,8 @@ export interface ComposerPost {
 
 /**
  * A public composer: what it posts to and who sees it, the text, and its
- * posts. ⌘↵ sends the primary post.
+ * posts, with the failure of its text (a thread's resolve or reopen shows
+ * with the thread instead). ⌘↵ sends the primary post.
  * Closed by Discard (with Undo) or by posting; anything else keeps it.
  * Opening it (or Undo) brings it into view and focuses its text; showing a
  * kept draft again does not.
@@ -292,7 +298,7 @@ export function GithubComposer({
         onChange={(event) => store.edit(slotKey, event.target.value)}
         onKeyDown={onKeyDown}
       />
-      {slot.failure && (
+      {slot.failure && !threadLane(slot.failure) && (
         <WriteFailureAlert
           failure={slot.failure}
           draftKept

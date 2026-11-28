@@ -18,7 +18,7 @@ use crate::local_chat::worktree_delta::git;
 use cache::ThreadsKey;
 use std::path::PathBuf;
 use tauri::State;
-use vertebrae_github::RepoRef;
+use vertebrae_github::{GitHubError, RepoRef};
 
 pub(super) async fn review_threads<L: PrLookup>(
     cache: &ReviewThreadsCache,
@@ -34,6 +34,7 @@ pub(super) async fn review_threads<L: PrLookup>(
             Ok(GithubPrReviewThreads {
                 repo: repo.full_name(),
                 pr_number,
+                pull_request_id: read.pull_request_id,
                 viewer_login: read.viewer_login,
                 head_oid: read.head_oid,
                 base_oid: read.base_oid,
@@ -44,7 +45,9 @@ pub(super) async fn review_threads<L: PrLookup>(
         .await
 }
 
-/// Sends `write` once. Whatever GitHub answers, the PR's cached read is
+/// Sends `write` once, to the thread or pull request node it names. A new
+/// thread is sent only if its node is PR `pr_number`'s, as this backend
+/// read it. Whatever GitHub answers, PR `pr_number`'s cached read is
 /// dropped so the caller's next read shows what GitHub applied.
 pub(super) async fn write_review_thread<L: PrLookup>(
     cache: &ReviewThreadsCache,
@@ -53,10 +56,23 @@ pub(super) async fn write_review_thread<L: PrLookup>(
     write: GithubThreadWrite,
     lookup: &L,
 ) -> Result<String, GithubFailure> {
+    if let GithubThreadWrite::Start {
+        pull_request_id, ..
+    } = &write
+    {
+        let read = review_threads(cache, repo, pr_number, false, lookup).await?;
+        if read.pull_request_id != *pull_request_id {
+            return Err(GitHubError::InvalidInput {
+                message: format!(
+                    "this thread was meant for another pull request than {}#{pr_number}",
+                    repo.full_name()
+                ),
+            }
+            .into());
+        }
+    }
     let number = u64::from(pr_number);
-    let result = lookup
-        .write_review_thread(repo, number, &write.into())
-        .await;
+    let result = lookup.write_review_thread(&write.into()).await;
     cache.invalidate(&ThreadsKey::new(repo, number));
     result.map_err(GithubFailure::from)
 }

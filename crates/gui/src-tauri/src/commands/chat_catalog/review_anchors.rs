@@ -124,13 +124,9 @@ pub enum ReviewAnchorSubject {
 /// review thread it discusses.
 pub(super) const GITHUB_THREAD_ORIGIN: &str = "github-thread:";
 
-/// GitHub's opaque node IDs: short, URL-safe Base64 with a type prefix.
-pub(super) fn valid_github_thread_id(id: &str) -> bool {
-    (1..=256).contains(&id.len())
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'='))
-}
+/// A GitHub thread link holds a GitHub node ID, checked as the adapter
+/// checks the threads it writes to.
+pub(super) use vertebrae_github::is_valid_node_id as valid_github_thread_id;
 
 #[derive(Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
