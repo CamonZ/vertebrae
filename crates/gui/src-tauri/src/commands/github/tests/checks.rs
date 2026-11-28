@@ -7,6 +7,7 @@ use std::{collections::HashMap, sync::Mutex as TestMutex};
 use vertebrae_github::{
     CheckCancel, CheckOutcome, CheckRerun, CheckStatus, OpenPrSearchResult, PullRequestCheck,
     PullRequestChecks, PullRequestChecksBatch, PullRequestReviewThreads, RateLimitStatus, RepoRef,
+    ReviewThreadWrite,
 };
 
 fn check(id: &str, status: CheckStatus, job: Option<u64>) -> PullRequestCheck {
@@ -145,6 +146,19 @@ impl PrLookup for FakeLookup {
             .get(&repo.full_name())
             .cloned()
             .unwrap_or_else(|| Err(missing(repo.full_name())))
+    }
+
+    async fn write_review_thread(
+        &self,
+        repo: &RepoRef,
+        number: u64,
+        write: &ReviewThreadWrite,
+    ) -> Result<String, GitHubError> {
+        self.record(format!("write {} {number} {write:?}", repo.full_name()));
+        self.write_result
+            .clone()
+            .unwrap_or(Ok(()))
+            .map(|()| "PRRT_written".into())
     }
 }
 
@@ -372,6 +386,7 @@ async fn review_threads_are_read_for_the_named_pr_and_cached_until_refresh() {
         threads: HashMap::from([(
             "example/demo-repo".to_string(),
             Ok(PullRequestReviewThreads {
+                viewer_login: Some("octo-viewer".into()),
                 head_oid: "1111111111111111111111111111111111111111".into(),
                 base_oid: "2222222222222222222222222222222222222222".into(),
                 threads: vec![thread],
@@ -390,6 +405,7 @@ async fn review_threads_are_read_for_the_named_pr_and_cached_until_refresh() {
         (loaded.repo.as_str(), loaded.pr_number),
         ("example/demo-repo", 7)
     );
+    assert_eq!(loaded.viewer_login.as_deref(), Some("octo-viewer"));
     let anchor = &loaded.threads[0].anchor;
     assert_eq!(anchor.side, ReviewThreadSide::Left);
     assert_eq!(anchor.start_side, Some(ReviewThreadSide::Right));
@@ -422,4 +438,97 @@ async fn review_threads_are_read_for_the_named_pr_and_cached_until_refresh() {
             "threads example/demo-repo 8",
         ]
     );
+}
+
+/// A write goes to GitHub once, as the frontend named it, and the next read
+/// of that PR asks GitHub again rather than answering from the cache; other
+/// PRs keep their cached reads. A refused write keeps its kind.
+#[tokio::test]
+async fn thread_writes_reach_github_once_and_invalidate_only_their_pr() {
+    let lookup = FakeLookup {
+        threads: HashMap::from([(
+            "example/demo-repo".to_string(),
+            Ok(PullRequestReviewThreads {
+                viewer_login: None,
+                head_oid: "1111111111111111111111111111111111111111".into(),
+                base_oid: "2222222222222222222222222222222222222222".into(),
+                threads: Vec::new(),
+                truncated: false,
+            }),
+        )]),
+        ..FakeLookup::default()
+    };
+    let cache = ReviewThreadsCache::default();
+    let repo = demo();
+    for number in [7, 8] {
+        review_threads(&cache, &repo, number, false, &lookup)
+            .await
+            .unwrap();
+    }
+
+    let written = write_review_thread(
+        &cache,
+        &repo,
+        7,
+        GithubThreadWrite::Start {
+            path: "src/retry.rs".into(),
+            side: crate::commands::chat_catalog::ReviewThreadSide::Right,
+            start_line: Some(3),
+            line: 4,
+            body: "Why?".into(),
+        },
+        &lookup,
+    )
+    .await
+    .unwrap();
+    assert_eq!(written, "PRRT_written");
+    for number in [7, 8] {
+        review_threads(&cache, &repo, number, false, &lookup)
+            .await
+            .unwrap();
+    }
+    let calls = lookup.calls();
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| call.starts_with("write"))
+            .count(),
+        1
+    );
+    assert!(calls.iter().any(|call| call.contains("side: Right")
+        && call.contains("start_line: Some(3)")
+        && call.contains("line: 4")));
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| *call == "threads example/demo-repo 7")
+            .count(),
+        2
+    );
+    assert_eq!(
+        calls
+            .iter()
+            .filter(|call| *call == "threads example/demo-repo 8")
+            .count(),
+        1
+    );
+
+    let refused = FakeLookup {
+        write_result: Some(Err(GitHubError::Forbidden {
+            message: "Must have push access".into(),
+        })),
+        ..FakeLookup::default()
+    };
+    let failure = write_review_thread(
+        &cache,
+        &repo,
+        7,
+        GithubThreadWrite::Resolve {
+            thread_id: "PRRT_1".into(),
+        },
+        &refused,
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(failure.kind, GithubErrorKind::Forbidden);
 }

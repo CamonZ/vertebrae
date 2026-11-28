@@ -26,6 +26,15 @@ pub enum GitHubError {
     #[error("GitHub request failed: {message}")]
     Network { message: String },
 
+    /// No answer in time: a write may or may not have been applied.
+    #[error("GitHub did not answer in time: {message}")]
+    Timeout { message: String },
+
+    /// GitHub took a write but its answer did not confirm what it wrote:
+    /// like a timeout, check before sending it again.
+    #[error("GitHub did not confirm the write: {message}")]
+    Unconfirmed { message: String },
+
     #[error("GitHub GraphQL error: {message}")]
     GraphQl { message: String },
 

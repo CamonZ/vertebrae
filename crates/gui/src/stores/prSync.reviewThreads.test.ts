@@ -27,6 +27,7 @@ import {
   acquireWorktreePr,
   pollWatchedPrsNow,
   refreshWorktreePr,
+  writeWorktreeReviewThread,
 } from "./prSync";
 import {
   openThreadCount,
@@ -45,6 +46,7 @@ vi.mock("../bindings", () => ({
     cancelGithubPrCheck: vi.fn(),
     getWorktreePublishedHead: vi.fn(),
     getGithubPrReviewThreads: vi.fn(),
+    writeGithubPrReviewThread: vi.fn(),
   },
 }));
 
@@ -126,6 +128,7 @@ describe("review thread reads", () => {
                 baseOid: "b",
                 threads: [reviewThread("slow")],
                 truncated: false,
+                viewerLogin: null,
               },
             });
         })
@@ -156,6 +159,7 @@ describe("review thread reads", () => {
                 baseOid: "b",
                 threads: [reviewThread("stale")],
                 truncated: false,
+                viewerLogin: null,
               },
             });
         })
@@ -197,6 +201,7 @@ describe("review thread reads", () => {
                 baseOid: "b",
                 threads: [reviewThread("t1")],
                 truncated: false,
+                viewerLogin: null,
               },
             });
         })
@@ -207,6 +212,86 @@ describe("review thread reads", () => {
     await settle();
     // The new scope reads for itself; the old answer never lands.
     expect(threads().data?.threads.map((t) => t.id) ?? []).not.toContain("t1");
+    hide();
+  });
+});
+
+describe("review thread writes", () => {
+  it("sends a write once to the PR it was meant for, then shows GitHub's threads past a read already out", async () => {
+    setThreads(reviewThread("t1"));
+    const hide = await show();
+    let answerStale!: () => void;
+    // A read that left before the write, answering after it.
+    read.mockImplementationOnce(
+      (_worktree, _branch, repo, prNumber) =>
+        new Promise((resolve) => {
+          answerStale = () =>
+            resolve({
+              status: "ok",
+              data: {
+                repo,
+                prNumber,
+                viewerLogin: "octo-viewer",
+                headOid: "1".repeat(40),
+                baseOid: "2".repeat(40),
+                threads: [reviewThread("t1")],
+                truncated: false,
+              },
+            });
+        })
+    );
+    void refreshWorktreePr(WT, BRANCH);
+    await settle(5);
+    read.mockClear();
+
+    const outcome = await writeWorktreeReviewThread(WT, BRANCH, 7, {
+      kind: "resolve",
+      threadId: "t1",
+    });
+    expect(outcome).toEqual({ ok: true, data: "t1" });
+    expect(commands.writeGithubPrReviewThread).toHaveBeenCalledExactlyOnceWith(
+      WT,
+      BRANCH,
+      REPO,
+      7,
+      { kind: "resolve", threadId: "t1" }
+    );
+    // Re-read past the backend's cache, not joined to the read already out.
+    expect(read).toHaveBeenCalledExactlyOnceWith(WT, BRANCH, REPO, 7, true);
+    expect(threads().data?.threads[0].resolved).toBe(true);
+    answerStale();
+    await settle(5);
+    expect(threads().data?.threads[0].resolved).toBe(true);
+    hide();
+  });
+
+  it("refuses a write for a PR the branch no longer links", async () => {
+    const hide = await show();
+    const outcome = await writeWorktreeReviewThread(WT, BRANCH, 8, {
+      kind: "reopen",
+      threadId: "t1",
+    });
+    expect(outcome.ok).toBe(false);
+    expect(commands.writeGithubPrReviewThread).not.toHaveBeenCalled();
+    hide();
+  });
+
+  it("re-reads after a failed write so a write GitHub applied anyway shows", async () => {
+    setThreads(reviewThread("t1"));
+    world.writeOutcomes = [
+      { failure: failure("timeout", "GitHub did not answer"), applied: true },
+    ];
+    const hide = await show();
+    const outcome = await writeWorktreeReviewThread(WT, BRANCH, 7, {
+      kind: "reply",
+      threadId: "t1",
+      body: "Done.",
+    });
+    expect(outcome).toMatchObject({ ok: false, failure: { kind: "timeout" } });
+    expect(threads().data?.threads[0].comments.at(-1)).toMatchObject({
+      author: { login: "octo-viewer" },
+      body: "Done.",
+    });
     hide();
   });
 });

@@ -359,3 +359,24 @@ export const useWorktreePrStore = create<WorktreePrStoreState>((set) => ({
 export function prEntryOf(key: string): WorktreePrEntry {
   return useWorktreePrStore.getState().entries[key] ?? IDLE_PR_ENTRY;
 }
+
+/** The store's scope now: a write made for an earlier one is dropped. */
+export const prScope = () => useWorktreePrStore.getState().scope;
+
+/** Writes a branch's entry, unless the store was reset since `at`. */
+export function updatePrEntry(
+  key: string,
+  next: (entry: WorktreePrEntry) => WorktreePrEntry,
+  at = prScope()
+) {
+  useWorktreePrStore.setState((state) =>
+    state.scope !== at
+      ? state
+      : {
+          entries: {
+            ...state.entries,
+            [key]: next(state.entries[key] ?? IDLE_PR_ENTRY),
+          },
+        }
+  );
+}

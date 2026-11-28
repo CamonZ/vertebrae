@@ -7,6 +7,7 @@ import {
   discussionTurn,
   isOutdated,
   SelectionDiscussions,
+  languageOf,
 } from "./selectionDiscussions";
 import { createDiffComment } from "../thread/toolChange/diffComments";
 import { formatTextCommentsForReply } from "./assistantTextComments";
@@ -80,7 +81,9 @@ it("does not publish a new renderer selection for the same patch and range", () 
   const controller = new SelectionDiscussions();
   const selected = anchor();
   let publications = 0;
-  controller.subscribe(() => { publications++; });
+  controller.subscribe(() => {
+    publications++;
+  });
   controller.select(selected);
   controller.select({ ...selected, home: { ...selected.home } });
   expect(publications).toBe(1);
@@ -134,7 +137,7 @@ describe("turn oracle", () => {
   const fourth = "Thanks";
   const edited = {
     wholeBranch: true,
-      files: [parsePatch(fixtures[0].patch.replace("+new", "+changed"))[0]],
+    files: [parsePatch(fixtures[0].patch.replace("+new", "+changed"))[0]],
   };
 
   it("sends the anchor once and only the question on later turns", () => {
@@ -151,7 +154,9 @@ describe("turn oracle", () => {
     turn("Please explain what this file does");
     turn(second);
     controller.reconcile(edited);
-    controller.applyMappings(edited, [{ threadId: id, status: "outdated", startLine: null, line: null }]);
+    controller.applyMappings(edited, [
+      { threadId: id, status: "outdated", startLine: null, line: null },
+    ]);
     turn("Is it still correct?");
     turn(fourth);
 
@@ -163,7 +168,9 @@ describe("turn oracle", () => {
     const { controller, id, thread } = threadOn();
 
     controller.reconcile(edited);
-    controller.applyMappings(edited, [{ threadId: id, status: "outdated", startLine: null, line: null }]);
+    controller.applyMappings(edited, [
+      { threadId: id, status: "outdated", startLine: null, line: null },
+    ]);
     const next = discussionTurn(thread(), false, "Why?");
     controller.sent(id, "session-2", next.notesOutdated);
 
@@ -204,7 +211,13 @@ it("generated discussion state machine agrees with an independent observable mod
 
         if (operation === 1 && selected) {
           ids.push(controller.ask(anchor(), String(ids.length), capture));
-          facts.push({ outdated: false, start: 5, unavailable: false, noted: false, session: null });
+          facts.push({
+            outdated: false,
+            start: 5,
+            unavailable: false,
+            noted: false,
+            session: null,
+          });
           active = facts.length - 1;
         }
 
@@ -245,9 +258,15 @@ it("generated discussion state machine agrees with an independent observable mod
         if (operation === 6) {
           const snapshot = { wholeBranch: true, files: [] };
           controller.reconcile(snapshot);
-          controller.applyMappings(snapshot, ids.map((threadId) => ({
-            threadId, status: "outdated", startLine: null, line: null,
-          })));
+          controller.applyMappings(
+            snapshot,
+            ids.map((threadId) => ({
+              threadId,
+              status: "outdated",
+              startLine: null,
+              line: null,
+            }))
+          );
           selected = false;
           facts.forEach((fact) => {
             fact.outdated = true;
@@ -269,10 +288,19 @@ it("generated discussion state machine agrees with an independent observable mod
           const snapshot = { wholeBranch: true, files: [] };
           selected = false;
           controller.reconcile(snapshot);
-          controller.applyMappings(snapshot, ids.map((threadId, index) => index % 2 === 0
-            ? { threadId, status: "unavailable", startLine: null, line: null }
-            : { threadId, status: "open", startLine: 9, line: 10 }
-          ));
+          controller.applyMappings(
+            snapshot,
+            ids.map((threadId, index) =>
+              index % 2 === 0
+                ? {
+                    threadId,
+                    status: "unavailable",
+                    startLine: null,
+                    line: null,
+                  }
+                : { threadId, status: "open", startLine: 9, line: 10 }
+            )
+          );
           facts.forEach((fact, index) => {
             fact.unavailable = index % 2 === 0;
             if (!fact.unavailable) {
@@ -309,3 +337,13 @@ it("generated discussion state machine agrees with an independent observable mod
     },
     { seed: 0x8640ee9e }
   ));
+
+describe("languageOf", () => {
+  it("takes the file's extension, not a dot in its directory", () => {
+    expect(languageOf("src/lib.rs")).toBe("rs");
+    expect(languageOf("a.b/Makefile")).toBe("text");
+    expect(languageOf("LICENSE")).toBe("text");
+    expect(languageOf("config/.env")).toBe("text");
+    expect(languageOf("web/app.test.tsx")).toBe("tsx");
+  });
+});

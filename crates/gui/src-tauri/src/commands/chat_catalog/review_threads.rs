@@ -454,9 +454,19 @@ pub async fn list_review_threads(
 #[derive(Deserialize, specta::Type)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ReviewThreadUpdate {
-    Position { position: ReviewThreadPosition },
+    Position {
+        position: ReviewThreadPosition,
+    },
     OutdatedNote,
-    Anchor { anchor: ReviewThreadInput },
+    Anchor {
+        anchor: ReviewThreadInput,
+    },
+    /// A line discussion was posted to GitHub as this new review thread: it
+    /// is drawn with that thread from now on, keeping its history.
+    GithubThread {
+        #[serde(rename = "githubThreadId")]
+        github_thread_id: String,
+    },
 }
 
 #[derive(Deserialize, specta::Type)]
@@ -492,6 +502,23 @@ fn edit_review_thread(
         }
         ReviewThreadUpdate::Anchor { .. } => {
             return Err(thread_error("The captured review anchor is immutable."));
+        }
+        ReviewThreadUpdate::GithubThread { github_thread_id } => {
+            if !valid_github_thread_id(&github_thread_id) {
+                return Err(thread_error("That is not a GitHub review thread ID."));
+            }
+            let origin = format!("{GITHUB_THREAD_ORIGIN}{github_thread_id}");
+            match &stored.origin_ref {
+                Some(current) if *current == origin => {}
+                None if stored.home_kind == ReviewThreadHome::Worktree => {
+                    stored.origin_ref = Some(origin);
+                }
+                _ => {
+                    return Err(thread_error(
+                        "Only a line discussion in Changes can move under a GitHub thread.",
+                    ))
+                }
+            }
         }
     }
     Ok((stored != previous).then(|| stored.into_wire()))
@@ -812,6 +839,29 @@ mod tests {
             shared_thread_notification(&after, &catalog, "project", id),
             Some(None)
         );
+
+        // Posting a line discussion moves it under its new GitHub thread,
+        // once; it never moves again, and a tool call's discussion never does.
+        let github = |id: &str| ReviewThreadUpdate::GithubThread {
+            github_thread_id: id.into(),
+        };
+        let posted = edit_review_thread(Some(&record), github("PRRT_kwDOAbc"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(posted["origin_ref"], "github-thread:PRRT_kwDOAbc");
+        assert_eq!(posted["original_blob_id"], "blob");
+        let mut moved_record = record.clone();
+        moved_record.remote.payload = posted;
+        assert!(
+            edit_review_thread(Some(&moved_record), github("PRRT_kwDOAbc"))
+                .unwrap()
+                .is_none()
+        );
+        assert!(edit_review_thread(Some(&moved_record), github("PRRT_other")).is_err());
+        assert!(edit_review_thread(Some(&record), github("not a node id")).is_err());
+        let mut tool_record = record.clone();
+        tool_record.remote.payload["home_kind"] = json!("tool_call");
+        assert!(edit_review_thread(Some(&tool_record), github("PRRT_kwDOAbc")).is_err());
 
         record.remote.payload["deleted"] = json!(true);
         assert_eq!(

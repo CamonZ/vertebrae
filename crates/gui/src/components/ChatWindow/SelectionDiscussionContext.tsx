@@ -237,16 +237,15 @@ export function SelectionDiscussionProvider({
   const reportMapping = useCallback((error: unknown | null) => {
     setMappingError(error === null ? null : errorMessage(error));
   }, []);
-  const { mapSnapshot, noteWriter, comparison } = useSelectionDiscussionCatalog(
-    {
+  const { mapSnapshot, noteWriter, comparison, saveGithubThread } =
+    useSelectionDiscussionCatalog({
       controller,
       projectPath,
       parentChatId,
       worktreePath,
       report: reportCatalogError,
       reportMapping,
-    }
-  );
+    });
   const reconcile = useCallback(
     (snapshot: WorktreeSnapshot) => {
       const changed = snapshotRef.current !== snapshot;
@@ -535,6 +534,11 @@ export function SelectionDiscussionProvider({
       discuss: begin,
       discussGithub,
       attach: (...args) => callbacks.current.onAttach(...args),
+      // A worktree location names no chat; only tool-call ones do.
+      locate: (anchor) =>
+        anchor.home.kind === "worktree" && !anchor.fullFile
+          ? reviewLocation(anchor, "", comparison())
+          : null,
       attachThread,
       canAttachGithub,
       attachGithub: (placed) => {
@@ -592,6 +596,16 @@ export function SelectionDiscussionProvider({
       focusTaken: (id) =>
         setFocusRequest((current) => (current === id ? null : current)),
       revealed: (nonce) => controller.revealed(nonce),
+      moveUnderGithub: async (id, githubThreadId) => {
+        try {
+          await saveGithubThread(id, githubThreadId);
+        } catch (error) {
+          reportCatalogError(error);
+          return;
+        }
+        controller.moveUnderGithub(id, githubThreadId);
+        controller.reveal(id);
+      },
       draft: (id) => controller.draft(id),
       setDraft: (id, text) => controller.setDraft(id, text),
     };
@@ -608,6 +622,8 @@ export function SelectionDiscussionProvider({
     canAttachGithub,
     reconcile,
     checkAvailability,
+    saveGithubThread,
+    reportCatalogError,
   ]);
 
   const unreadable = state.threads.find(

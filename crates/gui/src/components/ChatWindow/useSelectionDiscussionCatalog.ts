@@ -45,6 +45,7 @@ export function useSelectionDiscussionCatalog({
   const scope = useRef<{
     reconcile(next: WorktreeSnapshot, changed: boolean): void;
     noteWriter(): ((threadId: string) => Promise<void>) | undefined;
+    moveUnderGithub(threadId: string, githubThreadId: string): Promise<void>;
   }>(null);
 
   useEffect(() => {
@@ -148,6 +149,17 @@ export function useSelectionDiscussionCatalog({
     })();
 
     scope.current = {
+      async moveUnderGithub(id, githubThreadId) {
+        const project = await projectLookup;
+        if (!project)
+          throw new Error("Could not find the project for the discussion.");
+        await unwrapCommand(
+          commands.putReviewThread(project, id, {
+            kind: "github_thread",
+            githubThreadId,
+          })
+        );
+      },
       reconcile(next, changed) {
         map(next);
         if (!changed) return;
@@ -186,6 +198,8 @@ export function useSelectionDiscussionCatalog({
           (previous.revision === row.revision &&
             samePosition(previous.payload, row.payload) &&
             previous.payload.outdatedNoted === row.payload.outdatedNoted &&
+            // A discussion linked to a GitHub thread keeps its revision.
+            previous.payload.originRef === row.payload.originRef &&
             previous.checkoutPath === row.checkoutPath &&
             previousThread &&
             previousThread.status.kind !== "unreadable"))
@@ -378,5 +392,12 @@ export function useSelectionDiscussionCatalog({
   }, []);
   const noteWriter = useCallback(() => scope.current?.noteWriter(), []);
   const comparison = useCallback(() => snapshot.current?.comparison, []);
-  return { mapSnapshot, noteWriter, comparison };
+  /** Saves that a discussion now discusses a GitHub thread. */
+  const saveGithubThread = useCallback(
+    (id: string, githubThreadId: string) =>
+      scope.current?.moveUnderGithub(id, githubThreadId) ??
+      Promise.reject(new Error("The discussion catalog is not open.")),
+    []
+  );
+  return { mapSnapshot, noteWriter, comparison, saveGithubThread };
 }

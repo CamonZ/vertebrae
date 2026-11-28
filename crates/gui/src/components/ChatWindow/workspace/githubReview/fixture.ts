@@ -3,6 +3,7 @@ import type {
   GithubThreadAnchor,
   GithubThreadPlacement,
   GithubThreadPosition,
+  GithubThreadWrite,
 } from "../../../../bindings";
 
 type ThreadOverrides = Partial<GithubThreadAnchor> &
@@ -99,4 +100,46 @@ export function outdated(
         : [{ number: originalLine, text, focus: true }],
     originalCommit: originalLine === null ? null : "2".repeat(40),
   };
+}
+
+/**
+ * `threads` with `write` applied as GitHub applies it, by `viewer`; the new
+ * thread (or the reply's comment) gets `nodeId`. Synthetic only.
+ */
+export function applyThreadWrite(
+  threads: readonly GithubReviewThread[],
+  write: GithubThreadWrite,
+  viewer: string,
+  nodeId: string
+): GithubReviewThread[] {
+  const comment = (body: string) => ({
+    id: nodeId,
+    author: { login: viewer },
+    body,
+    createdAt: "2026-11-28T10:00:00Z",
+    url: `https://github.com/example/demo-repo/pull/7#discussion_${nodeId}`,
+  });
+  if (write.kind === "start")
+    return [
+      ...threads,
+      {
+        ...reviewThread(nodeId, {
+          path: write.path,
+          side: write.side,
+          startSide: write.startLine === null ? null : write.side,
+          line: write.line,
+          startLine: write.startLine,
+          originalLine: write.line,
+          originalStartLine: write.startLine,
+        }),
+        comments: [comment(write.body)],
+      },
+    ];
+  return threads.map((thread) =>
+    thread.id !== write.threadId
+      ? thread
+      : write.kind === "reply"
+        ? { ...thread, comments: [...thread.comments, comment(write.body)] }
+        : { ...thread, resolved: write.kind === "resolve" }
+  );
 }

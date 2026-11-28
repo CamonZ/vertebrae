@@ -3226,6 +3226,26 @@ function seedResumableDiscussion(threadId = "restored") {
   return id;
 }
 
+it("takes up a GitHub thread link that arrives at the same revision", async () => {
+  findFixtureProject();
+  const row = restoredRow();
+  vi.mocked(commands.listReviewThreads).mockResolvedValueOnce({
+    status: "ok",
+    data: [row],
+  });
+  render(fixture());
+  await screen.findByRole("button", { name: "Reopen selection discussion" });
+  expect(liveDiscussion.threads[0].githubThreadId).toBeNull();
+
+  await act(async () =>
+    emitChange({
+      ...row,
+      payload: { ...row.payload, originRef: "github-thread:PRRT_linked" },
+    })
+  );
+  expect(liveDiscussion.threads[0].githubThreadId).toBe("PRRT_linked");
+});
+
 it("reports an unreadable anchor and retains the bound conversation even when a refresh omits the row", async () => {
   findFixtureProject();
   const sessionId = seedResumableDiscussion();

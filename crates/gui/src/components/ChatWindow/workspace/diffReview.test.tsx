@@ -597,6 +597,7 @@ describe("Changes keyboard line cursor", () => {
     revealed: vi.fn(),
     draft: vi.fn(() => ""),
     setDraft: vi.fn(),
+    moveUnderGithub: vi.fn(async () => {}),
   } satisfies DiscussionActions;
   const writeText = vi.fn(() => Promise.resolve());
 

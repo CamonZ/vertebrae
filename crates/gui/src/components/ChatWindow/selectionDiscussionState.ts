@@ -10,6 +10,7 @@ import {
   type DiscussionState,
   type ThreadAnchor,
 } from "./selectionDiscussions";
+import type { ReviewAnchorLocation } from "../../bindings";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
 import type { PlacedThread } from "./workspace/githubReview/model";
 
@@ -32,6 +33,11 @@ export interface DiscussionActions {
    */
   discussGithub(placed: PlacedThread): Promise<GithubDiscussResult>;
   attach(anchor: CodeSelection, outdated?: boolean, question?: string): void;
+  /**
+   * Where a selection in the worktree's Changes reads its lines (the shown
+   * comparison's side); null for any other selection.
+   */
+  locate?(anchor: CodeSelection): ReviewAnchorLocation | null;
   /** Send to main chat: attach a thread (and a GitHub thread's discussion). */
   attachThread(id: string, question: string): void;
   /** Whether Send to main chat is offered for GitHub threads here. */
@@ -58,6 +64,12 @@ export interface DiscussionActions {
   focusTaken(id: string): void;
   /** Changes showed the GitHub thread `reveal` asked for. */
   revealed(nonce: number): void;
+  /**
+   * A line discussion's comment started GitHub thread `githubThreadId`:
+   * the discussion moves under it, saved first, and Changes shows it there.
+   * A failed save leaves it where it is and says why.
+   */
+  moveUnderGithub(id: string, githubThreadId: string): Promise<void>;
   /** A thread's unsent question, kept while it is closed. */
   draft(id: string): string;
   setDraft(id: string, text: string): void;

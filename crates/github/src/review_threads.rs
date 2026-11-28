@@ -1,4 +1,5 @@
 //! Pull request review threads: their published anchors and comments.
+//! Writes to threads live in `review_thread_writes`.
 
 use crate::{
     auth::GitHubToken, error::bounded_message, wire::GraphQlPageInfo, GitHubClient, GitHubError,
@@ -17,6 +18,7 @@ query PullRequestReviewThreads(
   $owner: String!, $repo: String!, $number: Int!,
   $first: Int!, $comments: Int!, $after: String
 ) {
+  viewer { login }
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
       headRefOid
@@ -111,6 +113,8 @@ pub struct ReviewThread {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestReviewThreads {
+    /// The authenticated user, who would author any reply or new thread.
+    pub viewer_login: Option<String>,
     /// Commit the published (`Right`) anchors refer to.
     pub head_oid: String,
     pub base_oid: String,
@@ -121,6 +125,8 @@ pub struct PullRequestReviewThreads {
 
 #[derive(Debug, Deserialize)]
 struct ReviewThreadsData {
+    #[serde(default)]
+    viewer: Option<AuthorNode>,
     repository: Option<ReviewThreadsRepo>,
 }
 
@@ -297,6 +303,9 @@ impl GitHubClient {
                     }),
                 )
                 .await?;
+            if let Some(viewer) = data.viewer {
+                pages.viewer_login.get_or_insert(viewer.login);
+            }
             let pr = data
                 .repository
                 .and_then(|repo| repo.pull_request)
@@ -322,6 +331,7 @@ enum NextPage {
 /// fetches.
 #[derive(Debug, Default)]
 struct PageAssembly {
+    viewer_login: Option<String>,
     pages: usize,
     oids: Option<(String, String)>,
     threads: Vec<ReviewThread>,
@@ -358,6 +368,7 @@ impl PageAssembly {
     fn finish(self) -> PullRequestReviewThreads {
         let (head_oid, base_oid) = self.oids.unwrap_or_default();
         PullRequestReviewThreads {
+            viewer_login: self.viewer_login,
             head_oid,
             base_oid,
             threads: self.threads,
@@ -419,6 +430,7 @@ mod tests {
     fn page(nodes: serde_json::Value, next: Option<&str>) -> serde_json::Value {
         json!({
             "data": {
+                "viewer": { "login": "octo-viewer" },
                 "repository": {
                     "pullRequest": {
                         "headRefOid": "1111111111111111111111111111111111111111",
@@ -564,6 +576,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.head_oid, "1111111111111111111111111111111111111111");
+        assert_eq!(result.viewer_login.as_deref(), Some("octo-viewer"));
         assert!(!result.truncated);
         assert_eq!(result.threads.len(), 2);
         let first = &result.threads[0];

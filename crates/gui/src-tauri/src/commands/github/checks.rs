@@ -9,7 +9,7 @@ use std::{future::Future, path::Path};
 use vertebrae_github::{
     CheckCancel, CheckOutcome, CheckRerun, CheckStatus, GitHubError, OpenPrSearchResult,
     PullRequestCheck, PullRequestChecks, PullRequestChecksBatch, PullRequestReviewThreads,
-    PullRequestSummary, RateLimitStatus, RepoRef,
+    PullRequestSummary, RateLimitStatus, RepoRef, ReviewThreadWrite,
 };
 
 /// Below this many remaining points, polling waits for the window to reset.
@@ -299,6 +299,14 @@ pub(super) trait PrLookup: Sync {
         repo: &RepoRef,
         number: u64,
     ) -> impl Future<Output = Result<PullRequestReviewThreads, GitHubError>> + Send;
+
+    /// Sends one review-thread write; the ID of the thread it wrote.
+    fn write_review_thread(
+        &self,
+        repo: &RepoRef,
+        number: u64,
+        write: &ReviewThreadWrite,
+    ) -> impl Future<Output = Result<String, GitHubError>> + Send;
 }
 
 impl PrLookup for GitHubLookup {
@@ -346,6 +354,18 @@ impl PrLookup for GitHubLookup {
     ) -> Result<PullRequestReviewThreads, GitHubError> {
         let (client, token) = self.session().await?;
         client.list_review_threads(&token, repo, number).await
+    }
+
+    async fn write_review_thread(
+        &self,
+        repo: &RepoRef,
+        number: u64,
+        write: &ReviewThreadWrite,
+    ) -> Result<String, GitHubError> {
+        let (client, token) = self.session().await?;
+        client
+            .write_review_thread(&token, repo, number, write)
+            .await
     }
 }
 

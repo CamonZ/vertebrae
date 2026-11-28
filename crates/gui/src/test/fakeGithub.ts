@@ -8,12 +8,14 @@ import type {
   GithubPullRequest,
   GithubRemotePoll,
   GithubReviewThread,
+  GithubThreadWrite,
   WorktreeGithub,
   commands as Commands,
 } from "../bindings";
 import { useChatStore, type ChatSession } from "../stores/chatStore";
 import type { ChatPrLink, LinkedPr } from "../stores/prLinks";
 import { resetPrSync } from "../stores/prSync";
+import { applyThreadWrite } from "../components/ChatWindow/workspace/githubReview/fixture";
 
 /**
  * A synthetic GitHub behind the GitHub commands the PR sync calls, so tests
@@ -34,7 +36,12 @@ type GithubCommands = Pick<
   | "cancelGithubPrCheck"
   | "getWorktreePublishedHead"
 > &
-  Partial<Pick<typeof Commands, "getGithubPrReviewThreads">>;
+  Partial<
+    Pick<
+      typeof Commands,
+      "getGithubPrReviewThreads" | "writeGithubPrReviewThread"
+    >
+  >;
 
 export const GITHUB_COMMANDS = [
   "resolveWorktreeGithub",
@@ -45,6 +52,7 @@ export const GITHUB_COMMANDS = [
   "cancelGithubPrCheck",
   "getWorktreePublishedHead",
   "getGithubPrReviewThreads",
+  "writeGithubPrReviewThread",
 ] as const;
 
 export function pullRequest(
@@ -134,6 +142,15 @@ export interface FakeGithub {
   reviewThreads: Map<string, GithubReviewThread[]>;
   /** Fails every review-thread read until cleared. */
   failThreads: GithubFailure | null;
+  /** The signed-in user, who authors replies and new threads. */
+  viewer: string | null;
+  /** Every thread write GitHub received, in order. */
+  writes: GithubThreadWrite[];
+  /**
+   * How the next writes answer, in order: a failure, and whether GitHub
+   * applied the write anyway (a timeout that landed). Empty: they succeed.
+   */
+  writeOutcomes: { failure: GithubFailure; applied: boolean }[];
 }
 
 export const prId = (repo: string, number: number) =>
@@ -151,6 +168,9 @@ export function fakeGithub(): FakeGithub {
     incomplete: new Set(),
     reviewThreads: new Map(),
     failThreads: null,
+    viewer: "octo-viewer",
+    writes: [],
+    writeOutcomes: [],
   };
 }
 
@@ -287,7 +307,29 @@ export function installFakeGithub(commands: GithubCommands, world: FakeGithub) {
               baseOid: "2".repeat(40),
               threads: world.reviewThreads.get(prId(repo, prNumber)) ?? [],
               truncated: false,
+              viewerLogin: world.viewer,
             })
+    );
+  if (commands.writeGithubPrReviewThread)
+    vi.mocked(commands.writeGithubPrReviewThread).mockImplementation(
+      async (_worktreePath, _branch, repo, prNumber, write) => {
+        world.writes.push(write);
+        const outcome = world.writeOutcomes.shift();
+        const id = prId(repo, prNumber);
+        const nodeId = `PRRT_written_${world.writes.length}`;
+        if (!outcome || outcome.applied)
+          world.reviewThreads.set(
+            id,
+            applyThreadWrite(
+              world.reviewThreads.get(id) ?? [],
+              write,
+              world.viewer ?? "octo-viewer",
+              nodeId
+            )
+          );
+        if (outcome) return err(outcome.failure);
+        return ok(write.kind === "start" ? nodeId : write.threadId);
+      }
     );
 }
 

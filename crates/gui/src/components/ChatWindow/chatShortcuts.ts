@@ -362,6 +362,14 @@ export const DIFF_COMPOSER_SEND_SHORTCUT = {
   label: "Send to main chat",
 } as const satisfies ChatShortcutDefinition;
 
+/** Diff composer: post the text to the linked PR as a new GitHub thread. */
+export const DIFF_COMPOSER_GITHUB_SHORTCUT = {
+  modifiers: ["meta", "alt"],
+  keys: ["Enter"],
+  displayKey: "↵",
+  label: "Comment on GitHub",
+} as const satisfies ChatShortcutDefinition;
+
 /** Keys that open the composer for the keyboard line selection. */
 export const DIFF_COMMENT_KEYS = ["c", "Enter"] as const;
 
@@ -568,6 +576,10 @@ export const CHANGES_HINT_GROUPS: readonly {
       {
         keys: modifierKeys(DIFF_COMPOSER_SEND_SHORTCUT),
         label: DIFF_COMPOSER_SEND_SHORTCUT.label,
+      },
+      {
+        keys: modifierKeys(DIFF_COMPOSER_GITHUB_SHORTCUT),
+        label: "Comment on GitHub (linked PR)",
       },
       { keys: ["Esc"], label: "Cancel and return to line" },
     ],

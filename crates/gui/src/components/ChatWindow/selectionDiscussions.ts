@@ -7,7 +7,9 @@ import type {
 } from "./assistantTextComments";
 import {
   canonicalPath,
+  chunkPatch,
   resolveSelection,
+  spanChunk,
   spanRows,
   type FilePatch,
   type LineSpan,
@@ -275,6 +277,48 @@ export function selectionLabel(anchor: CodeSelection): string {
   return `${anchor.path}:${anchor.startLine}${end}${anchor.fullFile ? "" : ` (${anchor.side})`}`;
 }
 
+/** Rows of context shown around a discussed span. */
+export const DISCUSSION_CONTEXT_ROWS = 3;
+
+/** What a discussion is about, to show with it away from the diff. */
+export type DiscussedCode =
+  | {
+      kind: "diff";
+      /** One file's patch holding the span's hunk rows and their context. */
+      patch: string;
+      /** The span, as the diff renderer selects lines. */
+      selection: {
+        start: number;
+        end: number;
+        side: "additions" | "deletions";
+      };
+    }
+  | { kind: "code"; path: string; code: string };
+
+/** A file's extension as its language; none (Makefile, .env) is text. */
+export function languageOf(path: string): string {
+  const name = path.split("/").pop() ?? "";
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(dot + 1) : "text";
+}
+
+/**
+ * The span's diff rows with the rows around them; the selected code when
+ * the diff does not hold the span (a whole file).
+ */
+export function codeUnderDiscussion(anchor: CodeSelection): DiscussedCode {
+  const chunk = anchor.fullFile
+    ? null
+    : spanChunk(anchor.file, anchor, DISCUSSION_CONTEXT_ROWS);
+  if (!chunk) return { kind: "code", path: anchor.path, code: anchor.code };
+  const side = anchor.side === "old" ? "deletions" : "additions";
+  return {
+    kind: "diff",
+    patch: chunkPatch(anchor.file, chunk),
+    selection: { start: anchor.startLine, end: anchor.endLine, side },
+  };
+}
+
 /** Note sent once, with the first follow-up after the selection changed. */
 export const OUTDATED_CONTEXT_NOTE =
   "Note: the selected code has changed since this discussion started, so the original snapshot may be outdated.";
@@ -479,6 +523,19 @@ export class SelectionDiscussions {
   revealed(nonce: number) {
     if (this.state.reveal?.nonce === nonce)
       this.publish({ ...this.state, reveal: null });
+  }
+
+  /**
+   * A line discussion now discusses the GitHub thread its comment started:
+   * drawn with that thread from here on, its transcript and draft kept.
+   */
+  moveUnderGithub(id: string, githubThreadId: string) {
+    if (!this.thread(id)) return;
+    this.publishThreads(
+      this.state.threads.map((thread) =>
+        thread.id === id ? { ...thread, githubThreadId } : thread
+      )
+    );
   }
 
   /** The discussion of a GitHub review thread, if there is one. */

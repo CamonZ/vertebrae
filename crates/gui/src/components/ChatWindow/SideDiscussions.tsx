@@ -1,4 +1,4 @@
-import { useContext, useRef, type KeyboardEvent } from "react";
+import { lazy, Suspense, useContext, useRef, type KeyboardEvent } from "react";
 import type { PaletteItem } from "../CommandPalette/paletteModel";
 import { contextScope, usePaletteScope } from "../CommandPalette/paletteScopes";
 import { CHAT_AREA_ATTRIBUTE, enterFirstRow, stepRow } from "./chatAreas";
@@ -15,6 +15,7 @@ import { SideEmptyState } from "./SideEmptyState";
 import { LockGlyph, MiniThread } from "./SelectionDiscussionThread";
 import {
   anchorNotice,
+  codeUnderDiscussion,
   discussionList,
   selectionLabel,
   threadPlace,
@@ -290,6 +291,29 @@ function DiscussionGroup({
   );
 }
 
+const DiscussedCodeView = lazy(() => import("./DiscussedCodeView"));
+
+/**
+ * Away from the diff, an opened discussion shows the code it is about,
+ * highlighted as in Changes; one whose code changed shows its original
+ * selection instead.
+ */
+function CodeUnderDiscussion({
+  anchor,
+}: {
+  anchor: SelectionThread["anchor"];
+}) {
+  return (
+    <div className="side-discussion-diff" aria-label="Code under discussion">
+      <Suspense
+        fallback={<pre className="side-discussion-code">{anchor.code}</pre>}
+      >
+        <DiscussedCodeView code={codeUnderDiscussion(anchor)} />
+      </Suspense>
+    </div>
+  );
+}
+
 function DiscussionRow({
   thread,
   discussion,
@@ -309,6 +333,11 @@ function DiscussionRow({
           thread={thread}
           discussion={discussion}
           onClosed={() => onClosed(thread.id)}
+          code={
+            thread.status.kind === "inline" && (
+              <CodeUnderDiscussion anchor={thread.anchor} />
+            )
+          }
         />
       </li>
     );

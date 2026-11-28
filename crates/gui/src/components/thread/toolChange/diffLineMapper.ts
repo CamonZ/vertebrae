@@ -636,3 +636,68 @@ export function spanRows(file: FilePatch, span: LineSpan): HunkRow[] | null {
   }
   return rows;
 }
+
+/** A span's rows with the rows around it in its hunk. */
+export interface SpanChunk {
+  rows: HunkRow[];
+  /** The span's first and last row in `rows`. */
+  first: number;
+  last: number;
+  /** The old and new line `rows` start at. */
+  oldStart: number;
+  newStart: number;
+}
+
+/**
+ * The span's hunk rows with up to `context` rows of the same hunk on each
+ * side. Null when the span is not all in one hunk of `file`.
+ */
+export function spanChunk(
+  file: FilePatch,
+  span: LineSpan,
+  context: number
+): SpanChunk | null {
+  const start = findRow(file, span.side, span.startLine);
+  const end = findRow(file, span.side, span.endLine);
+  if (
+    !start ||
+    !end ||
+    start.hunkIndex !== end.hunkIndex ||
+    end.rowIndex < start.rowIndex
+  )
+    return null;
+  const { hunk } = start;
+  const from = Math.max(0, start.rowIndex - context);
+  const to = Math.min(hunk.rows.length, end.rowIndex + 1 + context);
+  const before = hunk.rows.slice(0, from);
+  // A hunk's empty side names the line before it; its rows start after.
+  const first = (start: number, count: number) => (count ? start : start + 1);
+  return {
+    rows: hunk.rows.slice(from, to),
+    first: start.rowIndex - from,
+    last: end.rowIndex - from,
+    oldStart:
+      first(hunk.oldStart, hunk.oldCount) +
+      before.filter((row) => row.kind !== "add").length,
+    newStart:
+      first(hunk.newStart, hunk.newCount) +
+      before.filter((row) => row.kind !== "del").length,
+  };
+}
+
+/** A one-hunk patch of `file` holding only `chunk`'s rows. */
+export function chunkPatch(file: FilePatch, chunk: SpanChunk): string {
+  const oldCount = chunk.rows.filter((row) => row.kind !== "add").length;
+  const newCount = chunk.rows.filter((row) => row.kind !== "del").length;
+  // An empty side names the line before it, as git writes it.
+  const start = (line: number, count: number) => (count ? line : line - 1);
+  const path = canonicalPath(file);
+  return [
+    `diff --git a/${file.oldPath ?? path} b/${file.newPath ?? path}`,
+    `--- ${file.oldPath === null ? "/dev/null" : `a/${file.oldPath}`}`,
+    `+++ ${file.newPath === null ? "/dev/null" : `b/${file.newPath}`}`,
+    `@@ -${start(chunk.oldStart, oldCount)},${oldCount} +${start(chunk.newStart, newCount)},${newCount} @@`,
+    ...chunk.rows.map(rowText),
+    "",
+  ].join("\n");
+}

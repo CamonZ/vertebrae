@@ -96,6 +96,7 @@ function FileFixture({
         revealed: vi.fn(),
         draft: vi.fn(() => ""),
         setDraft: vi.fn(),
+        moveUnderGithub: vi.fn(async () => {}),
         reveal: null,
         focusRequest: null,
         collapsed: new Set(),

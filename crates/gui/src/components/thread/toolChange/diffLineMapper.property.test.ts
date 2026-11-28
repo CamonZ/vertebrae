@@ -1,10 +1,15 @@
 import { describe, test } from "vitest";
 import * as hegel from "@hegeldev/hegel";
+import * as gs from "@hegeldev/hegel/generators";
 import {
   canonicalPath,
+  chunkPatch,
+  findRow,
   parsePatch,
   projectToolRowToWorktree,
   projectWorktreeRowToToolCall,
+  rowLine,
+  spanChunk,
   type FilePatch,
   type ToolPatch,
 } from "./diffLineMapper";
@@ -206,5 +211,200 @@ describe("diff line mapper (repeated lines)", () => {
           }
         }
       }
+    }));
+});
+
+/** Git's start for a hunk side: its first line, or the line before when empty. */
+const gitStart = (line: number, count: number) => (count ? line : line - 1);
+
+/**
+ * A one-file patch as git writes it: an added file (one all-added hunk), a
+ * deleted file (one all-removed hunk), or random hunks, each a random mix
+ * of row kinds (some only added or only removed).
+ */
+function drawFilePatch(tc: hegel.TestCase): FilePatch {
+  const shape = tc.draw(
+    gs.sampledFrom(["modified", "added", "deleted"] as const)
+  );
+  if (shape !== "modified") {
+    const size = tc.draw(gs.integers({ minValue: 1, maxValue: 12 }));
+    const kind = shape === "added" ? "+" : "-";
+    const lines = Array.from({ length: size }, (_, i) => `${kind}line ${i}`);
+    return parsePatch(
+      [
+        "diff --git a/f b/f",
+        shape === "added" ? "new file mode 100644" : "deleted file mode 100644",
+        shape === "added" ? "--- /dev/null" : "--- a/f",
+        shape === "added" ? "+++ b/f" : "+++ /dev/null",
+        shape === "added" ? `@@ -0,0 +1,${size} @@` : `@@ -1,${size} +0,0 @@`,
+        ...lines,
+        "",
+      ].join("\n")
+    )[0];
+  }
+  const kinds = [" ", "+", "-"] as const;
+  let oldLine = 1;
+  let newLine = 1;
+  const hunks: string[] = [];
+  const count = tc.draw(gs.integers({ minValue: 1, maxValue: 3 }));
+  for (let hunk = 0; hunk < count; hunk += 1) {
+    // A gap of unchanged lines between hunks.
+    const gap = tc.draw(gs.integers({ minValue: 0, maxValue: 5 }));
+    oldLine += gap;
+    newLine += gap;
+    const only = tc.draw(gs.sampledFrom(["mixed", "+", "-"] as const));
+    const rows = tc.draw(
+      gs.arrays(gs.sampledFrom(only === "mixed" ? kinds : [only]), {
+        minSize: 1,
+        maxSize: 12,
+      })
+    );
+    const oldCount = rows.filter((kind) => kind !== "+").length;
+    const newCount = rows.filter((kind) => kind !== "-").length;
+    hunks.push(
+      `@@ -${gitStart(oldLine, oldCount)},${oldCount} +${gitStart(newLine, newCount)},${newCount} @@`,
+      ...rows.map((kind, index) => `${kind}line ${hunk}.${index}`)
+    );
+    oldLine += oldCount;
+    newLine += newCount;
+  }
+  return parsePatch(
+    ["diff --git a/f b/f", "--- a/f", "+++ b/f", ...hunks, ""].join("\n")
+  )[0];
+}
+
+/**
+ * The `@@` header git writes for `rows`, a run of `hunk`'s rows from row
+ * `from`, worked out from the hunk's own header and rows: a side's start is
+ * its first line, or when the run has none, the line before the run.
+ */
+function gitHeader(
+  hunk: FilePatch["hunks"][number],
+  from: number,
+  count: number
+) {
+  const header = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(
+    hunk.header
+  )!;
+  const rows = hunk.rows.slice(from, from + count);
+  const side = (lineOf: "oldLine" | "newLine", start: number, size: number) => {
+    const lines = rows.flatMap((row) =>
+      row[lineOf] === null ? [] : [row[lineOf]]
+    );
+    if (lines.length) return `${lines[0]},${lines.length}`;
+    const earlier = hunk.rows
+      .slice(0, from)
+      .flatMap((row) => (row[lineOf] === null ? [] : [row[lineOf]]));
+    // Before the run: the hunk's last line before it, else the line before
+    // the hunk (its header's start, less one unless that side is empty).
+    const before = earlier.length
+      ? earlier[earlier.length - 1]
+      : size
+        ? start - 1
+        : start;
+    return `${before},0`;
+  };
+  return `@@ -${side("oldLine", Number(header[1]), Number(header[2] ?? 1))} +${side("newLine", Number(header[3]), Number(header[4] ?? 1))} @@`;
+}
+
+describe("a span's chunk", () => {
+  test("is the span's rows and up to `context` rows of its hunk on each side", () =>
+    hegel.test((tc) => {
+      const file = drawFilePatch(tc);
+      const side = tc.draw(gs.sampledFrom(["old", "new"] as const));
+      const lines = file.hunks.flatMap((hunk) =>
+        hunk.rows.flatMap((row) => {
+          const line = rowLine(row, side);
+          return line === null ? [] : [line];
+        })
+      );
+      if (lines.length === 0) return;
+      const a = tc.draw(gs.sampledFrom(lines));
+      const b = tc.draw(gs.sampledFrom(lines));
+      const span = { side, startLine: Math.min(a, b), endLine: Math.max(a, b) };
+      const context = tc.draw(gs.integers({ minValue: 0, maxValue: 5 }));
+      const chunk = spanChunk(file, span, context);
+      const start = findRow(file, side, span.startLine)!;
+      const end = findRow(file, side, span.endLine)!;
+      if (start.hunkIndex !== end.hunkIndex) {
+        check(chunk === null, "a span across hunks has no chunk");
+        return;
+      }
+      check(chunk !== null, "a span in one hunk has a chunk");
+      const rows = start.hunk.rows;
+      const from = rows.indexOf(chunk!.rows[0]);
+      // One contiguous run of the hunk's own rows.
+      check(
+        chunk!.rows.every((row, index) => rows[from + index] === row),
+        "not a run of the hunk"
+      );
+      check(chunk!.rows[chunk!.first] === start.row, "first is not the start");
+      check(chunk!.rows[chunk!.last] === end.row, "last is not the end");
+      check(
+        chunk!.first === Math.min(context, start.rowIndex),
+        "wrong rows before"
+      );
+      check(
+        chunk!.rows.length - 1 - chunk!.last ===
+          Math.min(context, rows.length - 1 - end.rowIndex),
+        "wrong rows after"
+      );
+    }));
+
+  test("round-trips through its one-hunk patch, rows and line numbers intact", () =>
+    hegel.test((tc) => {
+      const file = drawFilePatch(tc);
+      const hunk = tc.draw(
+        gs.integers({ minValue: 0, maxValue: file.hunks.length - 1 })
+      );
+      const { rows } = file.hunks[hunk];
+      const a = tc.draw(
+        gs.integers({ minValue: 0, maxValue: rows.length - 1 })
+      );
+      const b = tc.draw(
+        gs.integers({ minValue: 0, maxValue: rows.length - 1 })
+      );
+      // A span on the side both its ends have a line on, if any.
+      const ends = [rows[Math.min(a, b)], rows[Math.max(a, b)]];
+      const side = (["new", "old"] as const).find((candidate) =>
+        ends.every((row) => rowLine(row, candidate) !== null)
+      );
+      if (!side) return;
+      const context = tc.draw(gs.integers({ minValue: 0, maxValue: 5 }));
+      const chunk = spanChunk(
+        file,
+        {
+          side,
+          startLine: rowLine(ends[0], side)!,
+          endLine: rowLine(ends[1], side)!,
+        },
+        context
+      )!;
+      const patch = chunkPatch(file, chunk);
+      const fileHunk = file.hunks[hunk];
+      check(
+        patch.split("\n")[3] ===
+          gitHeader(
+            fileHunk,
+            fileHunk.rows.indexOf(chunk.rows[0]),
+            chunk.rows.length
+          ),
+        `not git's header: ${patch.split("\n")[3]}`
+      );
+      const parsed = parsePatch(patch);
+      check(parsed.length === 1, "not one file");
+      check(canonicalPath(parsed[0]) === canonicalPath(file), "path changed");
+      check(parsed[0].hunks.length === 1, "not one hunk");
+      const strip = (row: (typeof rows)[number]) => [
+        row.kind,
+        row.text,
+        row.oldLine,
+        row.newLine,
+      ];
+      check(
+        JSON.stringify(parsed[0].hunks[0].rows.map(strip)) ===
+          JSON.stringify(chunk.rows.map(strip)),
+        "rows or line numbers changed"
+      );
     }));
 });

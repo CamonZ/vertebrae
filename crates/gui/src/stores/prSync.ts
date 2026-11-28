@@ -4,6 +4,8 @@ import {
   type GithubPrPollRequest,
   type GithubPullRequest,
   type GithubFailure,
+  type GithubPrReviewThreads,
+  type GithubThreadWrite,
   type Result,
   type Task,
   type WorktreeGithub,
@@ -15,6 +17,7 @@ import { useChatStore } from "./chatStore";
 import {
   chatBranchOf,
   chatPrLinkOf,
+  isSameLinkedPr,
   isSamePr,
   linkedPrFrom,
   newerLink,
@@ -27,21 +30,25 @@ import {
 import { createPrPoller, type PrPoller, type PrPollAnswer } from "./prPoller";
 import { getProjectScopeGeneration } from "./projectScopedStores";
 import {
-  noticeNewThreads,
-  resetReviewThreadNotices,
-} from "./reviewThreadNotices";
+  forgetThreadRead,
+  readThreads,
+  resetThreadReads,
+} from "./prReviewThreadsSync";
+import { resetReviewThreadNotices } from "./reviewThreadNotices";
 import {
   GithubCommandError,
   IDLE_CHECKS,
-  IDLE_PR_ENTRY,
   isPendingStatus,
   isPrBusy,
   onlyOwnPr,
   prEntryOf,
+  prScope,
   reconcileWrites,
   settleGithubCommand,
+  updatePrEntry as update,
   useWorktreePrStore,
   worktreePrKey,
+  type GithubOutcome,
   type PrWriteState,
   type WorktreePrEntry,
 } from "./worktreePrStore";
@@ -109,31 +116,6 @@ const probes = new Map<
 /** Branches to read in full once their remotes are known. */
 const readOnce = new Set<string>();
 const resolving = new Map<string, Promise<boolean>>();
-/** The review-thread read out per branch; one at a time per PR and scope. */
-const threadReads = new Map<
-  string,
-  { target: string; at: number; forced: boolean; read: Promise<void> }
->();
-
-const scopeOf = () => useWorktreePrStore.getState().scope;
-
-/** Writes a branch's entry, unless the store was reset since `at`. */
-function update(
-  key: string,
-  next: (entry: WorktreePrEntry) => WorktreePrEntry,
-  at = scopeOf()
-) {
-  useWorktreePrStore.setState((state) =>
-    state.scope !== at
-      ? state
-      : {
-          entries: {
-            ...state.entries,
-            [key]: next(state.entries[key] ?? IDLE_PR_ENTRY),
-          },
-        }
-  );
-}
 
 function branchStates(): Map<string, BranchState> {
   const tasks = cachedTasksById(getProjectScopeGeneration());
@@ -252,7 +234,7 @@ function resolve(worktreePath: string, branch: string): Promise<boolean> {
   const key = worktreePrKey(worktreePath, branch);
   const pending = resolving.get(key);
   if (pending) return pending;
-  const at = scopeOf();
+  const at = prScope();
   const read = (async () => {
     const outcome = await settleGithubCommand(() =>
       commands.resolveWorktreeGithub(worktreePath, branch)
@@ -285,67 +267,6 @@ function failedRead(
   attempt: number
 ): WorktreePrEntry["read"] {
   return { status: "failed", failure, retryAt, attempt };
-}
-
-const threadsTarget = (key: string, pr: LinkedPr) =>
-  JSON.stringify([key, pr.host, `${pr.owner}/${pr.repo}`, pr.number]);
-
-/**
- * Reads the linked PR's review threads. A read already out for the same PR
- * is shared, unless this one must get past the backend's cache (`refresh`)
- * and that one would not. An answer lands only on the PR it was asked for,
- * in the scope it was asked in.
- */
-function readThreads(state: BranchState, refresh: boolean): Promise<void> {
-  const pr = state.link?.pr;
-  if (!pr) return Promise.resolve();
-  const { key } = state;
-  const target = threadsTarget(key, pr);
-  const at = scopeOf();
-  const out = threadReads.get(key);
-  if (out && out.target === target && out.at === at && (out.forced || !refresh))
-    return out.read;
-  const onPr = (next: (entry: WorktreePrEntry) => WorktreePrEntry) =>
-    update(
-      key,
-      (entry) => (isSameLinkedPr(entry.link?.pr, pr) ? next(entry) : entry),
-      at
-    );
-  onPr((entry) => ({
-    ...entry,
-    reviewThreads: { ...entry.reviewThreads, loading: true },
-  }));
-  const pending = { target, at, forced: refresh } as {
-    target: string;
-    at: number;
-    forced: boolean;
-    read: Promise<void>;
-  };
-  pending.read = (async () => {
-    const outcome = await settleGithubCommand(() =>
-      commands.getGithubPrReviewThreads(
-        state.worktreePath,
-        state.branch,
-        `${pr.owner}/${pr.repo}`,
-        pr.number,
-        refresh
-      )
-    );
-    // A later read for the branch answers instead.
-    if (threadReads.get(key) !== pending || scopeOf() !== at) return;
-    if (outcome.ok) noticeNewThreads(target, outcome.data);
-    onPr((entry) => ({
-      ...entry,
-      reviewThreads: outcome.ok
-        ? { data: outcome.data, loading: false, error: null }
-        : // A failed read keeps the threads already shown.
-          { ...entry.reviewThreads, loading: false, error: outcome.failure },
-    }));
-  })().finally(() => {
-    if (threadReads.get(key) === pending) threadReads.delete(key);
-  });
-  threadReads.set(key, pending);
-  return pending.read;
 }
 
 /** Saves the link on every chat on the branch, and on its entry. */
@@ -385,9 +306,6 @@ function refreshLink(state: BranchState, fresh: LinkedPr) {
   saveLink(state, next);
   update(state.key, (entry) => ({ ...entry, link: next }));
 }
-
-const isSameLinkedPr = (a: LinkedPr | null | undefined, b: LinkedPr | null) =>
-  !!a && !!b && isSamePr(a, b.host, `${b.owner}/${b.repo}`, b.number);
 
 function sync() {
   const states = branchStates();
@@ -739,7 +657,7 @@ export async function refreshWorktreePr(
 ): Promise<boolean> {
   const key = worktreePrKey(worktreePath, branch);
   if (isPrBusy(prEntryOf(key))) return false;
-  const at = scopeOf();
+  const at = prScope();
   update(key, (entry) => ({
     ...entry,
     read: { status: "refreshing" },
@@ -753,7 +671,7 @@ export async function refreshWorktreePr(
       readThreads(state, true),
     ]);
   }
-  if (scopeOf() !== at) return false;
+  if (prScope() !== at) return false;
   const read = prEntryOf(key).read;
   if (read.status === "refreshing")
     update(key, (entry) => ({ ...entry, read: IDLE_READ }));
@@ -771,8 +689,8 @@ async function mutate(
 ): Promise<boolean> {
   const key = worktreePrKey(worktreePath, branch);
   if (isPrBusy(prEntryOf(key))) return false;
-  const at = scopeOf();
-  const current = () => scopeOf() === at;
+  const at = prScope();
+  const current = () => prScope() === at;
   update(key, (entry) => ({ ...entry, linking: true, error: null }));
   if (!prEntryOf(key).github) await resolve(worktreePath, branch);
   const entry = prEntryOf(key);
@@ -867,7 +785,7 @@ async function writeOnce(
   const pr = state.link?.pr;
   const key = state.key;
   if (!pr || prEntryOf(key)[field][id]?.status === "requesting") return;
-  const at = scopeOf();
+  const at = prScope();
   const set = (write: PrWriteState) =>
     update(
       key,
@@ -884,7 +802,7 @@ async function writeOnce(
       ? { status: "requested", at: Date.now() }
       : { status: "failed", message: outcome.failure.message }
   );
-  if (scopeOf() === at)
+  if (prScope() === at)
     await poller?.pollNow(readRequests(stateOf(worktreePath, branch)));
 }
 
@@ -929,6 +847,60 @@ export function cancelWorktreePrCheck(
   );
 }
 
+const NOT_LINKED: GithubFailure = {
+  kind: "other",
+  message: "The PR this was written for is no longer linked to the branch.",
+  retryAfterSecs: null,
+};
+
+/**
+ * Reads the linked PR `prNumber`'s threads past every cache. A read already
+ * out started before what the caller needs to see, so it answers no one.
+ * The threads as read, or null when the read failed or the PR changed.
+ */
+export async function rereadWorktreeReviewThreads(
+  worktreePath: string,
+  branch: string,
+  prNumber: number
+): Promise<GithubPrReviewThreads | null> {
+  const state = stateOf(worktreePath, branch);
+  if (state.link?.pr?.number !== prNumber) return null;
+  forgetThreadRead(state.key);
+  await readThreads(state, true);
+  const { reviewThreads } = prEntryOf(state.key);
+  return reviewThreads.error === null &&
+    reviewThreads.data?.prNumber === prNumber
+    ? reviewThreads.data
+    : null;
+}
+
+/**
+ * Posts one write to the review threads of the linked PR `prNumber`, the
+ * PR the user saw as its target; a different linked PR refuses it. Sent
+ * once: success or not, the threads are read again so the view shows what
+ * GitHub has. Answers the written thread's ID.
+ */
+export async function writeWorktreeReviewThread(
+  worktreePath: string,
+  branch: string,
+  prNumber: number,
+  write: GithubThreadWrite
+): Promise<GithubOutcome<string>> {
+  const pr = stateOf(worktreePath, branch).link?.pr;
+  if (pr?.number !== prNumber) return { ok: false, failure: NOT_LINKED };
+  const outcome = await settleGithubCommand(() =>
+    commands.writeGithubPrReviewThread(
+      worktreePath,
+      branch,
+      `${pr.owner}/${pr.repo}`,
+      pr.number,
+      write
+    )
+  );
+  await rereadWorktreeReviewThreads(worktreePath, branch, prNumber);
+  return outcome;
+}
+
 /** Makes every watched remote due, as a timer tick would. */
 export function pollWatchedPrsNow(): Promise<void> {
   return poller?.pollNow() ?? Promise.resolve();
@@ -950,7 +922,7 @@ export function resetPrSync() {
   shown.clear();
   readOnce.clear();
   resolving.clear();
-  threadReads.clear();
+  resetThreadReads();
   watchedRequests.clear();
   resetReviewThreadNotices();
   useWorktreePrStore.getState().reset();

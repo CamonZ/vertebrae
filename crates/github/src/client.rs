@@ -118,6 +118,13 @@ impl GitHubClient {
     }
 
     pub(crate) fn with_base_url(base_url: &str) -> Result<Self, GitHubError> {
+        Self::with_base_url_and_timeout(base_url, REQUEST_TIMEOUT)
+    }
+
+    pub(crate) fn with_base_url_and_timeout(
+        base_url: &str,
+        request_timeout: Duration,
+    ) -> Result<Self, GitHubError> {
         let base_url = validate_base_url(base_url)?;
 
         let mut default_headers = HeaderMap::new();
@@ -133,7 +140,7 @@ impl GitHubClient {
 
         let http = reqwest::Client::builder()
             .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
+            .timeout(request_timeout)
             .redirect(reqwest::redirect::Policy::none())
             .default_headers(default_headers)
             .build()
@@ -350,9 +357,12 @@ pub(crate) fn map_graphql_errors(
 }
 
 pub(crate) fn map_transport_error(err: reqwest::Error) -> GitHubError {
-    let message = if err.is_timeout() {
-        "GitHub request timed out".to_string()
-    } else if err.is_connect() {
+    if err.is_timeout() {
+        return GitHubError::Timeout {
+            message: "GitHub request timed out".to_string(),
+        };
+    }
+    let message = if err.is_connect() {
         "Could not connect to GitHub".to_string()
     } else {
         format!("GitHub network error: {err}")

@@ -33,6 +33,14 @@ import {
   type DiscussionValue,
 } from "./selectionDiscussionState";
 import { parsePatch } from "../thread/toolChange/diffLineMapper";
+import type { DiscussedCode } from "./selectionDiscussions";
+
+// Pierre renders in a worker; the test reads what it is handed.
+vi.mock("./DiscussedCodeView", () => ({
+  default: ({ code }: { code: DiscussedCode }) => (
+    <pre data-testid="discussed-code">{JSON.stringify(code)}</pre>
+  ),
+}));
 
 const file = parsePatch(
   "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,3 +1,3 @@\n-old\n+first\n+second\n+third\n"
@@ -116,6 +124,7 @@ function Discussions({
       revealed: vi.fn(),
       draft: () => "",
       setDraft: vi.fn(),
+      moveUnderGithub: vi.fn(async () => {}),
       toggleCollapsed: (id) =>
         setCollapsed((current) => {
           const next = new Set(current);
@@ -412,6 +421,53 @@ describe("SideDiscussions", () => {
 
     expect(screen.queryByTestId("selection-mini-thread")).toBeNull();
     await waitFor(() => expect(rows()[0]).toHaveFocus());
+  });
+
+  it("shows an opened anchored thread's diff chunk, with its lines selected", async () => {
+    render(
+      <Discussions threads={TWO_DETACHED_ONE_INLINE}>
+        <SideDiscussions />
+      </Discussions>
+    );
+    // Listed rows stay one line each.
+    expect(screen.queryByLabelText("Code under discussion")).toBeNull();
+
+    fireEvent.click(rows()[2]);
+
+    const card = await screen.findByTestId("selection-mini-thread");
+    const shown = await within(card).findByTestId("discussed-code");
+    const code = JSON.parse(shown.textContent ?? "") as DiscussedCode;
+    if (code.kind !== "diff") throw new Error("expected a diff chunk");
+    expect(code.selection).toEqual({ start: 1, end: 1, side: "additions" });
+    // The selection (new line 1) with the hunk's rows around it.
+    expect(
+      parsePatch(code.patch)[0].hunks.map((hunk) =>
+        hunk.rows.map((row) => [row.kind, row.text])
+      )
+    ).toEqual([
+      [
+        ["del", "old"],
+        ["add", "first"],
+        ["add", "second"],
+        ["add", "third"],
+        // The fixture patch's trailing newline is a blank context row.
+        ["context", ""],
+      ],
+    ]);
+    expect(screen.getAllByLabelText("Code under discussion")).toHaveLength(1);
+  });
+
+  it("shows no diff chunk for an opened detached thread", async () => {
+    render(
+      <Discussions threads={TWO_DETACHED_ONE_INLINE}>
+        <SideDiscussions />
+      </Discussions>
+    );
+    fireEvent.click(rows()[0]);
+
+    const card = await screen.findByTestId("selection-mini-thread");
+    expect(within(card).queryByLabelText("Code under discussion")).toBeNull();
+    expect(within(card).getByLabelText("Original selected code")).toBeTruthy();
   });
 
   it("shows an inline thread's code in Changes with o, only for inline threads", () => {
