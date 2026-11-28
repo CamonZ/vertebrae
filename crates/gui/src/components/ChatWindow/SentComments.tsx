@@ -1,7 +1,10 @@
 import { useContext, useMemo, useState, type ReactNode } from "react";
 import { MarkdownContent } from "../shared/MarkdownContent";
 import { FileReferenceNavigationContext } from "../shared/FileReferenceNavigationContext";
-import { ASSISTANT_RESPONSE_SELECTOR } from "./assistantTextComments";
+import {
+  ASSISTANT_RESPONSE_SELECTOR,
+  lineRangeSuffix,
+} from "./assistantTextComments";
 import { findQuoteRange, revealCommentAnchor } from "./commentHighlight";
 import {
   parseSentComments,
@@ -80,20 +83,25 @@ function TextCommentCard({ comment }: { comment: SentTextComment }) {
   );
 }
 
+/** A GitHub thread sent as a comment reads back as one: its home names it. */
+function isGithubThread(comment: SentDiffComment): boolean {
+  return /^GitHub thread( from |$)/.test(comment.home);
+}
+
 function DiffCommentCard({ comment }: { comment: SentDiffComment }) {
   const navigate = useContext(FileReferenceNavigationContext);
-  const range =
-    comment.endLine === comment.startLine
-      ? `${comment.startLine}`
-      : `${comment.startLine}-${comment.endLine}`;
-  const location = `${comment.path}:${range}`;
+  const location = `${comment.path}${lineRangeSuffix(comment)}`;
+  const github = isGithubThread(comment);
   return (
-    <li className="vtb-comment-card sent-comment" data-kind="diff">
+    <li
+      className="vtb-comment-card sent-comment"
+      data-kind={github ? "github_thread" : "diff"}
+    >
       <button
         type="button"
         className="vtb-comment-meta sent-comment-anchor"
         disabled={!navigate}
-        aria-label={`Comment ${comment.number}: open ${location} (${comment.side})`}
+        aria-label={`Comment ${comment.number}: ${github ? `${comment.home}, ` : ""}open ${location} (${comment.side})`}
         title={`Open ${location}`}
         onClick={() =>
           navigate?.({
@@ -104,16 +112,24 @@ function DiffCommentCard({ comment }: { comment: SentDiffComment }) {
           })
         }
       >
+        {github && <span className="sent-comment-home">{comment.home}</span>}
         <span className="sent-comment-location">{location}</span>
         <span>{comment.side}</span>
         {comment.outdated ? (
           <span className="vtb-comment-outdated">outdated</span>
         ) : null}
       </button>
-      <pre className="vtb-comment-quote vtb-comment-quote-code">
-        {comment.hunk}
-      </pre>
-      {comment.body ? (
+      {comment.hunk ? (
+        <pre className="vtb-comment-quote vtb-comment-quote-code">
+          {comment.hunk}
+        </pre>
+      ) : null}
+      {comment.body && github ? (
+        // The thread's comments and the private discussion, as written.
+        <div className="sent-comment-body sent-comment-markdown">
+          <MarkdownContent text={comment.body} />
+        </div>
+      ) : comment.body ? (
         <p className="vtb-comment-body sent-comment-body">{comment.body}</p>
       ) : null}
     </li>

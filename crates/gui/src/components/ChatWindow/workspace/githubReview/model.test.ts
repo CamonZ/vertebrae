@@ -60,7 +60,16 @@ describe("buildReviewModel", () => {
     const model = buildReviewModel(
       7,
       [reviewThread("t1")],
-      [at("t1", { kind: "edited", startLine: 13, line: 13, published })],
+      [
+        at("t1", {
+          kind: "edited",
+          startLine: 13,
+          line: 13,
+          published,
+          editedLines: [13],
+          publishedCommit: "1".repeat(40),
+        }),
+      ],
       false
     );
     const placed = model.byThread.get("t1")!;
@@ -68,14 +77,53 @@ describe("buildReviewModel", () => {
       kind: "line",
       line: 13,
       publishedLine: 13,
-      drift: { kind: "edited" },
+      drift: { kind: "edited", lines: [13], commit: "1".repeat(40) },
       published,
     });
+    expect(placed.kind === "line" && driftExplanation(placed)).toBe(
+      "You edited the commented line locally; reviewers still see line 13 as published."
+    );
     const marker = model.markerByKey.get(
       markerKey("src/lib.rs", "additions", 13)
     )!;
     expect(markerLabel(marker)).toContain("commented line edited locally");
   });
+
+  it.each([
+    [
+      [546],
+      "You edited line 546 of the commented lines 541–549 locally; reviewers still see them as published.",
+    ],
+    [
+      [543, 544, 545, 548],
+      "You edited lines 543–545 and 548 of the commented lines 541–549 locally; reviewers still see them as published.",
+    ],
+    [
+      [],
+      "You added lines inside the commented lines 541–549 locally; reviewers still see them as published.",
+    ],
+  ])(
+    "names the lines a local edit changed in a commented range: %j",
+    (editedLines, note) => {
+      const model = buildReviewModel(
+        7,
+        [reviewThread("t1")],
+        [
+          at("t1", {
+            kind: "edited",
+            startLine: 541,
+            line: 549,
+            published: [],
+            editedLines,
+            publishedCommit: "1".repeat(40),
+          }),
+        ],
+        false
+      );
+      const placed = model.byThread.get("t1")!;
+      expect(placed.kind === "line" && driftExplanation(placed)).toBe(note);
+    }
+  );
 
   it("lists outdated, file-level and undrawable threads for the rail only", () => {
     const threads = [
@@ -147,6 +195,7 @@ describe("lineLabel and drift", () => {
           originalStartLine: 7,
           originalLine: 9,
           original: [],
+          originalCommit: null,
         }),
       ],
       false

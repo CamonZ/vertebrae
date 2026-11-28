@@ -25,6 +25,7 @@ import type {
 import type {
   PendingComment,
   PendingDiffComment,
+  PendingGithubThreadComment,
   PendingTextComment,
 } from "./assistantTextComments";
 import {
@@ -406,21 +407,29 @@ describe("ChatComposer", () => {
   });
 
   it("offers a provider choice without model or permission overrides for ACP", async () => {
-    render(<ChatComposer {...defaultProps({
-      session: createSession({ harness: "acp" }),
-      visibleHarness: {
-        ...CLAUDE_INFO,
-        harness: "acp",
-        label: "ACP agent",
-        models: [],
-        default_model_id: null,
-        permission_modes: [],
-      },
-    })} />);
+    render(
+      <ChatComposer
+        {...defaultProps({
+          session: createSession({ harness: "acp" }),
+          visibleHarness: {
+            ...CLAUDE_INFO,
+            harness: "acp",
+            label: "ACP agent",
+            models: [],
+            default_model_id: null,
+            permission_modes: [],
+          },
+        })}
+      />
+    );
 
-    expect(screen.queryByTestId("local-chat-permission-mode-picker")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("local-chat-permission-mode-picker")
+    ).not.toBeInTheDocument();
     expect(getComposerPicker("local-chat-provider-picker")).toBeVisible();
-    expect(screen.queryByTestId("local-chat-model-picker")).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("local-chat-model-picker")
+    ).not.toBeInTheDocument();
   });
 
   it("renders only Codex permission profiles for Codex sessions", () => {
@@ -1337,6 +1346,84 @@ describe("ChatComposer", () => {
       fireEvent.click(screen.getByTestId("local-chat-comment-icon-2"));
       expect(onNavigateComment).toHaveBeenCalledTimes(2);
       expect(onNavigateComment).toHaveBeenLastCalledWith("diff-1");
+    });
+
+    it("shows a GitHub thread attachment as thread + discussion and reopens it from its chip", () => {
+      const onNavigateComment = vi.fn();
+      const attachment: PendingGithubThreadComment = {
+        kind: "github_thread",
+        id: "github-thread-PRRT_1",
+        body: "",
+        githubThreadId: "PRRT_1",
+        discussionId: "d1",
+        path: "src/retry.rs",
+        side: "new",
+        startLine: 4,
+        endLine: 5,
+        code: "let budget = 3;\nlet delay = 10;",
+        author: "alice",
+        comments: [{ author: "alice", body: "Why retry here?" }],
+        turns: [{ role: "user", text: "Is it idempotent?" }],
+      };
+      render(
+        <ChatComposer
+          {...defaultProps({
+            pendingComments: [attachment],
+            onNavigateComment,
+          })}
+        />
+      );
+      const chip = screen.getByTestId("local-chat-comment-icon-1");
+      expect(chip).toHaveTextContent("retry.rs:4-5 · thread + discussion");
+      // Private context, not a GitHub action: no GitHub glyph.
+      expect(chip.querySelector(".pr-gh-glyph")).toBeNull();
+      fireEvent.click(chip);
+      expect(onNavigateComment).toHaveBeenCalledExactlyOnceWith(
+        "github-thread-PRRT_1"
+      );
+      expect(screen.getByTestId("local-chat-comment-hunk")).toHaveTextContent(
+        "let budget = 3;"
+      );
+      expect(screen.getByTestId("local-chat-comment-body")).toHaveTextContent(
+        "No comment — attached as context"
+      );
+    });
+
+    it("shows a GitHub thread sent without a discussion as the thread alone", () => {
+      const onNavigateComment = vi.fn();
+      render(
+        <ChatComposer
+          {...defaultProps({
+            pendingComments: [
+              {
+                kind: "github_thread",
+                id: "github-thread-PRRT_2",
+                body: "",
+                githubThreadId: "PRRT_2",
+                discussionId: null,
+                path: "docs/guide.md",
+                side: "new",
+                startLine: null,
+                endLine: null,
+                code: "",
+                author: "bob",
+                comments: [{ author: "bob", body: "Whole file needs a pass." }],
+                turns: [],
+              },
+            ],
+            onNavigateComment,
+          })}
+        />
+      );
+      const chip = screen.getByTestId("local-chat-comment-icon-1");
+      expect(chip).toHaveTextContent("guide.md · thread");
+      expect(chip).not.toHaveTextContent("discussion");
+      fireEvent.click(chip);
+      expect(onNavigateComment).toHaveBeenCalledExactlyOnceWith(
+        "github-thread-PRRT_2"
+      );
+      // No code was read for a file-level comment: no empty code block.
+      expect(screen.queryByTestId("local-chat-comment-hunk")).toBeNull();
     });
 
     it("sends a code attachment without its own text when a follow-up asks the question", () => {

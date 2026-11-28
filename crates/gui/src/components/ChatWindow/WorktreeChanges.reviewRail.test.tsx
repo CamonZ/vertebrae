@@ -25,6 +25,8 @@ import {
   type FakeGithub,
 } from "../../test/fakeGithub";
 import { WorktreeChanges } from "./WorktreeChanges";
+import { focusedPaletteScopes } from "../CommandPalette/paletteScopes";
+import { useCommandPaletteStore } from "../../stores/commandPaletteStore";
 import {
   anchored,
   at,
@@ -182,10 +184,8 @@ describe("Review rail", () => {
     ).toBeNull();
     expect(outdated).toHaveFocus();
 
-    // The PR's checks follow its threads.
-    expect(
-      within(rail).getByRole("region", { name: /^Checks/ })
-    ).toBeInTheDocument();
+    // The PR's checks stay in the review bar, not the rail.
+    expect(within(rail).queryByRole("region", { name: /^Checks/ })).toBeNull();
 
     await act(async () => fireEvent.keyDown(rail, { key: "Escape" }));
     expect(
@@ -194,11 +194,7 @@ describe("Review rail", () => {
     expect(entry).toHaveFocus();
   });
 
-  it("says why the checks are missing when GitHub could not be read", async () => {
-    world.failRemote.set(
-      "example/demo-repo",
-      failure("auth_expired", "gh auth expired")
-    );
+  it("keeps the rail open when an Esc inside it was already handled", async () => {
     useChatSideColumnStore
       .getState()
       .saveChanges("chat", WORKTREE, { reviewOpen: true });
@@ -206,12 +202,130 @@ describe("Review rail", () => {
     const rail = await screen.findByRole("complementary", {
       name: "Review rail",
     });
-    await settle(20);
-    const checks = within(rail).getByRole("region", { name: /^Checks/ });
-    expect(within(checks).getByRole("alert")).toHaveTextContent(
-      /Couldn’t read checks/
+    await settle();
+    const outdated = within(rail).getByRole("button", {
+      name: /outdated · was line 9/,
+    });
+    await act(async () => fireEvent.click(outdated));
+    const card = within(rail).getByRole("region", {
+      name: "GitHub thread from bob, outdated · was line 9",
+    });
+    // As a private discussion in the card does when its Esc closes it.
+    card.addEventListener("keydown", (event) => event.preventDefault());
+    await act(async () => fireEvent.keyDown(card, { key: "Escape" }));
+
+    expect(
+      screen.getByRole("complementary", { name: "Review rail" })
+    ).toBeInTheDocument();
+    expect(card).toBeInTheDocument();
+  });
+
+  it("opens on r and steps between threads with [ and ], focus in each card", async () => {
+    renderChanges();
+    const entry = await screen.findByRole("button", {
+      name: /^2 open threads/,
+    });
+    await waitFor(() =>
+      expect(commands.mapWorktreePrReviewThreads).toHaveBeenCalled()
     );
-    expect(within(checks).queryByText("Reading checks…")).toBeNull();
+    await settle();
+    entry.focus();
+    await act(async () => fireEvent.keyDown(entry, { key: "r", code: "KeyR" }));
+    const rail = screen.getByRole("complementary", { name: "Review rail" });
+    expect(rail).toHaveFocus();
+    const card = (name: string) =>
+      within(rail).queryByRole("region", {
+        name: `GitHub thread from ${name}`,
+      });
+    const step = (key: "[" | "]") =>
+      act(async () =>
+        fireEvent.keyDown(document.activeElement!, {
+          key,
+          code: key === "[" ? "BracketLeft" : "BracketRight",
+        })
+      );
+
+    // In line order: the outdated thread (was line 9), then line 13. Each
+    // step closes the card it leaves; the ends do not wrap.
+    await step("]");
+    const stale = card("bob, outdated · was line 9");
+    expect(stale).toHaveFocus();
+    await step("]");
+    expect(card("bob, outdated · was line 9")).toBeNull();
+    expect(card("alice, line 13")).toHaveFocus();
+    await step("]");
+    expect(card("alice, line 13")).toHaveFocus();
+    await step("[");
+    expect(card("alice, line 13")).toBeNull();
+    expect(card("bob, outdated · was line 9")).toHaveFocus();
+
+    // r again closes the rail.
+    await act(async () =>
+      fireEvent.keyDown(document.activeElement!, { key: "r", code: "KeyR" })
+    );
+    expect(
+      screen.queryByRole("complementary", { name: "Review rail" })
+    ).toBeNull();
+  });
+
+  it("offers the Review rail and thread stepping in the Changes palette", async () => {
+    renderChanges();
+    const entry = await screen.findByRole("button", {
+      name: /^2 open threads/,
+    });
+    await waitFor(() =>
+      expect(commands.mapWorktreePrReviewThreads).toHaveBeenCalled()
+    );
+    await settle();
+    const reviewItems = () => {
+      const { contexts, initial } = focusedPaletteScopes(entry);
+      act(() =>
+        useCommandPaletteStore.getState().openPalette(initial, contexts)
+      );
+      const items =
+        useCommandPaletteStore
+          .getState()
+          .contexts.find((scope) => scope.id === "changes")
+          ?.items.filter((item) => item.id.startsWith("changes-review-")) ?? [];
+      act(() => useCommandPaletteStore.getState().closePalette());
+      return items;
+    };
+    const keyOf = (item: { access?: unknown }) =>
+      (item.access as { key: string }).key;
+
+    expect(reviewItems().map((item) => [item.label, keyOf(item)])).toEqual([
+      ["Show review threads", "r"],
+      ["Next GitHub thread", "]"],
+      ["Previous GitHub thread", "["],
+    ]);
+    // Next opens the rail at the first thread, focus in its card, and
+    // keeps it there past the next frame.
+    await act(async () => {
+      await reviewItems()[1].run();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+    const rail = screen.getByRole("complementary", { name: "Review rail" });
+    expect(
+      within(rail).getByRole("region", {
+        name: "GitHub thread from bob, outdated · was line 9",
+      })
+    ).toHaveFocus();
+    expect(reviewItems()[0].label).toBe("Hide review threads");
+  });
+
+  it("says why the threads are missing when GitHub could not be read", async () => {
+    world.failThreads = failure("auth_expired", "gh auth expired");
+    useChatSideColumnStore
+      .getState()
+      .saveChanges("chat", WORKTREE, { reviewOpen: true });
+    renderChanges();
+    const rail = await screen.findByRole("complementary", {
+      name: "Review rail",
+    });
+    expect(await within(rail).findByRole("alert")).toHaveTextContent(
+      /Couldn’t read review threads: .*gh auth/i
+    );
+    expect(within(rail).queryByRole("region", { name: /^Checks/ })).toBeNull();
   });
 
   it("explains an empty rail when no PR is linked", async () => {

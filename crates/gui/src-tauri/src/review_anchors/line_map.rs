@@ -108,6 +108,25 @@ impl<'a> LineMap<'a> {
         };
         Ok((mapped.slice(self.current).ok() == Some(anchored)).then_some(mapped))
     }
+
+    /// The lines of `range` that an edit changed or removed: those that do
+    /// not map on their own. Empty when the edit only inserted lines inside
+    /// the range.
+    pub(crate) fn edited_lines(&self, range: ReviewLineRange) -> Result<Vec<u32>, AnchorError> {
+        let mut edited = Vec::new();
+        for line in range.start_line..=range.line {
+            if self
+                .map(ReviewLineRange {
+                    start_line: line,
+                    line,
+                })?
+                .is_none()
+            {
+                edited.push(line);
+            }
+        }
+        Ok(edited)
+    }
 }
 
 /// Where `range` of `original` sits in `current`.

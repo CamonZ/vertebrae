@@ -8,6 +8,7 @@ import {
   type DiffCommentHome,
   type PendingComment,
   type PendingDiffComment,
+  type PendingGithubThreadComment,
   type PendingTextComment,
 } from "./assistantTextComments";
 import { parseSentComments } from "./sentCommentSet";
@@ -94,6 +95,59 @@ function drawDiff(tc: TestCase, id: string): PendingDiffComment {
   };
 }
 
+/** A GitHub thread and its private discussion, as Send to main chat attaches it. */
+function drawGithub(tc: TestCase, id: string): PendingGithubThreadComment {
+  const start = tc.draw(gs.integers({ minValue: 1, maxValue: 400 }));
+  const span = tc.draw(gs.integers({ minValue: 0, maxValue: 3 }));
+  const code = Array.from(
+    { length: span + 1 },
+    (_, index) =>
+      `${tc.draw(gs.sampledFrom(["", "  ", "\t"]))}line ${index}${tc.draw(
+        gs.sampledFrom(["", "`x`", "```", "**", " // > quoted"])
+      )}`
+  ).join("\n");
+  const who = gs.sampledFrom(["alice", "bob-2", "carol_c"]);
+  // Sent without a discussion, a thread may have no lines (a file-level
+  // comment) or no code read for them.
+  const discussed = tc.draw(gs.booleans());
+  const lines = discussed || tc.draw(gs.booleans());
+  return {
+    kind: "github_thread",
+    id,
+    body: tc.draw(gs.sampledFrom(BODIES)),
+    githubThreadId: `PRRT_${id}`,
+    discussionId: discussed ? `d-${id}` : null,
+    path: tc.draw(gs.sampledFrom(["src/a.ts", "dir with space/b.rs", "c"])),
+    side: tc.draw(gs.sampledFrom<"new" | "old">(["new", "old"])),
+    startLine: lines ? start : null,
+    endLine: lines ? start + span : null,
+    code: discussed || tc.draw(gs.booleans()) ? code : "",
+    author: tc.draw(gs.optional(who)) ?? null,
+    comments: tc.draw(
+      gs.arrays(
+        gs.tuples(who, gs.sampledFrom(BODIES)).map(([author, body]) => ({
+          author,
+          body,
+        })),
+        { maxSize: 3 }
+      )
+    ),
+    turns: !discussed
+      ? []
+      : tc.draw(
+          gs.arrays(
+            gs
+              .tuples(
+                gs.sampledFrom<"user" | "assistant">(["user", "assistant"]),
+                gs.sampledFrom(BODIES.filter(Boolean))
+              )
+              .map(([role, text]) => ({ role, text })),
+            { maxSize: 3 }
+          )
+        ),
+  };
+}
+
 describe("sent comment set", () => {
   test("parses every formatted message back into its comments", () =>
     hegel.test(
@@ -101,10 +155,16 @@ describe("sent comment set", () => {
         const count = tc.draw(gs.integers({ minValue: 1, maxValue: 4 }));
         const comments: PendingComment[] = Array.from(
           { length: count },
-          (_, index) =>
-            tc.draw(gs.booleans())
+          (_, index) => {
+            const kind = tc.draw(
+              gs.sampledFrom(["text", "diff", "github_thread"] as const)
+            );
+            return kind === "text"
               ? drawText(tc, `c${index}`)
-              : drawDiff(tc, `c${index}`)
+              : kind === "diff"
+                ? drawDiff(tc, `c${index}`)
+                : drawGithub(tc, `c${index}`);
+          }
         );
         for (const comment of comments)
           if (comment.kind === "text") tc.assume(comment.quote.trim() !== "");
@@ -120,6 +180,39 @@ describe("sent comment set", () => {
         set!.comments.forEach((sent, index) => {
           const comment = comments[index];
           expect(sent.number).toBe(index + 1);
+          if (comment.kind === "github_thread") {
+            // Read back as a code comment: its heading, code and the thread,
+            // discussion and note as the text, in that order.
+            expect(sent).toMatchObject({
+              kind: "diff",
+              home:
+                comment.author === null
+                  ? "GitHub thread"
+                  : `GitHub thread from ${comment.author}`,
+              path: comment.path,
+              startLine: comment.startLine,
+              endLine: comment.endLine,
+              side: comment.side,
+              outdated: false,
+              hunk: comment.code,
+            });
+            const parts = [
+              ...comment.comments.map(({ author }) => `**${author}:**`),
+              ...comment.turns.map(({ role }) =>
+                role === "user" ? "**You:**" : "**Assistant:**"
+              ),
+              comment.body.trim(),
+            ];
+            let from = 0;
+            for (const part of parts) {
+              const at = sent.body.indexOf(part, from);
+              expect(at).toBeGreaterThanOrEqual(0);
+              from = at + part.length;
+            }
+            if (comment.body.trim())
+              expect(sent.body.endsWith(comment.body.trim())).toBe(true);
+            return;
+          }
           expect(sent.kind).toBe(comment.kind);
           expect(sent.body).toBe(comment.body.trim());
           if (comment.kind === "diff" && sent.kind === "diff") {

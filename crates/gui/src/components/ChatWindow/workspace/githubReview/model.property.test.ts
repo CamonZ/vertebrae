@@ -14,10 +14,13 @@ import type {
 import { at, reviewThread } from "./fixture";
 import {
   buildReviewModel,
+  driftExplanation,
   hunksShow,
   lineLabel,
+  lineList,
   markerKey,
   sideName,
+  stepThread,
   type PlacedThread,
 } from "./model";
 
@@ -36,13 +39,26 @@ const placementGen: gs.Generator<GithubThreadPlacement> =
         publishedLine,
       })),
     gs
-      .tuples(lineGen, gs.integers({ minValue: 0, maxValue: 3 }))
-      .map(([line, span]) => ({
-        kind: "edited",
-        startLine: Math.max(1, line - span),
-        line,
-        published: [],
-      })),
+      .tuples(
+        lineGen,
+        gs.integers({ minValue: 0, maxValue: 3 }),
+        gs.integers({ minValue: 0, maxValue: 15 })
+      )
+      .map(([line, span, mask]) => {
+        const startLine = Math.max(1, line - span);
+        return {
+          kind: "edited",
+          startLine,
+          line,
+          published: [],
+          // Any subset of the range, none included (an insertion inside).
+          editedLines: Array.from(
+            { length: line - startLine + 1 },
+            (_, index) => startLine + index
+          ).filter((_, index) => (mask >> index) & 1),
+          publishedCommit: "1".repeat(40),
+        };
+      }),
     gs
       .tuples(lineGen, gs.integers({ minValue: 0, maxValue: 3 }))
       .map(([line, span]) => ({
@@ -55,6 +71,7 @@ const placementGen: gs.Generator<GithubThreadPlacement> =
       originalStartLine: line,
       originalLine: line,
       original: [],
+      originalCommit: null,
     })),
     gs.sampledFrom<GithubThreadPlacement>([
       { kind: "file_level" },
@@ -225,4 +242,131 @@ test("hunksShow is membership in some hunk's span on the asked side", () =>
       })
     );
     expect(hunksShow(hunks, side, line)).toBe(rows.has(line));
+  }));
+
+/*
+ * `[` and `]` (stepThread). Expectations come from the generated threads'
+ * (path, line) keys, never from the model's own ordering: stepping visits
+ * every thread once in key order and stops at either end; from a line it
+ * lands on the nearest thread strictly past it, with none in between.
+ */
+const keyOf = (placed: PlacedThread): [string, number] => [
+  placed.thread.anchor.path,
+  placed.kind === "line"
+    ? placed.line
+    : placed.kind === "outdated"
+      ? (placed.originalLine ?? 0)
+      : 0,
+];
+const compareKeys = ([pa, la]: [string, number], [pb, lb]: [string, number]) =>
+  pa.localeCompare(pb) || la - lb;
+
+test("[ and ] visit every thread once, in path and line order, without wrapping", () =>
+  hegel.test((tc) => {
+    const { threads, positions } = tc.draw(reviewGen);
+    const model = buildReviewModel(7, threads, positions, false);
+    const placed = [...model.byThread.values()];
+
+    for (const direction of [1, -1] as const) {
+      const visited: PlacedThread[] = [];
+      let at = stepThread(model, null, direction);
+      while (at) {
+        visited.push(at);
+        at = stepThread(model, { kind: "thread", id: at.thread.id }, direction);
+      }
+      expect(visited.map(({ thread }) => thread.id).sort()).toEqual(
+        placed.map(({ thread }) => thread.id).sort()
+      );
+      for (let i = 1; i < visited.length; i++)
+        expect(
+          direction * compareKeys(keyOf(visited[i - 1]), keyOf(visited[i]))
+        ).toBeLessThanOrEqual(0);
+    }
+    // A thread the PR no longer has steps like nowhere.
+    expect(stepThread(model, { kind: "thread", id: "gone" }, 1)).toBe(
+      stepThread(model, null, 1)
+    );
+  }));
+
+test("from a line, [ and ] land on the nearest thread strictly past it", () =>
+  hegel.test((tc) => {
+    const { threads, positions } = tc.draw(reviewGen);
+    const model = buildReviewModel(7, threads, positions, false);
+    const placed = [...model.byThread.values()];
+    const from: [string, number] = [
+      tc.draw(gs.sampledFrom(PATHS)),
+      tc.draw(gs.integers({ minValue: 0, maxValue: 42 })),
+    ];
+    const direction = tc.draw(gs.sampledFrom([1, -1] as const));
+    const past = (p: PlacedThread) =>
+      direction * compareKeys(keyOf(p), from) > 0;
+
+    const next = stepThread(
+      model,
+      { kind: "line", path: from[0], line: from[1] },
+      direction
+    );
+    if (!placed.some(past)) {
+      expect(next).toBeNull();
+      return;
+    }
+    expect(next).not.toBeNull();
+    expect(past(next!)).toBe(true);
+    for (const other of placed.filter(past))
+      expect(
+        direction * compareKeys(keyOf(other), keyOf(next!))
+      ).toBeGreaterThanOrEqual(0);
+  }));
+
+/** The line numbers a `lineList` phrase names, read back from its text. */
+function namedLines(text: string): number[] {
+  return text
+    .replace(/^lines? /, "")
+    .split(/, | and /)
+    .flatMap((part) => {
+      const [from, to = from] = part.split("–").map(Number);
+      return Array.from({ length: to - from + 1 }, (_, index) => from + index);
+    });
+}
+
+test("lineList names exactly the given lines, runs collapsed", () =>
+  hegel.test((tc) => {
+    const lines = [
+      ...new Set(tc.draw(gs.arrays(lineGen, { maxSize: 12 }))),
+    ].sort((a, b) => a - b);
+    const text = lineList(lines);
+    if (lines.length === 0) return expect(text).toBeNull();
+    expect(namedLines(text!)).toEqual(lines);
+    expect(text!.startsWith(lines.length === 1 ? "line " : "lines ")).toBe(
+      true
+    );
+    // Runs are collapsed: each part starts past a gap after the previous.
+    const parts = text!
+      .replace(/^lines? /, "")
+      .split(/, | and /)
+      .map((part) => part.split("–").map(Number));
+    for (let index = 1; index < parts.length; index++)
+      expect(parts[index][0]).toBeGreaterThan(parts[index - 1].at(-1)! + 1);
+  }));
+
+test("an edited range's note names the lines the edit changed", () =>
+  hegel.test((tc) => {
+    const { threads, positions } = tc.draw(reviewGen);
+    const model = buildReviewModel(7, threads, positions, false);
+    for (const position of positions) {
+      const placement = position.placement;
+      if (placement.kind !== "edited") continue;
+      const placed = model.byThread.get(position.threadId)!;
+      if (placed.kind !== "line") continue;
+      expect(placed.drift).toEqual({
+        kind: "edited",
+        lines: placement.editedLines,
+        commit: placement.publishedCommit,
+      });
+      const note = driftExplanation(placed)!;
+      if (placement.startLine >= placement.line) continue;
+      const named = lineList(placement.editedLines);
+      if (named) expect(note.toLowerCase()).toContain(named);
+      else expect(note).toMatch(/lines (added|inside)/);
+    }
   }));

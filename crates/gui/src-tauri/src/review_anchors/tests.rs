@@ -59,7 +59,7 @@ fn batches_keep_their_order_and_classify_each_anchor() {
             Ok(PublishedPlacement::Mapped(range(4, 4))),
             Ok(PublishedPlacement::Missing),
             Ok(PublishedPlacement::Mapped(range(2, 2))),
-            Ok(PublishedPlacement::Edited),
+            Ok(PublishedPlacement::Edited { lines: vec![2] }),
             Err(AnchorError::InvalidRange),
             Err(AnchorError::InvalidRange),
             Err(AnchorError::MissingCommit),

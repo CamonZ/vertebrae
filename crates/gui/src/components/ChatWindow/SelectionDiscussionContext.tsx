@@ -1,13 +1,9 @@
-import { useInlineScrollFollow } from "./useInlineScrollFollow";
 import { getProjectScopeGeneration } from "../../stores/projectScopedStores";
 import { findDiscussionSession } from "./restoreSelectionDiscussions";
 import { useSelectionDiscussionCatalog } from "./useSelectionDiscussionCatalog";
-import { useUIStore } from "../../stores/uiStore";
-import { ThinkingIndicator } from "./ThinkingIndicator";
 import { useDiscussionModel } from "../../hooks/useDiscussionModel";
 import {
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -15,7 +11,21 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { commands, type LocalChatHarnessKind } from "../../bindings";
+import {
+  commands,
+  type GithubReviewThread,
+  type LocalChatHarnessKind,
+} from "../../bindings";
+import type { PendingGithubThreadComment } from "./assistantTextComments";
+import {
+  githubDiscussionAnchor,
+  githubDiscussionContext,
+  githubDiscussionTarget,
+  githubThreadAttachment,
+  githubThreadPlace,
+  discussionPlace,
+} from "./workspace/githubReview/githubDiscussion";
+import type { PlacedThread } from "./workspace/githubReview/model";
 import { errorMessage } from "../../query/commandResult";
 import {
   reviewLocation,
@@ -27,7 +37,6 @@ import {
   getLocalChatLifecycle,
   isLocalChatLifecycleBusy,
   useChatStore,
-  type ActiveChatTurn,
 } from "../../stores/chatStore";
 import {
   currentBackendSessionId,
@@ -36,25 +45,12 @@ import {
 import { deliverLocalChatTurn } from "../../hooks/localChatTurnDelivery";
 import {
   SelectionDiscussions,
-  anchorNotice,
   anchorsInChanges,
   isOutdated,
   discussionTurn,
-  selectionLabel,
   type CodeSelection,
-  type DiscussionState,
 } from "./selectionDiscussions";
 import type { WorktreeSnapshot } from "../thread/toolChange/diffComments";
-import { ChatTranscript } from "./ChatMessages";
-import { collapseTurns, earlierTurnsLabel } from "./discussionTurns";
-import {
-  DISCUSSION_ASK_SHORTCUT,
-  DISCUSSION_COLLAPSE_SHORTCUT,
-  DISCUSSION_SEND_SHORTCUT,
-  DISCUSSION_OPEN_KEY,
-  matchesChatShortcut,
-  shortcutText,
-} from "./chatShortcuts";
 import {
   SelectionDiscussionModelContext,
   SelectionDiscussionContext,
@@ -63,10 +59,11 @@ import {
   SelectionDiscussionSelectionContext,
   type DiscussionActions,
   type DiscussionValue,
+  type GithubDiscussResult,
 } from "./selectionDiscussionState";
-import { focusKeepProps } from "../../utils/focusKeep";
-import { useKeepFocus } from "../../hooks/useKeepFocus";
-import { OWNS_ESCAPE_ATTRIBUTE } from "../../hooks/useGlassPanel";
+
+const OPENED: GithubDiscussResult = { opened: true };
+const UNAVAILABLE: GithubDiscussResult = { opened: false, error: null };
 
 export function SelectionDiscussionProvider({
   children,
@@ -82,6 +79,8 @@ export function SelectionDiscussionProvider({
   personality,
   onOpen,
   onAttach,
+  onAttachGithub,
+  githubThreads,
   snapshot,
 }: {
   children: ReactNode;
@@ -104,6 +103,10 @@ export function SelectionDiscussionProvider({
   /** Show the chat's Changes, where an inline thread's anchor is. */
   onOpen(): void;
   onAttach(anchor: CodeSelection, outdated?: boolean, question?: string): void;
+  /** Send to main chat for a GitHub thread's discussion. */
+  onAttachGithub?(comment: PendingGithubThreadComment): void;
+  /** The PR's review threads as last read (`useWorktreePr`). */
+  githubThreads?: readonly GithubReviewThread[];
 }) {
   const state = useSyncExternalStore(
     controller.subscribe,
@@ -165,8 +168,15 @@ export function SelectionDiscussionProvider({
     state.selection !== null || state.threads.length > 0;
   const choice = useDiscussionModel(mainSelection, hasDiscussionContext);
 
-  const callbacks = useRef({ onOpen, onAttach });
-  callbacks.current = { onOpen, onAttach };
+  const callbacks = useRef({ onOpen, onAttach, onAttachGithub, githubThreads });
+  callbacks.current = { onOpen, onAttach, onAttachGithub, githubThreads };
+  const githubThread = useCallback(
+    (id: string | null) =>
+      id === null
+        ? undefined
+        : callbacks.current.githubThreads?.find((thread) => thread.id === id),
+    []
+  );
 
   // Only the active thread keeps an idle process; a collapsed thread closes
   // it once its reply settles and resumes the conversation on the next ask.
@@ -313,7 +323,13 @@ export function SelectionDiscussionProvider({
 
       const continues =
         !!session && (!!session.backendSessionId || !!session.providerResumeId);
-      const turn = discussionTurn(thread, continues, question);
+      const github = githubThread(thread.githubThreadId);
+      const turn = discussionTurn(
+        thread,
+        continues,
+        question,
+        github && githubDiscussionContext(github)
+      );
 
       controller.sent(id, sessionId, false);
       const writer = noteWriter();
@@ -334,7 +350,15 @@ export function SelectionDiscussionProvider({
       if (started?.activeTurn?.phase === "stopping" && started.backendSessionId)
         void interrupt(sessionId, started.backendSessionId);
     },
-    [controller, choice, noteWriter, parentChatId, projectPath, worktreePath]
+    [
+      controller,
+      choice,
+      githubThread,
+      noteWriter,
+      parentChatId,
+      projectPath,
+      worktreePath,
+    ]
   );
 
   const cancel = useCallback(
@@ -376,7 +400,7 @@ export function SelectionDiscussionProvider({
             threadId: id,
             location: reviewLocation(anchor, parentChatId, comparison()),
             range: reviewRange(anchor),
-            selectedText: anchor.code,
+            subject: { kind: "selection", selectedText: anchor.code },
             parent: { chatId: parentChatId, projectPath },
           })
         );
@@ -415,8 +439,93 @@ export function SelectionDiscussionProvider({
     ]
   );
 
-  const actions = useMemo<DiscussionActions>(
-    () => ({
+  // A GitHub thread has one discussion: opening it again reopens that one.
+  const discussGithub = useCallback(
+    async (placed: PlacedThread) => {
+      const existing = controller.forGithubThread(placed.thread.id);
+      if (existing) {
+        controller.reopen(existing.id);
+        setFocusRequest(existing.id);
+        return OPENED;
+      }
+      const shown = comparison();
+      const target = shown && githubDiscussionTarget(placed, shown);
+      if (
+        !canAsk ||
+        !parentChatId ||
+        !projectPath ||
+        capturing.current ||
+        !target
+      )
+        return UNAVAILABLE;
+      capturing.current = true;
+      const id = crypto.randomUUID();
+      const generation = getProjectScopeGeneration();
+      try {
+        const capture = await unwrapAnchor(
+          commands.captureReviewAnchor({
+            worktree: worktreePath,
+            threadId: id,
+            location: target.location,
+            range: target.range,
+            subject: {
+              kind: "github_thread",
+              githubThreadId: target.githubThreadId,
+            },
+            parent: { chatId: parentChatId, projectPath },
+          })
+        );
+        if (!mounted.current || generation !== getProjectScopeGeneration())
+          return UNAVAILABLE;
+        controller.ask(
+          githubDiscussionAnchor(
+            target,
+            capture.code.replace(/\n$/, ""),
+            snapshotRef.current
+          ),
+          id,
+          capture,
+          target.githubThreadId
+        );
+        setFocusRequest(id);
+        return OPENED;
+      } catch (error) {
+        // Said on the thread's card, where it was asked for.
+        return generation === getProjectScopeGeneration()
+          ? { opened: false, error: errorMessage(error) }
+          : UNAVAILABLE;
+      } finally {
+        capturing.current = false;
+      }
+    },
+    [canAsk, comparison, controller, parentChatId, projectPath, worktreePath]
+  );
+
+  // Only whether the chat takes GitHub threads matters here: its callback
+  // is a new function each render and is read through `callbacks`.
+  const canAttachGithub = !!onAttachGithub;
+  const actions = useMemo<DiscussionActions>(() => {
+    const attachThread = (id: string, question: string) => {
+      const thread = controller.thread(id);
+      if (!thread || thread.status.kind === "unreadable") return;
+      if (thread.githubThreadId === null) {
+        callbacks.current.onAttach(thread.anchor, isOutdated(thread), question);
+        return;
+      }
+      const session = thread.sessionId
+        ? useChatStore.getState().sessions[thread.sessionId]
+        : undefined;
+      callbacks.current.onAttachGithub?.(
+        githubThreadAttachment(
+          thread.githubThreadId,
+          githubThread(thread.githubThreadId),
+          discussionPlace(thread),
+          { id: thread.id, messages: session?.messages ?? [] },
+          `github-thread-${thread.githubThreadId}`
+        )
+      );
+    };
+    return {
       canAsk,
       canAskFullFile,
       select: (anchor) => {
@@ -424,13 +533,43 @@ export function SelectionDiscussionProvider({
         if (anchor) void checkAvailability();
       },
       discuss: begin,
+      discussGithub,
       attach: (...args) => callbacks.current.onAttach(...args),
+      attachThread,
+      canAttachGithub,
+      attachGithub: (placed) => {
+        const existing = controller.forGithubThread(placed.thread.id);
+        if (existing && existing.status.kind !== "unreadable") {
+          attachThread(existing.id, "");
+          return;
+        }
+        callbacks.current.onAttachGithub?.(
+          githubThreadAttachment(
+            placed.thread.id,
+            placed.thread,
+            githubThreadPlace(
+              placed,
+              comparison() ?? null,
+              snapshotRef.current
+            ),
+            null,
+            `github-thread-${placed.thread.id}`
+          )
+        );
+      },
       reopen: (id, options) => {
-        controller.reopen(id);
-        setFocusRequest(id && options?.focus ? id : null);
         const thread = id ? controller.thread(id) : undefined;
+        // Shown with its GitHub thread, wherever Changes draws that.
+        if (id && thread?.githubThreadId && !options?.inPlace)
+          controller.reveal(id);
+        else controller.reopen(id);
+        setFocusRequest(id && options?.focus ? id : null);
 
-        if (!options?.inPlace && thread && anchorsInChanges(thread.anchor))
+        if (
+          !options?.inPlace &&
+          thread &&
+          (thread.githubThreadId !== null || anchorsInChanges(thread.anchor))
+        )
           callbacks.current.onOpen();
         if (thread?.sessionId) {
           const store = useChatStore.getState();
@@ -452,18 +591,24 @@ export function SelectionDiscussionProvider({
         }),
       focusTaken: (id) =>
         setFocusRequest((current) => (current === id ? null : current)),
-    }),
-    [
-      controller,
-      send,
-      cancel,
-      canAsk,
-      canAskFullFile,
-      begin,
-      reconcile,
-      checkAvailability,
-    ]
-  );
+      revealed: (nonce) => controller.revealed(nonce),
+      draft: (id) => controller.draft(id),
+      setDraft: (id, text) => controller.setDraft(id, text),
+    };
+  }, [
+    controller,
+    send,
+    cancel,
+    canAsk,
+    canAskFullFile,
+    begin,
+    discussGithub,
+    githubThread,
+    comparison,
+    canAttachGithub,
+    reconcile,
+    checkAvailability,
+  ]);
 
   const unreadable = state.threads.find(
     ({ status, anchor }) =>
@@ -533,383 +678,4 @@ function closeProcess(sessionId: string, backendSessionId: string) {
     clearStreamingAssistant: store.clearStreamingAssistant,
     settleActiveTurn: store.settleActiveTurn,
   });
-}
-
-const collapseKeys = shortcutText(DISCUSSION_COLLAPSE_SHORTCUT);
-const askKeys = shortcutText(DISCUSSION_ASK_SHORTCUT);
-const sendKeys = shortcutText(DISCUSSION_SEND_SHORTCUT);
-
-/**
- * Rendered in the diff annotation at the thread's anchor, never in a footer.
- * `onClosed` returns focus to the anchor line after the thread closes.
- */
-export function InlineSelectionDiscussion({
-  threadId,
-  onClosed,
-}: {
-  threadId: string;
-  onClosed?(anchor: CodeSelection): void;
-}) {
-  const discussion = useContext(SelectionDiscussionContext);
-  const thread = discussion?.threads.find((thread) => thread.id === threadId);
-  if (!thread || !discussion) return null;
-  const notice = anchorNotice(thread.status);
-
-  return discussion.activeId === thread.id ? (
-    <MiniThread
-      key={thread.id}
-      thread={thread}
-      discussion={discussion}
-      onClosed={thread.status.kind === "inline" ? onClosed : undefined}
-    />
-  ) : (
-    <button
-      type="button"
-      className="selection-mini-marker"
-      aria-label="Reopen selection discussion"
-      title={`Open discussion (${DISCUSSION_OPEN_KEY.toUpperCase()} on its line)`}
-      aria-keyshortcuts={DISCUSSION_OPEN_KEY}
-      onClick={() => discussion.reopen(thread.id, { focus: true })}
-    >
-      Discussion · {selectionLabel(thread.anchor)}
-      {notice && ` · ${notice.marker}`}
-    </button>
-  );
-}
-
-/** An open discussion: its transcript, composer and turn controls. */
-export function MiniThread({
-  thread,
-  discussion,
-  onClosed,
-}: {
-  thread: DiscussionState["threads"][number];
-  discussion: DiscussionValue;
-  onClosed?(anchor: CodeSelection): void;
-}) {
-  const [question, setQuestion] = useState("");
-  const composerRef = useRef<HTMLTextAreaElement>(null);
-  useKeepFocus(composerRef);
-  const thinkingStyle = useUIStore((state) => state.thinkingIndicatorStyle);
-  const choice = useContext(SelectionDiscussionModelContext);
-  const session = useChatStore((state) =>
-    thread.sessionId ? state.sessions[thread.sessionId] : undefined
-  );
-
-  const activeTurn = session?.activeTurn ?? null;
-  const cardRef = useInlineScrollFollow(activeTurn?.localId);
-  const failed = getLocalChatLifecycle(session) === "error";
-  const announcement = useTurnAnnouncement(activeTurn, failed);
-  const notice = anchorNotice(thread.status);
-
-  // Opening from the keyboard puts the caret in the composer, once. Opening
-  // also highlights the anchor, and the diff re-renders its rows a frame
-  // later, which can blur the slotted composer; focus again after that.
-  const { focusRequest, focusTaken } = discussion;
-  useEffect(() => {
-    if (focusRequest !== thread.id) return;
-    const focus = () => {
-      const composer = composerRef.current;
-      if (composer && document.activeElement !== composer) composer.focus();
-    };
-    focus();
-    let frame = requestAnimationFrame(() => {
-      frame = requestAnimationFrame(() => {
-        focus();
-        focusTaken(thread.id);
-      });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [focusRequest, focusTaken, thread.id]);
-
-  const collapsed = discussion.collapsed.has(thread.id);
-  const turns = collapsed && session ? collapseTurns(session.messages) : null;
-  const hidden = turns && turns.earlier > 0 ? turns : null;
-  const toggleCollapsed = () => discussion.toggleCollapsed(thread.id);
-  const close = () => {
-    discussion.reopen(null);
-    onClosed?.(thread.anchor);
-  };
-  const unreadable = thread.status.kind === "unreadable";
-  const canAsk =
-    !unreadable && !activeTurn && !!question.trim() && !choice?.error;
-  const ask = () => {
-    if (!canAsk) return;
-    discussion.send(thread.id, question);
-    setQuestion("");
-  };
-  const sendToMain = () => {
-    if (unreadable) return;
-    discussion.attach(thread.anchor, isOutdated(thread), question);
-    setQuestion("");
-  };
-
-  return (
-    <section
-      ref={cardRef}
-      className="selection-mini-thread"
-      aria-label="Selection discussion"
-      data-testid="selection-mini-thread"
-      // Esc closes this thread, not the chat workspace around it.
-      {...{ [OWNS_ESCAPE_ATTRIBUTE]: "" }}
-      onKeyDown={(event) => {
-        if (event.defaultPrevented || event.nativeEvent.isComposing) return;
-        if (matchesChatShortcut(event, DISCUSSION_COLLAPSE_SHORTCUT)) {
-          event.preventDefault();
-          if (!event.repeat) toggleCollapsed();
-          return;
-        }
-        const plain =
-          !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
-        if (event.key !== "Escape" || !plain) return;
-        event.preventDefault();
-        close();
-      }}
-      onClick={(event) => {
-        if (
-          thread.status.kind !== "inline" ||
-          event.currentTarget.ownerDocument.getSelection()?.isCollapsed ===
-            false ||
-          (event.target instanceof Element &&
-            event.target.closest("button, a, input, textarea, select, pre"))
-        )
-          return;
-        discussion.select(thread.anchor);
-      }}
-    >
-      <header className="selection-mini-header">
-        <button
-          type="button"
-          className="selection-mini-anchor"
-          disabled={thread.status.kind !== "inline"}
-          aria-label={`Highlight selected code: ${selectionLabel(thread.anchor)}`}
-          title="Highlight selected code"
-          onClick={() => discussion.select(thread.anchor)}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            aria-hidden="true"
-          >
-            <path d="m8 8-4 4 4 4m8-8 4 4-4 4m-3-10-2 20" />
-          </svg>
-          <span>{selectionLabel(thread.anchor)}</span>
-        </button>
-        <span className="selection-mini-badge">Read only</span>
-        {notice && (
-          <span className="selection-mini-outdated" role="status">
-            {notice.label}
-          </span>
-        )}
-        <button
-          type="button"
-          className="selection-mini-close"
-          aria-label={
-            collapsed ? "Show all turns" : "Show only the latest response"
-          }
-          aria-pressed={collapsed}
-          aria-keyshortcuts="Meta+Shift+E"
-          title={`${collapsed ? "Show all turns" : "Show only the latest response"} (${collapseKeys})`}
-          onClick={toggleCollapsed}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path
-              d={
-                collapsed
-                  ? "m7 9 5-5 5 5M7 15l5 5 5-5"
-                  : "m7 4 5 5 5-5M7 20l5-5 5 5"
-              }
-            />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className="selection-mini-close"
-          aria-label="Close discussion"
-          aria-keyshortcuts="Escape"
-          title="Close discussion (Esc)"
-          onClick={close}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            aria-hidden="true"
-          >
-            <path d="m6 6 12 12M6 18 18 6" />
-          </svg>
-        </button>
-      </header>
-      {thread.status.kind !== "inline" &&
-        thread.status.kind !== "unreadable" && (
-          <pre aria-label="Original selected code">
-            {thread.git.original.code}
-          </pre>
-        )}
-      <DiscussionModelNotice />
-      <div className="selection-mini-messages">
-        {hidden && (
-          <button
-            type="button"
-            className="selection-mini-earlier"
-            title={`Show all turns (${collapseKeys})`}
-            onClick={toggleCollapsed}
-          >
-            <span aria-hidden="true">▸</span>
-            {earlierTurnsLabel(hidden.earlier)}
-          </button>
-        )}
-        {session && (
-          <ChatTranscript
-            sessionId={session.id}
-            messages={hidden?.latest ?? session.messages}
-            // Discussions show no model labels; the composer owns that choice.
-            assistantLabel="Assistant"
-            isActive={!!session.backendSessionId}
-            streamingAssistant={session.streamingAssistant ?? null}
-          />
-        )}
-      </div>
-      {activeTurn && (
-        <div className="selection-mini-thinking">
-          <ThinkingIndicator
-            label={activeTurn.phase === "stopping" ? "Stopping..." : undefined}
-            style={thinkingStyle}
-          />
-        </div>
-      )}
-      <p
-        className="sr-only"
-        data-testid="selection-mini-announcement"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        {announcement}
-      </p>
-      {failed && <p role="alert">Discussion failed.</p>}
-      <form
-        className="diff-comment-editor selection-mini-composer"
-        onSubmit={(event) => {
-          event.preventDefault();
-          ask();
-        }}
-      >
-        <textarea
-          ref={composerRef}
-          {...focusKeepProps}
-          aria-label="Ask about selected code"
-          value={question}
-          onChange={(event) => setQuestion(event.target.value)}
-          rows={3}
-          placeholder="Ask a follow-up question…"
-          onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
-            if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey))
-              return;
-            event.preventDefault();
-            if (event.repeat) return;
-            if (event.shiftKey) sendToMain();
-            else ask();
-          }}
-        />
-        <div className="diff-comment-editor-actions selection-mini-actions">
-          {activeTurn && (
-            <button
-              type="button"
-              disabled={activeTurn.phase === "stopping"}
-              onClick={() => discussion.cancel(thread.id)}
-            >
-              Cancel response
-            </button>
-          )}
-          <button
-            type="button"
-            disabled={unreadable}
-            title={`Send to main chat (${sendKeys})`}
-            aria-keyshortcuts="Meta+Shift+Enter"
-            onClick={sendToMain}
-          >
-            Send to main chat
-          </button>
-          <button
-            type="submit"
-            data-primary
-            disabled={!canAsk}
-            title={`Ask (${askKeys})`}
-            aria-keyshortcuts="Meta+Enter"
-          >
-            Ask
-          </button>
-        </div>
-      </form>
-    </section>
-  );
-}
-
-/** Screen-reader status for the end of each turn. */
-function useTurnAnnouncement(
-  activeTurn: ActiveChatTurn | null,
-  failed: boolean
-): string {
-  const [announcement, setAnnouncement] = useState("");
-  const previous = useRef(activeTurn);
-
-  useEffect(() => {
-    const ended = previous.current;
-    previous.current = activeTurn;
-
-    if (activeTurn) setAnnouncement("");
-    else if (ended)
-      setAnnouncement(
-        failed
-          ? "Discussion failed."
-          : ended.phase === "stopping"
-            ? "Reply cancelled."
-            : "Reply complete."
-      );
-  }, [activeTurn, failed]);
-
-  return announcement;
-}
-
-/** Shared by the initial comment dialog and each follow-up composer. */
-export function DiscussionModelNotice() {
-  const choice = useContext(SelectionDiscussionModelContext);
-
-  if (!choice?.error) return null;
-
-  // "<reason> Open Settings → … to choose …": the reason leads, the path to
-  // fix it follows as a quieter second clause.
-  const at = choice.error.indexOf("Open Settings");
-  const reason = at > 0 ? choice.error.slice(0, at).trim() : choice.error;
-  const fix = at > 0 ? choice.error.slice(at) : "";
-
-  return (
-    <p role="alert" className="selection-model-notice" data-tone="warn">
-      <span className="selection-model-notice-dot" aria-hidden="true" />
-      <span className="selection-model-notice-text">
-        <span>{reason}</span>
-        {fix && <span className="selection-model-notice-fix"> {fix}</span>}
-      </span>
-    </p>
-  );
 }

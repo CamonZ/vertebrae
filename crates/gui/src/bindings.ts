@@ -2089,7 +2089,11 @@ callee: string;
  * The callee's name at the call.
  */
 site: SourceLocation; resolution: Resolution }
-export type CapturedReviewAnchor = { originalCommitId: string; originalBlobId: string }
+export type CapturedReviewAnchor = { originalCommitId: string; originalBlobId: string; 
+/**
+ * The captured lines, as the retained blob has them.
+ */
+code: string }
 export type ChangeSides = { old: FileBody; new: FileBody;
 /**
  * In semantic mode only.
@@ -2663,12 +2667,12 @@ export type GithubThreadPlacement =
  * Local edits changed the commented lines: the thread stays at its
  * published range, with the published text.
  */
-{ kind: "edited"; startLine: number; line: number; published: GithubSnippetLine[] } |
+{ kind: "edited"; startLine: number; line: number; published: GithubSnippetLine[]; editedLines: number[]; publishedCommit: string } |
 /**
  * GitHub no longer places the thread on the PR's diff; `original` is
  * the commented code where its commit is available locally.
  */
-{ kind: "outdated"; originalStartLine: number | null; originalLine: number | null; original: GithubSnippetLine[] } |
+{ kind: "outdated"; originalStartLine: number | null; originalLine: number | null; original: GithubSnippetLine[]; originalCommit: string | null } |
 /**
  * A commit is not available locally (fetch to verify): shown at the
  * published range as GitHub reports it.
@@ -3190,8 +3194,14 @@ export type ResolvePermissionRequestInput = { request_id: string; behavior: Perm
 export type ReviewAnchorError = "not_repository" | "unborn_head" | "invalid_path" | "invalid_range" | "content_unavailable" | "catalog_unavailable" | "parent_unavailable" | "git"
 export type ReviewAnchorLocation = { path: string; side: ReviewThreadSide; source: ReviewAnchorSource }
 export type ReviewAnchorParent = { chatId: string; projectPath: string | null }
-export type ReviewAnchorRequest = { worktree: string; threadId: string; location: ReviewAnchorLocation; range: ReviewLineRange; selectedText: string; parent: ReviewAnchorParent | null }
+export type ReviewAnchorRequest = { worktree: string; threadId: string; location: ReviewAnchorLocation; range: ReviewLineRange; subject: ReviewAnchorSubject; parent: ReviewAnchorParent | null }
 export type ReviewAnchorSource = { kind: "worktree"; commit: string | null } | { kind: "full_file"; turn: ReviewAnchorTurn | null } | { kind: "tool_call"; chatId: string; toolUseId: string }
+/**
+ * What a discussion is about: code the user selected (checked against what
+ * is captured), or the lines a GitHub review thread is on, whose anchor
+ * GitHub owns, so the captured lines are read here rather than sent.
+ */
+export type ReviewAnchorSubject = { kind: "selection"; selectedText: string } | { kind: "github_thread"; githubThreadId: string }
 export type ReviewAnchorTurn = { sessionId: string; turnId: string }
 /**
  * Lines `start_line..=line`, 1-based.

@@ -96,6 +96,7 @@ fn outdated(
             original_start_line: None,
             original_line: None,
             original: Vec::new(),
+            original_commit: None,
         };
     };
     let (start_line, line) = range(anchor, anchor.original_start_line, line);
@@ -107,16 +108,19 @@ fn outdated(
             ReviewThreadSide::Right => Some(commit),
             ReviewThreadSide::Left => repo.merge_base(commit, commits.base).ok(),
         });
-    let original = match commit {
+    let (original, original_commit) = match commit {
         Some(commit) if start_line >= 1 && start_line <= line => {
-            snippet(texts, commit, &anchor.path, start_line, line)
+            let original = snippet(texts, commit, &anchor.path, start_line, line);
+            let read = (!original.is_empty()).then(|| commit.to_string());
+            (original, read)
         }
-        _ => Vec::new(),
+        _ => (Vec::new(), None),
     };
     GithubThreadPlacement::Outdated {
         original_start_line: Some(start_line),
         original_line: Some(line),
         original,
+        original_commit,
     }
 }
 
@@ -132,10 +136,12 @@ fn placed(
             line: mapped.line,
             published_line: line,
         },
-        Ok(PublishedPlacement::Edited) => GithubThreadPlacement::Edited {
+        Ok(PublishedPlacement::Edited { lines }) => GithubThreadPlacement::Edited {
             start_line,
             line,
             published: snippet(texts, anchor.published, anchor.path, start_line, line),
+            edited_lines: lines,
+            published_commit: anchor.published.to_string(),
         },
         Ok(PublishedPlacement::Missing) | Err(AnchorError::UnbornHead) => {
             GithubThreadPlacement::NotShown

@@ -93,6 +93,8 @@ pub struct ReviewAnchorLocation {
 pub struct CapturedReviewAnchor {
     original_commit_id: String,
     original_blob_id: String,
+    /// The captured lines, as the retained blob has them.
+    code: String,
 }
 
 #[derive(Deserialize, specta::Type)]
@@ -102,6 +104,34 @@ pub struct ReviewAnchorParent {
     project_path: Option<String>,
 }
 
+/// What a discussion is about: code the user selected (checked against what
+/// is captured), or the lines a GitHub review thread is on, whose anchor
+/// GitHub owns, so the captured lines are read here rather than sent.
+#[derive(Deserialize, specta::Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ReviewAnchorSubject {
+    Selection {
+        #[serde(rename = "selectedText")]
+        selected_text: String,
+    },
+    GithubThread {
+        #[serde(rename = "githubThreadId")]
+        github_thread_id: String,
+    },
+}
+
+/// Prefix of the catalog `origin_ref` that links a discussion to the GitHub
+/// review thread it discusses.
+const GITHUB_THREAD_ORIGIN: &str = "github-thread:";
+
+/// GitHub's opaque node IDs: short, URL-safe Base64 with a type prefix.
+fn valid_github_thread_id(id: &str) -> bool {
+    (1..=256).contains(&id.len())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'='))
+}
+
 #[derive(Deserialize, specta::Type)]
 #[serde(rename_all = "camelCase")]
 pub struct ReviewAnchorRequest {
@@ -109,8 +139,57 @@ pub struct ReviewAnchorRequest {
     thread_id: Uuid,
     location: ReviewAnchorLocation,
     range: ReviewLineRange,
-    selected_text: String,
+    subject: ReviewAnchorSubject,
     parent: Option<ReviewAnchorParent>,
+}
+
+/// The catalog home of a new thread: its kind, tool call and origin
+/// reference. A GitHub thread is anchored only on worktree content.
+fn catalog_home(
+    source: &ReviewAnchorSource,
+    subject: &ReviewAnchorSubject,
+) -> Result<(ReviewThreadHome, Option<String>, Option<String>), ReviewAnchorError> {
+    if let ReviewAnchorSubject::GithubThread { github_thread_id } = subject {
+        return match source {
+            ReviewAnchorSource::Worktree { .. } if valid_github_thread_id(github_thread_id) => {
+                Ok((
+                    ReviewThreadHome::Worktree,
+                    None,
+                    Some(format!("{GITHUB_THREAD_ORIGIN}{github_thread_id}")),
+                ))
+            }
+            _ => Err(ReviewAnchorError::ContentUnavailable),
+        };
+    }
+    Ok(match source {
+        ReviewAnchorSource::ToolCall { tool_use_id, .. } => {
+            (ReviewThreadHome::ToolCall, Some(tool_use_id.clone()), None)
+        }
+        ReviewAnchorSource::Worktree { .. } => (ReviewThreadHome::Worktree, None, None),
+        // The catalog's worktree home supports local origin references. Keep
+        // the full-file identity alongside its retained blob and checkout.
+        ReviewAnchorSource::FullFile { turn } => {
+            let identity = match turn {
+                Some(turn) => serde_json::json!([turn.session_id, turn.turn_id]).to_string(),
+                None => "null".into(),
+            };
+            (
+                ReviewThreadHome::Worktree,
+                None,
+                Some(format!("full-file:{identity}")),
+            )
+        }
+    })
+}
+
+/// Whether the captured lines are what the discussion is about.
+fn subject_matches(snippet: &str, subject: &ReviewAnchorSubject) -> bool {
+    match subject {
+        ReviewAnchorSubject::Selection { selected_text } => {
+            selected_text_matches(snippet, selected_text)
+        }
+        ReviewAnchorSubject::GithubThread { .. } => true,
+    }
 }
 
 #[derive(Deserialize, specta::Type)]
@@ -294,10 +373,11 @@ pub async fn capture_review_anchor(
         thread_id,
         location,
         range,
-        selected_text,
+        subject,
         parent,
     } = request;
     let parent = parent.ok_or(ReviewAnchorError::ParentUnavailable)?;
+    let (home_kind, tool_use_id, origin_ref) = catalog_home(&location.source, &subject)?;
     if let ReviewAnchorSource::FullFile { turn } = &location.source {
         if location.side != ReviewThreadSide::Right
             || turn
@@ -327,7 +407,7 @@ pub async fn capture_review_anchor(
             .ok_or(ReviewAnchorError::ContentUnavailable)?;
         let snippet = std::str::from_utf8(range.slice(&bytes)?)
             .map_err(|_| ReviewAnchorError::ContentUnavailable)?;
-        if !selected_text_matches(snippet, &selected_text) {
+        if !subject_matches(snippet, &subject) {
             return Err(ReviewAnchorError::ContentUnavailable);
         }
         let blob = capture(&repo, thread_id, &bytes)?;
@@ -335,6 +415,7 @@ pub async fn capture_review_anchor(
             CapturedReviewAnchor {
                 original_commit_id: head.to_string(),
                 original_blob_id: blob.to_string(),
+                code: snippet.to_owned(),
             },
             location,
             common_dir,
@@ -342,25 +423,6 @@ pub async fn capture_review_anchor(
     })
     .await?;
 
-    let (home_kind, tool_use_id, origin_ref) = match location.source {
-        ReviewAnchorSource::ToolCall { tool_use_id, .. } => {
-            (ReviewThreadHome::ToolCall, Some(tool_use_id), None)
-        }
-        ReviewAnchorSource::Worktree { .. } => (ReviewThreadHome::Worktree, None, None),
-        // The catalog's worktree home supports local origin references. Keep
-        // the full-file identity alongside its retained blob and checkout.
-        ReviewAnchorSource::FullFile { turn } => {
-            let identity = match turn {
-                Some(turn) => serde_json::json!([turn.session_id, turn.turn_id]).to_string(),
-                None => "null".into(),
-            };
-            (
-                ReviewThreadHome::Worktree,
-                None,
-                Some(format!("full-file:{identity}")),
-            )
-        }
-    };
     let payload = ReviewThreadInput {
         parent_chat_id: parent.chat_id,
         path: location.path,
@@ -503,6 +565,86 @@ mod tests {
         assert!(selected_text_matches("a\r\nb\r\n", "a\nb"));
         assert!(selected_text_matches("a\r\nb\r\n", "a\r\nb\r"));
         assert!(!selected_text_matches("a\r\nb\r\n", "a\nc"));
+    }
+
+    use hegel::generators as gs;
+
+    /// A generated anchor source of each kind.
+    fn source_of(tc: &hegel::TestCase) -> ReviewAnchorSource {
+        match tc.draw(gs::integers::<u8>().max_value(3)) {
+            0 => ReviewAnchorSource::Worktree { commit: None },
+            1 => ReviewAnchorSource::Worktree {
+                commit: Some("b".repeat(40)),
+            },
+            2 => ReviewAnchorSource::FullFile { turn: None },
+            _ => ReviewAnchorSource::ToolCall {
+                chat_id: "chat".into(),
+                tool_use_id: tc.draw(gs::text().min_size(1).max_size(8)),
+            },
+        }
+    }
+
+    /// A selection keeps the home its source implies, whatever the text; a
+    /// GitHub thread is a worktree thread whose origin names it, accepted
+    /// only on worktree content and with a node ID, and it never compares
+    /// text (GitHub's anchor, not a UI selection, says which lines).
+    #[hegel::test(test_cases = 200)]
+    fn subject_decides_the_catalog_origin(tc: hegel::TestCase) {
+        let source = source_of(&tc);
+        let snippet: String = tc.draw(gs::text().max_size(12));
+        let selected: String = tc.draw(gs::text().max_size(12));
+        let selection = ReviewAnchorSubject::Selection {
+            selected_text: selected.clone(),
+        };
+        let expected = match &source {
+            ReviewAnchorSource::ToolCall { tool_use_id, .. } => {
+                (ReviewThreadHome::ToolCall, Some(tool_use_id.clone()), None)
+            }
+            ReviewAnchorSource::Worktree { .. } => (ReviewThreadHome::Worktree, None, None),
+            ReviewAnchorSource::FullFile { .. } => (
+                ReviewThreadHome::Worktree,
+                None,
+                Some("full-file:null".to_string()),
+            ),
+        };
+        let (home, tool_use_id, origin_ref) = catalog_home(&source, &selection).unwrap();
+        assert_eq!((home, tool_use_id, origin_ref), expected);
+        assert_eq!(
+            subject_matches(&snippet, &selection),
+            selected_text_matches(&snippet, &selected)
+        );
+
+        let id: String = tc.draw(gs::text().max_size(20));
+        let github = ReviewAnchorSubject::GithubThread {
+            github_thread_id: id.clone(),
+        };
+        assert!(subject_matches(&snippet, &github));
+        let valid = !id.is_empty()
+            && id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || "_-=".contains(c));
+        match (catalog_home(&source, &github), &source) {
+            (Ok((home, tool_use_id, origin_ref)), ReviewAnchorSource::Worktree { .. }) => {
+                assert!(valid, "{id:?}");
+                assert_eq!(home, ReviewThreadHome::Worktree);
+                assert_eq!(tool_use_id, None);
+                assert_eq!(origin_ref, Some(format!("github-thread:{id}")));
+            }
+            (Ok(_), _) => panic!("GitHub threads anchor only on worktree content"),
+            (Err(error), source) => {
+                assert!(matches!(error, ReviewAnchorError::ContentUnavailable));
+                assert!(!valid || !matches!(source, ReviewAnchorSource::Worktree { .. }));
+            }
+        }
+    }
+
+    #[test]
+    fn github_thread_ids_accept_node_ids_and_reject_other_text() {
+        assert!(valid_github_thread_id("PRRT_kwDOAbc123-_="));
+        assert!(!valid_github_thread_id(""));
+        assert!(!valid_github_thread_id("PRRT 1"));
+        assert!(!valid_github_thread_id("github-thread:PRRT_1"));
+        assert!(!valid_github_thread_id(&"a".repeat(257)));
     }
 
     fn working_location(path: &str) -> ReviewAnchorLocation {

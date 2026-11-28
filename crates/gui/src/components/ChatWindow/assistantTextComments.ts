@@ -53,7 +53,43 @@ export interface PendingDiffComment {
   outdated: boolean;
 }
 
-export type PendingComment = PendingTextComment | PendingDiffComment;
+/**
+ * A GitHub review thread and its private discussion, attached to the main
+ * composer by Send to main chat. It carries what both said when attached;
+ * its chip reopens the discussion with its thread.
+ */
+export interface PendingGithubThreadComment {
+  kind: "github_thread";
+  id: string;
+  body: string;
+  /** The GitHub review thread: one attachment per thread. */
+  githubThreadId: string;
+  /** Its private discussion; null when only the thread was sent. */
+  discussionId: string | null;
+  path: string;
+  side: "new" | "old";
+  /** The commented lines; null for a comment on the whole file. */
+  startLine: number | null;
+  /** Equal to `startLine` for a single line. */
+  endLine: number | null;
+  /** The commented lines as read here; empty when they were not. */
+  code: string;
+  /**
+   * Login of the thread's first commenter; null when the thread was no
+   * longer in the PR's review state.
+   */
+  author: string | null;
+  comments: readonly { author: string; body: string }[];
+  /** Text of the private discussion's questions and replies. */
+  turns: readonly { role: "user" | "assistant"; text: string }[];
+}
+
+/** A pending comment on code: a diff line comment or a GitHub thread. */
+export type PendingCodeComment =
+  | PendingDiffComment
+  | PendingGithubThreadComment;
+
+export type PendingComment = PendingTextComment | PendingCodeComment;
 
 const CONTEXT_LENGTH = 80;
 const ENTRY_INDENT = "   ";
@@ -241,13 +277,20 @@ export function diffCommentHomeLabel(comment: PendingDiffComment): string {
     : `Tool call ${comment.path}`;
 }
 
-/** `path:start[-end]` for a diff comment. */
-export function diffCommentLocation(comment: PendingDiffComment): string {
-  const range =
-    comment.endLine === comment.startLine
-      ? `${comment.startLine}`
-      : `${comment.startLine}-${comment.endLine}`;
-  return `${comment.path}:${range}`;
+/** `path:start[-end]` for a comment on code. */
+export function diffCommentLocation(
+  comment: Pick<PendingCodeComment, "path" | "startLine" | "endLine">
+): string {
+  return `${comment.path}${lineRangeSuffix(comment)}`;
+}
+
+/** `:12` or `:12-14`; empty for a comment on a whole file. */
+export function lineRangeSuffix({
+  startLine,
+  endLine,
+}: Pick<PendingCodeComment, "startLine" | "endLine">): string {
+  if (startLine === null || endLine === null) return "";
+  return endLine === startLine ? `:${startLine}` : `:${startLine}-${endLine}`;
 }
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;
@@ -313,7 +356,7 @@ function diffCommentEntry(comment: PendingDiffComment, number: number): string {
   );
   const fence = "`".repeat(Math.max(3, longestRun + 1));
   const heading = [
-    `${number}. ${diffCommentHomeLabel(comment)} · ${diffCommentLocation(comment)} (${comment.side})`,
+    `${number}. ${codeCommentHeading(comment)}`,
     comment.outdated ? " [outdated]" : "",
   ].join("");
 
@@ -328,9 +371,69 @@ function diffCommentEntry(comment: PendingDiffComment, number: number): string {
   ].join("\n");
 }
 
+/** `<where> · path:lines (side)`: a code comment's heading everywhere it shows. */
+export function codeCommentHeading(comment: PendingCodeComment): string {
+  const home =
+    comment.kind === "diff"
+      ? diffCommentHomeLabel(comment)
+      : comment.author === null
+        ? "GitHub thread"
+        : `GitHub thread from ${comment.author}`;
+  return `${home} · ${diffCommentLocation(comment)} (${comment.side})`;
+}
+
+/** Quoted lines, the first prefixed with `lead`. */
+function quoted(lead: string, text: string): string[] {
+  return text
+    .trim()
+    .split("\n")
+    .map((line, index) => {
+      const content = index === 0 ? `${lead}${line}` : line;
+      return content ? `> ${content}` : ">";
+    });
+}
+
+/**
+ * A GitHub thread in the reply, shaped like a diff comment (heading, fenced
+ * code, then the text) so the sent message reads back as one. The text is
+ * the thread, the private discussion, then the user's note.
+ */
+function githubThreadEntry(
+  comment: PendingGithubThreadComment,
+  number: number
+): string {
+  const longestRun = Math.max(
+    0,
+    ...(comment.code.match(/`+/g) ?? []).map((run) => run.length)
+  );
+  const fence = "`".repeat(Math.max(3, longestRun + 1));
+  const thread = comment.comments.flatMap(({ author, body }) =>
+    quoted(`**${author}:** `, body)
+  );
+  const discussion = comment.turns.flatMap(({ role, text }) => [
+    `**${role === "user" ? "You" : "Assistant"}:** ${text.trim()}`,
+  ]);
+  const text = [
+    ...(thread.length ? ["GitHub thread:", ...thread] : []),
+    ...(discussion.length ? ["", "Private discussion:", ...discussion] : []),
+    ...(comment.body.trim() ? ["", comment.body.trim()] : []),
+  ]
+    .join("\n")
+    .trim();
+  return [
+    `${number}. ${codeCommentHeading(comment)}`,
+    ...indent([
+      ...(comment.code
+        ? [`${fence}diff`, ...comment.code.split("\n"), fence]
+        : []),
+      ...replyLines(text),
+    ]),
+  ].join("\n");
+}
+
 function commentsHeading(comments: readonly PendingComment[]): string {
   const hasText = comments.some((comment) => comment.kind === "text");
-  const hasDiff = comments.some((comment) => comment.kind === "diff");
+  const hasDiff = comments.some((comment) => comment.kind !== "text");
   if (hasText && hasDiff) {
     return "Comments on the previous response and on the worktree changes";
   }
@@ -350,7 +453,9 @@ export function formatTextCommentsForReply(
   const sections = comments.map((comment, index) =>
     comment.kind === "diff"
       ? diffCommentEntry(comment, index + 1)
-      : textCommentEntry(comment, index + 1)
+      : comment.kind === "github_thread"
+        ? githubThreadEntry(comment, index + 1)
+        : textCommentEntry(comment, index + 1)
   );
 
   const message = [`${commentsHeading(comments)}:\n\n${sections.join("\n\n")}`];

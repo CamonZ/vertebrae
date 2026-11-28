@@ -11,6 +11,7 @@ import type { PaletteItem } from "../../CommandPalette/paletteModel";
 import {
   CHANGES_COMMANDS,
   CHANGES_FILE_JUMP_KEYS,
+  CHANGES_REVIEW_KEY,
   CHANGES_UNVIEW_HINT,
   CHANGES_VIEWED_KEY,
   DISCUSSION_ASK_SHORTCUT,
@@ -23,7 +24,7 @@ import {
 import type { DiscussionValue } from "../selectionDiscussionState";
 import { isOutdated, selectionLabel } from "../selectionDiscussions";
 import type { DiffStyle } from "./ComparisonControls";
-import type { PrBarHandle } from "./PrAssociationBar";
+import type { PrBarHandle, ReviewEntry } from "./PrAssociationBar";
 import { STATUS_LETTER } from "./status";
 
 const FILE_ITEM_PREFIX = "changes-file-";
@@ -174,6 +175,8 @@ export interface ChangesPaletteState {
   /** The chat branch's PR, when Changes shows its review bar. */
   pr: WorktreePr | null;
   prBar: PrBarHandle | null;
+  /** The review bar's entry into the Review rail, once the PR is linked. */
+  review: ReviewEntry | null;
 }
 
 /** What Changes does for its palette entries. */
@@ -189,6 +192,8 @@ export interface ChangesPaletteActions {
   refresh(): void;
   /** Return focus to Changes; entering resumes the line cursor. */
   refocus(): void;
+  /** The previous or next GitHub thread, with focus in its card. */
+  stepThread(direction: -1 | 1): void;
 }
 
 /** Changes commands, its discussions and files, in the ⌘K Changes scope. */
@@ -377,9 +382,47 @@ export function changesPaletteItems(
   return [
     ...commands,
     ...prItems(state.pr, state.prBar, refocus),
+    ...reviewItems(state.review, actions.stepThread),
     ...changesDiscussionItems(state.discussion, refocus),
     ...fileItems,
   ];
+}
+
+/** The Review rail and stepping between the PR's GitHub threads. */
+function reviewItems(
+  review: ReviewEntry | null,
+  stepThread: (direction: -1 | 1) => void
+): PaletteItem[] {
+  if (!review) return [];
+  const item = (
+    id: string,
+    label: string,
+    key: string,
+    run: () => void
+  ): PaletteItem => ({
+    id: `changes-review-${id}`,
+    scope: "changes",
+    label,
+    access: { key },
+    keywords: "pull request github review threads comments",
+    run,
+  });
+  const items = [
+    item(
+      "rail",
+      review.open ? CHANGES_COMMANDS.hideReview : CHANGES_COMMANDS.showReview,
+      CHANGES_REVIEW_KEY,
+      review.onToggle
+    ),
+  ];
+  if (review.openCount !== null)
+    items.push(
+      item("next", CHANGES_COMMANDS.nextThread, "]", () => stepThread(1)),
+      item("previous", CHANGES_COMMANDS.previousThread, "[", () =>
+        stepThread(-1)
+      )
+    );
+  return items;
 }
 
 /** The review bar's actions: its checks, a refresh, the PR on GitHub, linking. */

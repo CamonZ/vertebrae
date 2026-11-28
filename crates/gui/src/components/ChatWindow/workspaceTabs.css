@@ -94,6 +94,26 @@
   line-height: 1.6;
 }
 
+/* A GitHub thread's private discussion: the rose accent bar and a lock. */
+.selection-mini-thread[data-private] {
+  border-inline-start: 3px solid var(--color-accent);
+}
+
+.selection-mini-private {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-accent);
+  font: 500 var(--text-meta)/1.4 var(--font-sans);
+}
+
+.side-discussion-row[data-private] svg {
+  flex: none;
+  color: var(--color-accent);
+}
+
 .selection-mini-header {
   display: flex;
   flex-wrap: wrap;

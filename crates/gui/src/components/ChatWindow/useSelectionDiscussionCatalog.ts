@@ -71,11 +71,19 @@ export function useSelectionDiscussionCatalog({
       if (!ids) snapshotVersion++;
       const version = snapshotVersion;
       const byCheckout = new Map<string, ReviewMappingRequest[]>();
-      for (const { id, git, status } of controller.getSnapshot().threads) {
+      for (const { id, git, status, githubThreadId } of controller.getSnapshot()
+        .threads) {
         const { original } = git;
-        if (original.home.kind !== "worktree" || original.fullFile?.turn ||
-            (!next && !original.fullFile) ||
-            status.kind === "unreadable" || (ids && !ids.has(id))) continue;
+        // A GitHub thread's discussion follows GitHub's anchor, never its own.
+        if (
+          githubThreadId !== null ||
+          original.home.kind !== "worktree" ||
+          original.fullFile?.turn ||
+          (!next && !original.fullFile) ||
+          status.kind === "unreadable" ||
+          (ids && !ids.has(id))
+        )
+          continue;
         const checkout = original.fullFile?.checkout ?? worktreePath;
         const requests = byCheckout.get(checkout) ?? [];
         requests.push({

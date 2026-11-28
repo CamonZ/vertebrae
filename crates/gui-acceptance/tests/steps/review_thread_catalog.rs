@@ -765,7 +765,7 @@ fn anchor_args(path: &Path, thread: Uuid, parent: Option<&str>) -> Value {
             "source": {"kind": "worktree", "commit": null}
         },
         "range": {"startLine": 2, "line": 2},
-        "selectedText": "const selected = 42;",
+        "subject": {"kind": "selection", "selectedText": "const selected = 42;"},
         "parent": parent.map(|chat| json!({"chatId": chat, "projectPath": path}))
     })
 }
@@ -809,6 +809,11 @@ async fn git_anchor_mapping(world: &mut GuiWorld) {
     let status = anchor_git(path, &["status", "--porcelain"]).await;
     let staged = anchor_git(path, &["diff", "--cached"]).await;
     let anchor = capture_anchor(&client, capture.clone()).await;
+    // The capture returns the lines it kept.
+    assert_eq!(
+        anchor["code"].as_str().map(str::trim_end),
+        Some("const selected = 42;")
+    );
     assert_anchor_position(&client, &capture, &anchor["originalBlobId"], Some(2)).await;
     assert_eq!(anchor_git(path, &["status", "--porcelain"]).await, status);
     assert_eq!(anchor_git(path, &["diff", "--cached"]).await, staged);

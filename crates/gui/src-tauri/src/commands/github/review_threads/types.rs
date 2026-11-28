@@ -176,6 +176,12 @@ pub enum GithubThreadPlacement {
         start_line: u32,
         line: u32,
         published: Vec<GithubSnippetLine>,
+        /// The published lines the local edit changed or removed; empty
+        /// when it only inserted lines inside the range.
+        edited_lines: Vec<u32>,
+        /// The commit `published` was read from: the commented lines as
+        /// reviewers see them.
+        published_commit: String,
     },
     /// GitHub no longer places the thread on the PR's diff; `original` is
     /// the commented code where its commit is available locally.
@@ -184,6 +190,8 @@ pub enum GithubThreadPlacement {
         original_start_line: Option<u32>,
         original_line: Option<u32>,
         original: Vec<GithubSnippetLine>,
+        /// The commit `original` was read from; `None` without a snippet.
+        original_commit: Option<String>,
     },
     /// A commit is not available locally (fetch to verify): shown at the
     /// published range as GitHub reports it.

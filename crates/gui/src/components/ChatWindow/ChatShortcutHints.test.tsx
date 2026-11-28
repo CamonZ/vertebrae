@@ -50,20 +50,32 @@ describe("ChatShortcutHints", () => {
     expect(kbds.length).toBeGreaterThan(0);
   });
 
-  it("lists every inline discussion binding in its own section", () => {
+  it("lists every inline discussion binding once, in its section or an earlier one", () => {
     render(<ChatShortcutHints onClose={vi.fn()} />);
-    expect(screen.getByText("Open discussion at line")).toBeInTheDocument();
+    expect(screen.getByText("Open discussion or GitHub thread at line")).toBeInTheDocument();
     const section = screen
       .getByRole("heading", { name: "Changes · inline discussion" })
       .closest("section")!;
     const labels = [...section.querySelectorAll("dd")].map(
       (dd) => dd.textContent
     );
-    expect(labels).toEqual(
-      CHANGES_HINT_GROUPS.find(
-        ({ title }) => title === "Changes · inline discussion"
-      )!.hints.map(({ label }) => label)
+    // A binding an earlier Changes section already lists (the same keys and
+    // label, as ⌘⇧↵ Send to main chat) is listed there, once.
+    const index = CHANGES_HINT_GROUPS.findIndex(
+      ({ title }) => title === "Changes · inline discussion"
     );
+    const earlier = new Set(
+      CHANGES_HINT_GROUPS.slice(0, index).flatMap(({ hints }) =>
+        hints.map(({ keys, label }) => `${keys.join(" ")}:${label}`)
+      )
+    );
+    expect(labels).toEqual(
+      CHANGES_HINT_GROUPS[index].hints
+        .filter(({ keys, label }) => !earlier.has(`${keys.join(" ")}:${label}`))
+        .map(({ label }) => label)
+    );
+    expect(labels).not.toContain("Send to main chat");
+    expect(screen.getByText("Send to main chat")).toBeInTheDocument();
   });
 
   it("renders known shortcut labels", () => {

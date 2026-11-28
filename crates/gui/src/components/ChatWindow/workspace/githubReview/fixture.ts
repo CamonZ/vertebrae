@@ -97,5 +97,6 @@ export function outdated(
       originalLine === null
         ? []
         : [{ number: originalLine, text, focus: true }],
+    originalCommit: originalLine === null ? null : "2".repeat(40),
   };
 }

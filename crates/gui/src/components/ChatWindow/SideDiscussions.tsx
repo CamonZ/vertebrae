@@ -12,7 +12,7 @@ import {
 } from "./chatShortcuts";
 import { QuoteGlyph } from "./commentIcons";
 import { SideEmptyState } from "./SideEmptyState";
-import { MiniThread } from "./SelectionDiscussionContext";
+import { LockGlyph, MiniThread } from "./SelectionDiscussionThread";
 import {
   anchorNotice,
   discussionList,
@@ -36,6 +36,10 @@ const GROUP: Record<ThreadPlace, { title: string; description?: string }> = {
     description: "The code changed or moved; the original selection is kept.",
   },
   changes: { title: "In Changes" },
+  github: {
+    title: "On GitHub threads",
+    description: "Private; shown with the GitHub thread they discuss.",
+  },
   transcript: {
     title: "In the transcript",
     description: "Anchored on a tool call's patch in the chat.",
@@ -45,6 +49,10 @@ const GROUP: Record<ThreadPlace, { title: string; description?: string }> = {
     description: "Anchored on a whole file opened from Changes.",
   },
 };
+
+function showsInChanges(place: ThreadPlace) {
+  return place === "changes" || place === "github";
+}
 
 function copy(text: string) {
   navigator.clipboard.writeText(text).catch((error: unknown) => {
@@ -56,11 +64,10 @@ function copy(text: string) {
 function threadActions(thread: SelectionThread, discussion: DiscussionValue) {
   return {
     reply: () => discussion.reopen(thread.id, { focus: true, inPlace: true }),
-    // Not in place: the thread opens at its anchor in Changes.
-    showCode:
-      threadPlace(thread) === "changes"
-        ? () => discussion.reopen(thread.id, { focus: true })
-        : null,
+    // Not in place: the thread opens at its anchor (or GitHub thread) in Changes.
+    showCode: showsInChanges(threadPlace(thread))
+      ? () => discussion.reopen(thread.id, { focus: true })
+      : null,
     copy: () => copy(thread.git.original.code),
     /** Fold (true) or unfold (false); null when it already is. */
     fold: (folded: boolean) =>
@@ -307,27 +314,30 @@ function DiscussionRow({
     );
   }
   const label = selectionLabel(thread.anchor);
+  const github = place === "github";
   return (
     <li className="side-discussion" data-thread-id={thread.id}>
       <button
         type="button"
         className="side-discussion-row"
+        data-private={github ? "" : undefined}
         {...{ [ROW_ATTRIBUTE]: thread.id }}
-        aria-label={`Discussion on ${label}${notice ? `, ${notice.label}` : ""}`}
+        aria-label={`${github ? "Private discussion of the GitHub thread" : "Discussion"} on ${label}${notice ? `, ${notice.label}` : ""}`}
         aria-keyshortcuts={
-          place === "changes"
+          showsInChanges(place)
             ? `Enter ${DISCUSSION_OPEN_KEY} Meta+C`
             : "Enter Meta+C"
         }
         title={
-          place === "changes"
-            ? "Open discussion (↵) · show in Changes (o) · copy code (⌘C)"
+          showsInChanges(place)
+            ? `Open discussion (↵) · show ${github ? "its thread " : ""}in Changes (o) · copy code (⌘C)`
             : `Open discussion (↵) · copy ${detached ? "original " : ""}code (⌘C)`
         }
         onClick={() =>
           discussion.reopen(thread.id, { focus: true, inPlace: true })
         }
       >
+        {github && <LockGlyph />}
         <span className="side-discussion-anchor">{label}</span>
         {notice && (
           <span className="selection-mini-outdated">{notice.label}</span>

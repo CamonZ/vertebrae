@@ -36,12 +36,13 @@ impl From<git2::Error> for AnchorError {
 }
 
 /// Where a published anchor lands on the shown side.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PublishedPlacement {
     /// The anchored lines are unchanged; they now sit at this range.
     Mapped(ReviewLineRange),
-    /// Edits changed the anchored lines.
-    Edited,
+    /// Edits changed the anchored lines: `lines` are the published lines
+    /// changed or removed (empty when lines were only inserted inside).
+    Edited { lines: Vec<u32> },
     /// The file is absent from the shown side.
     Missing,
 }
@@ -91,10 +92,16 @@ pub(crate) fn place_published_anchors(
                     .map_err(|error| *error)
                     .and_then(|(original, _)| anchors[index].range.slice(original))
                     .map(|_| PublishedPlacement::Missing),
-                Ok(Some(map)) => map.map(anchors[index].range).map(|mapped| match mapped {
-                    Some(range) => PublishedPlacement::Mapped(range),
-                    None => PublishedPlacement::Edited,
-                }),
+                Ok(Some(map)) => {
+                    let range = anchors[index].range;
+                    match map.map(range) {
+                        Ok(Some(mapped)) => Ok(PublishedPlacement::Mapped(mapped)),
+                        Ok(None) => map
+                            .edited_lines(range)
+                            .map(|lines| PublishedPlacement::Edited { lines }),
+                        Err(error) => Err(error),
+                    }
+                }
             };
         }
     }

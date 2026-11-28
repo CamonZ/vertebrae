@@ -54,6 +54,7 @@ import { FilesTree } from "./workspace/FilesTree";
 import { UnsavedChangesDialog } from "./workspace/UnsavedChangesDialog";
 import type { JumpTarget } from "./workspace/AllChangesView";
 import {
+  useChangesCursor,
   useChangesView,
   useChatSideColumnStore,
 } from "../../stores/chatSideColumnStore";
@@ -74,7 +75,11 @@ import {
 } from "./workspace/PrAssociationBar";
 import { useWorktreePr } from "../../hooks/useWorktreePr";
 import { ReviewRail } from "./workspace/githubReview/ReviewRail";
-import { useWorktreeReview } from "./workspace/githubReview/useWorktreeReview";
+import {
+  stepOrigin,
+  useThreadRevealRequests,
+  useWorktreeReview,
+} from "./workspace/githubReview/useWorktreeReview";
 import type { ViewportAnchor } from "./workspace/viewportAnchor";
 import { OpenDocumentTabs } from "./workspace/OpenDocumentTabs";
 import {
@@ -193,6 +198,7 @@ export function WorktreeChanges({
     [sessionId, worktreePath]
   );
   const { base, target, activePath, reviewOpen } = useChangesView(changesKey);
+  const [lineCursor] = useChangesCursor(changesKey);
   const saveChanges = useChatSideColumnStore((state) => state.saveChanges);
   const saveView = useCallback(
     (patch: Parameters<typeof saveChanges>[2]) =>
@@ -494,6 +500,8 @@ export function WorktreeChanges({
     jumpToFile,
   });
 
+  useThreadRevealRequests(review, discussion);
+
   const open = (path: string, view: "file" | "diff") => {
     dismissTurn();
     setReveal(null);
@@ -569,6 +577,7 @@ export function WorktreeChanges({
           targetButton: targetButton.current,
           pr: prBranch ? worktreePr : null,
           prBar: prBar.current,
+          review: review.review ?? null,
         },
         {
           jumpToFile,
@@ -581,6 +590,11 @@ export function WorktreeChanges({
           setDiffStyle,
           refresh: refreshAll,
           refocus,
+          // A stepped-to card takes focus itself; a deferred refocus would
+          // take it back, so the pane refocuses only when nothing opened.
+          stepThread: (direction) => {
+            if (!review.stepThreads(null, direction)) refocus();
+          },
         }
       )
     ),
@@ -599,6 +613,12 @@ export function WorktreeChanges({
       toggleViewed: selectedFile
         ? () =>
             setViewed(selectedFile.path, !viewedPaths.has(selectedFile.path))
+        : null,
+      toggleReview: review.review?.onToggle ?? null,
+      stepThread: review.review
+        ? (origin, direction) => {
+            review.stepThreads(stepOrigin(origin, lineCursor), direction);
+          }
         : null,
     });
 
@@ -929,7 +949,6 @@ export function WorktreeChanges({
         {review.showRail && (
           <ReviewRail
             railRef={review.railRef}
-            pr={worktreePr}
             prNumber={review.placement.prNumber}
             model={review.placement.model}
             loading={review.placement.loading}
