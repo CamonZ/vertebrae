@@ -169,7 +169,7 @@ export const inferenceStepMachine: MachinePartDef<InferenceExtra> = {
   part: {
     name: "inference step",
     job: "one agent turn",
-    aka: "llm_inference · claude · codex · mistral vibe",
+    aka: "llm_inference · claude · codex · ACP",
   },
   family: "vertebrae workflows",
   footprint: "M",

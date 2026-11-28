@@ -4,7 +4,7 @@ Choose when the mechanism one agent turn. Family: vertebrae workflows; footprint
 
 Props:
 
-- `harness`: `{"type":"string","default":"claude"}` — the harness running the turn (claude, codex, mistral vibe)
+- `harness`: `{"type":"string","default":"claude"}` — the harness running the turn (claude, codex, ACP)
 
 Ports:
 

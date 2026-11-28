@@ -49,8 +49,8 @@ pub enum CliHarness {
     Claude,
     Codex,
     Typesafe,
-    #[value(name = "mistral_vibe")]
-    MistralVibe,
+    #[value(name = "acp")]
+    Acp,
 }
 
 impl From<CliHarness> for StepHarness {
@@ -59,7 +59,7 @@ impl From<CliHarness> for StepHarness {
             CliHarness::Claude => Self::Claude,
             CliHarness::Codex => Self::Codex,
             CliHarness::Typesafe => Self::Typesafe,
-            CliHarness::MistralVibe => Self::MistralVibe,
+            CliHarness::Acp => Self::Acp,
         }
     }
 }

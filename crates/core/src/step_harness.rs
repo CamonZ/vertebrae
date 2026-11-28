@@ -14,17 +14,28 @@ pub enum StepHarness {
     Claude,
     Codex,
     Typesafe,
-    #[serde(rename = "mistral_vibe")]
-    MistralVibe,
+    Acp,
 }
 
 impl StepHarness {
+    pub const fn uses_local_process(self) -> bool {
+        !matches!(self, Self::Typesafe)
+    }
+
+    pub const fn supports_workflow_tool_overrides(self) -> bool {
+        matches!(self, Self::Claude | Self::Codex)
+    }
+
+    pub const fn supports_workflow_sessions(self) -> bool {
+        matches!(self, Self::Claude | Self::Codex)
+    }
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
             Self::Typesafe => "typesafe",
-            Self::MistralVibe => "mistral_vibe",
+            Self::Acp => "acp",
         }
     }
 }
@@ -45,7 +56,7 @@ mod tests {
             (StepHarness::Claude, "claude"),
             (StepHarness::Codex, "codex"),
             (StepHarness::Typesafe, "typesafe"),
-            (StepHarness::MistralVibe, "mistral_vibe"),
+            (StepHarness::Acp, "acp"),
         ] {
             assert_eq!(
                 serde_json::to_string(&harness).unwrap(),

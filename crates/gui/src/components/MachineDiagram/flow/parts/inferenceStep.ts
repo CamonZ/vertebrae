@@ -60,7 +60,7 @@ export const inferenceStepPart: PartKindDef<InferenceProps, InferenceState> = {
     harness: {
       type: "string",
       default: "claude",
-      description: "the harness running the turn (claude, codex, mistral vibe)",
+      description: "the harness running the turn (claude, codex, ACP)",
     },
   },
   ports,

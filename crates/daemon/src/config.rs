@@ -588,9 +588,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         }
     }

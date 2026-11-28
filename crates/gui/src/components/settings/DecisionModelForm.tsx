@@ -38,7 +38,7 @@ export function DecisionModelForm({
     ["anthropic", "Anthropic · Claude"],
     ["openai", "OpenAI · Codex"],
     ["typesafe", "TypeSafe"],
-    ["mistral", "Mistral Vibe"],
+    ...(settings.acp_providers ?? []).map((p): [string, string] => [p.id, p.name]),
     ...settings.providers.map((p): [string, string] => [
       p.id,
       `${p.id} · ${p.harness}`,
@@ -51,13 +51,16 @@ export function DecisionModelForm({
     ]);
   }
   const profile = settings.providers.find((p) => p.id === draft.provider);
+  const acp = settings.acp_providers?.find((p) => p.id === draft.provider);
   const provider = catalog?.providers.find((p) => p.id === draft.provider);
   const harness = catalog?.harnesses.find(
     (h) => h.harness === provider?.harness
   );
   const models: [string, string][] = profile
     ? profile.models.map((m) => [m, m])
-    : (provider?.models ?? harness?.models ?? [])
+    : acp?.models?.length
+      ? acp.models.map((m): [string, string] => [m, m])
+      : (provider?.models ?? harness?.models ?? [])
         .filter((m) => m.id !== "default")
         .map((m) => [m.id, m.label]);
   if (

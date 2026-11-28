@@ -13,7 +13,7 @@ use std::{
 };
 
 use vertebrae_core::{ProviderId, ProviderProfile, StepHarness};
-use vertebrae_harness::HarnessFactoryConfig;
+use vertebrae_harness::{AcpLaunch, HarnessFactoryConfig};
 use vertebrae_installer::ClaudePluginDirResolution;
 
 use crate::helpers::{ProviderBinaries, ProviderDiscoveryDiagnostics};
@@ -124,10 +124,10 @@ impl DaemonCapabilities {
                 },
             ),
             (
-                StepHarness::MistralVibe,
+                StepHarness::Acp,
                 HarnessCapability {
-                    executable: provider_binaries.mistral_vibe.clone(),
-                    discovery_diagnostic: provider_diagnostics.mistral_vibe.clone(),
+                    executable: None,
+                    discovery_diagnostic: None,
                 },
             ),
         ]
@@ -286,7 +286,14 @@ impl DaemonCapabilities {
                     self.provider_binaries.get(profile.harness).is_some()
                 }
                 StepHarness::Typesafe => true,
-                StepHarness::MistralVibe => self.provider_binaries.get(profile.harness).is_some(),
+                StepHarness::Acp => profile.executable.as_deref().is_some_and(|executable| {
+                    AcpLaunch::resolve(
+                        executable,
+                        profile.args.clone(),
+                        Some(self.shell_path.as_ref()),
+                    )
+                    .is_ok()
+                }),
             }
     }
 
@@ -501,7 +508,6 @@ mod tests {
             ProviderDiscoveryDiagnostics {
                 anthropic: Some("Claude Code CLI not found".to_string()),
                 openai: Some("Codex CLI not found".to_string()),
-                mistral_vibe: Some("Mistral Vibe server not found".to_string()),
             },
             Path::new("/tmp/project"),
             None,
@@ -526,9 +532,9 @@ mod tests {
         assert_eq!(
             capabilities
                 .harnesses
-                .get(&StepHarness::MistralVibe)
+                .get(&StepHarness::Acp)
                 .and_then(|capability| capability.discovery_diagnostic.as_deref()),
-            Some("Mistral Vibe server not found")
+            None
         );
         assert_eq!(
             capabilities

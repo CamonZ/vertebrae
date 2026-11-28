@@ -338,19 +338,20 @@ where
 }
 
 /// Keep step type authoritative for runtime capabilities. TypeSafe only
-/// supports structured inference, while Claude and Codex handle the regular
+/// supports structured inference, while Claude, Codex and ACP handle the regular
 /// `llm_inference` path.
 pub fn validate_step_harness_compatibility(
     step_type: Option<&str>,
     harness: Option<StepHarness>,
 ) -> Result<(), String> {
     match (step_type, harness) {
-        (Some("structured_inference"), Some(StepHarness::Claude | StepHarness::Codex)) => {
-            Err(format!(
-                "step type 'structured_inference' is unsupported by the selected '{}' harness",
-                harness.unwrap()
-            ))
-        }
+        (
+            Some("structured_inference"),
+            Some(StepHarness::Claude | StepHarness::Codex | StepHarness::Acp),
+        ) => Err(format!(
+            "step type 'structured_inference' is unsupported by the selected '{}' harness",
+            harness.unwrap()
+        )),
         (Some("llm_inference"), Some(StepHarness::Typesafe)) => {
             Err("step harness 'typesafe' only supports step type 'structured_inference'".into())
         }
@@ -367,9 +368,9 @@ fn parse_payload_harness(
             "claude" => Ok(Some(StepHarness::Claude)),
             "codex" => Ok(Some(StepHarness::Codex)),
             "typesafe" => Ok(Some(StepHarness::Typesafe)),
-            "mistral_vibe" => Ok(Some(StepHarness::MistralVibe)),
+            "acp" => Ok(Some(StepHarness::Acp)),
             unsupported => Err(format!(
-                "unsupported step harness '{unsupported}'; expected 'claude', 'codex', 'typesafe', or 'mistral_vibe'"
+                "unsupported step harness '{unsupported}'; expected 'claude', 'codex', 'typesafe', or 'acp'"
             )),
         },
         Some(value) => Err(format!(
@@ -1493,7 +1494,6 @@ mod tests {
             provider_binaries: crate::helpers::ProviderBinaries {
                 anthropic: None,
                 openai: None,
-                mistral_vibe: None,
             },
             shell_path: String::new(),
             installed_skills_roots: Vec::new(),
@@ -1891,6 +1891,12 @@ done
     }
 
     async fn provider_execution_server() -> wiremock::MockServer {
+        provider_execution_server_with_logs(|_| {}).await
+    }
+
+    async fn provider_execution_server_with_logs(
+        on_log: impl Fn(&wiremock::Request) + Send + Sync + 'static,
+    ) -> wiremock::MockServer {
         use wiremock::{
             Mock, MockServer, ResponseTemplate,
             matchers::{body_string_contains, method, path},
@@ -1899,11 +1905,12 @@ done
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_string_contains("create_session_log"))
-            .respond_with(
+            .respond_with(move |request: &wiremock::Request| {
+                on_log(request);
                 ResponseTemplate::new(200).set_body_json(
                     serde_json::json!({"data":{"create_session_log":{"id":"log-1"}}}),
-                ),
-            )
+                )
+            })
             .with_priority(1)
             .mount(&server)
             .await;
@@ -2012,6 +2019,9 @@ done
         let args = std::fs::read_to_string(temp.path().join("args.txt")).unwrap();
         (updates, args)
     }
+
+    #[cfg(unix)]
+    mod acp;
 
     async fn wait_for_file(path: &std::path::Path) {
         tokio::time::timeout(Duration::from_secs(10), async {
@@ -2463,7 +2473,6 @@ done
                 provider_binaries: crate::helpers::ProviderBinaries {
                     anthropic: Some(PathBuf::from("/usr/local/bin/claude")),
                     openai: Some(PathBuf::from("/usr/local/bin/codex")),
-                    mistral_vibe: None,
                 },
                 shell_path: "/usr/local/bin:/usr/bin:/bin".to_string(),
                 installed_skills_roots: Vec::new(),
@@ -2642,7 +2651,7 @@ done
             ("claude", StepHarness::Claude),
             ("codex", StepHarness::Codex),
             ("typesafe", StepHarness::Typesafe),
-            ("mistral_vibe", StepHarness::MistralVibe),
+            ("acp", StepHarness::Acp),
         ] {
             assert_eq!(
                 parse_payload_harness(Some(&serde_json::json!(wire))).unwrap(),
@@ -2667,7 +2676,7 @@ done
             "{error}"
         );
         assert!(
-            error.contains("'claude', 'codex', 'typesafe', or 'mistral_vibe'"),
+            error.contains("'claude', 'codex', 'typesafe', or 'acp'"),
             "{error}"
         );
 

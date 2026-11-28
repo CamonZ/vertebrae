@@ -35,10 +35,15 @@ export function AcpAgentForm({
   return (
     <div className={`${card} space-y-5`}>
       <h2 className="font-serif text-2xl" data-settings-anchor>
-        {existing ? settings.name.trim() || "ACP connection" : "New ACP connection"}
+        {existing ? settings.name.trim() || "ACP provider" : "New ACP provider"}
       </h2>
+      {!existing && (
+        <TextField label="Provider ID" value={settings.id}
+          change={(id) => onChange({ ...settings, id })} />
+      )}
+      {existing && <p className="text-secondary">Provider ID: {settings.id}</p>}
       <TextField
-        label="Connection name"
+        label="Provider name"
         value={settings.name}
         change={(name) => onChange({ ...settings, name })}
       />
@@ -48,6 +53,10 @@ export function AcpAgentForm({
         value={settings.executable}
         change={(executable) => onChange({ ...settings, executable })}
       />
+      <TextField label="Models" hint="Comma-separated agent model IDs. Leave empty to use the agent’s advertised models."
+        value={settings.models} change={(models) => onChange({ ...settings, models })} />
+      <TextField label="Default model" value={settings.default_model}
+        change={(default_model) => onChange({ ...settings, default_model })} />
       <fieldset className="space-y-3 border-t border-[var(--color-line)] pt-3">
         <legend className="text-content font-medium">Arguments</legend>
         <p className="text-secondary text-[var(--color-fg-mute)]">
@@ -86,7 +95,7 @@ export function AcpAgentForm({
       </fieldset>
       {onRemove && (
         <Button type="button" size="sm" variant="danger" onClick={onRemove}>
-          Remove connection
+          Remove provider
         </Button>
       )}
     </div>

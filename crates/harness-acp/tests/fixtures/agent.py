@@ -4,7 +4,9 @@ import os
 import sys
 
 model_mode = sys.argv[1:] == ["--model"]
-if not model_mode:
+workflow_mode = sys.argv[1:] == ["--workflow", "literal $HOME; value"]
+workflow_model = sys.argv[1:] == ["--workflow-model"]
+if not (model_mode or workflow_mode or workflow_model):
     assert sys.argv[1:] == ["one argument with spaces", "$HOME; literal", ""]
 
 
@@ -52,10 +54,104 @@ initialize = receive()
 assert initialize["method"] == "initialize"
 assert initialize["params"]["protocolVersion"] == 1
 assert initialize["params"]["clientCapabilities"] == {}
-result(initialize, protocolVersion=1)
+if workflow_mode or workflow_model:
+    result(initialize, protocolVersion=1, agentCapabilities={"sessionCapabilities": {"close": {}}})
+else:
+    result(initialize, protocolVersion=1)
 new = receive()
 assert new["method"] == "session/new"
 assert new["params"] == {"cwd": os.getcwd(), "mcpServers": []}
+if workflow_model:
+    result(new, sessionId="fixture")
+    turn = receive()
+    assert turn["method"] == "session/prompt"
+    assert turn["params"]["sessionId"] == "fixture"
+    actions, ending = json.loads(turn["params"]["prompt"][0]["text"])
+    for index, action in enumerate(actions):
+        if action == "text":
+            update("agent_message_chunk", content={"type": "text", "text": f"{index} "})
+        elif action == "usage":
+            update("usage_update", used=index, size=100)
+        elif action == "permission":
+            request_permission(f"request-{index}")
+            assert receive() == {
+                "jsonrpc": "2.0", "id": f"request-{index}",
+                "result": {"outcome": {"outcome": "cancelled"}},
+            }
+        else:
+            raise AssertionError(action)
+    if ending == "eof":
+        sys.exit(41)
+    if ending == "error":
+        send(id=turn["id"], error={"code": -32603, "message": "private fixture detail"})
+    elif ending == "complete":
+        result(turn, stopReason="end_turn")
+        close = receive()
+        assert close["method"] == "session/close"
+        assert close["params"] == {"sessionId": "fixture"}
+        with open("workflow-model-closed", "w") as marker:
+            marker.write("closed")
+        result(close)
+    else:
+        if ending == "cancel":
+            update("agent_message_chunk", content={"type": "text", "text": "cancel checkpoint"})
+            assert receive() == {
+                "jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "fixture"},
+            }
+        else:
+            assert ending == "agent-cancel"
+        result(turn, stopReason="cancelled")
+    # The runtime owns cleanup even if the agent keeps serving requests.
+    sys.stdin.readline()
+    sys.exit(0)
+if workflow_mode:
+    assert os.environ["VTB_ACP_WORKSPACE"] == os.getcwd()
+    if "VTB_ACP_PATH_HEAD" in os.environ:
+        assert os.environ["PATH"].split(os.pathsep)[0] == os.environ["VTB_ACP_PATH_HEAD"]
+    model = {
+        "type": "select", "id": "agent-model", "name": "Model", "category": "model",
+        "currentValue": "default",
+        "options": [{"value": name, "name": name} for name in ["default", "selected"]],
+    }
+    result(new, sessionId="fixture", configOptions=[model])
+    setting = receive()
+    assert setting["method"] == "session/set_config_option"
+    assert setting["params"] == {"configId": "agent-model", "sessionId": "fixture", "value": "selected"}
+    result(setting, configOptions=[dict(model, currentValue="selected")])
+    turn = receive()
+    assert turn["method"] == "session/prompt"
+    content = turn["params"]["prompt"][0]["text"]
+    assert content in {"complete", "cancel", "fail", "large"}
+    request_permission("workflow-permission")
+    assert receive() == {
+        "jsonrpc": "2.0", "id": "workflow-permission",
+        "result": {"outcome": {"outcome": "cancelled"}},
+    }
+    update("agent_message_chunk", content={"type": "text", "text": "Hello "})
+    if content == "cancel":
+        assert receive() == {
+            "jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": "fixture"},
+        }
+        result(turn, stopReason="cancelled")
+    elif content == "fail":
+        send(id=turn["id"], error={"code": -32603, "message": "private provider detail"})
+    else:
+        if content == "large":
+            for _ in range(3):
+                update("agent_message_chunk", content={"type": "text", "text": "x" * (400 * 1024)})
+        else:
+            update("agent_message_chunk", content={"type": "text", "text": "workflow"})
+        result(turn, stopReason="end_turn")
+    if content in {"complete", "large"}:
+        close = receive()
+        assert close["method"] == "session/close"
+        assert close["params"] == {"sessionId": "fixture"}
+        with open("close-ack", "w") as marker:
+            marker.write(content)
+        result(close)
+    # Successful tests should also settle against a process that stays alive.
+    sys.stdin.readline()
+    sys.exit(0)
 result(new, sessionId="fixture")
 
 def run_model():

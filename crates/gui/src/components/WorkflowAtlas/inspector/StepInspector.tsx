@@ -1,3 +1,5 @@
+import { AcpStepProviderFields } from "./AcpStepProviderFields";
+import { STEP_HARNESS_LABELS } from "./stepHarnessOptions";
 /* ──────────────────────────────────────────────────────────────────
    Workflow Atlas — Inspector content (step mode).
 
@@ -176,6 +178,7 @@ function StepInspectorContent({
   // The outgoing set the draft started from. Save sends transitions only when
   // the draft differs from it, because `update_step` replaces the whole set.
   const [seededTransitionsTo, setSeededTransitionsTo] = useState("");
+  const [acpProvider, setAcpProvider] = useState("");
   const [modelValue, setModelValue] = useState("");
   const [outputSchema, setOutputSchema] = useState("");
   const [routeConfig, setRouteConfig] = useState("");
@@ -210,6 +213,7 @@ function StepInspectorContent({
     setTransitionsTo(seededTransitions);
     setSeededTransitionsTo(seededTransitions);
     setModelValue(inferenceConfig?.agent_config?.model ?? "");
+    setAcpProvider(inferenceConfig?.agent_config?.provider ?? "");
     setOutputSchema(
       cfg.config && "output_schema" in cfg.config && cfg.config.output_schema
         ? JSON.stringify(cfg.config.output_schema, null, 2)
@@ -528,6 +532,11 @@ function StepInspectorContent({
 
     setSaving(true);
     setError(null);
+    if (isInference && harness === "acp" && !acpProvider.trim()) {
+      setError("Enter a configured ACP provider ID.");
+      setSaving(false);
+      return;
+    }
     try {
       const config = isExecute
         ? {
@@ -543,6 +552,11 @@ function StepInspectorContent({
               skills: listValue(skillsText),
               agent_config: {
                 ...inference?.agent_config,
+                ...(harness === "acp"
+                  ? { provider: acpProvider.trim() }
+                  : cfg?.harness === "acp"
+                    ? { provider: null }
+                    : {}),
                 model: modelValue || null,
               },
               output_schema: parsedSchema,
@@ -655,10 +669,9 @@ function StepInspectorContent({
                   setHarness((event.target.value || null) as StepHarness | null)
                 }
               >
-                <option value="claude">Claude</option>
-                <option value="codex">Codex</option>
-                <option value="typesafe">TypeSafe</option>
-                <option value="mistral_vibe">Mistral Vibe</option>
+                {Object.entries(STEP_HARNESS_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
               </select>
             </label>
           ) : null}
@@ -690,6 +703,12 @@ function StepInspectorContent({
                   onChange={(e) => setSkillsText(e.target.value)}
                 />
               </label>
+              {harness === "acp" ? (
+                <AcpStepProviderFields
+                  provider={acpProvider} model={modelValue}
+                  onProvider={(id) => { setAcpProvider(id); setModelValue(""); }}
+                  onModel={setModelValue} />
+              ) : (
               <label>
                 Model
                 <input
@@ -697,6 +716,7 @@ function StepInspectorContent({
                   onChange={(e) => setModelValue(e.target.value)}
                 />
               </label>
+              )}
             </>
           ) : null}
           {isStructured ? (

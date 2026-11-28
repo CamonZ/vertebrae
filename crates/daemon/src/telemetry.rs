@@ -100,10 +100,12 @@ fn capability_report(capabilities: &DaemonCapabilities) -> CapabilityReport {
     // Custom providers are advertised by ID only; endpoints and credentials
     // never leave the daemon.
     for (id, profile) in &capabilities.provider_profiles {
-        providers.insert(
-            id.to_string(),
-            capabilities.custom_provider_available(id, profile),
-        );
+        let available = capabilities.custom_provider_available(id, profile);
+        providers.insert(id.to_string(), available);
+        if profile.harness == StepHarness::Acp {
+            let ready = harnesses.entry("acp".into()).or_insert(false);
+            *ready |= available;
+        }
     }
 
     CapabilityReport {
@@ -161,7 +163,6 @@ mod tests {
             provider_binaries: ProviderBinaries {
                 anthropic: anthropic.map(PathBuf::from),
                 openai: openai.map(PathBuf::from),
-                mistral_vibe: None,
             },
             shell_path: "/secret/shell/path".into(),
             installed_skills_roots: vec![PathBuf::from("/secret/skills")],

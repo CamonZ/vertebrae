@@ -1,4 +1,4 @@
-//! ACP v1 interactive sessions over newline-delimited JSON-RPC.
+//! ACP v1 interactive sessions and one-shot runs over newline-delimited JSON-RPC.
 mod config;
 mod protocol;
 mod session;
@@ -32,10 +32,11 @@ struct AgentSession {
     config: SessionConfig,
     supports_steering: bool,
     supports_resume: bool,
+    supports_close: bool,
     initial_usage: Option<HarnessEventPayloadV1>,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AcpRuntime {
     executable: PathBuf,
     args: Vec<String>,
@@ -65,7 +66,9 @@ impl AcpRuntime {
                 ))
             })?;
 
-        let (mut process, session) = self.open(Some(directory.path().into()), None, None).await?;
+        let (mut process, session) = self
+            .open(Some(directory.path().into()), None, None, None)
+            .await?;
         let AgentSession {
             id,
             config,
@@ -159,7 +162,9 @@ impl AcpRuntime {
             can_append = true;
             Ok(())
         };
-        let (mut process, _) = self.open(directory, Some(id), Some(&mut record)).await?;
+        let (mut process, _) = self
+            .open(directory, Some(id), Some(&mut record), None)
+            .await?;
         process.reap().await;
         Ok(messages)
     }
@@ -169,6 +174,7 @@ impl AcpRuntime {
         directory: Option<PathBuf>,
         resume: Option<&str>,
         history: Option<&mut HistoryObserver<'_>>,
+        cancel: Option<&mut tokio::sync::watch::Receiver<bool>>,
     ) -> Result<(Process, AgentSession), HarnessError> {
         let cwd = tokio::task::spawn_blocking(move || {
             directory
@@ -181,18 +187,23 @@ impl AcpRuntime {
             HarnessError::InvalidRequest(format!("Invalid ACP working directory: {error}"))
         })?;
         let mut process = Process::spawn(&self.executable, &self.args, &self.environment, &cwd)?;
-        let result = timeout(Duration::from_secs(30), async {
+        let initialize = timeout(Duration::from_secs(30), async {
             let initialized = process.request(1, "initialize", json!({
                 "protocolVersion": 1,
                 "clientCapabilities": {},
                 "clientInfo": {"name":"vertebrae", "title":"Vertebrae", "version":env!("CARGO_PKG_VERSION")}
             })).await?;
             if initialized["protocolVersion"] != 1 {
-                return Err(HarnessError::Unsupported("ACP agent did not negotiate protocol version 1".into()));
+                return Err(HarnessError::Unsupported(
+                    "ACP agent did not negotiate protocol version 1".into(),
+                ));
             }
-            let supports_load = initialized.pointer("/agentCapabilities/loadSession")
-                .and_then(serde_json::Value::as_bool) == Some(true);
-            let supports_resume = initialized.pointer("/agentCapabilities/sessionCapabilities/resume")
+            let supports_load = initialized
+                .pointer("/agentCapabilities/loadSession")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true);
+            let supports_resume = initialized
+                .pointer("/agentCapabilities/sessionCapabilities/resume")
                 .is_some_and(serde_json::Value::is_object);
             let method = match (resume, history.is_some()) {
                 (Some(_), true) if supports_load => "session/load",
@@ -210,24 +221,33 @@ impl AcpRuntime {
             };
             let mut history = history;
             let mut initial_usage = None;
-            let session = process.request_observing(2, method, params, |message| {
-                if let Some(record) = &mut history {
-                    record(message)?;
-                }
-                let params = &message["params"];
-                if message["method"] == "session/update"
-                    && let Some(session_id) = params["sessionId"].as_str()
-                    && resume.is_none_or(|id| id == session_id)
-                    && let Some((usage @ HarnessEventPayloadV1::Usage(_), _)) = updates::update(&params["update"])
-                {
-                    initial_usage = Some((session_id.to_owned(), usage));
-                }
-                Ok(())
-            }).await?;
-            let id = session["sessionId"].as_str().or(resume).filter(|id| !id.is_empty()).map(str::to_owned)
+            let session = process
+                .request_observing(2, method, params, |message| {
+                    if let Some(record) = &mut history {
+                        record(message)?;
+                    }
+                    let params = &message["params"];
+                    if message["method"] == "session/update"
+                        && let Some(session_id) = params["sessionId"].as_str()
+                        && resume.is_none_or(|id| id == session_id)
+                        && let Some((usage @ HarnessEventPayloadV1::Usage(_), _)) =
+                            updates::update(&params["update"])
+                    {
+                        initial_usage = Some((session_id.to_owned(), usage));
+                    }
+                    Ok(())
+                })
+                .await?;
+            let id = session["sessionId"]
+                .as_str()
+                .or(resume)
+                .filter(|id| !id.is_empty())
+                .map(str::to_owned)
                 .ok_or_else(|| operation("ACP agent returned no session ID"))?;
             if resume.is_some_and(|resume| resume != id) {
-                return Err(operation("ACP agent returned a different session ID on resume"));
+                return Err(operation(
+                    "ACP agent returned a different session ID on resume",
+                ));
             }
             let mut config = SessionConfig::default();
             config.replace(&session);
@@ -239,9 +259,22 @@ impl AcpRuntime {
                 config,
                 supports_steering: config::supports_steering(&initialized),
                 supports_resume: supports_resume || supports_load,
+                supports_close: initialized
+                    .pointer("/agentCapabilities/sessionCapabilities/close")
+                    .is_some_and(Value::is_object),
                 initial_usage,
             })
-        }).await.unwrap_or_else(|_| Err(operation("ACP agent startup timed out")));
+        });
+        let result = tokio::select! {
+            biased;
+            _ = async {
+                match cancel {
+                    Some(cancel) => session::wait_for_signal(cancel).await,
+                    None => std::future::pending().await,
+                }
+            } => Err(operation("ACP agent startup interrupted")),
+            result = initialize => result.unwrap_or_else(|_| Err(operation("ACP agent startup timed out"))),
+        };
         match result {
             Ok(session) => Ok((process, session)),
             Err(error) => {
@@ -260,7 +293,7 @@ impl HarnessRuntime for AcpRuntime {
             available: true,
             unavailable_reason: None,
             persistent_sessions: true,
-            one_shot_runs: false,
+            one_shot_runs: true,
             structured_inference: false,
             session_resumption: false,
             default_model: None,
@@ -291,17 +324,17 @@ impl HarnessRuntime for AcpRuntime {
                 "ACP uses the agent's configured session settings".into(),
             ));
         }
-        let (process, session) = self.open(directory, resume, None).await?;
+        let (process, session) = self.open(directory, resume, None, None).await?;
         session::start(process, request, session, events, controls).await
     }
 
     async fn run_once(
         &self,
-        _request: RunRequest,
-        _events: Arc<dyn EventSink>,
+        request: RunRequest,
+        events: Arc<dyn EventSink>,
         _controls: Arc<dyn ControlSink>,
     ) -> Result<Arc<dyn RunHandle>, HarnessError> {
-        Err(HarnessError::Unsupported("ACP workflow execution".into()))
+        session::run_once(self.clone(), request, events)
     }
 }
 

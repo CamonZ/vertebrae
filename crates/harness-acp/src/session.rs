@@ -1,3 +1,6 @@
+mod one_shot;
+pub(crate) use one_shot::run_once;
+
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
@@ -11,7 +14,7 @@ use vertebrae_harness_core::{
     HarnessError, HarnessEventDraftV1, HarnessEventPayloadV1 as Event, ItemId, ProviderResumeId,
     SendTurnRequest, SequencedEventSink, SessionCloseOutcome, SessionCloseStatus, SessionHandle,
     SessionId, SessionStarted, StartSessionRequest, StreamId, ThreadId, TurnHandle, TurnId,
-    TurnInput, TurnInputProvenance, TurnOutcome, TurnStarted, UpdateSemantics,
+    TurnInput, TurnInputProvenance, TurnOutcome, TurnSettings, TurnStarted, UpdateSemantics,
 };
 
 use crate::{
@@ -63,7 +66,7 @@ async fn settle<T: Clone>(
     }
 }
 
-async fn wait_for_signal(receiver: &mut watch::Receiver<bool>) {
+pub(crate) async fn wait_for_signal(receiver: &mut watch::Receiver<bool>) {
     if receiver.wait_for(|value| *value).await.is_err() {
         std::future::pending::<()>().await;
     }
@@ -181,16 +184,31 @@ impl Drop for Session {
     }
 }
 
-struct Actor {
+struct SessionClient {
     process: Process,
     agent_session: String,
     config: SessionConfig,
     next_id: u64,
-    steers: mpsc::Receiver<Steer>,
     stream: StreamId,
+    events: Arc<SequencedEventSink>,
+}
+
+struct Actor {
+    client: SessionClient,
+    steers: mpsc::Receiver<Steer>,
     correlation: EventCorrelation,
-    events: SequencedEventSink,
     controls: Arc<dyn ControlSink>,
+}
+
+enum PromptMode<'a> {
+    Interactive(InteractivePrompt<'a>),
+    OneShot,
+}
+
+struct InteractivePrompt<'a> {
+    closing: &'a mut watch::Receiver<bool>,
+    steers: &'a mut mpsc::Receiver<Steer>,
+    controls: &'a Arc<dyn ControlSink>,
 }
 
 pub(crate) async fn start(
@@ -208,25 +226,31 @@ pub(crate) async fn start(
         .supports_resume
         .then(|| ProviderResumeId::new(session.id.clone()));
     let mut actor = Actor {
-        process,
-        agent_session: session.id,
-        config: session.config,
-        next_id: 2,
+        client: SessionClient {
+            process,
+            agent_session: session.id,
+            config: session.config,
+            next_id: 2,
+            stream: request.stream_id,
+            events: Arc::new(SequencedEventSink::new(
+                Arc::new(EventSequencer::default()),
+                events,
+            )),
+        },
         steers,
-        stream: request.stream_id,
         correlation: EventCorrelation {
             session_id: Some(request.session_id.clone()),
             thread_id: Some(ThreadId::new(request.session_id.as_str())),
             ..Default::default()
         },
-        events: SequencedEventSink::new(Arc::new(EventSequencer::default()), events),
         controls,
     };
     let started = actor
+        .client
         .emit(
             Event::SessionStarted(SessionStarted {
                 provider: "acp".into(),
-                model: actor.config.current("model").map(str::to_owned),
+                model: actor.client.config.current("model").map(str::to_owned),
                 provider_resume_id: provider_resume_id.clone(),
                 speed_tier_status: None,
                 tools: Vec::new(),
@@ -236,15 +260,16 @@ pub(crate) async fn start(
         )
         .await;
     if let Err(error) = started {
-        actor.process.reap().await;
+        actor.client.process.reap().await;
         return Err(error);
     }
     if let Some(usage) = session.initial_usage
         && let Err(error) = actor
+            .client
             .emit(usage, UpdateSemantics::Snapshot, &actor.correlation)
             .await
     {
-        actor.process.reap().await;
+        actor.client.process.reap().await;
         return Err(error);
     }
     tokio::spawn(actor.run(receiver, close_receiver, closed_sender));
@@ -265,18 +290,6 @@ impl Actor {
             Some(steer) => steer,
             None => std::future::pending().await,
         }
-    }
-
-    async fn emit(
-        &self,
-        payload: Event,
-        semantics: UpdateSemantics,
-        correlation: &EventCorrelation,
-    ) -> Result<(), HarnessError> {
-        let mut draft = HarnessEventDraftV1::new(self.stream.clone(), semantics, payload);
-        draft.correlation = correlation.clone();
-        self.events.emit(draft).await?;
-        Ok(())
     }
 
     async fn run(
@@ -300,27 +313,27 @@ impl Actor {
                     let _ = steer.result.send(Err(operation("ACP turn is no longer active")));
                 }
                 _ = wait_for_signal(&mut closing) => break,
-                message = self.process.read() => {
+                message = self.client.process.read() => {
                     let result = match message {
                         Ok(message) if message["method"] == "session/update" => {
                             let params = &message["params"];
-                            self.update_config(params);
-                            if params["sessionId"] == self.agent_session
+                            self.client.update_config(params);
+                            if params["sessionId"] == self.client.agent_session
                                 && let Some((event @ Event::Usage(_), semantics)) = update(&params["update"])
                             {
-                                self.emit(event, semantics, &self.correlation).await
+                                self.client.emit(event, semantics, &self.correlation).await
                             } else {
                                 Ok(())
                             }
                         }
                         Ok(message) if message.get("method").is_some() && message.get("id").is_some() => {
-                            self.process.reject(&message["id"]).await
+                            self.client.process.reject(&message["id"]).await
                         }
                         Ok(_) => Ok(()),
                         Err(error) => Err(error),
                     };
                     if let Err(error) = result {
-                        let _ = self.emit(
+                        let _ = self.client.emit(
                             Event::Error(DiagnosticEvent { message: error.to_string(), code: None }),
                             UpdateSemantics::Snapshot,
                             &self.correlation,
@@ -336,7 +349,7 @@ impl Actor {
             let mut stopping = watch::channel(true).1;
             let _ = self.run_turn(turn, &mut stopping).await;
         }
-        self.process.reap().await;
+        self.client.process.reap().await;
         let outcome = SessionCloseOutcome {
             status: if failure.is_some() {
                 SessionCloseStatus::ProcessLost
@@ -346,6 +359,7 @@ impl Actor {
             error: failure.map(|error| error.to_string()),
         };
         let result = self
+            .client
             .emit(
                 Event::SessionClosed(outcome.clone()),
                 UpdateSemantics::Snapshot,
@@ -367,6 +381,7 @@ impl Actor {
             ..self.correlation.clone()
         };
         if let Err(error) = self
+            .client
             .emit(
                 Event::TurnStarted(TurnStarted {
                     input_summary: None,
@@ -383,20 +398,12 @@ impl Actor {
         let (status, failure, fatal) = if *closing.borrow() || *turn.interrupt.borrow() {
             (CompletionStatus::Interrupted, None, false)
         } else {
-            let original_config = self.config.clone();
+            let original_config = self.client.config.clone();
             let settings = tokio::select! {
                 biased;
                 _ = wait_for_signal(closing) => None,
                 _ = wait_for_signal(&mut turn.interrupt) => None,
-                result = tokio::time::timeout(
-                    Duration::from_secs(10),
-                    self.config.apply(
-                        &mut self.process,
-                        &mut self.next_id,
-                        &self.agent_session,
-                        &turn.request.settings,
-                    ),
-                ) => Some(result.unwrap_or_else(|_| Err(operation("ACP agent did not confirm its settings in time")))),
+                result = self.client.apply_settings(&turn.request.settings) => Some(result),
             };
             match settings {
                 None => (
@@ -406,13 +413,26 @@ impl Actor {
                     )),
                     true,
                 ),
-                Some(Ok(())) => match self.prompt(&mut turn, closing, &correlation).await {
-                    Ok(status) => (status, None, false),
+                Some(Ok(())) => match self
+                    .client
+                    .prompt(
+                        &turn.request.content,
+                        &mut turn.interrupt,
+                        &correlation,
+                        PromptMode::Interactive(InteractivePrompt {
+                            closing,
+                            steers: &mut self.steers,
+                            controls: &self.controls,
+                        }),
+                    )
+                    .await
+                {
+                    Ok((status, _)) => (status, None, false),
                     Err(error) => (CompletionStatus::Failed, Some(error), true),
                 },
                 Some(Err(error)) => {
                     let fatal = !matches!(error, HarnessError::InvalidRequest(_))
-                        || self.config != original_config;
+                        || self.client.config != original_config;
                     (CompletionStatus::Failed, Some(error), fatal)
                 }
             }
@@ -423,6 +443,7 @@ impl Actor {
                 code: None,
             };
             let _ = self
+                .client
                 .emit(
                     if fatal {
                         Event::Error(diagnostic)
@@ -444,6 +465,7 @@ impl Actor {
         };
         drop(turn.permit);
         let delivered = self
+            .client
             .emit(
                 Event::TurnFinished(outcome.clone()),
                 UpdateSemantics::Snapshot,
@@ -462,6 +484,34 @@ impl Actor {
         } else {
             Ok(())
         }
+    }
+}
+
+impl SessionClient {
+    async fn emit(
+        &self,
+        payload: Event,
+        semantics: UpdateSemantics,
+        correlation: &EventCorrelation,
+    ) -> Result<(), HarnessError> {
+        let mut draft = HarnessEventDraftV1::new(self.stream.clone(), semantics, payload);
+        draft.correlation = correlation.clone();
+        self.events.emit(draft).await?;
+        Ok(())
+    }
+
+    async fn apply_settings(&mut self, settings: &TurnSettings) -> Result<(), HarnessError> {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.config.apply(
+                &mut self.process,
+                &mut self.next_id,
+                &self.agent_session,
+                settings,
+            ),
+        )
+        .await
+        .map_err(|_| operation("ACP agent did not confirm its settings in time"))?
     }
 
     fn update_config(&mut self, params: &Value) {
@@ -487,12 +537,29 @@ impl Actor {
 
     async fn prompt(
         &mut self,
-        turn: &mut Turn,
-        closing: &mut watch::Receiver<bool>,
+        content: &str,
+        interrupt: &mut watch::Receiver<bool>,
         correlation: &EventCorrelation,
-    ) -> Result<CompletionStatus, HarnessError> {
+        mode: PromptMode<'_>,
+    ) -> Result<(CompletionStatus, String), HarnessError> {
         let mut tool_calls = ToolCalls::default();
-        let mut latest = self.write_prompt(&turn.request.content).await?;
+        let mut latest = self.write_prompt(content).await?;
+        let (mut closing, mut steers, controls, mut result_text, cancel_status) = match mode {
+            PromptMode::Interactive(interactive) => (
+                Some(interactive.closing),
+                Some(interactive.steers),
+                Some(interactive.controls),
+                None,
+                CompletionStatus::Interrupted,
+            ),
+            PromptMode::OneShot => (
+                None,
+                None,
+                None,
+                Some(String::new()),
+                CompletionStatus::Cancelled,
+            ),
+        };
         let mut pending = HashSet::from([latest]);
         let mut status = CompletionStatus::Completed;
         let mut approval = None;
@@ -501,11 +568,16 @@ impl Actor {
         loop {
             tokio::select! {
                 biased;
-                _ = wait_for_signal(&mut turn.interrupt), if deadline.is_none() => {
+                _ = wait_for_signal(interrupt), if deadline.is_none() => {
                     self.cancel(&mut approval).await?;
                     deadline = Some(Instant::now() + Duration::from_secs(5));
                 }
-                _ = wait_for_signal(closing), if deadline.is_none() => {
+                _ = async {
+                    match closing.as_deref_mut() {
+                        Some(closing) => wait_for_signal(closing).await,
+                        None => std::future::pending().await,
+                    }
+                }, if deadline.is_none() => {
                     self.cancel(&mut approval).await?;
                     deadline = Some(Instant::now() + Duration::from_secs(5));
                 }
@@ -519,8 +591,13 @@ impl Actor {
                     let (rpc_id, request, _) = approval.take().expect("approval set");
                     self.process.write(permission_response(&rpc_id, &request, answered)).await?;
                 }
-                steer = Self::next_steer(&mut self.steers) => {
-                    if deadline.is_some() || steer.expected_turn != turn.request.turn_id {
+                steer = async {
+                    match steers.as_deref_mut() {
+                        Some(steers) => Actor::next_steer(steers).await,
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    if deadline.is_some() || correlation.turn_id.as_ref() != Some(&steer.expected_turn) {
                         let _ = steer.result.send(Err(operation("ACP turn is no longer active")));
                     } else if approval.is_some() {
                         let _ = steer.result.send(Err(operation("Answer the agent before steering")));
@@ -546,7 +623,7 @@ impl Actor {
                     {
                         let stop = response(message, "session/prompt")?;
                         let completion = match stop["stopReason"].as_str() {
-                            Some("cancelled") => CompletionStatus::Interrupted,
+                            Some("cancelled") => cancel_status,
                             Some("end_turn" | "max_tokens" | "max_turn_requests" | "refusal") => CompletionStatus::Completed,
                             _ => return Err(operation("ACP prompt returned an invalid stop reason")),
                         };
@@ -554,7 +631,7 @@ impl Actor {
                             status = completion;
                         }
                         if pending.is_empty() {
-                            return Ok(status);
+                            return Ok((status, result_text.unwrap_or_default()));
                         }
                         continue;
                     }
@@ -568,7 +645,10 @@ impl Actor {
                             for (event, semantics) in events {
                                 let mut item = correlation.clone();
                                 match &event {
-                                    Event::Text(_) => {
+                                    Event::Text(text) => {
+                                        if let Some(result_text) = &mut result_text {
+                                            result_text.push_str(&text.text);
+                                        }
                                         item.item_id = Some(text_item.get_or_insert_with(|| {
                                             ItemId::new(uuid::Uuid::new_v4().to_string())
                                         }).clone());
@@ -586,11 +666,13 @@ impl Actor {
                                 self.emit(event, semantics, &item).await?;
                             }
                         }
+                        // Workflow runs have no interactive approver.
                         (Some("session/request_permission"), Some(rpc_id)) => {
                             if deadline.is_none() && approval.is_none() && params["sessionId"] == self.agent_session
+                                && let Some(controls) = controls
                                 && let Some(request) = permission(params, correlation) {
                                 text_item = None;
-                                let controls = self.controls.clone();
+                                let controls = controls.clone();
                                 let control = request.clone();
                                 let (sender, receiver) = oneshot::channel();
                                 tokio::spawn(async move {
@@ -611,6 +693,19 @@ impl Actor {
                 }
             }
         }
+    }
+
+    async fn close(&mut self) {
+        self.next_id += 1;
+        let _ = tokio::time::timeout(
+            Duration::from_secs(2),
+            self.process.request(
+                self.next_id,
+                "session/close",
+                json!({"sessionId": self.agent_session}),
+            ),
+        )
+        .await;
     }
 
     async fn cancel(&mut self, approval: &mut Option<PendingApproval>) -> Result<(), HarnessError> {

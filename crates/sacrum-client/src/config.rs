@@ -7,7 +7,6 @@
 //! - `[sacrum].url` in config file for base URL (default: https://vertebrae.dev)
 //! - `[projects.<name>]` entries matched by CWD longest-prefix (CLI) or by name (GUI)
 //! - `[providers.<id>]` custom provider profiles used by steps and local chat
-//! - `[daemon]` daemon-wide execution settings (Rhai worker slots)
 
 use crate::error::{SacrumClientError, SacrumClientResult};
 use serde::{Deserialize, Serialize};
@@ -50,61 +49,36 @@ pub struct VertebraeConfigFile {
     #[serde(default, skip_serializing_if = "TypeSafeSection::is_default")]
     pub typesafe: TypeSafeSection,
     /// Per-machine custom providers keyed by provider ID. Built-in providers
-    /// (anthropic, openai, typesafe) need no entry. Profile Debug output
+    /// (anthropic, openai, typesafe) need no entry. ACP requires a named
+    /// profile. Profile Debug output
     /// redacts credentials.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub providers: BTreeMap<ProviderId, ProviderProfile>,
     #[serde(default, skip_serializing_if = "ObservabilityConfig::is_default")]
     pub observability: ObservabilityConfig,
-    /// Named ACP connections for desktop chat.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub local_chat_acp_agents: BTreeMap<String, LocalChatAcpSection>,
-    /// Daemon-wide execution settings shared by every project.
-    #[serde(default, skip_serializing_if = "DaemonSection::is_default")]
-    pub daemon: DaemonSection,
 }
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct LocalChatAcpSection {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    pub executable: PathBuf,
-    #[serde(default)]
-    pub args: Vec<String>,
-}
-
 impl VertebraeConfigFile {
-    pub fn acp_agents(&self) -> impl Iterator<Item = (&str, &LocalChatAcpSection)> {
-        self.local_chat_acp_agents
+    pub fn acp_agents(&self) -> impl Iterator<Item = (&ProviderId, &ProviderProfile)> {
+        self.providers
             .iter()
-            .map(|(id, config)| (id.as_str(), config))
+            .filter(|(_, profile)| profile.harness == vertebrae_core::StepHarness::Acp)
     }
 }
 
-impl LocalChatAcpSection {
-    pub fn display_name<'a>(&'a self, id: &'a str) -> &'a str {
-        self.name.as_deref().unwrap_or(id)
-    }
+#[derive(Deserialize)]
+struct LegacyAcpAgent {
+    name: Option<String>,
+    executable: PathBuf,
+    #[serde(default)]
+    args: Vec<String>,
 }
 
-impl std::fmt::Debug for LocalChatAcpSection {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("LocalChatAcpSection")
-            .field("executable", &self.executable)
-            .finish_non_exhaustive()
-    }
-}
-
-/// `[daemon]` settings read by vtb-daemon at startup.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct DaemonSection {}
-
-impl DaemonSection {
-    fn is_default(&self) -> bool {
-        self == &Self::default()
-    }
+#[derive(Deserialize)]
+struct ConfigWithLegacyAcp {
+    #[serde(flatten)]
+    config: VertebraeConfigFile,
+    #[serde(default)]
+    local_chat_acp_agents: BTreeMap<ProviderId, LegacyAcpAgent>,
 }
 
 /// TypeSafe provider settings shared with the daemon at startup.
@@ -549,9 +523,20 @@ fn open_config_lock(path: &Path) -> SacrumClientResult<std::fs::File> {
 }
 
 fn parse_config(content: &str) -> SacrumClientResult<VertebraeConfigFile> {
-    let mut config: VertebraeConfigFile = toml::from_str(content).map_err(|_| {
+    let ConfigWithLegacyAcp { mut config, local_chat_acp_agents } = toml::from_str(content).map_err(|_| {
         SacrumClientError::ConfigError("Configuration is not valid TOML or contains invalid settings. Fix the file before saving.".into())
     })?;
+    for (id, agent) in local_chat_acp_agents {
+        config
+            .providers
+            .entry(id)
+            .or_insert_with(|| ProviderProfile {
+                name: agent.name,
+                executable: Some(agent.executable),
+                args: agent.args,
+                ..ProviderProfile::new(vertebrae_core::StepHarness::Acp)
+            });
+    }
     config.source_revision = Some(config_revision(content));
     Ok(config)
 }
@@ -588,7 +573,8 @@ fn save_config_at(path: &Path, config: &VertebraeConfigFile) -> SacrumClientResu
             "Configuration changed on disk. Reload and reapply your edits.",
         ));
     }
-    let previous = parse_config(&content)?;
+    let previous: VertebraeConfigFile =
+        toml::from_str(&content).map_err(|_| config_error("Configuration is not valid TOML"))?;
     let old =
         toml::to_string(&previous).map_err(|_| config_error("Could not encode configuration"))?;
     let new =
@@ -603,6 +589,7 @@ fn save_config_at(path: &Path, config: &VertebraeConfigFile) -> SacrumClientResu
         .parse::<toml_edit::DocumentMut>()
         .map_err(|_| config_error("Configuration is not valid TOML"))?;
     merge_config_table(document.as_table_mut(), old.as_table(), new.as_table());
+    document.remove("local_chat_acp_agents");
     if read_config_text(path)? != content {
         return Err(config_error(
             "Configuration changed on disk. Reload and reapply your edits.",
@@ -873,9 +860,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -907,9 +892,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -939,9 +922,7 @@ mod tests {
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -1052,6 +1033,46 @@ models = ["qwen3-coder"]
     }
 
     #[test]
+    fn acp_profiles_preserve_literal_argv_and_migrate_old_desktop_connections_on_save() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[local_chat_acp_agents.previous]
+name = "Previous agent"
+executable = "previous-agent"
+args = ["", "two words"]
+
+[providers.gemini-neon]
+harness = "acp"
+executable = "neon"
+args = ["--acp", "secret-like option"]
+models = ["selected"]
+
+[providers.gemini-neon.env]
+AGENT_KEY = "secret-like environment"
+"#,
+        )
+        .unwrap();
+        let config = load_config_file_at(&path).unwrap();
+        let agents = config.acp_agents().collect::<Vec<_>>();
+        assert_eq!(agents.len(), 2);
+        assert_eq!(agents[0].0.as_str(), "gemini-neon");
+        assert_eq!(agents[0].1.args, ["--acp", "secret-like option"]);
+        assert_eq!(agents[1].1.args, ["", "two words"]);
+        assert!(!format!("{config:?}").contains("secret-like"));
+        save_config_at(&path, &config).unwrap();
+        let contents = std::fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("[providers.previous]"));
+        assert!(!contents.contains("local_chat_acp_agents"));
+        assert_eq!(
+            load_config_file_at(&path).unwrap().providers,
+            config.providers
+        );
+    }
+
+    #[test]
     fn config_file_rejects_custom_provider_without_harness() {
         let error = toml::from_str::<VertebraeConfigFile>(
             r#"
@@ -1092,9 +1113,7 @@ models = ["kimi-k2"]
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -1196,9 +1215,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         }
     }
@@ -1290,9 +1307,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -1321,9 +1336,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config).unwrap();
@@ -1616,9 +1629,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
 
@@ -1651,9 +1662,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         }
     }
@@ -1719,9 +1728,7 @@ path = "/Users/test/other"
             typesafe: Default::default(),
             providers: Default::default(),
             observability: Default::default(),
-            daemon: Default::default(),
             decision_model: Default::default(),
-            local_chat_acp_agents: Default::default(),
             source_revision: None,
         };
         let result = SacrumConfig::load_from_config(config);

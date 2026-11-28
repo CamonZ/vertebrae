@@ -1950,7 +1950,7 @@ worktreeChangedEvent: "worktree-changed-event"
 
 /** user-defined types **/
 
-export type AcpAgentSettings = { id: string; name: string; executable: string; args: string[] }
+export type AcpAgentSettings = { id: string; name: string; executable: string; args: string[]; models?: string[]; default_model?: string }
 export type ActivityAnalysis = { operations: Operation[] }
 export type ActivityInput = { name: string; input: Partial<{ [key in string]: JsonValue }> }
 /**
@@ -1958,8 +1958,8 @@ export type ActivityInput = { name: string; input: Partial<{ [key in string]: Js
  */
 export type AgentConfig = {
 /**
- * Provider ID: built-in (`anthropic`, `openai`, `typesafe`) or a custom
- * `[providers.<id>]` entry from the executing machine's config.toml.
+ * Provider ID: built-in (`anthropic`, `openai`, `typesafe`) or a named
+ * `[providers.<id>]` entry from the executing machine's config.toml. ACP requires a named entry.
  */
 provider?: string | null;
 /**
@@ -3468,8 +3468,8 @@ export type SessionLogUpdatedEvent = { log_id: string; step_execution_id: string
  * How an llm_inference destination enters its provider conversation.
  */
 export type SessionMode = "new" | "resume" | "fork"
-export type SettingsEdit = { section: "acp_agent"; settings: AcpAgentSettings } | { section: "remove_acp_agent"; id: string } | { section: "decision_model"; enabled: boolean; provider: string; model: string } | { section: "connection"; url: string; token: SecretEdit } | { section: "typesafe"; url: string; key: SecretEdit } | { section: "provider"; id: string; create: boolean; harness: string; endpoint: string; models: string[]; default_model: string; api_key_env: string; key: SecretEdit; environment: EnvironmentEdit[]; wire_api: string } | { section: "observability"; settings: ObservabilitySettings }
-export type SharedSettings = { decision_model: DecisionModelSettings; revision: string; path: string; connection_url: string; has_connection_token: boolean; effective_connection_url: string; connection_url_override: boolean; connection_token_override: boolean; typesafe_url: string; typesafe_endpoint_hidden: boolean; has_typesafe_key: boolean; typesafe_key_storage: string; credential_warning: string | null; typesafe_key_override: boolean; typesafe_url_override: boolean; providers: ProviderSettings[]; local_chat_acp_agents?: AcpAgentSettings[]; observability: ObservabilitySettings }
+export type SettingsEdit = { section: "acp_agent"; create: boolean; settings: AcpAgentSettings } | { section: "remove_acp_agent"; id: string } | { section: "decision_model"; enabled: boolean; provider: string; model: string } | { section: "connection"; url: string; token: SecretEdit } | { section: "typesafe"; url: string; key: SecretEdit } | { section: "provider"; id: string; create: boolean; harness: string; endpoint: string; models: string[]; default_model: string; api_key_env: string; key: SecretEdit; environment: EnvironmentEdit[]; wire_api: string } | { section: "observability"; settings: ObservabilitySettings }
+export type SharedSettings = { decision_model: DecisionModelSettings; revision: string; path: string; connection_url: string; has_connection_token: boolean; effective_connection_url: string; connection_url_override: boolean; connection_token_override: boolean; typesafe_url: string; typesafe_endpoint_hidden: boolean; has_typesafe_key: boolean; typesafe_key_storage: string; credential_warning: string | null; typesafe_key_override: boolean; typesafe_url_override: boolean; providers: ProviderSettings[]; acp_providers?: AcpAgentSettings[]; observability: ObservabilitySettings }
 export type Side = "old" | "new"
 /**
  * A point in a file, 1-based.
@@ -3680,7 +3680,7 @@ export type StepExecutionStatus = "Pending" | "Running" | "Completed" | "Failed"
  * Step runtime harness exposed to the GUI. The core enum remains the shared
  * domain contract and this mirror is generated into the TypeScript bindings.
  */
-export type StepHarness = "claude" | "codex" | "typesafe" | "mistral_vibe"
+export type StepHarness = "claude" | "codex" | "typesafe" | "acp"
 /**
  * The type of change that occurred on a step transition.
  */

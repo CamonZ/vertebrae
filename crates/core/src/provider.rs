@@ -2,8 +2,8 @@
 //!
 //! A provider names the endpoint/credential set a step or chat uses; the
 //! [`StepHarness`] names the runtime adapter that talks to it. The built-in
-//! providers (`anthropic`, `openai`, `typesafe`) need no configuration and map
-//! 1:1 onto the `claude`, `codex`, and `typesafe` harnesses. Custom providers
+//! providers (`anthropic`, `openai`, `typesafe`) map to the `claude`, `codex`,
+//! and `typesafe` harnesses. ACP always uses a named profile. Custom providers
 //! are declared per machine under `[providers.<id>]` in `config.toml` and bind
 //! to exactly one harness through their [`ProviderProfile`].
 
@@ -132,6 +132,12 @@ impl ProviderWireApi {
 pub struct ProviderProfile {
     pub harness: StepHarness,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub executable: Option<std::path::PathBuf>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     /// Full System One endpoint URL for TypeSafe providers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,6 +171,8 @@ impl fmt::Debug for ProviderProfile {
             .collect();
         f.debug_struct("ProviderProfile")
             .field("harness", &self.harness)
+            .field("executable", &self.executable)
+            .field("arg_count", &self.args.len())
             .field("base_url", &self.base_url.as_deref().map(redacted_base_url))
             .field("url", &self.url.as_ref().map(|_| "<redacted>"))
             .field("api_key_env", &self.api_key_env)
@@ -190,6 +198,9 @@ impl ProviderProfile {
     pub fn new(harness: StepHarness) -> Self {
         Self {
             harness,
+            executable: None,
+            args: Vec::new(),
+            name: None,
             base_url: None,
             url: None,
             api_key_env: None,
@@ -212,11 +223,12 @@ impl ProviderProfile {
         if self.models.iter().any(|model| model.trim().is_empty()) {
             return invalid("models must not contain blank entries".into());
         }
-        if self.models.is_empty() {
+        if self.models.is_empty() && self.harness != StepHarness::Acp {
             return invalid("models must list at least one model".into());
         }
         if let Some(default_model) = &self.default_model
-            && !self.models.iter().any(|model| model == default_model)
+            && ((!self.models.is_empty() && !self.models.contains(default_model))
+                || default_model.trim().is_empty())
         {
             return invalid(format!(
                 "default_model '{default_model}' is not listed in models"
@@ -232,6 +244,10 @@ impl ProviderProfile {
         if self.env.keys().any(|key| key.trim().is_empty()) {
             return invalid("env keys must not be blank".into());
         }
+        if self.harness != StepHarness::Acp && (self.executable.is_some() || !self.args.is_empty())
+        {
+            return invalid("executable and args are supported only by the ACP harness".into());
+        }
         match self.harness {
             StepHarness::Claude | StepHarness::Codex => {
                 if self.url.is_some() {
@@ -244,7 +260,28 @@ impl ProviderProfile {
                     return invalid("wire_api is only supported for the codex harness".into());
                 }
             }
-            StepHarness::Typesafe | StepHarness::MistralVibe => {
+            StepHarness::Acp => {
+                if self
+                    .executable
+                    .as_deref()
+                    .is_none_or(|path| path.as_os_str().is_empty())
+                {
+                    return invalid("set the ACP executable".into());
+                }
+                if self.args.iter().any(|arg| arg.contains('\0')) {
+                    return invalid("ACP arguments cannot contain a NUL character".into());
+                }
+                if self.base_url.is_some()
+                    || self.url.is_some()
+                    || self.api_key.is_some()
+                    || self.api_key_env.is_some()
+                    || self.api_key_secret.is_some()
+                    || self.wire_api.is_some()
+                {
+                    return invalid("ACP credentials and endpoints are configured by the agent or its environment".into());
+                }
+            }
+            StepHarness::Typesafe => {
                 if self.base_url.is_some() {
                     return invalid(
                         "base_url is not supported for the typesafe harness; use url".into(),
@@ -269,7 +306,12 @@ impl ProviderProfile {
         requested: Option<&str>,
     ) -> Result<String, String> {
         match requested.map(str::trim).filter(|model| !model.is_empty()) {
-            Some(model) if self.models.iter().any(|listed| listed == model) => Ok(model.into()),
+            Some(model)
+                if self.models.iter().any(|listed| listed == model)
+                    || (self.harness == StepHarness::Acp && self.models.is_empty()) =>
+            {
+                Ok(model.into())
+            }
             Some(model) => Err(format!(
                 "model '{model}' is not configured for provider '{id}'; configured models: {}",
                 self.models.join(", ")
@@ -310,6 +352,106 @@ mod tests {
             models: vec!["model-a".into(), "model-b".into()],
             ..ProviderProfile::new(harness)
         }
+    }
+
+    #[test]
+    fn acp_profile_accepts_only_agent_launch_fields() {
+        let id = ProviderId::new("named-agent").unwrap();
+        let valid = ProviderProfile {
+            executable: Some("agent".into()),
+            args: vec!["two words".into(), String::new(), "$HOME".into()],
+            env: [("AGENT_SETTING".into(), "value".into())].into(),
+            ..ProviderProfile::new(StepHarness::Acp)
+        };
+        assert!(valid.validate(&id).is_ok());
+
+        type InvalidCase = (&'static str, fn(&mut ProviderProfile));
+        let cases: &[InvalidCase] = &[
+            ("executable", |p| p.executable = None),
+            ("executable", |p| p.executable = Some("".into())),
+            ("NUL", |p| p.args.push("bad\0arg".into())),
+            ("credentials and endpoints", |p| {
+                p.base_url = Some("https://example.test".into())
+            }),
+            ("credentials and endpoints", |p| {
+                p.url = Some("https://example.test".into())
+            }),
+            ("credentials and endpoints", |p| {
+                p.api_key = Some("key".into())
+            }),
+            ("credentials and endpoints", |p| {
+                p.api_key_env = Some("KEY".into())
+            }),
+            ("credentials and endpoints", |p| {
+                p.api_key_secret = Some("secret-ref".into())
+            }),
+            ("credentials and endpoints", |p| {
+                p.wire_api = Some(ProviderWireApi::Chat)
+            }),
+        ];
+        for (diagnostic, mutate) in cases {
+            let mut profile = valid.clone();
+            mutate(&mut profile);
+            let error = profile.validate(&id).unwrap_err();
+            assert!(error.contains(diagnostic), "{error}");
+        }
+
+        for harness in [
+            StepHarness::Claude,
+            StepHarness::Codex,
+            StepHarness::Typesafe,
+        ] {
+            for (executable, args) in [(Some("agent".into()), vec![]), (None, vec!["--acp".into()])]
+            {
+                let profile = ProviderProfile {
+                    executable,
+                    args,
+                    models: vec!["model".into()],
+                    ..ProviderProfile::new(harness)
+                };
+                assert!(
+                    profile
+                        .validate(&id)
+                        .unwrap_err()
+                        .contains("only by the ACP harness")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn acp_model_selection_uses_the_profile_list_or_defers_to_the_agent() {
+        let id = ProviderId::new("named-agent").unwrap();
+        let mut profile = ProviderProfile {
+            executable: Some("agent".into()),
+            ..ProviderProfile::new(StepHarness::Acp)
+        };
+        assert!(profile.validate(&id).is_ok());
+        assert_eq!(
+            profile.resolve_model(&id, Some(" agent-choice ")).unwrap(),
+            "agent-choice"
+        );
+
+        profile.default_model = Some("agent-default".into());
+        assert!(profile.validate(&id).is_ok());
+        assert_eq!(profile.resolve_model(&id, None).unwrap(), "agent-default");
+
+        profile.models = vec!["first".into(), "preferred".into()];
+        assert!(profile.validate(&id).unwrap_err().contains("not listed"));
+        profile.default_model = Some("preferred".into());
+        assert!(profile.validate(&id).is_ok());
+        assert_eq!(profile.resolve_model(&id, Some("first")).unwrap(), "first");
+        assert_eq!(profile.resolve_model(&id, Some(" ")).unwrap(), "preferred");
+        assert!(
+            profile
+                .resolve_model(&id, Some("agent-choice"))
+                .unwrap_err()
+                .contains("not configured")
+        );
+
+        profile.default_model = None;
+        assert!(profile.validate(&id).is_ok());
+        assert_eq!(profile.resolve_model(&id, None).unwrap(), "first");
     }
 
     #[test]

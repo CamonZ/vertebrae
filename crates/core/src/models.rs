@@ -3972,7 +3972,7 @@ mod tests {
             (StepHarness::Claude, "claude"),
             (StepHarness::Codex, "codex"),
             (StepHarness::Typesafe, "typesafe"),
-            (StepHarness::MistralVibe, "mistral_vibe"),
+            (StepHarness::Acp, "acp"),
         ] {
             let step = Step::new("Selected", "wf-1").with_harness(harness);
             let encoded = serde_json::to_value(&step).unwrap();

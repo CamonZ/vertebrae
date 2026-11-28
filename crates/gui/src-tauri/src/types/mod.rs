@@ -548,8 +548,8 @@ impl From<PermissionMode> for vertebrae_core::PermissionMode {
 /// Agent configuration for workflow steps - mirrors db::AgentConfig
 #[derive(Debug, Clone, Default, Serialize, Deserialize, specta::Type)]
 pub struct AgentConfig {
-    /// Provider ID: built-in (`anthropic`, `openai`, `typesafe`) or a custom
-    /// `[providers.<id>]` entry from the executing machine's config.toml.
+    /// Provider ID: built-in (`anthropic`, `openai`, `typesafe`) or a named
+    /// `[providers.<id>]` entry from the executing machine's config.toml. ACP requires a named entry.
     #[serde(default)]
     pub provider: Option<String>,
     /// Model for the current session
@@ -719,8 +719,8 @@ pub enum StepHarness {
     Claude,
     Codex,
     Typesafe,
-    #[serde(rename = "mistral_vibe")]
-    MistralVibe,
+    #[serde(rename = "acp")]
+    Acp,
 }
 
 impl From<vertebrae_core::StepHarness> for StepHarness {
@@ -729,7 +729,7 @@ impl From<vertebrae_core::StepHarness> for StepHarness {
             vertebrae_core::StepHarness::Claude => Self::Claude,
             vertebrae_core::StepHarness::Codex => Self::Codex,
             vertebrae_core::StepHarness::Typesafe => Self::Typesafe,
-            vertebrae_core::StepHarness::MistralVibe => Self::MistralVibe,
+            vertebrae_core::StepHarness::Acp => Self::Acp,
         }
     }
 }
@@ -740,7 +740,7 @@ impl From<StepHarness> for vertebrae_core::StepHarness {
             StepHarness::Claude => Self::Claude,
             StepHarness::Codex => Self::Codex,
             StepHarness::Typesafe => Self::Typesafe,
-            StepHarness::MistralVibe => Self::MistralVibe,
+            StepHarness::Acp => Self::Acp,
         }
     }
 }
@@ -2647,7 +2647,7 @@ mod tests {
             ("claude", StepHarness::Claude),
             ("codex", StepHarness::Codex),
             ("typesafe", StepHarness::Typesafe),
-            ("mistral_vibe", StepHarness::MistralVibe),
+            ("acp", StepHarness::Acp),
         ] {
             let step: Step = serde_json::from_value(serde_json::json!({
                 "id": "selected",
@@ -2786,11 +2786,7 @@ mod tests {
                 StepHarness::Typesafe,
                 "typesafe",
             ),
-            (
-                vertebrae_core::StepHarness::MistralVibe,
-                StepHarness::MistralVibe,
-                "mistral_vibe",
-            ),
+            (vertebrae_core::StepHarness::Acp, StepHarness::Acp, "acp"),
         ] {
             assert_eq!(serde_json::to_value(gui).unwrap(), wire);
             assert_eq!(StepHarness::from(core), gui);

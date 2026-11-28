@@ -90,14 +90,14 @@ impl AcpLocalChatHarness {
             let id = provider_id
                 .as_deref()
                 .and_then(|id| id.strip_prefix("local:acp:"));
-            let (_, agent) = config
+            let (key, agent) = config
                 .acp_agents()
-                .find(|(key, _)| Some(*key) == id)
+                .find(|(key, _)| Some(key.as_str()) == id)
                 .ok_or_else(|| {
                     LocalChatSessionError::StartFailed("Select a configured ACP connection.".into())
                 })?;
             factory
-                .create_acp_chat(&agent.executable, agent.args.clone())
+                .create_acp_provider(key, agent)
                 .map_err(|error| LocalChatSessionError::StartFailed(error.to_string()))
         })
         .await
@@ -216,16 +216,28 @@ impl LocalChatHarness for AcpLocalChatHarness {
             Ok(config
                 .acp_agents()
                 .map(|(id, agent)| {
-                    let adapter = factory.create_acp_chat(&agent.executable, agent.args.clone());
+                    let adapter = factory.create_acp_provider(id, agent);
                     let provider = LocalChatProviderInfo {
                         id: format!("local:acp:{id}"),
-                        label: agent.display_name(id).into(),
+                        label: agent.name.clone().unwrap_or_else(|| id.to_string()),
                         harness: LocalChatHarnessKind::Acp,
                         custom: true,
                         available: adapter.is_ok(),
                         unavailable_reason: adapter.as_ref().err().map(ToString::to_string),
-                        models: None,
-                        default_model_id: None,
+                        models: (!agent.models.is_empty()).then(|| {
+                            agent
+                                .models
+                                .iter()
+                                .map(|id| LocalChatModelOption {
+                                    id: id.clone(),
+                                    label: id.clone(),
+                                    supported_reasoning_effort_ids: None,
+                                    supported_speed_tier_ids: None,
+                                    supports_personality: None,
+                                })
+                                .collect()
+                        }),
+                        default_model_id: agent.default_model.clone(),
                         discovered: None,
                         supports_steering: None,
                     };
@@ -273,9 +285,29 @@ impl LocalChatHarness for AcpLocalChatHarness {
         });
         let mut probes = stream::iter(probes).buffered(2);
         let mut providers = Vec::new();
-        while let Some((provider, cached)) = probes.next().await {
+        while let Some((mut provider, cached)) = probes.next().await {
             if let Some(cached) = cached {
                 cache.insert(provider.id.clone(), cached);
+            }
+            if let Some(discovered) = &mut provider.discovered {
+                if let Some(configured) = provider.models.take() {
+                    discovered
+                        .models
+                        .retain(|model| configured.iter().any(|entry| entry.id == model.id));
+                    if discovered.models.is_empty() {
+                        provider.available = false;
+                        provider.unavailable_reason =
+                            Some("The ACP agent did not advertise any configured models.".into());
+                    }
+                }
+                let preferred = provider
+                    .default_model_id
+                    .take()
+                    .into_iter()
+                    .chain(discovered.default_model_id.take())
+                    .find(|model| discovered.models.iter().any(|entry| &entry.id == model));
+                discovered.default_model_id =
+                    preferred.or_else(|| discovered.models.first().map(|entry| entry.id.clone()));
             }
             providers.push(provider);
         }
@@ -512,18 +544,19 @@ fn discovered_info(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use vertebrae_sacrum_client::{config::LocalChatAcpSection, VertebraeConfigFile};
+    use vertebrae_core::{ProviderId, ProviderProfile, StepHarness};
+    use vertebrae_sacrum_client::VertebraeConfigFile;
 
     #[tokio::test]
     async fn catalog_surfaces_agent_discovery_failure() {
         let directory = tempfile::tempdir().unwrap();
         let config = VertebraeConfigFile {
-            local_chat_acp_agents: [(
-                "broken".into(),
-                LocalChatAcpSection {
+            providers: [(
+                ProviderId::new("broken").unwrap(),
+                ProviderProfile {
                     name: Some("Broken ACP".into()),
-                    executable: "/usr/bin/false".into(),
-                    args: Vec::new(),
+                    executable: Some("/usr/bin/false".into()),
+                    ..ProviderProfile::new(StepHarness::Acp)
                 },
             )]
             .into(),
@@ -571,19 +604,20 @@ for line in sys.stdin:
         )
         .unwrap();
         let config = VertebraeConfigFile {
-            local_chat_acp_agents: ["first", "second"]
+            providers: ["first", "second"]
                 .into_iter()
                 .map(|name| {
                     (
-                        name.to_owned(),
-                        LocalChatAcpSection {
+                        ProviderId::new(name).unwrap(),
+                        ProviderProfile {
                             name: Some(format!("Agent {name}")),
-                            executable: "/usr/bin/env".into(),
+                            executable: Some("/usr/bin/env".into()),
                             args: vec![
                                 "python3".into(),
                                 fixture.to_str().unwrap().into(),
                                 format!("{name} connection"),
                             ],
+                            ..ProviderProfile::new(StepHarness::Acp)
                         },
                     )
                 })

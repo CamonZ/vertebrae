@@ -146,7 +146,7 @@ export function SharedConfigSettings({
     : null;
   const existingAcpAgent =
     draft?.section === "acp_agent" &&
-    (settings?.local_chat_acp_agents?.some((agent) => agent.id === draft.settings.id) ?? false);
+    !draft.create;
   const focusUndoRemoval = useCallback(
     (button: HTMLButtonElement | null) => button?.focus(),
     []
@@ -169,7 +169,7 @@ export function SharedConfigSettings({
               )
             : draft.section === "acp_agent"
               ? acpAgentDraft(
-                  result.data.local_chat_acp_agents?.find(
+                  result.data.acp_providers?.find(
                     (agent) => agent.id === draft.settings.id
                   )
                 )
@@ -240,13 +240,31 @@ export function SharedConfigSettings({
               {section === "providers" && (
                 <div className="grid gap-4 lg:grid-cols-2">
                   <section aria-labelledby="custom-providers" className={card}>
-                    <h2
-                      id="custom-providers"
-                      className="text-content font-semibold"
-                      data-settings-anchor
-                    >
-                      API providers
-                    </h2>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <h2
+                        id="custom-providers"
+                        className="text-content font-semibold"
+                        data-settings-anchor
+                      >
+                        Providers
+                      </h2>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          aria-pressed={draft.section === "provider" && draft.create}
+                          onClick={() => select(providerDraft())}
+                        >
+                          Add provider
+                        </Button>
+                        <Button
+                          size="sm"
+                          aria-pressed={draft.section === "acp_agent" && !existingAcpAgent}
+                          onClick={() => select(acpAgentDraft())}
+                        >
+                          Add ACP provider
+                        </Button>
+                      </div>
+                    </div>
                     <p className="mt-1 text-secondary text-[var(--color-fg-mute)]">
                       Connect an API endpoint using an existing harness.
                     </p>
@@ -276,34 +294,13 @@ export function SharedConfigSettings({
                           {provider.id}
                         </Button>
                       ))}
-                      <Button
-                        variant="ghost"
-                        aria-pressed={
-                          draft.section === "provider" && draft.create
-                        }
-                        onClick={() => select(providerDraft())}
-                      >
-                        Add provider
-                      </Button>
                     </div>
-                  </section>
-                  <section aria-labelledby="acp-connections" className={card}>
-                    <h2
-                      id="acp-connections"
-                      className="text-content font-semibold"
-                      data-settings-anchor
-                    >
-                      ACP connections
-                    </h2>
-                    <p className="mt-1 text-secondary text-[var(--color-fg-mute)]">
-                      Launch an installed ACP agent for chat.
-                    </p>
                     <div
                       role="group"
-                      aria-label="ACP agents"
-                      className="mt-4 flex flex-col items-start gap-2"
+                      aria-label="ACP providers"
+                      className="flex flex-col items-start gap-2"
                     >
-                      {(settings.local_chat_acp_agents ?? []).map((agent) => (
+                      {(settings.acp_providers ?? []).map((agent) => (
                         <Button
                           key={agent.id}
                           className={selectedProfileClass}
@@ -316,16 +313,6 @@ export function SharedConfigSettings({
                           {agent.name}
                         </Button>
                       ))}
-                      <Button
-                        variant="ghost"
-                        aria-pressed={
-                          draft.section === "acp_agent" &&
-                          !existingAcpAgent
-                        }
-                        onClick={() => select(acpAgentDraft())}
-                      >
-                        Add ACP connection
-                      </Button>
                     </div>
                   </section>
                 </div>
