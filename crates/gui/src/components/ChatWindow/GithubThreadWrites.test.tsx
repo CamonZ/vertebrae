@@ -6,6 +6,7 @@
  */
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -50,6 +51,7 @@ import {
 } from "./chatShortcuts";
 import {
   ThreadWrites,
+  type WriteAnswer,
   type WritePort,
 } from "./workspace/githubReview/threadWrites";
 import {
@@ -104,7 +106,18 @@ const VIEWER = "octo-viewer";
 const THREAD = "PRRT_kwDOsynthetic1";
 const PR_URL = "https://github.com/example/demo-repo/pull/7";
 
-type Answer = "posted" | "forbidden" | "transient" | "timeout_applied";
+/**
+ * How GitHub answers a write. `timeout_applied`: no answer, though it
+ * landed, and the read right after shows it; `timeout_unread`: the same, but
+ * that read failed, so only Retry's check can tell.
+ */
+type Answer =
+  | "posted"
+  | "forbidden"
+  | "transient"
+  | "timeout_applied"
+  | "timeout_unread";
+const SCOPE = "example/demo-repo#7";
 
 /** A synthetic GitHub: its threads, what it was sent, how it answers next. */
 class World {
@@ -121,34 +134,46 @@ class World {
   pr = (): GithubPrReviewThreads => ({
     repo: "example/demo-repo",
     prNumber: 7,
+    pullRequestId: "PR_kwDOsynthetic7",
     viewerLogin: VIEWER,
     headOid: "1".repeat(40),
     baseOid: "2".repeat(40),
     threads: this.threads,
     truncated: false,
   });
-  async send(write: GithubThreadWrite) {
+  async send(write: GithubThreadWrite): Promise<WriteAnswer> {
     this.sends.push(write);
     const answer = this.answers.shift() ?? "posted";
     const id = `PRRT_started${++this.nodes}`;
-    if (answer === "posted" || answer === "timeout_applied") {
+    if (
+      answer === "posted" ||
+      answer === "timeout_applied" ||
+      answer === "timeout_unread"
+    ) {
       this.threads = applyThreadWrite(this.threads, write, VIEWER, id);
       this.listeners.forEach((listener) => listener());
     }
+    const threads = answer === "timeout_unread" ? null : this.pr();
     if (answer === "posted")
       return {
-        ok: true as const,
-        data: write.kind === "start" ? id : write.threadId,
+        outcome: {
+          ok: true,
+          data: write.kind === "start" ? id : write.threadId,
+        },
+        threads,
       };
     const kind: GithubFailure["kind"] =
       answer === "forbidden"
         ? "forbidden"
         : answer === "transient"
           ? "other"
-          : "timeout";
+          : "ambiguous";
     return {
-      ok: false as const,
-      failure: { kind, message: "GitHub returned 502", retryAfterSecs: null },
+      outcome: {
+        ok: false,
+        failure: { kind, message: "GitHub returned 502", retryAfterSecs: null },
+      },
+      threads,
     };
   }
 }
@@ -161,11 +186,13 @@ let live!: NonNullable<React.ContextType<typeof SelectionDiscussionContext>>;
 function writesValue(threads: GithubReviewThread[]): GithubWritesValue {
   return {
     store,
+    scope: SCOPE,
     worktreePath: "/A",
     pr: { number: 7, url: PR_URL },
     viewer: VIEWER,
     threads: { ...world.pr(), threads },
     port: (started) => ({
+      scope: SCOPE,
       shown: () => world.pr(),
       send: (write) => world.send(write),
       reread: async () => world.pr(),
@@ -381,6 +408,23 @@ describe.each<Surface>(["diff", "rail"])(
       expect(
         within(alert).getByRole("button", { name: "Resolve on GitHub" })
       ).toBeInTheDocument();
+      // GitHub said no: no live Resolve contradicts the alert, here or as
+      // the composer's Reply and resolve.
+      expect(
+        within(card).queryByRole("button", { name: "Resolve" })
+      ).toBeNull();
+      fireEvent.click(
+        within(card).getByRole("button", { name: "Reply on GitHub" })
+      );
+      const composer = within(card).getByRole("region", {
+        name: "Reply on GitHub",
+      });
+      // The thread's failure stays with the thread, not in the reply.
+      expect(within(composer).queryByRole("alert")).toBeNull();
+      expect(within(card).getByRole("alert")).toBe(alert);
+      expect(
+        within(composer).queryByRole("button", { name: "Reply and resolve" })
+      ).toBeNull();
       expect(world.sends).toHaveLength(1);
     });
 
@@ -460,11 +504,27 @@ describe.each<Surface>(["diff", "rail"])(
       expect(world.sends).toHaveLength(1);
     });
 
-    it("checks the thread after a timeout and does not post a reply that landed", async () => {
+    it("settles a timed-out reply that landed from the read after it, with no alert", async () => {
       render(tree(surface));
       const card = await openCard(surface);
       await draftReply(card, "Done.");
       world.answers = ["timeout_applied"];
+      await act(async () =>
+        fireEvent.click(
+          within(card).getByRole("button", { name: "Reply on GitHub" })
+        )
+      );
+      expect(world.sends).toHaveLength(1);
+      expect(replyBox()).toBeNull();
+      expect(within(card).queryByRole("alert")).toBeNull();
+      expect(within(card).getByText("Done.")).toBeInTheDocument();
+    });
+
+    it("checks the thread after a timeout it could not read and does not post a reply that landed", async () => {
+      render(tree(surface));
+      const card = await openCard(surface);
+      await draftReply(card, "Done.");
+      world.answers = ["timeout_unread"];
       await act(async () =>
         fireEvent.click(
           within(card).getByRole("button", { name: "Reply on GitHub" })
@@ -672,6 +732,7 @@ describe("Comment on GitHub from a line discussion", () => {
     );
     expect(world.sends.at(-1)).toEqual({
       kind: "start",
+      pullRequestId: "PR_kwDOsynthetic7",
       path: "a",
       side: "RIGHT",
       startLine: null,
@@ -695,7 +756,10 @@ describe("Comment on GitHub from a selection", () => {
     { start: 1, end: 1, side: "additions" },
     { kind: "worktree", wholeBranch: true }
   )!;
-  const mapped = (status: "open" | "outdated", line: number | null = 1) =>
+  const mapped = (
+    status: "open" | "outdated" | "unavailable",
+    line: number | null = 1
+  ) =>
     vi.mocked(commands.mapReviewSelection).mockResolvedValue({
       status: "ok",
       data: { status, startLine: line, line },
@@ -749,6 +813,7 @@ describe("Comment on GitHub from a selection", () => {
   };
   const started = (line: number, body: string) => ({
     kind: "start",
+    pullRequestId: "PR_kwDOsynthetic7",
     path: "a",
     side: "RIGHT",
     startLine: null,
@@ -910,7 +975,7 @@ describe("Comment on GitHub from a selection", () => {
   it("checks GitHub before posting again after a timeout, so nothing posts twice", async () => {
     mapped("open", 3);
     const posted = vi.fn();
-    world.answers = ["timeout_applied"];
+    world.answers = ["timeout_unread"];
     render(selectionTree(posted));
     fireEvent.change(draftBox(), { target: { value: "Rename this?" } });
     const button = await ready();
@@ -932,7 +997,7 @@ describe("Comment on GitHub from a selection", () => {
 
   it("holds the text as sent after a timeout, until the check says what happened", async () => {
     mapped("open", 3);
-    world.answers = ["timeout_applied"];
+    world.answers = ["timeout_unread"];
     render(selectionTree());
     fireEvent.change(draftBox(), { target: { value: "Rename this?" } });
     const button = await ready();
@@ -948,7 +1013,7 @@ describe("Comment on GitHub from a selection", () => {
   it("forgets a failed post once the selection closes", async () => {
     mapped("open", 3);
     world.answers = ["transient"];
-    const key = selectionSlot(anchor);
+    const key = selectionSlot(SCOPE, anchor);
     const { unmount } = render(selectionTree());
     fireEvent.change(draftBox(), { target: { value: "Rename this?" } });
     const button = await ready();
@@ -964,6 +1029,46 @@ describe("Comment on GitHub from a selection", () => {
     expect(store.slot(key).failure).not.toBeNull();
     unmount();
     expect(store.slot(key)).toEqual(store.slot("never-used"));
+  });
+
+  it("tells lines it cannot check apart from lines that need pushing", async () => {
+    mapped("unavailable", null);
+    const view = render(selectionTree());
+    fireEvent.change(draftBox(), { target: { value: "Rename this?" } });
+    const button = await commentButton();
+    await waitFor(() =>
+      expect(button).toHaveAttribute(
+        "title",
+        expect.stringContaining("Can’t check these lines against PR #7")
+      )
+    );
+    expect(button).toBeDisabled();
+    expect(button.title).not.toContain("push them first");
+    view.unmount();
+
+    vi.mocked(commands.mapReviewSelection).mockRejectedValue(
+      new Error("Git could not load the review anchor.")
+    );
+    render(selectionTree());
+    const failed = await commentButton();
+    await waitFor(() =>
+      expect(failed).toHaveAttribute(
+        "title",
+        expect.stringContaining("Can’t check these lines")
+      )
+    );
+
+    mapped("outdated", null);
+    cleanup();
+    render(selectionTree());
+    const changed = await commentButton();
+    await waitFor(() =>
+      expect(changed).toHaveAttribute(
+        "title",
+        expect.stringContaining("push them first")
+      )
+    );
+    expect(world.sends).toEqual([]);
   });
 
   it("is not offered with no PR to post to", async () => {

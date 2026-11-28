@@ -21,6 +21,7 @@ query PullRequestReviewThreads(
   viewer { login }
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
+      id
       headRefOid
       baseRefOid
       reviewThreads(first: $first, after: $after) {
@@ -113,6 +114,8 @@ pub struct ReviewThread {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PullRequestReviewThreads {
+    /// The pull request's node ID, which a new thread is written to.
+    pub pull_request_id: String,
     /// The authenticated user, who would author any reply or new thread.
     pub viewer_login: Option<String>,
     /// Commit the published (`Right`) anchors refer to.
@@ -139,6 +142,7 @@ struct ReviewThreadsRepo {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ReviewThreadsPr {
+    id: String,
     head_ref_oid: String,
     base_ref_oid: String,
     review_threads: ThreadConnection,
@@ -333,7 +337,8 @@ enum NextPage {
 struct PageAssembly {
     viewer_login: Option<String>,
     pages: usize,
-    oids: Option<(String, String)>,
+    /// The pull request's node ID, head and base, from the first page.
+    identity: Option<(String, String, String)>,
     threads: Vec<ReviewThread>,
     truncated: bool,
 }
@@ -343,7 +348,8 @@ impl PageAssembly {
         self.pages += 1;
         // Anchors refer to the head of the first page; a push between pages
         // is picked up by the caller's next refresh.
-        self.oids.get_or_insert((pr.head_ref_oid, pr.base_ref_oid));
+        self.identity
+            .get_or_insert((pr.id, pr.head_ref_oid, pr.base_ref_oid));
         for node in pr.review_threads.nodes.into_iter().flatten() {
             self.threads.push(ReviewThread::try_from(node)?);
         }
@@ -366,8 +372,9 @@ impl PageAssembly {
     }
 
     fn finish(self) -> PullRequestReviewThreads {
-        let (head_oid, base_oid) = self.oids.unwrap_or_default();
+        let (pull_request_id, head_oid, base_oid) = self.identity.unwrap_or_default();
         PullRequestReviewThreads {
+            pull_request_id,
             viewer_login: self.viewer_login,
             head_oid,
             base_oid,
@@ -433,6 +440,7 @@ mod tests {
                 "viewer": { "login": "octo-viewer" },
                 "repository": {
                     "pullRequest": {
+                        "id": "PR_kwDOsynthetic7",
                         "headRefOid": "1111111111111111111111111111111111111111",
                         "baseRefOid": "2222222222222222222222222222222222222222",
                         "reviewThreads": {
@@ -459,6 +467,7 @@ mod tests {
             .map(|index| thread(&format!("{head}-{index}"), "RIGHT", Some(1), false))
             .collect();
         serde_json::from_value(json!({
+            "id": format!("PR_{head}"),
             "headRefOid": head,
             "baseRefOid": "base",
             "reviewThreads": {
@@ -510,6 +519,7 @@ mod tests {
         assert!(assembly.pages <= MAX_THREAD_PAGES);
         let result = assembly.finish();
         assert_eq!(result.head_oid, "head-0");
+        assert_eq!(result.pull_request_id, "PR_head-0");
         assert_eq!(result.truncated, expected_truncated);
         let ids: Vec<_> = result
             .threads
@@ -576,6 +586,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.head_oid, "1111111111111111111111111111111111111111");
+        assert_eq!(result.pull_request_id, "PR_kwDOsynthetic7");
         assert_eq!(result.viewer_login.as_deref(), Some("octo-viewer"));
         assert!(!result.truncated);
         assert_eq!(result.threads.len(), 2);

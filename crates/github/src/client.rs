@@ -23,7 +23,7 @@ const DEFAULT_API_BASE_URL: &str = "https://api.github.com";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
-const MAX_RESPONSE_BODY_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const MAX_RESPONSE_BODY_BYTES: usize = 4 * 1024 * 1024;
 const GITHUB_API_VERSION_HEADER: &str = "X-GitHub-Api-Version";
 const GITHUB_API_VERSION: &str = "2022-11-28";
 const USER_AGENT_VALUE: &str = concat!("vertebrae-github/", env!("CARGO_PKG_VERSION"));
@@ -356,18 +356,27 @@ pub(crate) fn map_graphql_errors(
     }
 }
 
+/// A transport failure, by whether the request can have reached GitHub: no
+/// connection (or no request built) means nothing was sent; any other drop
+/// happened once the request was out, so a write's outcome is unknown.
 pub(crate) fn map_transport_error(err: reqwest::Error) -> GitHubError {
     if err.is_timeout() {
-        return GitHubError::Timeout {
+        GitHubError::Timeout {
             message: "GitHub request timed out".to_string(),
-        };
-    }
-    let message = if err.is_connect() {
-        "Could not connect to GitHub".to_string()
+        }
+    } else if err.is_connect() {
+        GitHubError::Network {
+            message: "Could not connect to GitHub".to_string(),
+        }
+    } else if err.is_builder() {
+        GitHubError::Network {
+            message: format!("Could not build the GitHub request: {err}"),
+        }
     } else {
-        format!("GitHub network error: {err}")
-    };
-    GitHubError::Network { message }
+        GitHubError::Interrupted {
+            message: format!("the connection dropped: {err}"),
+        }
+    }
 }
 
 pub(crate) async fn read_checked_response(
@@ -427,8 +436,9 @@ fn map_http_status(status: StatusCode, headers: &HeaderMap, message: String) -> 
                 GitHubError::Forbidden { message }
             }
         }
-        _ => GitHubError::Network {
-            message: format!("GitHub returned HTTP {}: {message}", status.as_u16()),
+        _ => GitHubError::Http {
+            status: status.as_u16(),
+            message,
         },
     }
 }
@@ -799,8 +809,9 @@ mod tests {
         assert_eq!(
             get_pr_error(ResponseTemplate::new(502).set_body_string("<html>bad gateway</html>"))
                 .await,
-            GitHubError::Network {
-                message: "GitHub returned HTTP 502: HTTP 502".into(),
+            GitHubError::Http {
+                status: 502,
+                message: "HTTP 502".into(),
             }
         );
     }
@@ -862,7 +873,7 @@ mod tests {
             ResponseTemplate::new(302).insert_header("location", "https://example.invalid/graphql"),
         )
         .await;
-        assert!(matches!(err, GitHubError::Network { ref message } if message.contains("302")));
+        assert!(matches!(err, GitHubError::Http { status: 302, .. }));
     }
 
     #[tokio::test]

@@ -300,11 +300,10 @@ pub(super) trait PrLookup: Sync {
         number: u64,
     ) -> impl Future<Output = Result<PullRequestReviewThreads, GitHubError>> + Send;
 
-    /// Sends one review-thread write; the ID of the thread it wrote.
+    /// Sends one review-thread write to the node it names; the ID of the
+    /// thread it wrote.
     fn write_review_thread(
         &self,
-        repo: &RepoRef,
-        number: u64,
         write: &ReviewThreadWrite,
     ) -> impl Future<Output = Result<String, GitHubError>> + Send;
 }
@@ -356,16 +355,9 @@ impl PrLookup for GitHubLookup {
         client.list_review_threads(&token, repo, number).await
     }
 
-    async fn write_review_thread(
-        &self,
-        repo: &RepoRef,
-        number: u64,
-        write: &ReviewThreadWrite,
-    ) -> Result<String, GitHubError> {
+    async fn write_review_thread(&self, write: &ReviewThreadWrite) -> Result<String, GitHubError> {
         let (client, token) = self.session().await?;
-        client
-            .write_review_thread(&token, repo, number, write)
-            .await
+        client.write_review_thread(&token, write).await
     }
 }
 

@@ -124,6 +124,7 @@ describe("review thread reads", () => {
               data: {
                 repo: REPO,
                 prNumber: 7,
+                pullRequestId: "PR_kwDOsynthetic7",
                 headOid: "h",
                 baseOid: "b",
                 threads: [reviewThread("slow")],
@@ -155,6 +156,7 @@ describe("review thread reads", () => {
               data: {
                 repo: REPO,
                 prNumber: 7,
+                pullRequestId: "PR_kwDOsynthetic7",
                 headOid: "h",
                 baseOid: "b",
                 threads: [reviewThread("stale")],
@@ -197,6 +199,7 @@ describe("review thread reads", () => {
               data: {
                 repo: REPO,
                 prNumber: 7,
+                pullRequestId: "PR_kwDOsynthetic7",
                 headOid: "h",
                 baseOid: "b",
                 threads: [reviewThread("t1")],
@@ -231,6 +234,7 @@ describe("review thread writes", () => {
               data: {
                 repo,
                 prNumber,
+                pullRequestId: "PR_kwDOsynthetic7",
                 viewerLogin: "octo-viewer",
                 headOid: "1".repeat(40),
                 baseOid: "2".repeat(40),
@@ -248,7 +252,8 @@ describe("review thread writes", () => {
       kind: "resolve",
       threadId: "t1",
     });
-    expect(outcome).toEqual({ ok: true, data: "t1" });
+    expect(outcome.outcome).toEqual({ ok: true, data: "t1" });
+    expect(outcome.threads?.threads[0].resolved).toBe(true);
     expect(commands.writeGithubPrReviewThread).toHaveBeenCalledExactlyOnceWith(
       WT,
       BRANCH,
@@ -271,24 +276,33 @@ describe("review thread writes", () => {
       kind: "reopen",
       threadId: "t1",
     });
-    expect(outcome.ok).toBe(false);
+    expect(outcome).toEqual({
+      outcome: { ok: false, failure: expect.objectContaining({ kind: "rejected" }) },
+      threads: null,
+    });
     expect(commands.writeGithubPrReviewThread).not.toHaveBeenCalled();
     hide();
   });
 
-  it("re-reads after a failed write so a write GitHub applied anyway shows", async () => {
+  it("re-reads after a failed write and answers that read, so a write GitHub applied anyway settles at once", async () => {
     setThreads(reviewThread("t1"));
     world.writeOutcomes = [
-      { failure: failure("timeout", "GitHub did not answer"), applied: true },
+      { failure: failure("ambiguous", "GitHub did not answer"), applied: true },
     ];
     const hide = await show();
-    const outcome = await writeWorktreeReviewThread(WT, BRANCH, 7, {
-      kind: "reply",
-      threadId: "t1",
-      body: "Done.",
-    });
-    expect(outcome).toMatchObject({ ok: false, failure: { kind: "timeout" } });
-    expect(threads().data?.threads[0].comments.at(-1)).toMatchObject({
+    const read = vi.mocked(commands.getGithubPrReviewThreads);
+    read.mockClear();
+    const { outcome, threads: reread } = await writeWorktreeReviewThread(
+      WT,
+      BRANCH,
+      7,
+      { kind: "reply", threadId: "t1", body: "Done." }
+    );
+    expect(outcome).toMatchObject({ ok: false, failure: { kind: "ambiguous" } });
+    // One read, past the cache; what it answered is what the store shows.
+    expect(read).toHaveBeenCalledExactlyOnceWith(WT, BRANCH, REPO, 7, true);
+    expect(reread).toBe(threads().data);
+    expect(reread?.threads[0].comments.at(-1)).toMatchObject({
       author: { login: "octo-viewer" },
       body: "Done.",
     });

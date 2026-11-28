@@ -847,8 +847,9 @@ export function cancelWorktreePrCheck(
   );
 }
 
+/** Sending it again cannot help until the PR is linked again. */
 const NOT_LINKED: GithubFailure = {
-  kind: "other",
+  kind: "rejected",
   message: "The PR this was written for is no longer linked to the branch.",
   retryAfterSecs: null,
 };
@@ -878,16 +879,21 @@ export async function rereadWorktreeReviewThreads(
  * Posts one write to the review threads of the linked PR `prNumber`, the
  * PR the user saw as its target; a different linked PR refuses it. Sent
  * once: success or not, the threads are read again so the view shows what
- * GitHub has. Answers the written thread's ID.
+ * GitHub has. Answers the written thread's ID with that read (null when it
+ * failed), which settles a write whose answer was lost.
  */
 export async function writeWorktreeReviewThread(
   worktreePath: string,
   branch: string,
   prNumber: number,
   write: GithubThreadWrite
-): Promise<GithubOutcome<string>> {
+): Promise<{
+  outcome: GithubOutcome<string>;
+  threads: GithubPrReviewThreads | null;
+}> {
   const pr = stateOf(worktreePath, branch).link?.pr;
-  if (pr?.number !== prNumber) return { ok: false, failure: NOT_LINKED };
+  if (pr?.number !== prNumber)
+    return { outcome: { ok: false, failure: NOT_LINKED }, threads: null };
   const outcome = await settleGithubCommand(() =>
     commands.writeGithubPrReviewThread(
       worktreePath,
@@ -897,8 +903,12 @@ export async function writeWorktreeReviewThread(
       write
     )
   );
-  await rereadWorktreeReviewThreads(worktreePath, branch, prNumber);
-  return outcome;
+  const threads = await rereadWorktreeReviewThreads(
+    worktreePath,
+    branch,
+    prNumber
+  );
+  return { outcome, threads };
 }
 
 /** Makes every watched remote due, as a timer tick would. */

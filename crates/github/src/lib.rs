@@ -7,6 +7,7 @@ mod auth;
 mod checks;
 mod client;
 mod error;
+mod node_id;
 mod rate_limit;
 mod remote;
 mod rest;
@@ -23,6 +24,7 @@ pub use checks::{
 };
 pub use client::GitHubClient;
 pub use error::GitHubError;
+pub use node_id::{is_valid_node_id, MAX_NODE_ID_LEN};
 pub use rate_limit::RateLimitStatus;
 pub use remote::parse_github_remote_url;
 pub use review_thread_writes::{NewReviewThread, ReviewThreadWrite, MAX_COMMENT_CHARS};

@@ -401,24 +401,43 @@
 }
 
 /*
- * Posting to GitHub: neutral, with the GitHub glyph, never the private
- * accent. Inside a composer row it takes that row's button shape; the
- * row's main post is filled with the foreground colour.
+ * A post to GitHub: neutral, never the private accent. Self-contained, so
+ * it looks the same in a composer's action row, a thread card's footer or
+ * the selection box; it keeps its label on one line and lets the row wrap.
  */
 .gh-post-button {
   display: inline-flex;
+  flex: none;
   align-items: center;
   gap: 6px;
+  max-inline-size: 100%;
+  border: 1px solid var(--color-line-strong);
+  border-radius: var(--radius-lg);
+  background: transparent;
+  padding: 4px 8px;
+  color: var(--color-fg-soft);
+  font: 400 var(--text-secondary) / 1.45 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-.diff-comment-editor-actions .gh-post-button[data-github-primary] {
+.gh-post-button:hover:not(:disabled) {
+  background: var(--color-bg-2);
+  color: var(--color-fg);
+}
+
+.gh-post-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.gh-post-button[data-github-primary] {
   border-color: var(--color-fg-soft);
   background: var(--color-fg);
   color: var(--color-bg);
 }
 
-.diff-comment-editor-actions
-  .gh-post-button[data-github-primary]:hover:not(:disabled) {
+.gh-post-button[data-github-primary]:hover:not(:disabled) {
   border-color: var(--color-fg);
   background: var(--color-fg-soft);
   color: var(--color-bg);

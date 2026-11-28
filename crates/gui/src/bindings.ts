@@ -2586,9 +2586,21 @@ export type GithubErrorKind = "gh_missing" | "auth_expired" | "rate_limited" | "
  */
 "forbidden" |
 /**
- * No answer in time: a write may have been applied.
+ * The request is invalid and was refused before it was sent:
+ * resending it unchanged cannot help.
  */
-"timeout" | "other"
+"rejected" |
+/**
+ * The request went out but its outcome is unknown (no answer in time,
+ * a dropped connection, a server error, or an answer that does not
+ * confirm the write): a write may have been applied, so check before
+ * resending.
+ */
+"ambiguous" |
+/**
+ * A transient failure the request never got past: retrying may help.
+ */
+"other"
 export type GithubFailure = { kind: GithubErrorKind; message: string; retryAfterSecs: number | null }
 export type GithubOpenPrsPoll =
 /**
@@ -2633,6 +2645,10 @@ numbers: number[] }
  * One read of a PR's review threads.
  */
 export type GithubPrReviewThreads = { repo: string; prNumber: number;
+/**
+ * The PR's GitHub node ID: where a new thread is written.
+ */
+pullRequestId: string;
 /**
  * The signed-in GitHub user, who authors replies and new threads.
  */
@@ -2734,9 +2750,10 @@ export type GithubThreadPosition = { threadId: string; placement: GithubThreadPl
  */
 export type GithubThreadWrite = { kind: "reply"; threadId: string; body: string } | { kind: "resolve"; threadId: string } | { kind: "reopen"; threadId: string } |
 /**
- * A new thread on published lines of the PR's diff.
+ * A new thread on published lines of the diff of the PR whose node ID
+ * its threads' read answered.
  */
-{ kind: "start"; path: string; side: ReviewThreadSide; startLine: number | null; line: number; body: string }
+{ kind: "start"; pullRequestId: string; path: string; side: ReviewThreadSide; startLine: number | null; line: number; body: string }
 export type GithubUnplaceableReason =
 /**
  * The published range does not exist in the published file.

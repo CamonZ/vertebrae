@@ -4,13 +4,11 @@
  * answer; a line discussion starts a thread with a comment once its lines
  * are published on the PR, then moves under that thread.
  */
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   commands,
   type GithubPrReviewThreads,
-  type MappedReviewRange,
   type ReviewMappingRequest,
-  type ReviewThreadSide,
 } from "../../../../bindings";
 import type { ChatMessage } from "../../../../stores/chatStore";
 import { unwrapAnchor } from "../../reviewAnchors";
@@ -18,6 +16,12 @@ import type { SelectionThread } from "../../selectionDiscussions";
 import type { DiscussionValue } from "../../selectionDiscussionState";
 import { GithubComposer, GithubPostButton } from "./GithubWriteControls";
 import { commentSlot, replySlot, type NewThreadPlace } from "./threadWrites";
+import {
+  unplacedReason,
+  usePlaceOnPr,
+  type PlaceQuery,
+  type PublishedPlace,
+} from "./usePlaceOnPr";
 import {
   useGithubWrites,
   useWriteSlot,
@@ -44,7 +48,7 @@ export function latestAnswer(messages: readonly ChatMessage[]): string {
  */
 export function publishedRequest(
   thread: SelectionThread,
-  threads: GithubPrReviewThreads
+  threads: Pick<GithubPrReviewThreads, "headOid" | "baseOid">
 ): ReviewMappingRequest | null {
   const { original, capture } = thread.git;
   if (
@@ -73,77 +77,26 @@ export function publishedRequest(
   };
 }
 
-export type PublishedPlace =
-  | { kind: "checking" }
-  | { kind: "published"; place: NewThreadPlace }
-  | { kind: "unpublished" };
-
-/** A check of whether some lines are on the PR, and the result it maps. */
-export interface PlaceQuery {
-  /** Stands for the query's content: a new identity checks again. */
-  identity: string;
-  path: string;
-  side: ReviewThreadSide;
-  map(): Promise<Pick<MappedReviewRange, "status" | "startLine" | "line">>;
-}
-
-/** Whether `query`'s lines are on the PR, unchanged, and where. */
-export function usePlaceOnPr(query: PlaceQuery | null): PublishedPlace | null {
-  const identity = query?.identity ?? null;
-  const [answer, setAnswer] = useState<{
-    identity: string;
-    place: PublishedPlace;
-  } | null>(null);
-  useEffect(() => {
-    if (!query) return;
-    let current = true;
-    const settle = (place: PublishedPlace) => {
-      if (current) setAnswer({ identity: query.identity, place });
-    };
-    query
-      .map()
-      .then(({ status, startLine, line }) =>
-        settle(
-          status === "open" && line != null
-            ? {
-                kind: "published",
-                place: {
-                  path: query.path,
-                  side: query.side,
-                  startLine:
-                    startLine != null && startLine < line ? startLine : null,
-                  line,
-                },
-              }
-            : { kind: "unpublished" }
-        )
-      )
-      .catch(() => settle({ kind: "unpublished" }));
-    return () => {
-      current = false;
-    };
-    // `identity` stands for `query`'s content.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity]);
-  if (!query) return null;
-  return answer?.identity === identity ? answer.place : { kind: "checking" };
-}
-
 /** Whether the discussion's lines are on the PR, unchanged, and where. */
 function usePublishedPlace(
   thread: SelectionThread,
   writes: GithubWritesValue | null
 ): PublishedPlace | null {
+  // Only what the check reads: a reread of the threads leaves it alone.
+  const headOid = writes?.threads.headOid;
+  const baseOid = writes?.threads.baseOid;
   const request = useMemo(
-    () => (writes ? publishedRequest(thread, writes.threads) : null),
-    [thread, writes]
+    () =>
+      headOid !== undefined && baseOid !== undefined
+        ? publishedRequest(thread, { headOid, baseOid })
+        : null,
+    [thread, headOid, baseOid]
   );
   const worktree = writes?.worktreePath;
   const query = useMemo<PlaceQuery | null>(
     () =>
       request && worktree
         ? {
-            identity: JSON.stringify([worktree, request]),
             path: request.location.path,
             side: request.location.side,
             map: () =>
@@ -179,7 +132,7 @@ export function useDiscussionGithub(
   const key =
     thread.githubThreadId !== null
       ? replySlot(thread.githubThreadId)
-      : commentSlot(thread.id);
+      : commentSlot(writes?.scope ?? "", thread.id);
   const slot = useWriteSlot(writes?.store, key);
   if (!writes) return { action: null, composer: null };
   if (thread.githubThreadId !== null) {
@@ -210,11 +163,9 @@ export function useDiscussionGithub(
     <GithubPostButton
       disabled={!place || slot.draft !== null}
       title={
-        published.kind === "checking"
-          ? "Checking the lines are on the PR…"
-          : !place
-            ? `These lines aren’t on PR #${writes.pr.number} yet · push them first`
-            : `Start a GitHub thread on ${rangeLabel(place)}; posting is separate`
+        published.kind !== "published"
+          ? unplacedReason(published, writes.pr.number)
+          : `Start a GitHub thread on ${rangeLabel(published.place)}; posting is separate`
       }
       onClick={() => writes.store.open(key, latestAnswer(messages))}
     >
@@ -231,7 +182,16 @@ export function useDiscussionGithub(
       }`}
       textLabel="Comment on GitHub"
       placeholder="Write a comment…"
-      posts={[{ label: "Post comment", plan: { kind: "start", place } }]}
+      posts={[
+        {
+          label: "Post comment",
+          plan: {
+            kind: "start",
+            pullRequestId: writes.threads.pullRequestId,
+            place,
+          },
+        },
+      ]}
       port={writes.port((threadId) =>
         discussion.moveUnderGithub(thread.id, threadId)
       )}
@@ -244,8 +204,10 @@ export function useDiscussionGithub(
       composer ??
       (slot.draft !== null || slot.discarded !== null ? (
         <p className="gh-mute gh-thread-note" role="status">
-          Your comment draft is kept; these lines aren’t on PR #
-          {writes.pr.number} yet.
+          Your comment draft is kept;{" "}
+          {published.kind === "unavailable"
+            ? `these lines can’t be checked against PR #${writes.pr.number} yet.`
+            : `these lines aren’t on PR #${writes.pr.number} yet.`}
         </p>
       ) : null),
   };

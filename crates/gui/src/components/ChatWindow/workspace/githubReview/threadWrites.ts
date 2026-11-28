@@ -4,12 +4,17 @@
  * draft (a GitHub thread's reply, or a discussion's new comment) and the
  * write it last sent. Drafts live per chat, apart from the unsent private
  * questions of `SelectionDiscussions`, so closing a card, Esc or another
- * comparison keeps them. Nothing is sent without a call from a user action;
- * a timed-out write is checked against GitHub before it is sent again.
+ * comparison keeps them. Slots are scoped to one PR: a thread's by its
+ * GitHub node ID, a comment's or a selection's by the PR's identity, and a
+ * failure remembers the PR it was sent to, so nothing left from one PR is
+ * retried against another. Nothing is sent without a call from a user
+ * action; a write whose outcome is unknown is settled against the threads
+ * read right after it, and checked again before it is sent again.
  */
 import type {
   GithubFailure,
   GithubPrReviewThreads,
+  GithubReviewThread,
   GithubThreadWrite,
   ReviewThreadSide,
 } from "../../../../bindings";
@@ -28,17 +33,34 @@ export interface NewThreadPlace {
 export type WritePlan =
   | { kind: "reply"; threadId: string; resolve: boolean }
   | { kind: "resolve" | "reopen"; threadId: string }
-  | { kind: "start"; place: NewThreadPlace };
+  /** On the PR whose threads' read answered `pullRequestId`. */
+  | { kind: "start"; pullRequestId: string; place: NewThreadPlace };
 
 /**
- * Why a write failed, as what the user can do about it: `forbidden` and
- * `unconfirmed` (a timeout GitHub's threads could not settle) only go to
- * GitHub; `timeout` retries after checking the write is not there; anything
- * else retries.
+ * Why a write failed, as what the user can do about it:
+ * - `forbidden` (403) and `unconfirmed` (an unknown outcome GitHub's threads
+ *   could not settle) only go to GitHub;
+ * - `rejected`: the write is invalid and was refused before it was sent,
+ *   so resending it unchanged cannot help;
+ *   a draft is kept to be changed and posted again;
+ * - `ambiguous`: it may have landed (a timeout, a dropped answer, a reread
+ *   that failed), so Retry checks the threads before sending it again;
+ * - `transient`: it never got through, so Retry sends it again.
  */
-export type FailureKind = "forbidden" | "timeout" | "unconfirmed" | "transient";
+export type FailureKind =
+  | "forbidden"
+  | "rejected"
+  | "ambiguous"
+  | "unconfirmed"
+  | "transient";
+
+/** Whether Retry may act on a failure of `kind`. */
+export const retryable = (kind: FailureKind) =>
+  kind === "ambiguous" || kind === "transient";
 
 export interface WriteFailure {
+  /** The PR the write went to (its `WritePort.scope`). */
+  scope: string;
   /** What Retry posts; after a posted reply, only its resolve. */
   plan: WritePlan;
   kind: FailureKind;
@@ -58,6 +80,8 @@ export interface WriteSlot {
   /** The write being sent or checked. */
   pending: GithubThreadWrite["kind"] | null;
   failure: WriteFailure | null;
+  /** Writes GitHub refused with a 403 here: they are not offered again. */
+  refused: readonly GithubThreadWrite["kind"][];
 }
 
 export const EMPTY_SLOT: WriteSlot = {
@@ -65,13 +89,70 @@ export const EMPTY_SLOT: WriteSlot = {
   discarded: null,
   pending: null,
   failure: null,
+  refused: [],
 };
 
+/** A GitHub thread's slot: its node ID is unique across PRs. */
 export const replySlot = (githubThreadId: string) => `thread:${githubThreadId}`;
-export const commentSlot = (discussionId: string) => `comment:${discussionId}`;
+/** A discussion's new comment on the PR `scope`. */
+export const commentSlot = (scope: string, discussionId: string) =>
+  `comment:${scope}:${discussionId}`;
+
+/**
+ * Whether `failure` is the thread's own (a resolve or reopen, alone or after
+ * a posted reply) rather than its composer's text: it shows with the
+ * thread's buttons, and outlives the composer.
+ */
+export const threadLane = (failure: WriteFailure) =>
+  failure.sent.kind === "resolve" || failure.sent.kind === "reopen";
+
+/**
+ * What a thread offers the viewer to write: what GitHub permits, less what
+ * it refused here with a 403. While the reply composer is open the buttons
+ * give way to it (it posts, and resolves, itself).
+ */
+export function threadOffers(
+  thread: Pick<
+    GithubReviewThread,
+    "resolved" | "viewerCanReply" | "viewerCanResolve" | "viewerCanUnresolve"
+  >,
+  slot: Pick<WriteSlot, "draft" | "refused">
+): {
+  /** The Reply button. */
+  reply: boolean;
+  /** The Resolve or Reopen button. */
+  toggle: "resolve" | "reopen" | null;
+  /** The composer's Reply and resolve. */
+  replyAndResolve: boolean;
+} {
+  const allowed = (kind: "resolve" | "reopen") => !slot.refused.includes(kind);
+  const canResolve =
+    !thread.resolved && thread.viewerCanResolve && allowed("resolve");
+  const canReopen =
+    thread.resolved && thread.viewerCanUnresolve && allowed("reopen");
+  const closed = slot.draft === null;
+  return {
+    reply: closed && thread.viewerCanReply,
+    toggle: !closed
+      ? null
+      : canResolve
+        ? "resolve"
+        : canReopen
+          ? "reopen"
+          : null,
+    replyAndResolve: canResolve,
+  };
+}
 
 export function failureKind({ kind }: GithubFailure): FailureKind {
-  return kind === "forbidden" || kind === "timeout" ? kind : "transient";
+  switch (kind) {
+    case "forbidden":
+    case "rejected":
+    case "ambiguous":
+      return kind;
+    default:
+      return "transient";
+  }
 }
 
 const sameBody = (left: string, right: string) =>
@@ -161,16 +242,34 @@ export function writesOf(
           : []),
       ];
     case "start":
-      return body ? [{ kind: "start", ...plan.place, body }] : null;
+      return body
+        ? [
+            {
+              kind: "start",
+              pullRequestId: plan.pullRequestId,
+              ...plan.place,
+              body,
+            },
+          ]
+        : null;
   }
+}
+
+/** A sent write's answer, and the threads as read right after it. */
+export interface WriteAnswer {
+  outcome: GithubOutcome<string>;
+  /** Null when the reread failed or the PR changed. */
+  threads: GithubPrReviewThreads | null;
 }
 
 /** Where a slot's writes go: one PR, as the user saw it. */
 export interface WritePort {
+  /** The PR's identity: a failure is retried only through its own PR. */
+  scope: string;
   /** The PR's threads as shown now, to tell later whether a write landed. */
   shown(): GithubPrReviewThreads | null;
-  /** Sends one write once; answers the written thread. */
-  send(write: GithubThreadWrite): Promise<GithubOutcome<string>>;
+  /** Sends one write once; answers the written thread and a fresh read. */
+  send(write: GithubThreadWrite): Promise<WriteAnswer>;
   /** Reads the threads past every cache; null when that failed. */
   reread(): Promise<GithubPrReviewThreads | null>;
   /** The slot's new thread is on GitHub as `threadId`. */
@@ -198,7 +297,8 @@ export class ThreadWrites {
       next.draft === null &&
       next.discarded === null &&
       next.pending === null &&
-      next.failure === null
+      next.failure === null &&
+      next.refused.length === 0
     )
       this.slots.delete(key);
     else this.slots.set(key, next);
@@ -222,16 +322,25 @@ export class ThreadWrites {
     this.set(key, {
       draft: null,
       discarded: draft,
-      // A failure of the discarded text goes with it; a posted reply's
-      // resolve recovery stays.
-      failure: failure?.replied ? failure : null,
+      // A failure of the discarded text goes with it; the thread's own
+      // (a resolve, or a posted reply's resolve recovery) stays.
+      failure: failure && threadLane(failure) ? failure : null,
     });
   }
 
-  /** Drops the slot of a composer that is gone; a post that is out stays. */
+  /**
+   * Drops the slot of a composer that is gone; a post that is out stays,
+   * and so do the writes GitHub refused.
+   */
   forget(key: string) {
-    if (!this.slot(key).pending && this.slots.delete(key))
+    const { pending, refused } = this.slot(key);
+    if (pending || !this.slots.has(key)) return;
+    if (refused.length > 0)
+      this.set(key, { ...EMPTY_SLOT, refused });
+    else {
+      this.slots.delete(key);
       this.listeners.forEach((listener) => listener());
+    }
   }
 
   undo(key: string) {
@@ -249,16 +358,17 @@ export class ThreadWrites {
   }
 
   /**
-   * Posts the failed plan again. A timeout first reads the threads: a write
-   * that landed counts as posted, and one GitHub's threads cannot settle is
-   * left to GitHub, so nothing posts twice.
+   * Posts the failed plan again, through the PR it was sent to only. An
+   * ambiguous write first reads the threads: one that landed counts as
+   * posted, and one GitHub's threads cannot settle is left to GitHub, so
+   * nothing posts twice.
    */
   async retry(key: string, port: WritePort) {
     const { failure, pending, draft } = this.slot(key);
-    if (!failure || pending) return;
-    if (failure.kind === "forbidden" || failure.kind === "unconfirmed") return;
+    if (!failure || pending || failure.scope !== port.scope) return;
+    if (!retryable(failure.kind)) return;
     const { plan, replied } = failure;
-    if (failure.kind === "timeout") {
+    if (failure.kind === "ambiguous") {
       this.set(key, { pending: failure.sent.kind });
       const threads = await port.reread().catch(() => null);
       if (!threads) {
@@ -275,12 +385,7 @@ export class ThreadWrites {
       if (result.kind === "unknown") {
         this.set(key, {
           pending: null,
-          failure: {
-            ...failure,
-            kind: "unconfirmed",
-            message:
-              "GitHub’s threads here can’t show whether it posted; check on GitHub.",
-          },
+          failure: { ...failure, kind: "unconfirmed", message: UNSETTLED },
         });
         return;
       }
@@ -315,31 +420,41 @@ export class ThreadWrites {
       this.set(key, { pending: write.kind, failure: null });
       // A send that threw may or may not have reached GitHub: like a
       // timeout, it is checked before it is sent again.
-      const outcome = await port.send(write).catch(
-        (error: unknown): Awaited<ReturnType<WritePort["send"]>> => ({
-          ok: false,
-          failure: {
-            kind: "timeout",
-            message: error instanceof Error ? error.message : String(error),
-            retryAfterSecs: null,
+      const { outcome, threads } = await port.send(write).catch(
+        (error: unknown): WriteAnswer => ({
+          outcome: {
+            ok: false,
+            failure: {
+              kind: "ambiguous",
+              message: error instanceof Error ? error.message : String(error),
+              retryAfterSecs: null,
+            },
           },
+          threads: null,
         })
       );
-      if (!outcome.ok) {
+      const settled = settle(outcome, threads, write, before);
+      if (settled.kind === "failed") {
+        const { failure } = settled;
         this.set(key, {
           pending: null,
           failure: {
+            scope: port.scope,
             plan: index === 0 ? plan : restPlan(plan),
-            kind: failureKind(outcome.failure),
-            message: outcome.failure.message,
+            kind: failure.kind,
+            message: failure.message,
             replied: replied || index > 0,
             sent: write,
             before,
           },
+          refused:
+            failure.kind === "forbidden"
+              ? [...new Set([...this.slot(key).refused, write.kind])]
+              : this.slot(key).refused,
         });
         return;
       }
-      await this.wrote(key, write, outcome.data, port);
+      await this.wrote(key, write, settled.threadId, port);
     }
     this.set(key, { pending: null, failure: null });
   }
@@ -364,6 +479,42 @@ export class ThreadWrites {
         .catch((error: unknown) =>
           console.error("Following up a started GitHub thread failed", error)
         );
+  }
+}
+
+const UNSETTLED =
+  "GitHub’s threads here can’t show whether it posted; check on GitHub.";
+
+/**
+ * What a sent write did: posted as GitHub answered, or as the threads read
+ * right after it show when GitHub's answer was lost; otherwise how it
+ * failed. An unknown outcome the read cannot settle is left to GitHub, and
+ * one with no read is checked again on Retry.
+ */
+export function settle(
+  outcome: GithubOutcome<string>,
+  threads: GithubPrReviewThreads | null,
+  write: GithubThreadWrite,
+  before: readonly string[] | null
+):
+  | { kind: "posted"; threadId: string }
+  | { kind: "failed"; failure: { kind: FailureKind; message: string } } {
+  if (outcome.ok) return { kind: "posted", threadId: outcome.data };
+  const kind = failureKind(outcome.failure);
+  const { message } = outcome.failure;
+  if (kind !== "ambiguous" || !threads)
+    return { kind: "failed", failure: { kind, message } };
+  const result = landed(threads, write, before);
+  switch (result.kind) {
+    case "landed":
+      return { kind: "posted", threadId: result.threadId };
+    case "unknown":
+      return {
+        kind: "failed",
+        failure: { kind: "unconfirmed", message: UNSETTLED },
+      };
+    case "absent":
+      return { kind: "failed", failure: { kind, message } };
   }
 }
 

@@ -238,21 +238,45 @@ fn github_errors_map_to_typed_failure_kinds() {
         kind(GitHubError::Timeout {
             message: String::new()
         }),
-        GithubErrorKind::Timeout
+        GithubErrorKind::Ambiguous
     );
-    // Taken but not confirmed: checked before resending, like a timeout.
+    // Sent but not confirmed: checked before resending, like a timeout.
+    for sent in [
+        GitHubError::Unconfirmed {
+            message: String::new(),
+        },
+        GitHubError::Interrupted {
+            message: String::new(),
+        },
+    ] {
+        assert_eq!(kind(sent), GithubErrorKind::Ambiguous);
+    }
+    // Refused before sending: resending it unchanged cannot help.
     assert_eq!(
-        kind(GitHubError::Unconfirmed {
+        kind(GitHubError::InvalidInput {
             message: String::new()
         }),
-        GithubErrorKind::Timeout
+        GithubErrorKind::Rejected
     );
-    assert_eq!(
-        kind(GitHubError::Network {
-            message: String::new()
-        }),
-        GithubErrorKind::Other
-    );
+    // Not a refusal of the request itself: a write turns those of these
+    // that follow a send into Unconfirmed before they get here.
+    for other in [
+        GitHubError::Network {
+            message: String::new(),
+        },
+        GitHubError::Http {
+            status: 502,
+            message: String::new(),
+        },
+        GitHubError::GraphQl {
+            message: String::new(),
+        },
+        GitHubError::Decode {
+            message: String::new(),
+        },
+    ] {
+        assert_eq!(kind(other), GithubErrorKind::Other);
+    }
     let limited = GithubFailure::from(GitHubError::RateLimited {
         retry_after_secs: Some(u64::MAX),
         message: String::new(),

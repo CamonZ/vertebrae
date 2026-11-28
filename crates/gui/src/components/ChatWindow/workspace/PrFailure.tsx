@@ -38,7 +38,8 @@ export function GithubFailureText({ failure }: { failure: GithubFailure }) {
       );
     case "not_found":
     case "forbidden":
-    case "timeout":
+    case "rejected":
+    case "ambiguous":
     case "other":
       return <>{failure.message}</>;
     default: {
