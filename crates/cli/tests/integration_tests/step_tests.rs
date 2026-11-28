@@ -3169,7 +3169,7 @@ mod provider_tests {
             vertebrae_core::StepHarness::Claude => Some(CliHarness::Claude),
             vertebrae_core::StepHarness::Codex => Some(CliHarness::Codex),
             vertebrae_core::StepHarness::Typesafe => Some(CliHarness::Typesafe),
-            vertebrae_core::StepHarness::MistralVibe => Some(CliHarness::MistralVibe),
+            vertebrae_core::StepHarness::Acp => Some(CliHarness::Acp),
         }
     }
 
@@ -3293,6 +3293,7 @@ mod provider_tests {
             (CliHarness::Claude, "claude"),
             (CliHarness::Codex, "codex"),
             (CliHarness::Typesafe, "typesafe"),
+            (CliHarness::Acp, "acp"),
         ] {
             let id = format!("step-{wire}");
             let mut add = add_cmd_with("Harness", workflow_id.clone(), &id, None, None, None);

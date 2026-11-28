@@ -13,7 +13,7 @@ vertebrae/
 ├── crates/harness-core/   # V1 runtime, event, and replay contracts
 ├── crates/harness-claude/ # Claude streaming CLI adapter
 ├── crates/harness-codex/  # Codex App Server streaming adapter
-├── crates/harness-mistral-vibe/ # Mistral Vibe one-shot adapter
+├── crates/harness-acp/   # Shared ACP chat and workflow adapter
 ├── crates/sacrum-client/  # HTTP client implementing the service traits
 ├── crates/cli/            # CLI binary (vtb)
 ├── crates/daemon/         # Background step executor (vtb-daemon)
@@ -40,7 +40,7 @@ flowchart TB
     Factory["HarnessRuntimeFactory<br/>crates/harness"]
     Claude["Claude adapter<br/>crates/harness-claude"]
     Codex["Codex adapter<br/>crates/harness-codex"]
-    Mistral["Mistral Vibe adapter<br/>crates/harness-mistral-vibe"]
+    ACP["Shared ACP adapter<br/>crates/harness-acp"]
 
     subgraph "Backend Client (crates/sacrum-client)"
         SC["GraphqlClient (reqwest)"]
@@ -62,7 +62,7 @@ flowchart TB
     Daemon --> VSvc
     GUI --> Factory
     Daemon --> Factory
-    Factory --> Claude & Codex & Mistral
+    Factory --> Claude & Codex & ACP
 
     VSvc --> TS & WS & ES & SS & AS
     TS -.-> STS
@@ -115,7 +115,7 @@ Key types: `Task`, `Workflow`, `Step`, `StepHarness`, `Artifact`, `Section`, `Co
 
 Steps carry:
 - `step_type: StepType` — the execution mode, such as `llm_inference` or `structured_inference`
-- `harness: Option<StepHarness>` — optional `claude`, `codex`, `typesafe`, or `mistral_vibe` runtime selector
+- `harness: Option<StepHarness>` — optional `claude`, `codex`, `typesafe`, or `acp` runtime selector
 - `output_schema: Option<Value>` — JSON Schema for execute/evaluate structured output enforcement
 - `route_config: Option<Value>` — nullable opaque deterministic route program, validated and evaluated by Sacrum
 - `persistence_options: Option<Value>` — Sacrum-owned artifact persistence configuration
@@ -139,8 +139,8 @@ both live delivery and `format=harness` `SessionLog` replay.
 | `crates/harness-core` | The V1 contract: `HarnessRuntime`, `SessionHandle`/`TurnHandle`, `HarnessEventV1` + drafts, `EventSequencer`, `EventSink`, `ControlSink`, capabilities, and the canonical projection | Provider wire types, surface orchestration |
 | `crates/harness-claude` | Claude Code discovery, launch policy, live stream-json decoding, durable transcript discovery/replay, control responses, process lifetime | GUI, daemon, actor, persistence, or provider-settings code |
 | `crates/harness-codex` | Codex managed App Server daemon attachment, WebSocket JSON-RPC, durable rollout discovery/replay, model catalog, turn and control mapping | GUI, daemon, actor, persistence, or provider-settings code |
-| `crates/harness-mistral-vibe` | Mistral Vibe 2.26.1 discovery, dynamic `config/read` model catalog, request-scoped model selection, one-shot JSON-RPC turns, and normalized V1 events | GUI, daemon, actor, persistence, or provider-settings code |
-| `crates/harness` | Runtime **selection** only: `HarnessRuntimeFactory` maps a step's explicit `harness` (`claude`, `codex`, `typesafe`, `mistral_vibe`) to an adapter; when absent, it preserves the legacy `AgentConfig.provider` default/backfill path | Wire protocols, event decoding |
+| `crates/harness-acp` | ACP v1 session negotiation, model discovery and selection, interactive chat, one-shot workflow runs, and normalized V1 events | GUI, daemon, actor, persistence, or provider-settings code |
+| `crates/harness` | Runtime **selection** only: `HarnessRuntimeFactory` maps a step's explicit `harness` (`claude`, `codex`, `typesafe`, `acp`) to an adapter; when absent, it preserves the legacy `AgentConfig.provider` default/backfill path | Wire protocols, event decoding |
 
 Only `crates/harness` depends on the adapter crates. Surfaces depend on
 `vertebrae-harness` (construction) and `vertebrae-harness-core` (contract), and
@@ -200,38 +200,53 @@ in `gui/src/stores/providerReplay.ts` beside the chat store.
 
 ### Harnesses and providers
 
-A **harness** (`StepHarness`: `claude`, `codex`, `typesafe`, `mistral_vibe`)
-is the runtime adapter; a **provider** (`ProviderId`, carried on
-`AgentConfig.provider`) is the endpoint and credential set it talks to. The
-built-in providers `anthropic`, `openai`, `typesafe`, and `mistral`
-(`BuiltinProvider`) run on the matching harness and need no custom provider
-configuration. Custom providers are per-machine
+A **harness** (`StepHarness`) is the runtime adapter. A **provider**
+(`ProviderId` in `AgentConfig.provider`) identifies what the harness connects
+to. The built-in providers `anthropic`, `openai`, and `typesafe` use their
+matching harnesses. ACP agents always use named provider profiles. Custom
+providers are per-machine
 `[providers.<id>]` entries in config.toml (`ProviderProfile`, see
 [SACRUM_CONFIG.md](SACRUM_CONFIG.md)) bound to one harness.
 
-- `vertebrae_harness::resolve_provider` selects: no provider means the step
-  harness's built-in provider (Anthropic when no harness is set); a custom ID
-  must have a valid profile, and an explicit step harness must match the
-  provider's harness.
+- Claude, Codex, and TypeSafe use their built-in provider when the step omits
+  a provider. A step that omits both harness and provider defaults to
+  Anthropic. ACP requires a named provider profile. An explicit harness must
+  match the provider's harness.
 - Capability rules (reasoning effort, personality, verbosity, and one-shot
   option limits) key on the harness. Anthropic, OpenAI, and TypeSafe validate
-  against static built-in catalogs; custom providers accept only their
-  profile's `models`.
-- `mistral_vibe` accepts arbitrary model aliases statically because availability
-  is server-dependent. Each capability probe and run reads the installed Vibe
-  2.26.1 server's `config/read`, exposes aliases as capability model IDs, and
-  launches the selected turn with that alias's canonical Vibe model name. Set
-  `MISTRAL_VIBE_SERVER` to override the discovered `vibe-app-server` executable.
-  This production slice supports text-only one-shot `llm_inference`; tools,
-  callbacks, structured inference, persistent sessions, replay, and unsupported
-  request options fail explicitly rather than being silently ignored.
-- Each adapter translates a profile into its own launch settings:
-  `ClaudeProviderEndpoint` (environment), `CodexCustomModelProvider`
-  (a per-thread `model_providers.<id>` table plus `modelProvider`), and the
-  TypeSafe client config. Normalized events are unchanged.
-- The daemon reports the resolved provider ID and harness on execution status
-  updates and advertises configured custom provider IDs (never endpoints or
-  credentials) in its capability report.
+  against static built-in catalogs. Named providers use their configured
+  `models` list, which can be empty for ACP agents with dynamic model discovery.
+- `acp` is a harness for one-shot `llm_inference`.
+  The daemon starts a fresh session in the task worktree and validates any
+  explicit model against the agent's ACP choices before prompting. Unattended
+  permission requests receive a cancelled response. Structured inference,
+  output schemas, and workflow session routing are unsupported.
+
+Configure each ACP agent as a named provider in the shared Vertebrae
+`config.toml`, or use **Add ACP provider** under **Settings → Providers & Models**.
+
+```toml
+[providers.example-agent]
+harness = "acp"
+executable = "/absolute/path/to/agent"
+args = ["--acp"]
+models = ["example-model"]
+```
+
+Select `harness = "acp"` and `agent_config.provider = "example-agent"` on a
+workflow step. Desktop chat uses the same provider and retains saved chat
+connection IDs. A command name resolves on the executing machine's login shell
+PATH. Arguments are passed literally, and the optional `env` table supplies
+agent-specific environment overrides. Leaving `models` empty lets the agent
+validate any requested model. A nonempty model list restricts workflow requests
+to those IDs. The daemon reads the provider for each new execution.
+
+Legacy desktop ACP connections are read as named provider profiles and written
+to `[providers.<id>]` the next time settings are saved. Move any experimental
+`[daemon.acp]` configuration into a named provider and select that ID on the step. To move a Mistral Vibe
+workflow or bundle, give it the `acp` harness and the ID of a named provider
+configured to launch `vibe-acp`. Workflow authoring requires a Sacrum version
+that accepts the `acp` selector.
 
 ### Adding a harness
 

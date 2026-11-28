@@ -1,7 +1,7 @@
 import { withBuiltinProviders } from "../../test/localChatCatalog";
 import { useProviderSettingsStore } from "../../stores/providerSettingsStore";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider, Link } from "react-router-dom";
 import {
@@ -156,16 +156,24 @@ describe("shared configuration forms", () => {
     vi.mocked(commands.saveSharedSettings).mockImplementation(async (_, edit) => {
       if (edit.section !== "acp_agent") throw new Error("Expected an ACP connection");
       return { status: "ok", data: {
-        ...settings, local_chat_acp_agents: [edit.settings], revision: "revision-2",
+        ...settings, acp_providers: [edit.settings], revision: "revision-2",
       } };
     });
 
     mount("providers");
-    await user.click(await screen.findByRole("button", { name: "Add ACP connection" }));
-    expect(screen.getByRole("region", { name: "API providers" })).toBeVisible();
-    expect(screen.getByRole("region", { name: "ACP connections" })).toBeVisible();
+    const providers = await screen.findByRole("region", { name: "Providers" });
+    const [addProvider, addAcpProvider] = within(providers).getAllByRole("button");
+    expect(addProvider).toHaveAccessibleName("Add provider");
+    expect(addAcpProvider).toHaveAccessibleName("Add ACP provider");
+    await user.click(addProvider);
+    expect(addProvider).toHaveAttribute("aria-pressed", "true");
+    await user.click(addAcpProvider);
+    expect(addAcpProvider).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("group", { name: "ACP providers" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Connection details" })).toHaveFocus();
-    await user.type(screen.getByLabelText("Connection name"), connection.name);
+    await user.type(screen.getByLabelText("Provider ID"), "review-agent");
+    await user.type(screen.getByLabelText("Models"), "agent-model");
+    await user.type(screen.getByLabelText("Provider name"), connection.name);
     await user.type(
       screen.getByLabelText("Agent executable"),
       connection.executable
@@ -185,7 +193,8 @@ describe("shared configuration forms", () => {
     await waitFor(() => {
       expect(commands.saveSharedSettings).toHaveBeenCalledWith("revision-1", {
         section: "acp_agent",
-        settings: { id: expect.any(String), ...connection },
+        create: true,
+        settings: { id: "review-agent", models: ["agent-model"], default_model: "", ...connection },
       });
       expect(useProviderSettingsStore.getState().revision).toBe(1);
     });
@@ -196,13 +205,37 @@ describe("shared configuration forms", () => {
     expect(screen.getByLabelText("Argument 3")).toHaveValue("$HOME; literal");
   });
 
+  it("validates ACP model duplicates and listed defaults before saving", async () => {
+    const user = userEvent.setup();
+    mount("providers");
+    await user.click(await screen.findByRole("button", { name: "Add ACP provider" }));
+    await user.type(screen.getByLabelText("Provider ID"), "test-agent");
+    await user.type(screen.getByLabelText("Provider name"), "Test agent");
+    await user.type(screen.getByLabelText("Agent executable"), "/agent/test");
+    const models = screen.getByLabelText("Models");
+    const defaultModel = screen.getByLabelText("Default model");
+    const save = screen.getByRole("button", { name: "Save changes" });
+
+    await user.type(models, "first, first");
+    expect(models).toHaveAccessibleDescription(/unique/);
+    expect(save).toBeDisabled();
+    await user.clear(models);
+    await user.type(models, "first, second");
+    await user.type(defaultModel, "agent-default");
+    expect(defaultModel).toHaveAccessibleDescription(/in the model list/);
+    expect(save).toBeDisabled();
+    expect(commands.saveSharedSettings).not.toHaveBeenCalled();
+    await user.clear(models);
+    expect(save).toBeEnabled();
+  });
+
   it("validates, preserves rejected drafts, and explicitly clears the ACP agent", async () => {
     const user = userEvent.setup();
     const first = { id: "first", name: "First agent", executable: "/agent/agy", args: ["acp"] };
     const second = { id: "second", name: "Second agent", executable: "/agent/vibe", args: [] };
     vi.mocked(commands.getSharedSettings).mockResolvedValue({
       status: "ok",
-      data: { ...settings, local_chat_acp_agents: [first, second] },
+      data: { ...settings, acp_providers: [first, second] },
     });
     vi.mocked(commands.saveSharedSettings).mockResolvedValueOnce({
       status: "error",
@@ -222,7 +255,7 @@ describe("shared configuration forms", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Settings changed on disk.");
     expect(executable).toHaveValue("/new/agy");
     expect(screen.getByLabelText("Argument 1")).toHaveValue("acp");
-    await user.click(screen.getByRole("button", { name: "Remove connection" }));
+    await user.click(screen.getByRole("button", { name: "Remove provider" }));
     expect(screen.getByText(/Save changes to remove First agent/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(commands.saveSharedSettings).toHaveBeenLastCalledWith("revision-1", {
@@ -605,6 +638,23 @@ describe("decision model configuration", () => {
     ).not.toBeInTheDocument();
     chooseDropdownValue(screen.getByLabelText("Decision provider"), "openai");
     expect(screen.getByLabelText("Decision model")).toHaveValue("");
+  });
+
+  it("selects a model from a named ACP provider for decisions", async () => {
+    const configured = {
+      ...settings,
+      acp_providers: [{
+        id: "gemini-neon", name: "Gemini Neon", executable: "neon",
+        args: [], models: ["selected-model"],
+      }],
+    };
+    vi.mocked(commands.getSharedSettings).mockResolvedValue({
+      status: "ok", data: configured,
+    });
+    mount("decision_model");
+    chooseDropdownValue(await screen.findByLabelText("Decision provider"), "gemini-neon");
+    chooseDropdownValue(screen.getByLabelText("Decision model"), "selected-model");
+    expect(screen.getByLabelText("Decision model")).toHaveAttribute("data-value", "selected-model");
   });
 
   it("retains stale selections and allows disabling the optional role", async () => {

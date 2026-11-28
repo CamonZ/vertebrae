@@ -66,6 +66,10 @@ pub struct AcpAgentSettings {
     pub name: String,
     pub executable: String,
     pub args: Vec<String>,
+    #[serde(default)]
+    pub models: Vec<String>,
+    #[serde(default)]
+    pub default_model: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, specta::Type)]
@@ -87,7 +91,7 @@ pub struct SharedSettings {
     pub typesafe_url_override: bool,
     pub providers: Vec<ProviderSettings>,
     #[specta(optional)]
-    pub local_chat_acp_agents: Vec<AcpAgentSettings>,
+    pub acp_providers: Vec<AcpAgentSettings>,
     pub observability: ObservabilitySettings,
 }
 
@@ -95,6 +99,7 @@ pub struct SharedSettings {
 #[serde(tag = "section", rename_all = "snake_case")]
 pub enum SettingsEdit {
     AcpAgent {
+        create: bool,
         settings: AcpAgentSettings,
     },
     RemoveAcpAgent {
@@ -261,6 +266,7 @@ fn snapshot(config: &VertebraeConfigFile) -> Result<SharedSettings, CommandError
         providers: config
             .providers
             .iter()
+            .filter(|(_, p)| p.harness != StepHarness::Acp)
             .map(|(id, p)| ProviderSettings {
                 id: id.to_string(),
                 harness: p.harness.to_string(),
@@ -297,12 +303,18 @@ fn snapshot(config: &VertebraeConfigFile) -> Result<SharedSettings, CommandError
                     .unwrap_or_default(),
             })
             .collect(),
-        local_chat_acp_agents: config
+        acp_providers: config
             .acp_agents()
             .map(|(id, agent)| AcpAgentSettings {
-                id: id.into(),
-                name: agent.display_name(id).into(),
-                executable: agent.executable.to_string_lossy().into_owned(),
+                id: id.to_string(),
+                name: agent.name.clone().unwrap_or_else(|| id.to_string()),
+                executable: agent
+                    .executable
+                    .as_deref()
+                    .map(|path| path.to_string_lossy().into_owned())
+                    .unwrap_or_default(),
+                models: agent.models.clone(),
+                default_model: agent.default_model.clone().unwrap_or_default(),
                 args: agent.args.clone(),
             })
             .collect(),
@@ -313,42 +325,47 @@ fn snapshot(config: &VertebraeConfigFile) -> Result<SharedSettings, CommandError
 
 fn apply(config: &mut VertebraeConfigFile, edit: SettingsEdit) -> Result<(), CommandError> {
     match edit {
-        SettingsEdit::AcpAgent { settings } => {
-            let id = &settings.id;
-            if id.is_empty()
-                || id.len() > 64
-                || !id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
-            {
-                return Err(invalid("Invalid ACP connection ID."));
+        SettingsEdit::AcpAgent { create, settings } => {
+            let id = ProviderId::new(&settings.id).map_err(|error| invalid(&error))?;
+            if create == config.providers.contains_key(&id) {
+                return Err(invalid(if create {
+                    "This provider ID is already in use."
+                } else {
+                    "This provider no longer exists. Reload settings."
+                }));
             }
-            let executable = std::path::PathBuf::from(&settings.executable);
-            if settings.executable.trim().is_empty() {
-                return Err(invalid("Enter an executable for the ACP connection."));
+            let mut profile = config
+                .providers
+                .get(&id)
+                .cloned()
+                .unwrap_or_else(|| ProviderProfile::new(StepHarness::Acp));
+            if profile.harness != StepHarness::Acp {
+                return Err(invalid("This provider ID is already in use."));
             }
-            let name = nonblank(settings.name)
-                .ok_or_else(|| invalid("Enter a name for the ACP connection."))?;
+            profile.name = nonblank(settings.name);
+            profile.executable = Some(std::path::PathBuf::from(settings.executable.trim()));
+            profile.args = settings.args;
+            profile.models = settings.models;
+            profile.default_model = nonblank(settings.default_model);
             let shell = crate::shell_environment::user_shell_environment();
             HarnessRuntimeFactory::new(HarnessFactoryConfig {
                 search_path: Some(shell.path.into()),
                 ..Default::default()
             })
-            .create_acp_chat(&executable, settings.args.clone())
+            .create_acp_provider(&id, &profile)
             .map_err(|error| invalid(&error.to_string()))?;
-            config.local_chat_acp_agents.insert(
-                settings.id.clone(),
-                vertebrae_sacrum_client::config::LocalChatAcpSection {
-                    name: Some(name),
-                    executable,
-                    args: settings.args,
-                },
-            );
+            config.providers.insert(id, profile);
         }
         SettingsEdit::RemoveAcpAgent { id } => {
-            if config.local_chat_acp_agents.remove(&id).is_none() {
-                return Err(invalid("ACP connection does not exist."));
+            let id = ProviderId::new(&id).map_err(|error| invalid(&error))?;
+            if !config
+                .providers
+                .get(&id)
+                .is_some_and(|profile| profile.harness == StepHarness::Acp)
+            {
+                return Err(invalid("ACP provider does not exist."));
             }
+            config.providers.remove(&id);
         }
         SettingsEdit::DecisionModel {
             enabled,
@@ -425,9 +442,9 @@ fn apply(config: &mut VertebraeConfigFile, edit: SettingsEdit) -> Result<(), Com
             }
             let harness: StepHarness = serde_json::from_value(serde_json::Value::String(harness))
                 .map_err(|_| invalid("Select a supported harness."))?;
-            if harness == StepHarness::MistralVibe {
+            if harness == StepHarness::Acp {
                 return Err(invalid(
-                    "Custom Mistral Vibe profiles are not supported by this form.",
+                    "Custom ACP profiles are not supported by this form.",
                 ));
             }
             let mut provider = config
@@ -550,7 +567,8 @@ mod tests {
     #[test]
     fn acp_settings_preserve_arguments_and_reject_invalid_replacements() {
         let mut config = VertebraeConfigFile::default();
-        let edit = |id: &str, executable: &str, args: Vec<String>| SettingsEdit::AcpAgent {
+        let edit = |id: &str, executable: &str, args: Vec<String>, create| SettingsEdit::AcpAgent {
+            create,
             settings: AcpAgentSettings {
                 id: id.into(),
                 name: if executable.is_empty() && args.is_empty() {
@@ -560,13 +578,15 @@ mod tests {
                 },
                 executable: executable.into(),
                 args,
+                models: vec!["agent-model".into()],
+                default_model: String::new(),
             },
         };
         let executable = std::env::current_exe().unwrap();
         let args = vec!["two words".into(), String::new()];
         apply(
             &mut config,
-            edit("legacy", executable.to_str().unwrap(), args.clone()),
+            edit("legacy", executable.to_str().unwrap(), args.clone(), true),
         )
         .unwrap();
         apply(
@@ -575,18 +595,22 @@ mod tests {
                 "second",
                 executable.to_str().unwrap(),
                 vec!["second".into()],
+                true,
             ),
         )
         .unwrap();
+        assert_eq!(snapshot(&config).unwrap().acp_providers[0].args, args);
+        assert!(apply(&mut config, edit("legacy", "", vec!["acp".into()], false)).is_err());
+        assert!(apply(
+            &mut config,
+            edit("legacy", "./relative/agent", vec![], false)
+        )
+        .is_err());
         assert_eq!(
-            snapshot(&config).unwrap().local_chat_acp_agents[0].args,
-            args
-        );
-        assert!(apply(&mut config, edit("legacy", "", vec!["acp".into()])).is_err());
-        assert!(apply(&mut config, edit("legacy", "./relative/agent", vec![])).is_err());
-        assert_eq!(
-            config.local_chat_acp_agents["legacy"].executable,
-            executable
+            config.providers[&ProviderId::new("legacy").unwrap()]
+                .executable
+                .as_deref(),
+            Some(executable.as_path())
         );
         apply(
             &mut config,
@@ -595,8 +619,13 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(!config.local_chat_acp_agents.contains_key("legacy"));
-        assert_eq!(config.local_chat_acp_agents["second"].args, ["second"]);
+        assert!(!config
+            .providers
+            .contains_key(&ProviderId::new("legacy").unwrap()));
+        assert_eq!(
+            config.providers[&ProviderId::new("second").unwrap()].args,
+            ["second"]
+        );
     }
 
     #[test]

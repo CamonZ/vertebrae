@@ -35,7 +35,6 @@ use vertebrae_harness_core::{
     TranscriptChildSession, TranscriptReplay, TranscriptReplayPage, TranscriptReplayPageRequest,
     TranscriptReplayRequest,
 };
-use vertebrae_harness_mistral_vibe::{MistralVibeConfig, MistralVibeRuntime};
 use vertebrae_harness_typesafe::{TypeSafeClientConfig, TypeSafeError, TypeSafeRuntime};
 
 /// Construction inputs owned by the surface or deployment environment.
@@ -46,12 +45,10 @@ use vertebrae_harness_typesafe::{TypeSafeClientConfig, TypeSafeError, TypeSafeRu
 pub struct HarnessFactoryConfig {
     pub anthropic_executable: Option<PathBuf>,
     pub openai_executable: Option<PathBuf>,
-    pub mistral_vibe_executable: Option<PathBuf>,
     /// Startup discovery diagnostics. When present with a missing executable,
     /// the factory returns that cached error without probing PATH again.
     pub anthropic_executable_diagnostic: Option<String>,
     pub openai_executable_diagnostic: Option<String>,
-    pub mistral_vibe_executable_diagnostic: Option<String>,
     /// Whether executable resolution was completed by a startup snapshot.
     /// When false, preserve the factory's legacy eager validation behavior.
     pub provider_resolution_cached: bool,
@@ -331,17 +328,19 @@ pub fn read_only_tool_permitted(tool_name: &str) -> bool {
 
 pub use vertebrae_harness_acp::{AcpRuntime, Discovery as AcpDiscovery};
 
-impl HarnessRuntimeFactory {
-    pub fn new(config: HarnessFactoryConfig) -> Self {
-        Self { config }
-    }
+/// Validated executable and literal arguments for an ACP agent.
+#[derive(Clone)]
+pub struct AcpLaunch {
+    executable: PathBuf,
+    args: Vec<String>,
+}
 
-    /// Construct a desktop ACP runtime without adding a workflow harness selector.
-    pub fn create_acp_chat(
-        &self,
+impl AcpLaunch {
+    pub fn resolve(
         executable: &Path,
         args: Vec<String>,
-    ) -> Result<Arc<vertebrae_harness_acp::AcpRuntime>, HarnessError> {
+        search_path: Option<&std::ffi::OsStr>,
+    ) -> Result<Self, HarnessError> {
         if args.iter().any(|arg| arg.contains('\0')) {
             return Err(HarnessError::InvalidRequest(
                 "ACP arguments cannot contain a NUL character.".into(),
@@ -366,10 +365,8 @@ impl HarnessRuntimeFactory {
             && executable.file_name().is_some()
             && executable.as_os_str() == executable.file_name().unwrap_or_default()
         {
-            let path = self
-                .config
-                .search_path
-                .clone()
+            let path = search_path
+                .map(std::ffi::OsStr::to_os_string)
                 .or_else(|| env::var_os("PATH"))
                 .unwrap_or_default();
             env::split_paths(&path)
@@ -381,14 +378,47 @@ impl HarnessRuntimeFactory {
                 "Enter an absolute ACP executable path or a command on PATH.".into(),
             ));
         };
-        let executable = found.ok_or_else(|| HarnessError::Unavailable(
-            "ACP executable was not found. Check the executable in Settings → Providers & Models → ACP agent.".into(),
-        ))?;
-        Ok(Arc::new(vertebrae_harness_acp::AcpRuntime::new(
+        let executable = found.ok_or_else(|| {
+            HarnessError::Unavailable(format!(
+                "ACP executable '{}' was not found or is not executable",
+                executable.display()
+            ))
+        })?;
+        Ok(Self { executable, args })
+    }
+
+    fn into_runtime(self, environment: BTreeMap<String, String>) -> AcpRuntime {
+        AcpRuntime::new(self.executable, self.args, environment)
+    }
+}
+
+impl HarnessRuntimeFactory {
+    pub fn new(config: HarnessFactoryConfig) -> Self {
+        Self { config }
+    }
+
+    pub fn create_acp_provider(
+        &self,
+        id: &ProviderId,
+        profile: &ProviderProfile,
+    ) -> Result<Arc<AcpRuntime>, HarnessError> {
+        profile.validate(id).map_err(HarnessError::InvalidRequest)?;
+        let executable = profile.executable.as_deref().ok_or_else(|| {
+            HarnessError::InvalidRequest(format!("Set the executable in [providers.{id}]"))
+        })?;
+        let launch = AcpLaunch::resolve(
             executable,
-            args,
-            self.config.environment.clone(),
-        )))
+            profile.args.clone(),
+            self.config.search_path.as_deref(),
+        )
+        .map_err(|error| {
+            HarnessError::Unavailable(format!(
+                "ACP provider '{id}': {error}. Check [providers.{id}] and the login shell PATH."
+            ))
+        })?;
+        let mut environment = self.config.environment.clone();
+        environment.extend(profile.env.clone());
+        Ok(Arc::new(launch.into_runtime(environment)))
     }
 
     pub fn resolve_provider(
@@ -478,7 +508,14 @@ impl HarnessRuntimeFactory {
                 Arc::new(self.build_codex(&resolved, &options.agent_config, &request_config)?)
             }
             StepHarness::Typesafe => Arc::new(self.build_typesafe(&resolved, &request_config)?),
-            StepHarness::MistralVibe => Arc::new(self.build_mistral_vibe()?),
+            StepHarness::Acp => self.create_acp_provider(
+                &resolved.id,
+                resolved.profile.as_ref().ok_or_else(|| {
+                    HarnessError::InvalidRequest(
+                        "Select a named ACP provider from [providers.<id>]".into(),
+                    )
+                })?,
+            )?,
         };
         Ok(HarnessRuntimeInstance {
             provider: resolved.id,
@@ -537,8 +574,8 @@ impl HarnessRuntimeFactory {
             StepHarness::Typesafe => Err(HarnessError::Unsupported(format!(
                 "provider '{id}' runs on the typesafe harness, which has no CLI process"
             ))),
-            StepHarness::MistralVibe => Err(HarnessError::Unsupported(format!(
-                "provider '{id}' runs on the mistral_vibe harness, which has no custom CLI launch"
+            StepHarness::Acp => Err(HarnessError::Unsupported(format!(
+                "provider '{id}' runs on the acp harness, which has no custom CLI launch"
             ))),
         }
     }
@@ -601,7 +638,7 @@ impl HarnessRuntimeFactory {
             StepHarness::Codex => {
                 CodexTranscriptReplay::new(self.config.transcript_home_dir.clone()).replay(request)
             }
-            StepHarness::Typesafe | StepHarness::MistralVibe => Ok(None),
+            StepHarness::Typesafe | StepHarness::Acp => Ok(None),
         }
     }
 
@@ -635,7 +672,7 @@ impl HarnessRuntimeFactory {
                 CodexTranscriptReplay::new(self.config.transcript_home_dir.clone())
                     .child_sessions(request)
             }
-            StepHarness::Typesafe | StepHarness::MistralVibe => Ok(Vec::new()),
+            StepHarness::Typesafe | StepHarness::Acp => Ok(Vec::new()),
         }
     }
 
@@ -656,7 +693,7 @@ impl HarnessRuntimeFactory {
                 CodexTranscriptReplay::new(self.config.transcript_home_dir.clone())
                     .replay_page(request, page)
             }
-            StepHarness::Typesafe | StepHarness::MistralVibe => Ok(None),
+            StepHarness::Typesafe | StepHarness::Acp => Ok(None),
         }
     }
 
@@ -834,33 +871,6 @@ impl HarnessRuntimeFactory {
         Ok(CodexRuntime::new(provider))
     }
 
-    fn build_mistral_vibe(&self) -> Result<MistralVibeRuntime, HarnessError> {
-        let provider = MistralVibeConfig {
-            executable: self.config.mistral_vibe_executable.clone(),
-            search_path: self
-                .config
-                .search_path
-                .clone()
-                .or_else(|| env::var_os("PATH")),
-            environment: self.config.environment.clone(),
-            ..MistralVibeConfig::default()
-        };
-        if !self.config.provider_resolution_cached && provider.executable.is_some() {
-            provider.resolve_executable()?;
-        } else if provider.executable.is_none() {
-            if let Some(diagnostic) = &self.config.mistral_vibe_executable_diagnostic {
-                return Err(HarnessError::Unavailable(diagnostic.clone()));
-            }
-            if self.config.provider_resolution_cached {
-                return Err(HarnessError::Unavailable(
-                    "Mistral Vibe executable was not resolved at startup".into(),
-                ));
-            }
-            provider.resolve_executable()?;
-        }
-        Ok(MistralVibeRuntime::new(provider))
-    }
-
     fn typesafe_api_key(&self) -> Result<Option<String>, HarnessError> {
         let api_key = if self.config.typesafe_api_key_secret.is_some() {
             match self
@@ -927,6 +937,11 @@ fn normalized_request_config(
     match &resolved.profile {
         // Custom providers accept exactly their configured models; built-in
         // catalog prefix rules never apply to them.
+        Some(profile) if resolved.harness == StepHarness::Acp && profile.models.is_empty() => {
+            if request_config.model.is_none() {
+                request_config.model.clone_from(&profile.default_model);
+            }
+        }
         Some(profile) => {
             request_config.model = Some(
                 profile
@@ -1144,21 +1159,47 @@ mod tests {
             ..Default::default()
         });
         assert!(matches!(
-            factory.create_acp_chat(Path::new("test-agent"), vec![]),
+            AcpLaunch::resolve(
+                Path::new("test-agent"),
+                vec![],
+                factory.config.search_path.as_deref()
+            ),
             Err(HarnessError::Unavailable(_))
         ));
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
-        assert!(
-            factory
-                .create_acp_chat(Path::new("test-agent"), vec!["two words".into()])
-                .is_ok()
-        );
+        for args in [
+            vec![],
+            vec![
+                "two words".into(),
+                "$HOME; literal".into(),
+                "".into(),
+                "-x".into(),
+            ],
+            vec!["💡".into(), "line one\nline two".into()],
+        ] {
+            let launch = AcpLaunch::resolve(
+                Path::new("test-agent"),
+                args.clone(),
+                factory.config.search_path.as_deref(),
+            )
+            .unwrap();
+            assert_eq!(launch.executable, path);
+            assert_eq!(launch.args, args);
+        }
         assert!(matches!(
-            factory.create_acp_chat(Path::new("./test-agent"), vec![]),
+            AcpLaunch::resolve(
+                Path::new("./test-agent"),
+                vec![],
+                factory.config.search_path.as_deref()
+            ),
             Err(HarnessError::InvalidRequest(_))
         ));
         assert!(matches!(
-            factory.create_acp_chat(&path, vec!["bad\0argument".into()]),
+            AcpLaunch::resolve(
+                &path,
+                vec!["bad\0argument".into()],
+                factory.config.search_path.as_deref()
+            ),
             Err(HarnessError::InvalidRequest(_))
         ));
     }
@@ -1191,10 +1232,7 @@ mod tests {
             (StepHarness::Claude, ProviderId::anthropic()),
             (StepHarness::Codex, ProviderId::openai()),
             (StepHarness::Typesafe, ProviderId::typesafe()),
-            (
-                StepHarness::MistralVibe,
-                ProviderId::new("mistral").unwrap(),
-            ),
+            (StepHarness::Acp, ProviderId::new("acp").unwrap()),
         ] {
             let resolved = resolve_provider(Some(harness), &AgentConfig::default(), &profiles)
                 .expect("built-in selection");
@@ -1441,45 +1479,40 @@ mod tests {
             request_config,
         };
 
-        let result = factory.create_for_harness(Some(StepHarness::MistralVibe), options);
+        let result = factory.create_for_harness(Some(StepHarness::Acp), options);
 
         assert!(matches!(result, Err(HarnessError::Unsupported(_))));
     }
 
     #[test]
-    fn mistral_vibe_accepts_dynamic_model_aliases_from_the_installed_server() {
+    fn named_acp_provider_accepts_dynamic_model_ids() {
+        let id = ProviderId::new("test-agent").unwrap();
         let factory = HarnessRuntimeFactory::new(HarnessFactoryConfig {
-            mistral_vibe_executable: Some(executable()),
-            ..HarnessFactoryConfig::default()
+            provider_profiles: [(
+                id.clone(),
+                ProviderProfile {
+                    executable: Some(executable()),
+                    ..ProviderProfile::new(StepHarness::Acp)
+                },
+            )]
+            .into(),
+            ..Default::default()
         });
         let instance = factory
             .create_for_harness(
-                Some(StepHarness::MistralVibe),
+                Some(StepHarness::Acp),
                 HarnessRuntimeOptions {
-                    agent_config: AgentConfig::default(),
-                    request_config: RequestConfig {
-                        model: Some("future-vibe-alias".into()),
-                        ..RequestConfig::default()
-                    },
+                    agent_config: AgentConfig::new()
+                        .with_provider(id.clone())
+                        .with_model("agent-model"),
+                    request_config: RequestConfig::default(),
                 },
             )
-            .expect("Mistral Vibe model availability is validated at run time");
-        assert_eq!(instance.provider, ProviderId::new("mistral").unwrap());
-        assert_eq!(instance.harness, StepHarness::MistralVibe);
+            .unwrap();
+        assert_eq!(instance.provider, id);
         assert_eq!(
             instance.request_config.model.as_deref(),
-            Some("future-vibe-alias")
-        );
-
-        let result = factory.create_for_harness(
-            Some(StepHarness::MistralVibe),
-            HarnessRuntimeOptions {
-                agent_config: AgentConfig::new().with_tools(vec!["Bash".into()]),
-                request_config: RequestConfig::default(),
-            },
-        );
-        assert!(
-            matches!(result, Err(HarnessError::InvalidRequest(message)) if message.contains("tools"))
+            Some("agent-model")
         );
     }
 

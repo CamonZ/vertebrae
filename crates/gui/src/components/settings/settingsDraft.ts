@@ -6,6 +6,11 @@ import type {
 } from "../../bindings";
 import type { SecretEdit } from "../../bindings";
 import type { SettingsValidation } from "./settingsValidation";
+const RESERVED_PROVIDER_IDS = new Set([
+  "anthropic", "claude", "openai", "codex", "typesafe", "type-safe",
+  "type_safe", "systemone", "system-one", "system_one", "acp",
+]);
+
 export const keep: SecretEdit = { action: "keep" };
 export type ConfigSection =
   | "providers"
@@ -16,20 +21,25 @@ export interface AcpAgentDraft {
   id: string;
   name: string;
   executable: string;
+  models: string;
+  default_model: string;
   args: { id: string; value: string }[];
 }
 
 export type SettingsDraft =
   | Exclude<SettingsEdit, { section: "acp_agent" | "remove_acp_agent" }>
-  | { section: "acp_agent"; settings: AcpAgentDraft; remove?: boolean };
+  | { section: "acp_agent"; settings: AcpAgentDraft; create: boolean; remove?: boolean };
 
 export function acpAgentDraft(agent?: AcpAgentSettings | null): SettingsDraft {
   return {
     section: "acp_agent",
+    create: !agent,
     settings: {
-      id: agent?.id ?? crypto.randomUUID(),
+      id: agent?.id ?? "",
       name: agent?.name ?? "",
       executable: agent?.executable ?? "",
+      models: (agent?.models ?? []).join(", "),
+      default_model: agent?.default_model ?? "",
       args: (agent?.args ?? []).map((value) => ({
         id: crypto.randomUUID(),
         value,
@@ -41,10 +51,11 @@ export function acpAgentDraft(agent?: AcpAgentSettings | null): SettingsDraft {
 export function settingsEdit(draft: SettingsDraft): SettingsEdit {
   if (draft.section !== "acp_agent") return draft;
   if (draft.remove) return { section: "remove_acp_agent", id: draft.settings.id };
-  const { args, ...settings } = draft.settings;
+  const { args, models, ...settings } = draft.settings;
   return {
     section: "acp_agent",
-    settings: { ...settings, args: args.map(({ value }) => value) },
+    create: draft.create,
+    settings: { ...settings, models: models.split(",").map((model) => model.trim()).filter(Boolean), args: args.map(({ value }) => value) },
   };
 }
 
@@ -98,6 +109,19 @@ function validEndpoint(value: string, optional = false) {
     return false;
   }
 }
+function validateModelSelection(
+  models: string[],
+  defaultModel: string,
+  field: string
+): SettingsValidation | null {
+  const ids = models.map((model) => model.trim());
+  if (new Set(ids).size !== ids.length)
+    return { field, message: "Model IDs must be unique." };
+  if (ids.length && defaultModel.trim() && !ids.includes(defaultModel.trim()))
+    return { field: "Default model", message: "The default model must be in the model list." };
+  return null;
+}
+
 export function validateSettingsDraft(
   edit: SettingsEdit
 ): SettingsValidation | null {
@@ -112,9 +136,13 @@ export function validateSettingsDraft(
   }
   const error = (field: string, message: string) => ({ field, message });
   if (edit.section === "acp_agent") {
-    const { name, executable, args } = edit.settings;
+    const { id, name, executable, args } = edit.settings;
+    if ((name.trim() || executable.trim()) &&
+        (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(id) || RESERVED_PROVIDER_IDS.has(id))) {
+      return error("Provider ID", "Enter a custom provider ID using lowercase letters, digits, hyphens or underscores.");
+    }
     if ((executable.trim() || args.length) && !name.trim()) {
-      return error("Connection name", "Enter a name for the ACP connection.");
+      return error("Provider name", "Enter a name for the ACP provider.");
     }
     const absolute = /^(?:[/]|[A-Za-z]:[/\\]|\\\\)/.test(executable);
     const command =
@@ -131,7 +159,7 @@ export function validateSettingsDraft(
     }
     const invalidArgument = args.findIndex((arg) => arg.includes("\0"));
     return invalidArgument < 0
-      ? null
+      ? validateModelSelection(edit.settings.models ?? [], edit.settings.default_model ?? "", "Models")
       : error(
           `Argument ${invalidArgument + 1}`,
           "Arguments cannot contain a NUL character."
@@ -172,18 +200,7 @@ export function validateSettingsDraft(
         "Provider ID",
         "Enter a provider ID using lowercase letters, digits, hyphens or underscores."
       );
-    if (
-      [
-        "anthropic",
-        "openai",
-        "typesafe",
-        "claude",
-        "codex",
-        "system-one",
-        "mistral",
-        "mistral_vibe",
-      ].includes(edit.id)
-    )
+    if (RESERVED_PROVIDER_IDS.has(edit.id))
       return error(
         "Provider ID",
         "Choose a custom provider ID; built-in names are reserved."
@@ -203,13 +220,8 @@ export function validateSettingsDraft(
         "Model IDs",
         "Add at least one model; model IDs cannot be blank."
       );
-    if (new Set(edit.models.map((v) => v.trim())).size !== edit.models.length)
-      return error("Model IDs", "Model IDs must be unique.");
-    if (edit.default_model && !edit.models.includes(edit.default_model))
-      return error(
-        "Default model",
-        "The default model must be in the model list."
-      );
+    const modelError = validateModelSelection(edit.models, edit.default_model, "Model IDs");
+    if (modelError) return modelError;
     const invalidEnvironment = edit.environment.find(
       (v) =>
         !v.name.trim() ||

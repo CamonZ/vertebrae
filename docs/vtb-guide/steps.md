@@ -126,10 +126,10 @@ and `--model` remain `agent_config` shortcuts. Execute rejects inference flags;
 `config: $.<field>: is not supported for <type> steps`.
 
 `--harness` selects the step runtime independently of model and request
-settings. It accepts `claude`, `codex`, or `typesafe`; execute omits it and runs
+settings. It accepts `claude`, `codex`, `typesafe`, or `acp`. Execute omits it and runs
 Rhai directly. In other API clients, omission for inference keeps Sacrum's
 configured default and provider backfill behavior. TypeSafe supports
-`structured_inference` steps. Claude and Codex run `llm_inference` steps.
+`structured_inference` steps. Claude, Codex, and ACP run `llm_inference` steps.
 `--provider` and `--model` continue to configure the request, and do not set
 the step harness. `--provider` accepts a built-in provider or a custom
 `[providers.<id>]` ID; see [Harness and Provider Settings](#harness-and-provider-settings).
@@ -220,7 +220,7 @@ request with no property changes before reporting success.
 | Flag | Short | Behavior |
 |------|-------|----------|
 | `--name <NAME>` | | Replace the step name |
-| `--harness <HARNESS>` | | Select `claude`, `codex`, or `typesafe`; rejected for execute |
+| `--harness <HARNESS>` | | Select `claude`, `codex`, `typesafe`, or `acp`. Execute omits this flag. |
 | `--goal <GOAL>` | `-g` | Replace the step goal |
 | `--agent <AGENT>` | `-a` | Replace the full agents list; repeat for multiple agents |
 | `--clear-agents` | | Replace the agents list with an empty list |
@@ -231,7 +231,7 @@ request with no property changes before reporting success.
 | `--script <RHAI>` | | Replace an execute step's Rhai script, inline or from `@path`; omitted fields remain unchanged |
 | `--agent-config <JSON>` | | Replace/overlay the full agent config from a JSON string |
 | `--model <MODEL>` | `-m` | Set `config.model` on `structured_inference` steps, otherwise `agent_config.model` |
-| `--provider <PROVIDER>` | | Set `config.provider` on `structured_inference` steps, otherwise `agent_config.provider`: a built-in provider (`anthropic`/`claude` or `openai`/`codex`) or a custom `[providers.<id>]` ID; alias `--model-provider` |
+| `--provider <PROVIDER>` | | Set `config.provider` on `structured_inference` steps, otherwise `agent_config.provider`: a built-in provider (`anthropic`/`claude`, `openai`/`codex`, or `typesafe`) or a custom `[providers.<id>]` ID; alias `--model-provider` |
 | `--state <JSON\|STRING>` | | Replace a `structured_inference` step's state; JSON or string template, or `@path` |
 | `--questions <JSON>` | | Replace a `structured_inference` step's question map, inline or `@path` |
 | `--codex-model-provider <PROVIDER>` | | Set `agent_config.codex_model_provider`; alias `--codex-provider`; only valid when the resulting provider is OpenAI/Codex |
@@ -341,7 +341,7 @@ matching step exists, the command fails with `Step not found: <id>`. If an
 | `prompt` | Template sent to the executing agent (supports `{{task.id}}` interpolation) |
 | `model` | AI model shortcut (sonnet, haiku, opus) |
 | `agent-config` | Full LLM config JSON (model, budget, tools, permissions) |
-| `provider` | Provider shortcut: built-in (`anthropic`/`claude` or `openai`/`codex`) or a custom `[providers.<id>]` ID; `--model-provider` is an alias |
+| `provider` | Provider shortcut: built-in (`anthropic`/`claude`, `openai`/`codex`, or `typesafe`) or a custom `[providers.<id>]` ID; `--model-provider` is an alias |
 | `codex-model-provider` | Codex upstream provider shortcut from `~/.codex/config.toml`; `--codex-provider` is an alias |
 | `reasoning-effort` | OpenAI/Codex reasoning effort (`low`, `medium`, `high`, `xhigh`) |
 | `agents` | Agent file paths for AI-assisted execution |
@@ -585,7 +585,7 @@ it does not interpret this setting or create artifacts.
 ### Harness and Provider Settings
 
 `--harness` selects the runtime for a step. Its exact values are `claude`,
-`codex`, and `typesafe`. When the field is omitted, Sacrum's configured default
+`codex`, `typesafe`, and `acp`. When the field is omitted, Sacrum's configured default
 and provider-backfill behavior remain in effect; the daemon then derives the
 harness from `agent_config.provider`. `--provider` and `--model` configure the
 provider and model separately. Explicit provider/request settings must be
@@ -595,8 +595,9 @@ compatible with the selected runtime.
 `typesafe`) or a custom provider declared under `[providers.<id>]` in the
 executing machine's config.toml (see
 [SACRUM_CONFIG.md](../SACRUM_CONFIG.md)). A custom provider binds to one
-harness, supplies its endpoint and credential, and lists the exact models it
-serves:
+harness. For ACP, pass the ID of a named profile with `harness = "acp"` and an
+agent executable. Its model list is optional. Other custom profiles can supply
+an endpoint, credentials, and a model list:
 
 ```toml
 [providers.openrouter]
@@ -621,16 +622,17 @@ provider ID and harness on the execution.
 | `claude` | Claude Code streaming harness | `claude`, persistent stream-json session | `CLAUDE_CODE_PATH` |
 | `codex` | Codex App Server streaming harness | `codex`, App Server WebSocket | `CODEX_PATH` |
 | `typesafe` | TypeSafe structured-inference runtime | System One API | Optional `TYPESAFE_API_KEY` or `[typesafe].api_key`; without a key no `Authorization` header is sent |
+| `acp` | ACP one-shot inference | Configured agent, ACP v1 over stdio | [Named ACP provider](../architecture.md#harnesses-and-providers) |
 
 The harnesses emit normalized events through the shared runtime contract. The
 daemon persists those events as `format=harness` session logs and the GUI
 replays them through one projection. TypeSafe is supported for
-`structured_inference`; Claude and Codex support `llm_inference`. See
+`structured_inference`; Claude, Codex, and ACP support `llm_inference`. See
 [Architecture — Harness Crates](../architecture.md#harness-crates) for crate
 ownership and runtime selection.
 
 When no explicit harness is present, the daemon defaults to **Anthropic** if
-the legacy provider setting is also unset. It resolves the harness binary by
+the legacy provider setting is also unset. For Claude and Codex it resolves the harness binary by
 checking the provider-specific environment variable first, then the user's login-shell
 `PATH`, then well-known install locations (`~/.local/bin`, `/usr/local/bin`,
 `/opt/homebrew/bin`).
@@ -649,8 +651,9 @@ checking the provider-specific environment variable first, then the user's login
 `vtb step add` requires `--harness`; `vtb step update` accepts it and requires
 it whenever the update sets the provider (`--provider` or a `provider` in
 `--agent-config`). A built-in provider must match the harness (`anthropic` →
-`claude`, `openai` → `codex`). A harness can be changed but not cleared. To configure a Codex request as well, use `--provider`
-(alias:
+`claude`, `openai` → `codex`, `typesafe` → `typesafe`). With `--harness acp`,
+set `--provider` to the named ACP profile ID. An update can replace the
+harness. To configure a Codex request as well, use `--provider` (alias:
 `--model-provider`), `--model`, `--codex-model-provider` (alias:
 `--codex-provider`), and `--reasoning-effort`. These flags set request
 configuration and do not choose the step runtime:
@@ -734,11 +737,13 @@ catalog before persisting the step:
 
 Mismatched pairs (e.g. `--provider openai --model claude-opus-4-5`) are
 rejected at the CLI with an actionable error. Unknown model names are also
-rejected unless `--provider openai` is paired with `--codex-model-provider`,
+rejected by the static catalog for Claude and OpenAI, with an exception when
+`--provider openai` is paired with `--codex-model-provider`,
 which tells Vertebrae to leave provider-scoped model IDs such as
 `deepseek/deepseek-v4-flash` or `glm-5.1` to Codex. `codex_model_provider` is
 rejected with `--provider anthropic` because Claude Code does not understand
-Codex upstream provider profiles. `--agent-config` is still useful when you
+Codex upstream provider profiles. ACP validates model IDs from the configured
+agent during session setup. `--agent-config` is still useful when you
 need to set provider/model together with lower-level config fields:
 
 ```bash

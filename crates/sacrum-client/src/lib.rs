@@ -72,10 +72,10 @@ pub use api_types::{
 pub use artifact_service::SacrumArtifactService;
 pub use client::{DaemonCredentialRecovery, GraphqlClient, SharedBearerToken, with_fragments};
 pub use config::{
-    DaemonSection, GlobalSacrumSection, ObservabilityConfig, ObservabilityLevel,
-    ObservabilityProtocol, ObservabilitySignal, ObservabilitySubsystem, ProjectSection,
-    SacrumConfig, TypeSafeSection, VertebraeConfigFile, config_path, load_config_file,
-    register_project, save_config_file, unregister_project,
+    GlobalSacrumSection, ObservabilityConfig, ObservabilityLevel, ObservabilityProtocol,
+    ObservabilitySignal, ObservabilitySubsystem, ProjectSection, SacrumConfig, TypeSafeSection,
+    VertebraeConfigFile, config_path, load_config_file, register_project, save_config_file,
+    unregister_project,
 };
 pub use daemon_service::{
     DaemonBootstrap, DaemonCredentialMetadata, DaemonEnrollmentMetadata, DaemonRename,

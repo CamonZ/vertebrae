@@ -12,7 +12,6 @@ use vertebrae_core::StepHarness;
 pub struct ProviderBinaries {
     pub anthropic: Option<PathBuf>,
     pub openai: Option<PathBuf>,
-    pub mistral_vibe: Option<PathBuf>,
 }
 
 /// Best-effort diagnostics captured alongside [`ProviderBinaries`].
@@ -20,7 +19,6 @@ pub struct ProviderBinaries {
 pub struct ProviderDiscoveryDiagnostics {
     pub anthropic: Option<String>,
     pub openai: Option<String>,
-    pub mistral_vibe: Option<String>,
 }
 
 impl ProviderBinaries {
@@ -30,7 +28,7 @@ impl ProviderBinaries {
         match harness {
             StepHarness::Claude => self.anthropic.as_deref(),
             StepHarness::Codex => self.openai.as_deref(),
-            StepHarness::Typesafe | StepHarness::MistralVibe => None,
+            StepHarness::Typesafe | StepHarness::Acp => None,
         }
     }
 }
@@ -72,27 +70,11 @@ pub fn resolve_all_provider_binaries_with_diagnostics(
             (None, Some(err))
         }
     };
-    let (mistral_vibe, mistral_vibe_diagnostic) = match find_mistral_vibe_binary(shell_path) {
-        Ok(path) => (Some(path), None),
-        Err(err) => {
-            tracing::warn!(
-                harness = %StepHarness::MistralVibe,
-                error = %err,
-                "Mistral Vibe provider binary not resolved at startup; steps requesting it will fail"
-            );
-            (None, Some(err))
-        }
-    };
     (
-        ProviderBinaries {
-            anthropic,
-            openai,
-            mistral_vibe,
-        },
+        ProviderBinaries { anthropic, openai },
         ProviderDiscoveryDiagnostics {
             anthropic: anthropic_diagnostic,
             openai: openai_diagnostic,
-            mistral_vibe: mistral_vibe_diagnostic,
         },
     )
 }
@@ -148,17 +130,6 @@ const CLAUDE_SPEC: BinarySpec = BinarySpec {
     env_override: "CLAUDE_CODE_PATH",
     well_known: &["/usr/local/bin/claude", "/opt/homebrew/bin/claude"],
     home_relative: ".local/bin/claude",
-};
-
-const MISTRAL_VIBE_SPEC: BinarySpec = BinarySpec {
-    display_name: "Mistral Vibe App Server",
-    binary_name: "vibe-app-server",
-    env_override: "MISTRAL_VIBE_SERVER",
-    well_known: &[
-        "/usr/local/bin/vibe-app-server",
-        "/opt/homebrew/bin/vibe-app-server",
-    ],
-    home_relative: ".local/bin/vibe-app-server",
 };
 
 const CODEX_SPEC: BinarySpec = BinarySpec {
@@ -232,26 +203,6 @@ pub fn find_claude_binary(shell_path: &str) -> Result<PathBuf, String> {
 /// See [`find_binary`] for resolution order. Honors `CODEX_PATH`.
 pub fn find_codex_binary(shell_path: &str) -> Result<PathBuf, String> {
     find_binary(&CODEX_SPEC, shell_path)
-}
-
-pub fn find_mistral_vibe_binary(shell_path: &str) -> Result<PathBuf, String> {
-    find_binary(&MISTRAL_VIBE_SPEC, shell_path)
-}
-
-/// Find the CLI binary for a [`StepHarness`].
-///
-/// Errors are scoped to the requested harness so a user choosing Codex
-/// gets a Codex-specific error instead of a Claude-specific one.
-pub fn find_provider_binary(harness: StepHarness, shell_path: &str) -> Result<PathBuf, String> {
-    match harness {
-        StepHarness::Claude => find_claude_binary(shell_path),
-        StepHarness::Codex => find_codex_binary(shell_path),
-        StepHarness::Typesafe => Err(
-            "TypeSafe provider does not use a CLI executable; set [typesafe].api_key in config.toml or TYPESAFE_API_KEY"
-                .to_string(),
-        ),
-        StepHarness::MistralVibe => find_mistral_vibe_binary(shell_path),
-    }
 }
 
 #[cfg(test)]
@@ -377,36 +328,6 @@ mod tests {
         let err = find_codex_binary("/usr/bin:/bin").unwrap_err();
         assert!(err.contains("does not exist"), "err was: {err}");
         assert!(err.contains("CODEX_PATH"), "err was: {err}");
-    }
-
-    // ===== find_provider_binary dispatch =====
-    //
-    // The success-path tests use `*_PATH` env overrides pointing at
-    // `/bin/ls` so they don't depend on whether claude/codex are installed
-    // on the host. The "missing binary" tests use a synthetic `BinarySpec`
-    // that has no well-known paths so the failure branch is reachable on
-    // hosts that do have a real claude/codex installed.
-
-    #[test]
-    fn provider_binary_anthropic_uses_claude_lookup() {
-        let _lock = env_lock();
-        let g = EnvGuard::capture("CLAUDE_CODE_PATH");
-        let _c = EnvGuard::capture("CODEX_PATH");
-        g.set("/bin/ls");
-
-        let result = find_provider_binary(StepHarness::Claude, "/usr/bin:/bin");
-        assert_eq!(result.unwrap(), PathBuf::from("/bin/ls"));
-    }
-
-    #[test]
-    fn provider_binary_openai_uses_codex_lookup() {
-        let _lock = env_lock();
-        let _c = EnvGuard::capture("CLAUDE_CODE_PATH");
-        let g = EnvGuard::capture("CODEX_PATH");
-        g.set("/bin/ls");
-
-        let result = find_provider_binary(StepHarness::Codex, "/usr/bin:/bin");
-        assert_eq!(result.unwrap(), PathBuf::from("/bin/ls"));
     }
 
     /// When the requested provider's env override and PATH lookup both

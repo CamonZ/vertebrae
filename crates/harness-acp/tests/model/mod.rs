@@ -206,3 +206,5 @@ async fn check_trace(trace: Vec<(Operation, usize)>) {
 }
 
 mod configuration;
+
+mod one_shot;

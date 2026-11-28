@@ -556,7 +556,7 @@ mod tests {
             StepHarness::Claude,
             StepHarness::Codex,
             StepHarness::Typesafe,
-            StepHarness::MistralVibe,
+            StepHarness::Acp,
         ] {
             let mut response = step_response(Some("llm_inference"), json!({"version": 1}));
             response.harness = Some(harness);
@@ -1052,7 +1052,7 @@ mod tests {
             StepHarness::Claude,
             StepHarness::Codex,
             StepHarness::Typesafe,
-            StepHarness::MistralVibe,
+            StepHarness::Acp,
         ] {
             let server = MockServer::start().await;
             let mut response = make_step_response("step-new", "Review", "wf-1", 0);
@@ -1105,7 +1105,7 @@ mod tests {
             StepHarness::Claude,
             StepHarness::Codex,
             StepHarness::Typesafe,
-            StepHarness::MistralVibe,
+            StepHarness::Acp,
         ] {
             service
                 .update_step("step-1", &StepUpdate::new().with_harness(harness))
@@ -1128,7 +1128,7 @@ mod tests {
             StepHarness::Claude,
             StepHarness::Codex,
             StepHarness::Typesafe,
-            StepHarness::MistralVibe,
+            StepHarness::Acp,
         ]) {
             let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
             assert_eq!(body["variables"]["harness"], harness.as_str());

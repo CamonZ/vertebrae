@@ -1,3 +1,5 @@
+import { AcpStepProviderFields } from "./AcpStepProviderFields";
+import { STEP_HARNESS_LABELS } from "./stepHarnessOptions";
 /* ──────────────────────────────────────────────────────────────────
    Workflow Atlas — Inspector content (workflow mode).
 
@@ -74,6 +76,8 @@ export function WorkflowInspector({
   const [newName, setNewName] = useState("");
   const [newType, setNewType] = useState<StepType>("llm_inference");
   const [newHarness, setNewHarness] = useState<StepHarness | null>(null);
+  const [acpProvider, setAcpProvider] = useState("");
+  const [acpModel, setAcpModel] = useState("");
   const [newTransition, setNewTransition] = useState("");
   const [newStructured, setNewStructured] = useState<StructuredInferenceInput>(
     EMPTY_STRUCTURED_INPUT
@@ -149,6 +153,11 @@ export function WorkflowInspector({
       setAddError("Stop steps require exactly one outgoing transition.");
       return;
     }
+    const acp = newHarness === "acp" && newType === "llm_inference";
+    if (acp && !acpProvider.trim()) {
+      setAddError("Enter a configured ACP provider ID.");
+      return;
+    }
     let structuredConfig: Record<string, JsonValue> | null = null;
     if (newType === "structured_inference") {
       const result = structuredInferenceConfig(newStructured);
@@ -170,7 +179,9 @@ export function WorkflowInspector({
           config:
             newType === "structured_inference"
               ? structuredConfig
-              : newType === "llm_inference" ||
+              : acp
+                ? { agent_config: { provider: acpProvider.trim(), model: acpModel.trim() || null } }
+                : newType === "llm_inference" ||
                   newType === "route" ||
                   newType === "wait_children"
                 ? {}
@@ -184,6 +195,8 @@ export function WorkflowInspector({
       setNewName("");
       setNewTransition("");
       setNewHarness(null);
+      setAcpProvider("");
+      setAcpModel("");
       setNewStructured(EMPTY_STRUCTURED_INPUT);
       setAdding(false);
       if (created.id)
@@ -407,12 +420,17 @@ export function WorkflowInspector({
                   }
                 >
                   <option value="">Use Sacrum default</option>
-                  <option value="claude">Claude</option>
-                  <option value="codex">Codex</option>
-                  <option value="typesafe">TypeSafe</option>
-                <option value="mistral_vibe">Mistral Vibe</option>
+                  {Object.entries(STEP_HARNESS_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
                 </select>
               </label>
+              {newType === "llm_inference" && newHarness === "acp" && (
+                <AcpStepProviderFields
+                  provider={acpProvider} model={acpModel}
+                  onProvider={(id) => { setAcpProvider(id); setAcpModel(""); }}
+                  onModel={setAcpModel} />
+              )}
               {newType === "structured_inference" ? (
                 <StructuredInferenceQuestions
                   value={newStructured}

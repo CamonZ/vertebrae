@@ -30,20 +30,21 @@ pub const SUPPORTED_OPENAI_REASONING_EFFORTS: &[&str] = &["low", "medium", "high
 
 pub const DEFAULT_TYPESAFE_MODEL: &str = "jev-latest";
 
-/// Built-in execution providers recognized by Vertebrae without any
-/// configuration. Each one runs on exactly one harness.
+/// Reserved provider identities. Each maps to one harness. The ACP identity
+/// represents the harness in shared validation and diagnostics. Running ACP
+/// requires a named provider profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BuiltinProvider {
     Anthropic,
     Openai,
     Typesafe,
-    Mistral,
+    Acp,
 }
 
 impl BuiltinProvider {
     pub const ALL: [BuiltinProvider; 4] =
-        [Self::Anthropic, Self::Openai, Self::Typesafe, Self::Mistral];
+        [Self::Anthropic, Self::Openai, Self::Typesafe, Self::Acp];
 
     /// String form used on the CLI and in serialized agent_config JSON.
     pub const fn as_str(self) -> &'static str {
@@ -51,7 +52,7 @@ impl BuiltinProvider {
             BuiltinProvider::Anthropic => "anthropic",
             BuiltinProvider::Openai => "openai",
             BuiltinProvider::Typesafe => "typesafe",
-            BuiltinProvider::Mistral => "mistral",
+            BuiltinProvider::Acp => "acp",
         }
     }
 
@@ -71,7 +72,7 @@ impl BuiltinProvider {
             "typesafe" | "type-safe" | "type_safe" | "systemone" | "system-one" | "system_one" => {
                 Some(BuiltinProvider::Typesafe)
             }
-            "mistral" | "mistral-vibe" | "mistral_vibe" => Some(BuiltinProvider::Mistral),
+            "acp" => Some(BuiltinProvider::Acp),
             _ => None,
         }
     }
@@ -81,7 +82,7 @@ impl BuiltinProvider {
             BuiltinProvider::Anthropic => StepHarness::Claude,
             BuiltinProvider::Openai => StepHarness::Codex,
             BuiltinProvider::Typesafe => StepHarness::Typesafe,
-            BuiltinProvider::Mistral => StepHarness::MistralVibe,
+            BuiltinProvider::Acp => StepHarness::Acp,
         }
     }
 
@@ -90,14 +91,14 @@ impl BuiltinProvider {
             StepHarness::Claude => BuiltinProvider::Anthropic,
             StepHarness::Codex => BuiltinProvider::Openai,
             StepHarness::Typesafe => BuiltinProvider::Typesafe,
-            StepHarness::MistralVibe => BuiltinProvider::Mistral,
+            StepHarness::Acp => BuiltinProvider::Acp,
         }
     }
 
     pub const fn default_model(self) -> Option<&'static str> {
         match self {
             BuiltinProvider::Typesafe => Some(DEFAULT_TYPESAFE_MODEL),
-            BuiltinProvider::Anthropic | BuiltinProvider::Openai | BuiltinProvider::Mistral => None,
+            BuiltinProvider::Anthropic | BuiltinProvider::Openai | BuiltinProvider::Acp => None,
         }
     }
 }
@@ -172,6 +173,7 @@ fn is_openai_reasoning_alias(normalized: &str) -> bool {
 /// Validate that a built-in `(provider, model)` pair is internally consistent.
 ///
 /// Rules:
+/// - ACP model IDs are validated by the connected agent.
 /// - If the model is recognized and maps to a different provider, reject with
 ///   an actionable error.
 /// - If the model is not recognized at all, reject with an error pointing to
@@ -217,10 +219,12 @@ pub fn validate_provider_model_with_codex_provider(
     if trimmed.is_empty() {
         return Ok(());
     }
+    if provider == BuiltinProvider::Acp {
+        return Ok(());
+    }
     match classify_model(trimmed) {
         Some(detected) if detected == provider => Ok(()),
         Some(_) => Err(wrong_provider_error(provider, trimmed).expect("detected wrong provider")),
-        None if provider == BuiltinProvider::Mistral => Ok(()),
         None => Err(ProviderModelMismatch::UnknownModel {
             requested: provider,
             model: trimmed.to_string(),
@@ -282,7 +286,7 @@ pub fn validate_harness_agent_config(
     harness: StepHarness,
     config: &AgentConfig,
 ) -> Result<(), ProviderAgentOptionMismatch> {
-    if !matches!(harness, StepHarness::Typesafe | StepHarness::MistralVibe) {
+    if !matches!(harness, StepHarness::Typesafe | StepHarness::Acp) {
         return Ok(());
     }
 
@@ -805,22 +809,16 @@ mod tests {
     }
 
     #[test]
-    fn mistral_maps_to_its_harness_and_discovers_models_at_runtime() {
-        assert_eq!(BuiltinProvider::Mistral.as_str(), "mistral");
+    fn acp_model_names_are_validated_by_the_agent() {
+        assert_eq!(BuiltinProvider::Acp.as_str(), "acp");
         assert_eq!(
-            BuiltinProvider::from_id("mistral"),
-            Some(BuiltinProvider::Mistral)
+            BuiltinProvider::parse_alias("acp"),
+            Some(BuiltinProvider::Acp)
         );
-        assert_eq!(BuiltinProvider::Mistral.harness(), StepHarness::MistralVibe);
-        assert!(
-            validate_provider_model(BuiltinProvider::Mistral, Some("future-vibe-alias")).is_ok()
-        );
-        assert!(
-            validate_provider_model(BuiltinProvider::Mistral, Some("claude-opus-4-5"))
-                .expect_err("recognized non-Mistral models must still fail")
-                .to_string()
-                .contains("claude")
-        );
+        assert_eq!(BuiltinProvider::Acp.harness(), StepHarness::Acp);
+        for model in ["agent-defined-model", "claude-opus-4-5", "gpt-5"] {
+            assert!(validate_provider_model(BuiltinProvider::Acp, Some(model)).is_ok());
+        }
     }
 
     #[test]
@@ -925,15 +923,15 @@ mod tests {
     }
 
     #[test]
-    fn validate_mistral_vibe_agent_options() {
-        let config = AgentConfig::new().with_model("future-vibe-alias");
-        assert!(validate_harness_agent_config(StepHarness::MistralVibe, &config).is_ok());
+    fn validate_acp_agent_options() {
+        let config = AgentConfig::new().with_model("agent-defined-model");
+        assert!(validate_harness_agent_config(StepHarness::Acp, &config).is_ok());
 
         let config = AgentConfig::new().with_reasoning_effort("high");
-        let error = validate_harness_agent_config(StepHarness::MistralVibe, &config)
-            .expect_err("Mistral Vibe must reject unsupported agent options");
+        let error = validate_harness_agent_config(StepHarness::Acp, &config)
+            .expect_err("ACP must reject unsupported agent options");
         assert_eq!(error.option, "reasoning_effort");
-        assert!(error.to_string().contains("mistral_vibe"));
+        assert!(error.to_string().contains("acp"));
     }
 
     #[test]

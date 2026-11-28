@@ -250,6 +250,10 @@ async fn startup_reports_launch_authentication_and_version_failures() {
         ),
         (failing_agent("auth"), "requires authentication"),
         (failing_agent("version"), "protocol version 1"),
+        (
+            failing_agent("stderr"),
+            "check the configured agent arguments",
+        ),
     ] {
         let events = Arc::new(Events::default());
         let result = start(
@@ -263,6 +267,13 @@ async fn startup_reports_launch_authentication_and_version_failures() {
             panic!("startup unexpectedly succeeded")
         };
         assert!(error.to_string().contains(diagnostic), "{error}");
+        if diagnostic == "check the configured agent arguments" {
+            assert!(error.to_string().contains("42"), "{error}");
+            assert!(
+                !error.to_string().contains("private-argument-value"),
+                "{error}"
+            );
+        }
         assert!(events.0.lock().await.is_empty());
     }
 }
@@ -621,4 +632,232 @@ async fn load_only_agent_restores_id_exposes_legacy_modes_and_reports_context() 
         ]
         .concat()
     );
+}
+
+struct NoWorkflowControls;
+
+#[async_trait]
+impl ControlSink for NoWorkflowControls {
+    async fn request(
+        &self,
+        _request: ControlRequestEnvelope,
+    ) -> Result<ControlResolution, HarnessError> {
+        panic!("an unattended ACP run asked the desktop for permission");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn workflow_cancel_settles_during_open_or_model_configuration() {
+    use vertebrae_harness_core::RunRequest;
+    for phase in ["cancel-open", "cancel-settings"] {
+        timeout(Duration::from_secs(8), async {
+            let checkpoint = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let events = Arc::new(Events::default());
+            let runtime = failing_agent(phase);
+            let run = runtime
+                .run_once(
+                    RunRequest {
+                        run_id: phase.into(),
+                        stream_id: phase.into(),
+                        prompt: "never sent".into(),
+                        config: RequestConfig {
+                            model: Some("selected".into()),
+                            environment: [(
+                                "VTB_ACP_CANCEL_CHECKPOINT".into(),
+                                checkpoint.local_addr().unwrap().to_string(),
+                            )]
+                            .into(),
+                            ..Default::default()
+                        },
+                    },
+                    events.clone(),
+                    Arc::new(NoWorkflowControls),
+                )
+                .await
+                .unwrap();
+            let _connection = checkpoint.accept().await.unwrap();
+            run.cancel().await.unwrap();
+            run.cancel().await.unwrap();
+            let outcome = run.await_outcome().await.unwrap();
+            assert_eq!(outcome.status, CompletionStatus::Cancelled);
+            let events = events.0.lock().await;
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].payload, Event::RunFinished(outcome));
+        })
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn workflow_rejects_unsupported_requests_before_launch() {
+    use vertebrae_harness_core::RunRequest;
+    let agent = AcpRuntime::new("/missing-acp-executable".into(), vec![], Default::default());
+    for (prompt, config) in [
+        (" ", RequestConfig::default()),
+        (
+            "prompt",
+            RequestConfig {
+                read_only: true,
+                ..Default::default()
+            },
+        ),
+        (
+            "prompt",
+            RequestConfig {
+                output_schema: Some(serde_json::json!({})),
+                ..Default::default()
+            },
+        ),
+        (
+            "prompt",
+            RequestConfig {
+                personality: Some("style".into()),
+                ..Default::default()
+            },
+        ),
+        (
+            "prompt",
+            RequestConfig {
+                verbosity: Some(vertebrae_harness_core::OutputVerbosity::Low),
+                ..Default::default()
+            },
+        ),
+        (
+            "prompt",
+            RequestConfig {
+                developer_instructions: Some("instruction".into()),
+                ..Default::default()
+            },
+        ),
+    ] {
+        let events = Arc::new(Events::default());
+        let result = agent
+            .run_once(
+                RunRequest {
+                    run_id: "bad".into(),
+                    stream_id: "bad".into(),
+                    prompt: prompt.into(),
+                    config,
+                },
+                events.clone(),
+                Arc::new(NoWorkflowControls),
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(HarnessError::InvalidRequest(_) | HarnessError::Unsupported(_))
+        ));
+        assert!(events.0.lock().await.is_empty());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn workflow_outcome_matches_the_scripted_acp_exchange() {
+    use vertebrae_harness_core::RunRequest;
+
+    timeout(Duration::from_secs(15), async {
+        let fixture = format!("{}/tests/fixtures/agent.py", env!("CARGO_MANIFEST_DIR"));
+        let runtime = AcpRuntime::new(
+            "/usr/bin/env".into(),
+            vec![
+                "python3".into(),
+                fixture,
+                "--workflow".into(),
+                "literal $HOME; value".into(),
+            ],
+            Default::default(),
+        );
+        let workspace = tempfile::tempdir().unwrap();
+        let cwd = workspace.path().canonicalize().unwrap();
+        for (prompt, status) in [
+            ("complete", CompletionStatus::Completed),
+            ("large", CompletionStatus::Completed),
+            ("cancel", CompletionStatus::Cancelled),
+            ("fail", CompletionStatus::Failed),
+        ] {
+            let events = Arc::new(Events::default());
+            let run = runtime
+                .run_once(
+                    RunRequest {
+                        run_id: prompt.into(),
+                        stream_id: "test-stream".into(),
+                        prompt: prompt.into(),
+                        config: RequestConfig {
+                            working_directory: Some(cwd.clone()),
+                            model: Some("selected".into()),
+                            environment: [(
+                                "VTB_ACP_WORKSPACE".into(),
+                                cwd.to_str().unwrap().into(),
+                            )]
+                            .into(),
+                            ..Default::default()
+                        },
+                    },
+                    events.clone(),
+                    Arc::new(NoWorkflowControls),
+                )
+                .await
+                .unwrap();
+            if prompt == "cancel" {
+                loop {
+                    let notified = events.1.notified();
+                    if events
+                        .0
+                        .lock()
+                        .await
+                        .iter()
+                        .any(|event| matches!(event.payload, Event::Text(_)))
+                    {
+                        break;
+                    }
+                    notified.await;
+                }
+                run.cancel().await.unwrap();
+                run.cancel().await.unwrap();
+            }
+            let outcome = run.await_outcome().await.unwrap();
+            assert_eq!(outcome.status, status, "{outcome:?}");
+            let events = events.0.lock().await;
+            let terminals: Vec<_> = events
+                .iter()
+                .filter(|event| event.payload.is_lifecycle_terminal())
+                .collect();
+            assert_eq!(terminals.len(), 1);
+            assert_eq!(terminals[0].payload, Event::RunFinished(outcome.clone()));
+            assert_eq!(events.last(), terminals.last().copied());
+            assert!(
+                events
+                    .iter()
+                    .all(|event| event.correlation.run_id.as_ref() == Some(run.run_id()))
+            );
+            match status {
+                CompletionStatus::Completed => {
+                    let expected = if prompt == "large" {
+                        format!("Hello {}", "x".repeat(1200 * 1024))
+                    } else {
+                        "Hello workflow".to_string()
+                    };
+                    assert_eq!(outcome.result_text.as_deref(), Some(expected.as_str()));
+                    assert_eq!(
+                        std::fs::read_to_string(cwd.join("close-ack")).unwrap(),
+                        prompt
+                    );
+                }
+                CompletionStatus::Failed => {
+                    let error = outcome.error.unwrap();
+                    assert!(
+                        error.contains("session/prompt failed (code -32603)"),
+                        "{error}"
+                    );
+                    assert!(!error.contains("private provider detail"), "{error}");
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .unwrap();
 }

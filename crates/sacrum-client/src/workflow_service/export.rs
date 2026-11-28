@@ -648,7 +648,7 @@ mod tests {
             StepHarness::Claude,
             StepHarness::Codex,
             StepHarness::Typesafe,
-            StepHarness::MistralVibe,
+            StepHarness::Acp,
         ] {
             let mut snapshot = snapshot();
             let step_id = snapshot.workflows[0].workflow_steps[0].id.clone();

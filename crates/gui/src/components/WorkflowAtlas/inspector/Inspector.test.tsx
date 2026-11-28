@@ -48,6 +48,7 @@ vi.mock("../../../hooks", () => ({ useStep: vi.fn(), useSteps: vi.fn() }));
 vi.mock("../../../bindings", () => ({
   commands: {
     createStep: vi.fn(),
+    getSharedSettings: vi.fn().mockResolvedValue({ status: "ok", data: { acp_providers: [] } }),
     updateStep: vi.fn(),
     deleteStep: vi.fn(),
     updateWorkflow: vi.fn(),
@@ -269,9 +270,42 @@ describe("WorkflowInspector", () => {
     );
   });
 
-  it.each(["claude", "codex", "typesafe"] as const)(
+  it.each(["claude", "codex", "typesafe", "acp"] as const)(
     "creates a step with the explicit %s harness",
     async (harness: StepHarness) => {
+      if (harness === "acp") {
+        vi.mocked(commands.getSharedSettings).mockResolvedValueOnce({
+          status: "ok",
+          data: {
+            decision_model: {
+              enabled: false, provider: "", model: "", harness: null, validation_error: null,
+            },
+            revision: "fixture",
+            path: "/fixture/config.toml",
+            connection_url: "",
+            has_connection_token: false,
+            effective_connection_url: "",
+            connection_url_override: false,
+            connection_token_override: false,
+            typesafe_url: "",
+            typesafe_endpoint_hidden: false,
+            has_typesafe_key: false,
+            typesafe_key_storage: "",
+            credential_warning: null,
+            typesafe_key_override: false,
+            typesafe_url_override: false,
+            providers: [],
+            observability: {
+              enabled: false, endpoint: "", protocol: "", signals: [],
+              subsystems: [], level: "info", capture_message_content: false,
+            },
+            acp_providers: [{
+              id: "gemini-neon", name: "Gemini Neon", executable: "neon",
+              args: [], models: ["agent-model"],
+            }],
+          },
+        });
+      }
       render(
         <WorkflowInspector
           model={MODEL}
@@ -287,11 +321,25 @@ describe("WorkflowInspector", () => {
       fireEvent.change(screen.getByLabelText("Step harness"), {
         target: { value: harness },
       });
+      if (harness === "acp") {
+        fireEvent.change(screen.getByLabelText("ACP provider"), { target: { value: "gemini-neon" } });
+        const model = screen.getByLabelText("Model");
+        await waitFor(() => {
+          const options = document.getElementById(model.getAttribute("list")!);
+          expect(options?.querySelector('option[value="agent-model"]')).toBeInTheDocument();
+        });
+        fireEvent.change(screen.getByLabelText("Model"), { target: { value: "agent-model" } });
+      }
       fireEvent.click(screen.getByRole("button", { name: "Create step" }));
 
       await waitFor(() =>
         expect(commands.createStep).toHaveBeenCalledWith(
-          expect.objectContaining({ harness })
+          expect.objectContaining(harness === "acp" ? {
+          harness,
+          config: expect.objectContaining({ agent_config: expect.objectContaining({
+            provider: "gemini-neon", model: "agent-model",
+          }) }),
+        } : { harness })
         )
       );
     }
@@ -1125,7 +1173,7 @@ describe("StepInspector", () => {
     );
   });
 
-  it.each(["claude", "codex", "typesafe"] as const)(
+  it.each(["claude", "codex", "typesafe", "acp"] as const)(
     "shows and saves the %s step harness",
     async (harness: StepHarness) => {
       mockUseStep(stepFixture({ harness }));
@@ -1144,12 +1192,48 @@ describe("StepInspector", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: "Edit" }));
       expect(screen.getByLabelText("Step harness")).toHaveValue(harness);
+      if (harness === "acp") {
+        fireEvent.change(screen.getByLabelText("ACP provider"), { target: { value: "gemini-neon" } });
+        fireEvent.change(screen.getByLabelText("Model"), { target: { value: "agent-model" } });
+      }
       fireEvent.click(screen.getByRole("button", { name: "Save step" }));
       await waitFor(() =>
         expect(commands.updateStep).toHaveBeenCalledWith(
-          expect.objectContaining({ harness })
+          expect.objectContaining(harness === "acp" ? {
+          harness,
+          config: expect.objectContaining({ agent_config: expect.objectContaining({
+            provider: "gemini-neon", model: "agent-model",
+          }) }),
+        } : { harness })
         )
       );
+    }
+  );
+
+  it.each(["claude", "codex"] as const)(
+    "clears the ACP provider when switching to %s",
+    async (harness) => {
+      mockUseStep(stepFixture({
+        harness: "acp",
+        config: {
+          version: 1, prompt: "Run", output_schema: null, agents: [], skills: [],
+          agent_config: createMockAgentConfig({ provider: "gemini-neon" }),
+        },
+      }));
+      render(<StepInspector model={MODEL} workflowId="wf-build" stepId="s1"
+        onSelect={vi.fn()} onClose={vi.fn()} />);
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      expect(screen.getByLabelText("ACP provider")).toHaveValue("gemini-neon");
+      fireEvent.change(screen.getByLabelText("Step harness"), { target: { value: harness } });
+      fireEvent.click(screen.getByRole("button", { name: "Save step" }));
+      await waitFor(() => expect(commands.updateStep).toHaveBeenCalledWith(
+        expect.objectContaining({
+          harness,
+          config: expect.objectContaining({
+            agent_config: expect.objectContaining({ provider: null }),
+          }),
+        })
+      ));
     }
   );
 

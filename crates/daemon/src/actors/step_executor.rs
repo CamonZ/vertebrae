@@ -385,7 +385,7 @@ impl ControlSink for DaemonControlSink {
     ) -> Result<ControlResolution, HarnessError> {
         if matches!(request.request, ControlRequest::UserQuestion { .. }) {
             return Err(HarnessError::Control(
-                "daemon workflow runs cannot answer interactive Claude questions".into(),
+                "daemon workflow runs cannot answer interactive agent questions".into(),
             ));
         }
         let decision = request.automatic_resolution.unwrap_or_else(|| {
@@ -798,10 +798,7 @@ impl StepExecutor {
         {
             agent_config.model = Some(DEFAULT_MODEL.into());
         }
-        if !matches!(
-            resolved_harness,
-            StepHarness::Typesafe | StepHarness::MistralVibe
-        ) {
+        if resolved_harness.supports_workflow_tool_overrides() {
             for skill in &state.config.step_config.skills {
                 if !agent_config.allowed_tools.contains(skill) {
                     agent_config.allowed_tools.push(skill.clone());
@@ -826,12 +823,6 @@ impl StepExecutor {
                 .anthropic
                 .clone(),
             openai_executable: state.config.capabilities.provider_binaries.openai.clone(),
-            mistral_vibe_executable: state
-                .config
-                .capabilities
-                .provider_binaries
-                .mistral_vibe
-                .clone(),
             anthropic_executable_diagnostic: state
                 .config
                 .capabilities
@@ -843,12 +834,6 @@ impl StepExecutor {
                 .capabilities
                 .harnesses
                 .get(&StepHarness::Codex)
-                .and_then(|capability| capability.discovery_diagnostic.clone()),
-            mistral_vibe_executable_diagnostic: state
-                .config
-                .capabilities
-                .harnesses
-                .get(&StepHarness::MistralVibe)
                 .and_then(|capability| capability.discovery_diagnostic.clone()),
             provider_resolution_cached: true,
             search_path: Some(state.config.capabilities.shell_path.clone().into()),
@@ -881,11 +866,9 @@ impl StepExecutor {
             .configure_provider_harnesses(&mut factory_config);
         let request_config = RequestConfig {
             read_only: false,
-            working_directory: (!matches!(
-                resolved_harness,
-                StepHarness::Typesafe | StepHarness::MistralVibe
-            ))
-            .then(|| state.config.working_dir().to_path_buf()),
+            working_directory: resolved_harness
+                .uses_local_process()
+                .then(|| state.config.working_dir().to_path_buf()),
             model: agent_config.model.clone(),
             reasoning_effort: agent_config.reasoning_effort.clone(),
             speed_tier: agent_config.speed_tier,
@@ -893,10 +876,7 @@ impl StepExecutor {
             verbosity: agent_config.verbosity,
             output_schema: agent_config.json_schema.clone(),
             developer_instructions: None,
-            environment: if matches!(
-                resolved_harness,
-                StepHarness::Typesafe | StepHarness::MistralVibe
-            ) {
+            environment: if !resolved_harness.uses_local_process() {
                 Default::default()
             } else {
                 std::iter::once(("PATH".into(), state.config.capabilities.shell_path.clone()))
@@ -962,6 +942,20 @@ impl StepExecutor {
             .unwrap_or_else(|| "Execute step".to_string());
         let actor_ref = myself.clone();
         let step_session = state.config.step_config.session.clone();
+        if !resolved_harness.supports_workflow_sessions() && step_session.is_some() {
+            let _ = state.parent.cast(ProjectMessage::StepFinished {
+                execution_id: state.execution_id.clone(),
+                task_id: state.task_id.clone(),
+                result: StepResult::failed(
+                    None,
+                    format!(
+                        "The {resolved_harness} harness does not support workflow session routing"
+                    ),
+                ),
+            });
+            myself.stop(Some("unsupported harness session".into()));
+            return Ok(());
+        }
         // Codex always runs a single-turn session; any harness runs one when
         // the step names a session to start, resume or fork.
         if resolved_harness == StepHarness::Codex || step_session.is_some() {

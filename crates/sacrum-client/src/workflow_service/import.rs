@@ -76,7 +76,7 @@ fn default_import_harness(step_type: &StepType, config: Option<&serde_json::Valu
         .and_then(serde_json::Value::as_str)
     {
         Some("openai" | "codex") => StepHarness::Codex,
-        Some("mistral" | "mistral-vibe" | "mistral_vibe") => StepHarness::MistralVibe,
+        Some("acp") => StepHarness::Acp,
         _ => StepHarness::Claude,
     }
 }
@@ -369,7 +369,7 @@ mod tests {
         ))
         .unwrap();
         for (step, harness) in bundle.workflows[0].steps.iter_mut().zip([
-            vertebrae_core::StepHarness::Claude,
+            vertebrae_core::StepHarness::Acp,
             vertebrae_core::StepHarness::Codex,
             vertebrae_core::StepHarness::Typesafe,
         ]) {
@@ -431,7 +431,7 @@ mod tests {
         );
         assert!(sent_bundle["workflows"][0]["metadata"].is_object());
         assert!(sent_bundle["workflows"][0]["steps"][1]["config"]["route_config"].is_object());
-        for (index, harness) in ["claude", "codex", "typesafe"].into_iter().enumerate() {
+        for (index, harness) in ["acp", "codex", "typesafe"].into_iter().enumerate() {
             assert_eq!(
                 sent_bundle["workflows"][0]["steps"][index]["harness"],
                 harness

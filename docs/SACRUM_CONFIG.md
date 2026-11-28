@@ -113,6 +113,10 @@ dispatcher controls execute-step concurrency.
 
 `[providers.<id>]`
 
+For ACP, set `harness = "acp"` on a named provider and supply `executable`
+and optional `args`, `env`, and `models`. Desktop chat and daemon inference
+use the same profiles. See [ACP provider configuration](architecture.md#harnesses-and-providers).
+
 Custom providers for workflow steps and local chat on this machine. The
 built-in providers (`anthropic`, `openai`, `typesafe`) need no entry. IDs use
 lowercase letters, digits, `-`, and `_`; built-in names and their aliases

@@ -3,7 +3,7 @@ use std::{collections::BTreeMap, path::Path, process::Stdio, time::Duration};
 use futures::StreamExt;
 use serde_json::{Value, json};
 use tokio::{
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     process::{Child, ChildStdin, ChildStdout, Command},
     time::timeout,
 };
@@ -16,6 +16,7 @@ pub(crate) struct Process {
     child: Child,
     stdin: ChildStdin,
     stdout: FramedRead<ChildStdout, LinesCodec>,
+    stderr: Option<tokio::task::JoinHandle<Option<&'static str>>>,
 }
 
 impl Process {
@@ -32,7 +33,7 @@ impl Process {
             .current_dir(cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .kill_on_drop(true);
         #[cfg(unix)]
         command.process_group(0);
@@ -41,7 +42,39 @@ impl Process {
         })?;
         let stdin = child.stdin.take().expect("stdin was piped");
         let stdout = child.stdout.take().expect("stdout was piped");
+        let mut stderr = child.stderr.take().expect("stderr was piped");
+        let stderr = tokio::spawn(async move {
+            // Retain a bounded prefix for classification. Agent stderr can
+            // contain credentials, so only fixed diagnostic labels leave here.
+            let mut prefix = Vec::new();
+            let mut chunk = [0; 4096];
+            while let Ok(size @ 1..) = stderr.read(&mut chunk).await {
+                let retain = size.min(8192usize.saturating_sub(prefix.len()));
+                prefix.extend_from_slice(&chunk[..retain]);
+            }
+            let text = String::from_utf8_lossy(&prefix).to_ascii_lowercase();
+            if [
+                "unknown option",
+                "unrecognized argument",
+                "unexpected argument",
+            ]
+            .iter()
+            .any(|phrase| text.contains(phrase))
+            {
+                Some("check the configured agent arguments")
+            } else if ["authentication", "unauthorized", "api key"]
+                .iter()
+                .any(|phrase| text.contains(phrase))
+            {
+                Some("check the agent's sign-in and credential configuration")
+            } else if !text.is_empty() {
+                Some("the agent wrote to stderr; check its local logs")
+            } else {
+                None
+            }
+        });
         Ok(Self {
+            stderr: Some(stderr),
             child,
             stdin,
             stdout: FramedRead::new(stdout, LinesCodec::new_with_max_length(MAX_MESSAGE_BYTES)),
@@ -49,19 +82,39 @@ impl Process {
     }
 
     pub(crate) async fn read(&mut self) -> Result<Value, HarnessError> {
-        let line = self
-            .stdout
-            .next()
-            .await
-            .ok_or_else(|| operation("ACP agent closed its output"))?
-            .map_err(|error| match error {
-                LinesCodecError::MaxLineLengthExceeded => {
-                    operation("ACP message exceeds the size limit")
-                }
-                LinesCodecError::Io(error) => {
-                    operation(format!("Could not read ACP output: {error}"))
-                }
-            })?;
+        let Some(line) = self.stdout.next().await else {
+            let outcome = reap_process_tree(
+                &mut self.child,
+                Duration::from_millis(250),
+                ReapMode::WaitThenSignal,
+            )
+            .await;
+            let hint = match self.stderr.take() {
+                Some(mut task) => match timeout(Duration::from_millis(250), &mut task).await {
+                    Ok(Ok(hint)) => hint,
+                    Ok(Err(_)) => None,
+                    Err(_) => {
+                        task.abort();
+                        None
+                    }
+                },
+                None => None,
+            };
+            let status = outcome
+                .status
+                .filter(|_| !outcome.forced)
+                .map_or_else(String::new, |status| format!(" ({status})"));
+            let hint = hint.map_or_else(String::new, |hint| format!("; {hint}"));
+            return Err(operation(format!(
+                "ACP agent closed its output{status}{hint}"
+            )));
+        };
+        let line = line.map_err(|error| match error {
+            LinesCodecError::MaxLineLengthExceeded => {
+                operation("ACP message exceeds the size limit")
+            }
+            LinesCodecError::Io(error) => operation(format!("Could not read ACP output: {error}")),
+        })?;
         let message: Value = serde_json::from_str(&line)
             .map_err(|_| operation("ACP agent returned invalid JSON"))?;
         if message["jsonrpc"] != "2.0" {
@@ -131,12 +184,18 @@ impl Process {
             ReapMode::SignalFirst,
         )
         .await;
+        if let Some(task) = self.stderr.take() {
+            task.abort();
+        }
     }
 }
 
 impl Drop for Process {
     fn drop(&mut self) {
         signal_process_group(self.child.id(), true);
+        if let Some(task) = self.stderr.take() {
+            task.abort();
+        }
     }
 }
 
